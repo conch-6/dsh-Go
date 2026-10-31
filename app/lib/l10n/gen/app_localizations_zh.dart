@@ -12441,7 +12441,7 @@ class L10nZh extends L10n {
   String get remoteStartCommand => '启动命令';
 
   @override
-  String get remoteStartCommandHelp => '用 nvm 安装的可以填完整路径';
+  String get remoteStartCommandHelp => '用 nvm 安装的可以填完整路径；也支持 tmux，需带 -s 会话名（会话名不填会报错），如 tmux new-session -d -s dsh \'dsh web --port 3081 --no-open\'';
 
   @override
   String get remoteWorkingDirectory => '工作目录（可选）';

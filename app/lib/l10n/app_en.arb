@@ -3775,7 +3775,7 @@
   "remoteImportKeyFile": "Import from file",
   "remotePrivateKeyPassword": "Private key passphrase (optional)",
   "remoteStartCommand": "Start command",
-  "remoteStartCommandHelp": "If installed with nvm, you can enter the full path",
+  "remoteStartCommandHelp": "If installed with nvm, you can enter the full path. tmux works too: include -s <name> (required), e.g. tmux new-session -d -s dsh 'dsh web --port 3081 --no-open'",
   "remoteWorkingDirectory": "Working directory (optional)",
   "remoteWorkingDirectoryHelp": "Default folder for new chats. Supports ~/.",
   "remoteHostFingerprint": "Host fingerprint",

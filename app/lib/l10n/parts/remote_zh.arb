@@ -689,7 +689,7 @@
   "remoteImportKeyFile": "从文件导入",
   "remotePrivateKeyPassword": "私钥密码（可选）",
   "remoteStartCommand": "启动命令",
-  "remoteStartCommandHelp": "用 nvm 安装的可以填完整路径",
+  "remoteStartCommandHelp": "用 nvm 安装的可以填完整路径；也支持 tmux，需带 -s 会话名（会话名不填会报错），如 tmux new-session -d -s dsh 'dsh web --port 3081 --no-open'",
   "remoteWorkingDirectory": "工作目录（可选）",
   "remoteWorkingDirectoryHelp": "新对话默认在这里，支持 ~/",
   "remoteHostFingerprint": "主机指纹",

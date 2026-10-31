@@ -13040,7 +13040,7 @@ class L10nEn extends L10n {
   String get remoteStartCommand => 'Start command';
 
   @override
-  String get remoteStartCommandHelp => 'If installed with nvm, you can enter the full path';
+  String get remoteStartCommandHelp => 'If installed with nvm, you can enter the full path. tmux works too: include -s <name> (required), e.g. tmux new-session -d -s dsh \'dsh web --port 3081 --no-open\'';
 
   @override
   String get remoteWorkingDirectory => 'Working directory (optional)';
