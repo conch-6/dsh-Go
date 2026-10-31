@@ -25,9 +25,6 @@ import '../chat/balance_widgets.dart' show formatMoney;
 import '../common/ask_ai.dart';
 import '../common/overview_card.dart';
 import '../common/search_capsule.dart';
-import '../common/status_chip.dart';
-import '../engine/engine_screen.dart';
-import '../engine/engine_status.dart';
 import '../engine_settings/engine_settings_hub.dart';
 import '../engine_settings/web_search_page.dart';
 import 'media_settings_page.dart';
@@ -88,8 +85,6 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
     final settings = ref.watch(settingsProvider);
-    final runtime = ref.watch(localRuntimeProvider);
-    final engine = EngineStatusView.of(runtime);
     final colors = DshColors.of(context);
     final notifier = ref.read(settingsProvider.notifier);
     final uiMode = ref.watch(uiModeProvider.select((s) => s.mode));
@@ -266,13 +261,6 @@ class SettingsScreen extends ConsumerWidget {
           title: l10n.hubGroupHosts,
           children: [
             SettingsTile(
-              icon: AppIcons.engine,
-              tint: SettingsHues.hosts,
-              spot: SettingsIndex.entry(SettingsPageId.engine),
-              value: StatusChip(tone: engine.tone, label: engine.label),
-              onTap: () => _push(context, const EngineScreen()),
-            ),
-            SettingsTile(
               icon: AppIcons.remoteHosts,
               tint: SettingsHues.hosts,
               spot: SettingsIndex.entry(SettingsPageId.remote),
@@ -389,7 +377,6 @@ class _SettingsOverviewState extends ConsumerState<SettingsOverview> {
     final balance = ref.watch(balanceProvider);
     final wallets = ref.watch(accountWalletBalanceProvider);
     final runtime = ref.watch(localRuntimeProvider);
-    final engine = EngineStatusView.of(runtime);
     final colors = DshColors.of(context);
     final active = ref.watch(activeHostProvider);
     final remoteOnly = runtime.status.runtimeMissing && !active.isLocal;
@@ -446,7 +433,6 @@ class _SettingsOverviewState extends ConsumerState<SettingsOverview> {
         title = l10n.hubSettingsSignInAccount;
         subtitle = l10n.hubSettingsOrApiKey;
     }
-    final dsh = runtime.status.dshVersion;
     // The card is 账号's way in (its title is whoever is signed in).
     return SpotAnchor(
       spot: SettingsIndex.entry(SettingsPageId.account),
@@ -465,11 +451,6 @@ class _SettingsOverviewState extends ConsumerState<SettingsOverview> {
             ? l10n.hubSettingsHostSemantics(title, hostLink)
             : l10n.hubSettingsAccountSemantics(title, subtitle),
         onTap: () => _push(hostLink != null ? const RemoteScreen() : const AccountPage()),
-        footer: OverviewFooter(
-          tone: engine.tone,
-          text: [l10n.hubSettingsEngine, engine.label, if (dsh != null) 'DSH $dsh'].join(' · '),
-        ),
-        onFooterTap: () => _push(const EngineScreen()),
       ),
     );
   }

@@ -20,7 +20,7 @@ class OnboardingPrefs {
     this.loaded = false,
     this.welcomeSeen = false,
     this.keySkipped = false,
-    this.localDeclined = false,
+    this.localDeclined = true,
     this.setupStep,
   });
 
@@ -83,7 +83,7 @@ class OnboardingPrefsController extends Notifier<OnboardingPrefs> {
         loaded: true,
         welcomeSeen: prefs.getBool(_welcomeKey) ?? false,
         keySkipped: prefs.getBool(_skippedKey) ?? false,
-        localDeclined: prefs.getBool(_declinedKey) ?? false,
+        localDeclined: prefs.getBool(_declinedKey) ?? true,
         setupStep: SetupStep.parse(prefs.getString(_setupStepKey)),
       );
     } catch (_) {
@@ -109,6 +109,9 @@ class OnboardingPrefsController extends Notifier<OnboardingPrefs> {
   }
 
   Future<void> setLocalDeclined(bool declined) async {
+    // Remote-only fork: the on-device runtime is never offered, so the flag
+    // can only ever be true (it starts true and stays true).
+    if (!declined) return;
     if (state.loaded && state.localDeclined == declined) return;
     state = state.copyWith(localDeclined: declined);
     try {

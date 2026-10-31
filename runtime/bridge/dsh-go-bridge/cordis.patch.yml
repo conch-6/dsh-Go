@@ -1,5 +1,0 @@
-# Layer applied when a profile lists this bundle (`dsh plugin add dsh-go-bridge` on a remote
-# host). The dsh-app runtime loads it by path from /etc/dsh-app/dsh-web.patch.yml instead.
-- insert:
-    - id: dsh-go-bridge
-      name: dsh-go-bridge
