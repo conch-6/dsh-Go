@@ -25,6 +25,7 @@ import '../chat/balance_widgets.dart' show formatMoney;
 import '../common/ask_ai.dart';
 import '../common/overview_card.dart';
 import '../common/search_capsule.dart';
+import '../common/status_dot.dart' show StatusTone;
 import '../engine_settings/engine_settings_hub.dart';
 import '../engine_settings/web_search_page.dart';
 import 'media_settings_page.dart';
