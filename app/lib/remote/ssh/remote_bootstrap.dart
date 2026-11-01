@@ -143,7 +143,7 @@ class RemoteDshBootstrap {
       }
     }
     onDetail?.call(appL10n.remoteBootstrapStarting);
-    return start();
+    return start(force: forceRestart);
   }
 
   Future<RemoteProbe> probe() async {
@@ -152,8 +152,8 @@ class RemoteDshBootstrap {
     return parseProbe(result.stdout);
   }
 
-  Future<RemoteDshEndpoint> start() async {
-    final result = await shell.run(startScript(), timeout: startTimeout + const Duration(seconds: 20));
+  Future<RemoteDshEndpoint> start({bool force = false}) async {
+    final result = await shell.run(startScript(force: force), timeout: startTimeout + const Duration(seconds: 20));
     if (_missingShell(result)) throw _noShell(result);
     return parseStart(result, customCommand: !_defaultCommand, command: launchCommand);
   }
@@ -250,7 +250,7 @@ fi
       ..writeln('  P=\$(tmux list-panes -t "\$S" -F \'#{pane_pid}\' 2>/dev/null | head -n 1)')
       ..writeln('  if [ -n "\$P" ] && kill -0 "\$P" 2>/dev/null; then')
       ..writeln('    printf \'$_tag alive %s\\n\' "\$P"')
-      ..writeln('    L=\$(tmux capture-pane -t "\$S" -p -S - 2>/dev/null | grep -E \'https?://[^ ]*[?&]token=\' | tail -n 1)')
+      ..writeln('    L=\$(tmux capture-pane -t "\$S" -p -J -S - 2>/dev/null | grep -E \'https?://[^ ]*[?&]token=\' | tail -n 1)')
       ..writeln('    if [ -n "\$L" ]; then')
       ..writeln('      printf \'$_tag url %s\\n\' "\$L"')
       ..writeln('      if [ ! -f "\$D/web.cmd" ] || [ "\$(cat "\$D/web.cmd" 2>/dev/null)" = ${shQuote(launchCommand)} ]; then printf \'$_tag samecmd\\n\'; fi')
@@ -301,10 +301,10 @@ if ! command -v dsh >/dev/null 2>&1; then printf 'DSHAPP nodsh\n'; exit 127; fi
 printf 'DSHAPP dsh %s\n' "$(command -v dsh)"
 ''';
 
-  String startScript() {
+  String startScript({bool force = false}) {
     final seconds = startTimeout.inSeconds.clamp(5, 600);
     final cwd = workingDirectory?.trim();
-    if (isTmuxCommand) return _tmuxStartScript(seconds, cwd);
+    if (isTmuxCommand) return _tmuxStartScript(seconds, cwd, force);
     final b = StringBuffer(_prelude())
       ..writeln('printf \'$_tag home %s\\n\' "\$HOME"')
       ..writeln('mkdir -p "\$D" || { printf \'$_tag nodir\\n\'; exit 70; }')
@@ -348,7 +348,7 @@ printf 'DSHAPP dsh %s\n' "$(command -v dsh)"
   /// or belong to a hand-started instance probe raced with) before being
   /// replaced. Plain `-t "$S"` matching everywhere: older tmux doesn't know
   /// the `-t "=name"` exact-match prefix and silently finds nothing.
-  String _tmuxStartScript(int seconds, String? cwd) {
+  String _tmuxStartScript(int seconds, String? cwd, bool force) {
     final sess = tmuxSession;
     final b = StringBuffer(_prelude())
       ..writeln('printf \'$_tag home %s\\n\' "\$HOME"')
@@ -362,6 +362,7 @@ printf 'DSHAPP dsh %s\n' "$(command -v dsh)"
       ..writeln('printf \'%s\' ${shQuote(launchCommand)} > "\$D/web.cmd"')
       ..writeln(': > "\$D/web.log"')
       ..writeln('S=${sess == null ? '' : shQuote(sess)}')
+      ..writeln('FORCE=${force ? '1' : ''}')
       ..writeln('if [ -z "\$S" ]; then')
       ..writeln(
         '  printf \'tmux: the launch command needs a session name (add -s <name>)\\n\' >> "\$D/web.log"\n'
@@ -374,11 +375,13 @@ printf 'DSHAPP dsh %s\n' "$(command -v dsh)"
         '  printf \'$_tag exited\\n\'; tail -n 20 "\$D/web.log" 2>/dev/null | sed \'s/^/$_tag log /\'; exit 1',
       )
       ..writeln('fi')
-      ..writeln('if tmux has-session -t "\$S" 2>/dev/null; then')
+      // A 401-triggered restart (FORCE) must not re-grab the stale token
+      // from the old pane's history — that would loop forever.
+      ..writeln('if [ -z "\$FORCE" ] && tmux has-session -t "\$S" 2>/dev/null; then')
       ..writeln('  tmux resize-pane -t "\$S" -x 240 -y 60 2>/dev/null')
       ..writeln('  i=0')
       ..writeln('  while [ \$i -lt 5 ]; do')
-      ..writeln('    L=\$(tmux capture-pane -t "\$S" -p -S - 2>/dev/null | grep -E \'https?://[^ ]*[?&]token=\' | tail -n 1)')
+      ..writeln('    L=\$(tmux capture-pane -t "\$S" -p -J -S - 2>/dev/null | grep -E \'https?://[^ ]*[?&]token=\' | tail -n 1)')
       ..writeln('    if [ -n "\$L" ]; then printf \'$_tag url %s\\n\' "\$L"; printf \'%s\\n\' "\$S" > "\$D/web.tmux"; exit 0; fi')
       ..writeln('    P=\$(tmux list-panes -t "\$S" -F \'#{pane_pid}\' 2>/dev/null | head -n 1)')
       ..writeln('    if [ -z "\$P" ] || ! kill -0 "\$P" 2>/dev/null; then break; fi')
@@ -413,7 +416,7 @@ printf 'DSHAPP dsh %s\n' "$(command -v dsh)"
       ..writeln('printf \'$_tag started %s\\n\' "\$P"')
       ..writeln('i=0')
       ..writeln('while [ \$i -lt $seconds ]; do')
-      ..writeln('  L=\$(tmux capture-pane -t "\$S" -p -S - 2>/dev/null | grep -E \'https?://[^ ]*[?&]token=\' | tail -n 1)')
+      ..writeln('  L=\$(tmux capture-pane -t "\$S" -p -J -S - 2>/dev/null | grep -E \'https?://[^ ]*[?&]token=\' | tail -n 1)')
       ..writeln('  if [ -n "\$L" ]; then printf \'$_tag url %s\\n\' "\$L"; exit 0; fi')
       ..writeln('  if ! kill -0 "\$P" 2>/dev/null; then')
       ..writeln(
