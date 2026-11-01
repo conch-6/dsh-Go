@@ -100,7 +100,7 @@ void main() {
       final harness = ChatHarness(session: 's1', states: {'s1': runInfoState(finished: true)});
       await _pumpChat(tester, harness, Brightness.light);
       expect(find.byType(TurnFootnote), findsOneWidget);
-      expect(find.text('1 分 23 秒 · 5 步 · 8 万 tokens'), findsOneWidget);
+      expect(find.text('1 分 23 秒 · 5 步 · 80.1K tokens'), findsOneWidget);
 
       await tester.tap(find.byType(TurnFootnote));
       await pumpFrames(tester, 8);

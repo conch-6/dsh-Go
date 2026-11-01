@@ -21,6 +21,7 @@ Map<UiHideItem, String> get _hideNames => {
   UiHideItem.whaleTail: appL10n.shellHideWhaleTail,
   UiHideItem.todoPill: appL10n.shellHideTodoPill,
   UiHideItem.goalBar: appL10n.shellHideGoalBar,
+  UiHideItem.pluginCapsule: appL10n.plugslotsChatEntry,
 };
 
 Map<String, String> get _groupNames => {

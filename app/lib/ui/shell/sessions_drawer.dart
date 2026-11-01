@@ -19,6 +19,7 @@ import '../../state/engine_control.dart';
 import '../../state/hosts_state.dart';
 import '../../state/drawer_view_state.dart';
 import '../../state/session_attention_state.dart';
+import '../../state/session_deletion_state.dart';
 import '../../state/sessions_state.dart';
 import '../../state/read_list_identity.dart';
 import '../../state/workspaces_state.dart';
@@ -48,6 +49,7 @@ import 'drawer/archive_notice.dart';
 import 'drawer/drawer_filter_bar.dart';
 import 'drawer/drawer_list.dart';
 import 'drawer/selection_bars.dart';
+import 'drawer/session_deletion.dart';
 import 'session_search_page.dart';
 
 export '../../state/drawer_view_state.dart' show SessionDay, sessionDayOf;
@@ -170,7 +172,7 @@ class SessionsDrawer extends ConsumerWidget {
         child: Row(
           children: [
             Expanded(child: WorkspaceSwitcher(onManage: manageWorkspaces)),
-            const _ViewOptionsKey(),
+            _ViewOptionsKey(onClose: onClose),
           ],
         ),
       ),
@@ -256,6 +258,11 @@ class SessionsDrawer extends ConsumerWidget {
                                 onArchive: () {
                                   if (ref.read(drawerScopeProvider)?.readOnly == false) {
                                     archiveSelectionFlow(context, ref);
+                                  }
+                                },
+                                onDelete: () {
+                                  if (ref.read(drawerScopeProvider)?.readOnly == false) {
+                                    unawaited(deleteSelectionFlow(context, ref));
                                   }
                                 },
                               )
@@ -353,16 +360,20 @@ class NewChatButton extends StatelessWidget {
 /// 「对话列表」 options at the end of the workspace row, its circle on the 10
 /// line; only while there are conversations to organise.
 class _ViewOptionsKey extends ConsumerWidget {
-  const _ViewOptionsKey();
+  const _ViewOptionsKey({required this.onClose});
+
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scope = ref.watch(drawerScopeProvider);
     final filtered = ref.watch(drawerFilterProvider) != DrawerFilter.all;
-    if (scope == null || (scope.sessions.isEmpty && !filtered)) return const SizedBox.shrink();
+    ref.watch(sessionsProvider);
+    final hasArchived = ref.read(sessionsProvider.notifier).archivedSessions.isNotEmpty;
+    if (scope == null || (scope.sessions.isEmpty && !filtered && !hasArchived)) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(right: 10),
-      child: DrawerViewButton(onTap: () => openDrawerViewOptions(context, ref)),
+      child: DrawerViewButton(onTap: () => openDrawerViewOptions(context, ref, onClose: onClose)),
     );
   }
 }
@@ -430,12 +441,13 @@ class _SessionList extends ConsumerWidget {
     // fold into one row that opens the Bot pages.
     final botReady = ref.watch(dsBotProvider.select((s) => s.ready));
     final showBots = scope.bots.isNotEmpty || (workspace == null && botReady);
-    if (scope.sessions.isEmpty && !showBots) {
+    if (scope.sessions.isEmpty && !showBots && ref.watch(drawerViewProvider).folders.isEmpty) {
       if (scope.readOnly) return _Centered(child: Text(readListStatusText(scope.status)));
       return workspace == null ? const _EmptyState() : const _WorkspaceEmptyState();
     }
     return DrawerConversationList(
       now: now,
+      onNewChat: onClose,
       readOnly: scope.readOnly,
       leading: showBots
           ? DsBotDrawerRow(
@@ -467,6 +479,21 @@ class _SessionList extends ConsumerWidget {
   }
 
   Future<void> _showActions(BuildContext context, WidgetRef ref, SessionSummary s) async {
+    // Consent belongs to the host/generation present before the action sheet.
+    final owner = captureSessionDeletionOwner(ref);
+    try {
+      await _showOwnedActions(context, ref, s, owner);
+    } finally {
+      owner?.close();
+    }
+  }
+
+  Future<void> _showOwnedActions(
+    BuildContext context,
+    WidgetRef ref,
+    SessionSummary s,
+    SessionDeletionOwner? deletionOwner,
+  ) async {
     final title = sessionTitle(s);
     final workspaces = ref.read(workspacesProvider);
     final pinned = workspaces.pinnedSessionIds.contains(s.sessionId);
@@ -518,6 +545,13 @@ class _SessionList extends ConsumerWidget {
                       subtitle: Text(context.l10n.shellArchiveStopsTurn),
                       onTap: () => Navigator.pop(sheet, 'archive'),
                     ),
+                    SessionDeleteTile(
+                      ids: [s.sessionId],
+                      owner: deletionOwner,
+                      onTap: () {
+                        if (deletionOwner?.isCurrent(ref) == true) Navigator.pop(sheet, 'delete');
+                      },
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -552,6 +586,10 @@ class _SessionList extends ConsumerWidget {
           await ref.read(sessionsProvider.notifier).rename(s.sessionId, next);
         } catch (_) {
           messenger?.showSnackBar(SnackBar(content: Text(appL10n.shellRenameFailed)));
+        }
+      case 'delete':
+        if (deletionOwner != null && deletionOwner.isCurrent(ref)) {
+          await deleteSessionsFlow(context, ref, [s.sessionId], owner: deletionOwner);
         }
       case 'archive':
         unawaited(

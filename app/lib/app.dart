@@ -7,7 +7,6 @@ import 'performance/performance_state.dart';
 import 'state/app_info.dart';
 import 'state/appearance_state.dart';
 import 'state/locale_state.dart';
-import 'state/settings_state.dart';
 import 'state/star_prompt.dart' show starPromptGateProvider, starPromptProvider;
 import 'state/tile_style_state.dart';
 import 'ui/chat/dsh_ui/dsh_ui_model.dart' show DshUiAppAccent;
@@ -15,6 +14,7 @@ import 'ui/common/side_insets.dart';
 import 'ui/launch/launch_overlay.dart';
 import 'ui/shell/root_gate.dart';
 import 'ui/theme/theme.dart';
+import 'ui_config/ui_config_state.dart';
 import 'usage/usage_stats.dart';
 
 class DshApp extends ConsumerStatefulWidget {
@@ -108,7 +108,7 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final themeMode = ref.watch(settingsProvider.select((s) => s.themeMode));
+    final themeMode = ref.watch(uiThemeModeProvider.select((s) => s.value));
     final appearance = ref.watch(appearanceProvider);
     final waiting =
         !appearance.loaded ||

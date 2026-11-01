@@ -3,11 +3,13 @@
 // lists none for it; a failed read is an error with 「重试」, no connection is
 // the offline message.
 
+import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/models_state.dart';
+import '../../state/providers_state.dart' show formatTokens;
 import '../../state/read_list_cache.dart' show ReadListStatus;
 import '../../state/subscriptions_state.dart';
 import '../common/list_page_row.dart';
@@ -19,6 +21,7 @@ import '../features/feature_widgets.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import 'model_context_page.dart';
 import 'provider_widgets.dart';
 import 'subscription_sheet.dart';
 
@@ -83,6 +86,21 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
         : FeatureMessage.error(title: title, error: error, onRetry: retry);
   }
 
+  /// 「上下文长度」: one model's override of the catalog's figure.
+  void _openContext(ModelInfo model, ModelOverride? current) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ModelContextPage(
+          subscription: widget.subscription,
+          route: widget.subscription.wire,
+          modelId: model.id,
+          modelName: model.name,
+          current: current,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -92,6 +110,10 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
     final signedIn = status?.signedIn ?? false;
     final catalog = ref.watch(modelCatalogProvider);
     final wire = widget.subscription.wire;
+    // The pi-ai route this subscription declared: the model overrides hang off
+    // it (`providers.<route>.modelOverrides`). Null before sign-in or while the
+    // bridge is declaring it.
+    final profile = ref.watch(subscriptionProfileProvider(widget.subscription)).value;
     final models = [
       for (final group in catalog.value?.groups ?? const [])
         if (group.id == wire) ...group.models,
@@ -157,10 +179,11 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
                     )
                   else
                     for (final model in models)
-                      ListPageRow(
-                        icon: AppIcons.modelItem,
-                        title: model.name,
-                        subtitle: model.name == model.id ? null : model.id,
+                      _ModelRow(
+                        model: model,
+                        modelOverride: profile?.modelOverrides[model.id],
+                        showContext: profile != null,
+                        onTap: profile == null ? null : () => _openContext(model, profile.modelOverrides[model.id]),
                       ),
                 ],
               ),
@@ -176,6 +199,35 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// 订阅模型的一行：名字 + 渠道模型 id，右侧是它生效的上下文长度（有覆盖时
+/// 是覆盖值，没有时写「默认」= 跟随目录）。点开可改。
+class _ModelRow extends StatelessWidget {
+  const _ModelRow({required this.model, required this.modelOverride, required this.showContext, required this.onTap});
+
+  final ModelInfo model;
+
+  /// The model's override, when it has one.
+  final ModelOverride? modelOverride;
+
+  /// Whether the route profile is known: only then can the row say which
+  /// context length is in effect (「默认」 or the override).
+  final bool showContext;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final value = modelOverride?.contextWindow;
+    return ListPageRow(
+      icon: AppIcons.modelItem,
+      title: model.name,
+      subtitle: model.name == model.id ? null : model.id,
+      value: !showContext ? null : (value == null ? l10n.commonDefault : formatTokens(value)),
+      onTap: onTap,
     );
   }
 }

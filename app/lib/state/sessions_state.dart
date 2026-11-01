@@ -103,6 +103,8 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
   Timer? _debounce;
   final _archives = <PendingSessionArchive>{};
   final _archiveLeases = <PendingSessionArchive>{};
+  final _deleting = <String>{};
+  final _deleted = <String>{};
   static const archiveUndoWindow = Duration(seconds: 4);
 
   void _retireArchives() {
@@ -193,6 +195,8 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
       // shows them as the reload's previous value until the new list lands.)
       _host = host;
       _all = const [];
+      _deleted.clear();
+      _deleting.clear();
       _archived = const {};
       _origin = null;
       _titles.clear();
@@ -270,7 +274,9 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
     }
     if (!r.mounted) return const [];
     if (seq == _loadSeq) {
-      _all = sessions;
+      // A list already in flight when deletion completed may still contain
+      // the old row. Only a server-confirmed deletion adds this host's fence.
+      _all = sessions.where((s) => !_deleted.contains(s.sessionId)).toList();
       final cache = r.read(readListCacheProvider);
       cache.stamp(sessions, identity, client);
       _origin = cache.origin(sessions);
@@ -304,6 +310,7 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
       default:
         return false;
     }
+    if (_deleted.contains(row.sessionId)) return true;
     final at = _all.indexWhere((s) => s.sessionId == row.sessionId);
     _all = at < 0 ? [..._all, row] : (List.of(_all)..[at] = row);
     state = AsyncData(_visible());
@@ -584,7 +591,12 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
         !identical(ref.read(readListLiveConnectionProvider), conn) ||
         ids.isEmpty ||
         state.isLoading ||
-        ids.any((id) => !_all.any((s) => s.sessionId == id && !s.blank && !s.isSubagent) || _archived.contains(id))) {
+        ids.any(
+          (id) =>
+              !_all.any((s) => s.sessionId == id && !s.blank && !s.isSubagent) ||
+              _archived.contains(id) ||
+              _deleting.contains(id),
+        )) {
       throw const DshClosedException('session owner or inventory changed');
     }
     for (final existing in _archives) {
@@ -719,7 +731,36 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
     return pending;
   }
 
+  /// Reserves a live row for a confirmed destructive request. The Host remains
+  /// authoritative about jobs, descendants and other writers.
+  String? beginDeletion(String sessionId) {
+    if (state.isLoading || !state.hasValue || _host != ref.read(activeHostProvider)) return 'inventory-changed';
+    final row = _all.where((s) => s.sessionId == sessionId && !s.blank && !s.isSubagent).firstOrNull;
+    if (row == null || _deleted.contains(sessionId)) return 'inventory-changed';
+    if (row.running) return 'session-active';
+    if (_archiveLeases.any((p) => p.ids.contains(sessionId))) return 'archive-pending';
+    if (!_deleting.add(sessionId)) return 'busy';
+    return null;
+  }
+
+  void endDeletion(String sessionId) => _deleting.remove(sessionId);
+
+  /// Called only for a matching successful Host response, never optimistically.
+  void confirmDeleted(String sessionId) {
+    _deleted.add(sessionId);
+    _deleting.remove(sessionId);
+    _all = _all.where((s) => s.sessionId != sessionId).toList();
+    _archived = {..._archived}..remove(sessionId);
+    _titles.remove(sessionId);
+    _titleFailures.remove(sessionId);
+    _titleReads?.queue.removeWhere((s) => s.sessionId == sessionId);
+    if (state.hasValue && !state.isLoading) state = AsyncData(_visible());
+  }
+
   Future<void> archive(String sessionId) async {
+    if (_deleting.contains(sessionId) || _deleted.contains(sessionId)) {
+      throw const DshClosedException('session is being deleted');
+    }
     final conn = ref.read(activeConnectionProvider).value;
     if (conn == null) throw const DshClosedException('not connected');
     await conn.client.archiveSession(sessionId, stopActivity: true);
@@ -764,6 +805,22 @@ class _TitleReads {
   bool retired = false;
 }
 
+/// Folder chosen for the unsent new-chat draft, scoped to the active host.
+/// This is a local drawer folder, not the engine's working directory.
+class PendingSessionFolderController extends Notifier<String?> {
+  @override
+  String? build() {
+    ref.watch(activeHostProvider);
+    return null;
+  }
+
+  void select(String? folderId) => state = folderId;
+}
+
+final pendingSessionFolderProvider = NotifierProvider<PendingSessionFolderController, String?>(
+  PendingSessionFolderController.new,
+);
+
 /// The session shown in the chat screen; null means "new chat".
 class CurrentSessionController extends Notifier<String?> {
   static const _key = 'last_session_id';
@@ -796,6 +853,7 @@ class CurrentSessionController extends Notifier<String?> {
   void select(String? sessionId) {
     _selectionRevision++;
     _touched = true;
+    ref.read(pendingSessionFolderProvider.notifier).select(null);
     state = sessionId;
     unawaited(
       SharedPreferences.getInstance()

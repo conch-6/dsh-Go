@@ -5796,6 +5796,10 @@ class L10nEn extends L10n {
   String get engineModelContextLength => 'Context length';
 
   @override
+  String get engineModelContextOverrideHint =>
+      'Empty uses the catalog\'s figure. A larger value is what the engine counts context pressure and compaction against.';
+
+  @override
   String get engineModelMaxOutput => 'Max output';
 
   @override
@@ -7650,6 +7654,27 @@ class L10nEn extends L10n {
   String get hubInterfacePhoneLayout => 'Phone layout';
 
   @override
+  String get hubTableTint => 'Table tint';
+
+  @override
+  String get hubTableTintFollow => 'Theme';
+
+  @override
+  String get hubTableTintFill => 'Tinted';
+
+  @override
+  String get hubTableTintNone => 'Plain';
+
+  @override
+  String get hubTableTintFillHint => 'Alternating rows, easier to scan long tables';
+
+  @override
+  String get hubTableTintFollowHint => 'Header tint only, body follows the reply';
+
+  @override
+  String get hubTableTintNoneHint => 'Grid lines only, the lightest';
+
+  @override
   String get hubAbout => 'About DSH Go';
 
   @override
@@ -7696,6 +7721,13 @@ class L10nEn extends L10n {
 
   @override
   String get hubPermissionPhoneConfirm => 'Phone control confirmation';
+
+  @override
+  String get hubHardwareEnterSends => 'Send with hardware Enter';
+
+  @override
+  String get hubHardwareEnterSendsHint =>
+      'When on, Shift+Enter inserts a new line. The on-screen keyboard keeps newlines; Ctrl/⌘+Enter always sends.';
 
   @override
   String get launchScreenTitle => 'Launch screen';
@@ -9803,6 +9835,16 @@ class L10nEn extends L10n {
   String phoneLaunchExited(String code) {
     return 'Exit code $code';
   }
+
+  @override
+  String get phoneDndManualConnect => 'Connect manually';
+
+  @override
+  String get phoneDndConnectPortLabel => 'Connection port';
+
+  @override
+  String get phoneDndConnectPortHint =>
+      'On the main Wireless debugging settings page, find “IP address & port” and enter the port after the colon. Do not use the pairing-code dialog’s port.';
 
   @override
   String get phoneTaskResultReady => 'Task complete · View result';
@@ -13759,6 +13801,9 @@ class L10nEn extends L10n {
   String get searchKwTextSize => 'font,font size,text size,larger text';
 
   @override
+  String get searchKwTableTint => 'table,tint,header,stripe,row,background';
+
+  @override
   String get searchKwFoldTurns => 'collapse,fold,steps';
 
   @override
@@ -13958,6 +14003,106 @@ class L10nEn extends L10n {
 
   @override
   String get searchKwUsageStats => 'statistics,stats,usage data,analytics,telemetry,anonymous,privacy,data';
+
+  @override
+  String get shellDeletePermanently => 'Delete permanently';
+
+  @override
+  String get shellDeleteNoUndo => 'Cannot be undone; this is not archive';
+
+  @override
+  String get shellDeleteChecking => 'Checking whether this host supports permanent deletion…';
+
+  @override
+  String get shellDeleteUnsupported =>
+      'This host does not support safe permanent deletion. Archive is still available.';
+
+  @override
+  String get shellDeleteUnavailable =>
+      'Safe permanent deletion is unavailable. Reconnect or update this host; nothing was archived instead.';
+
+  @override
+  String shellDeleteChatConfirmation(String title) {
+    return 'Permanently delete “$title”?';
+  }
+
+  @override
+  String shellDeleteChatsConfirmation(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Permanently delete $count chats?',
+      one: 'Permanently delete 1 chat?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get shellDeleteWarning =>
+      'The selected chat history will be permanently deleted from this host. This cannot be undone and is not archive.\n\nWorking directories, generated files, forks, shared attachments and published cloud shares are kept. Cloud shares must be removed separately. Active or related chats may be refused by the host.';
+
+  @override
+  String get shellDeleteOwnerChanged =>
+      'The host or connection changed. Cancel and start deletion again; the old confirmation is no longer valid.';
+
+  @override
+  String get shellDeletingChats => 'Deleting chats…';
+
+  @override
+  String shellChatsDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Permanently deleted $count chats',
+      one: 'Permanently deleted 1 chat',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String shellDeletePartial(int deleted, int failed) {
+    String _temp0 = intl.Intl.pluralLogic(
+      deleted,
+      locale: localeName,
+      other: 'Deleted $deleted chats',
+      one: 'Deleted 1 chat',
+    );
+    String _temp1 = intl.Intl.pluralLogic(failed, locale: localeName, other: '$failed failed', one: '1 failed');
+    return '$_temp0; $_temp1';
+  }
+
+  @override
+  String get shellDeleteRunning =>
+      'Stop running work before deleting. The host also checks active tasks and schedules.';
+
+  @override
+  String get shellDeleteRelated => 'This chat has related subagent work. The host refused deletion to protect it.';
+
+  @override
+  String get shellDeleteWriterHeld => 'Another process is using this chat. Close it there and try again.';
+
+  @override
+  String get shellDeleteNotFound => 'The chat no longer exists on this host. Refresh the list.';
+
+  @override
+  String get shellDeleteConnectionLost =>
+      'The connection was lost and the deletion result is unconfirmed. Refresh the chat list before taking further action.';
+
+  @override
+  String get shellDeleteArchivePending => 'An archive operation is pending. Finish or undo it before deleting.';
+
+  @override
+  String get shellDeleteInventoryChanged => 'The chat list changed. Refresh and select the chats again.';
+
+  @override
+  String get shellDeleteProtocolError =>
+      'The deletion result is unconfirmed. Refresh the chat list before taking further action.';
+
+  @override
+  String get shellDeleteNotAttempted => 'Not attempted. Check the chat list before trying again.';
+
+  @override
+  String get shellDeleteFailed => 'The host could not confirm deletion. Refresh before retrying.';
 
   @override
   String get setupAppearanceTitle => 'Choose a look';

@@ -8,6 +8,7 @@ import 'package:dsh_app/pets/pet_state.dart';
 import 'package:dsh_app/state/chat_state.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/draft_store.dart';
+import 'package:dsh_app/state/drawer_view_state.dart';
 import 'package:dsh_app/state/models_state.dart';
 import 'package:dsh_app/state/sessions_state.dart';
 import 'package:dsh_app/ui/chat/composer.dart';
@@ -147,6 +148,46 @@ void _expectPrompt(_CreationHarness c, String sessionId, String text) {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('a new chat is filed only after its own creation succeeds', (tester) async {
+    final c = await _CreationHarness.start(tester);
+    try {
+      final view = c.h.container.read(drawerViewProvider.notifier);
+      final folder = await view.createFolder('Work');
+      c.h.container.read(pendingSessionFolderProvider.notifier).select(folder);
+      await c.typeAndSend(tester, 'file this conversation');
+      expect(c.sessions.pending, hasLength(1));
+      c.sessions.finish(0);
+      await pumpFrames(tester);
+      expect(c.selected, 'S');
+      expect(c.h.container.read(drawerViewProvider).folderOf['S'], folder);
+      expect(c.h.container.read(pendingSessionFolderProvider), isNull);
+      await c.baseline(tester, 'S');
+      await fixture.settleIo(tester, () => fixture.writes(c.h).isNotEmpty);
+      _expectPrompt(c, 'S', 'file this conversation');
+    } finally {
+      await c.close(tester);
+    }
+  });
+
+  testWidgets('a retired new-chat request cannot file its late result', (tester) async {
+    final c = await _CreationHarness.start(tester);
+    try {
+      final view = c.h.container.read(drawerViewProvider.notifier);
+      final folder = await view.createFolder('Work');
+      c.h.container.read(pendingSessionFolderProvider.notifier).select(folder);
+      await c.typeAndSend(tester, 'old request');
+      c.select('T');
+      await tester.pump();
+      c.sessions.finish(0);
+      await pumpFrames(tester);
+      expect(c.selected, 'T');
+      expect(c.h.container.read(drawerViewProvider).folderOf, isEmpty);
+      expect(c.h.container.read(pendingSessionFolderProvider), isNull);
+    } finally {
+      await c.close(tester);
+    }
+  });
 
   testWidgets('late creation preserves new A and T B without consuming the pending model', (tester) async {
     final c = await _CreationHarness.start(tester);

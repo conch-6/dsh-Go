@@ -1,6 +1,6 @@
 // The drawer's chrome while choosing conversations: a
 // header (全选 · 已选 N 个 · 完成) in place of the brand row, and an action bar
-// (移到文件夹 · 置顶 · 归档) in place of the identity bar, at the same heights
+// (移到文件夹 · 置顶 · 归档 · 删除) in place of the identity bar, at the same heights
 // so nothing below or above moves.
 
 import 'package:flutter/material.dart';
@@ -9,6 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../l10n/l10n.dart';
 import '../../../state/drawer_view_state.dart';
 import '../../../state/workspaces_state.dart';
+import '../../../state/session_deletion_state.dart';
+import 'session_deletion.dart';
 import '../../common/pressable.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
@@ -146,14 +148,21 @@ class DoneButton extends StatelessWidget {
   }
 }
 
-/// Replaces the identity bar: three equal keys, icon over label. Off until
+/// Replaces the identity bar: four equal keys, icon over label. Off until
 /// something is chosen.
 class SelectionActionBar extends ConsumerWidget {
-  const SelectionActionBar({super.key, required this.onMove, required this.onPin, required this.onArchive});
+  const SelectionActionBar({
+    super.key,
+    required this.onMove,
+    required this.onPin,
+    required this.onArchive,
+    required this.onDelete,
+  });
 
   final VoidCallback onMove;
   final VoidCallback onPin;
   final VoidCallback onArchive;
+  final VoidCallback onDelete;
 
   /// Least key height; the drawer lays the bar over the identity bar, so the
   /// keys fill that height.
@@ -167,25 +176,51 @@ class SelectionActionBar extends ConsumerWidget {
     final canPin = ref.watch(workspacesProvider.select((s) => s.ready));
     final none = selected.isEmpty;
     final allPinned = !none && selected.every(pinned.contains);
+    final busy = ref.watch(sessionDeletionBusyProvider);
+    final scope = ref.watch(drawerScopeProvider);
+    final deleteReason = sessionDeletionDisabledReason(
+      context,
+      available: ref.watch(sessionDeletionAvailableProvider),
+      busy: busy,
+      sessions: scope?.sessions ?? const [],
+      ids: selected,
+    );
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: _ActionKey(icon: AppIcons.moveToFolder, label: l10n.shellMoveToFolder, onTap: none ? null : onMove),
+            child: _ActionKey(
+              icon: AppIcons.moveToFolder,
+              label: l10n.shellMoveToFolder,
+              onTap: none || busy ? null : onMove,
+            ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: _ActionKey(
               icon: allPinned ? AppIcons.pinActive : AppIcons.pin,
               label: allPinned ? l10n.shellUnpin : l10n.commonPin,
-              onTap: none || !canPin ? null : onPin,
+              onTap: none || !canPin || busy ? null : onPin,
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: _ActionKey(icon: AppIcons.archive, label: l10n.shellArchive, onTap: none ? null : onArchive),
+            child: _ActionKey(icon: AppIcons.archive, label: l10n.shellArchive, onTap: none || busy ? null : onArchive),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Tooltip(
+              message: deleteReason ?? l10n.shellDeleteNoUndo,
+              child: _ActionKey(
+                icon: AppIcons.delete,
+                label: busy ? l10n.shellDeletingChats : l10n.commonDelete,
+                onTap: none || deleteReason != null || scope?.readOnly != false ? null : onDelete,
+                destructive: true,
+                busy: busy,
+              ),
+            ),
           ),
         ],
       ),
@@ -194,17 +229,25 @@ class SelectionActionBar extends ConsumerWidget {
 }
 
 class _ActionKey extends StatelessWidget {
-  const _ActionKey({required this.icon, required this.label, required this.onTap});
+  const _ActionKey({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.destructive = false,
+    this.busy = false,
+  });
 
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
+  final bool destructive;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final on = onTap != null;
-    final color = theme.colorScheme.onSurface;
+    final color = destructive ? theme.colorScheme.error : theme.colorScheme.onSurface;
     return Semantics(
       button: true,
       enabled: on,
@@ -224,7 +267,10 @@ class _ActionKey extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(icon, size: 22, color: color),
+                  if (busy)
+                    SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 2, color: color))
+                  else
+                    Icon(icon, size: 22, color: color),
                   const SizedBox(height: 2),
                   Text(
                     label,

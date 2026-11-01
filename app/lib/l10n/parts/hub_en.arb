@@ -136,6 +136,13 @@
   "hubInterfaceWebHint": "DSH's own web app",
   "hubInterfaceOpenWeb": "Open the web app",
   "hubInterfacePhoneLayout": "Phone layout",
+  "hubTableTint": "Table tint",
+  "hubTableTintFollow": "Theme",
+  "hubTableTintFill": "Tinted",
+  "hubTableTintNone": "Plain",
+  "hubTableTintFillHint": "Alternating rows, easier to scan long tables",
+  "hubTableTintFollowHint": "Header tint only, body follows the reply",
+  "hubTableTintNoneHint": "Grid lines only, the lightest",
   "hubAbout": "About DSH Go",
   "hubAboutNewVersion": "Update available",
   "hubValueSet": "Set",
@@ -163,5 +170,7 @@
   "hubEngineStartup": "Startup",
   "hubThemeLightDark": "Light and dark",
   "hubPermissionPhone": "Phone",
-  "hubPermissionPhoneConfirm": "Phone control confirmation"
+  "hubPermissionPhoneConfirm": "Phone control confirmation",
+  "hubHardwareEnterSends": "Send with hardware Enter",
+  "hubHardwareEnterSendsHint": "When on, Shift+Enter inserts a new line. The on-screen keyboard keeps newlines; Ctrl/⌘+Enter always sends."
 }

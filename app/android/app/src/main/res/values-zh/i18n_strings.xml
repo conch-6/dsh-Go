@@ -7,6 +7,7 @@
     <string name="background_shizuku_permission">未授权 Shizuku</string>
     <string name="background_adb_not_paired">尚未完成无线调试配对</string>
     <string name="background_adb_disconnected">未连接本机 adbd，请在无线调试开启后重连</string>
+    <string name="background_adb_invalid_port">请输入 1 到 65535 之间的端口</string>
     <string name="background_unsupported">此系统不支持所需的受信虚拟屏（可能是 Android 15 QPR2）</string>
     <string name="background_off">未开启不打扰模式</string>
     <string name="background_requires_android">不打扰模式需要 Android 14 或更高版本</string>

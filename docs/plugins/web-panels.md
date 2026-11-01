@@ -21,6 +21,8 @@
 
 聊天页输入框上方胶囊行的最后一枚胶囊「插件」（拼图图标）打开这个对话的插件弹层。它只在弹层有内容时出现，不占胶囊 8 个的名额，生成回复时和整行一起让位。
 
+若要隐藏这个 App 绘制的入口，在 `$DSH_HOME/dsh-go/ui.json` 的现有 `hide` 数组中加上 `pluginCapsule`，例如 `{"version":1,"hide":["pluginCapsule"]}`。删除这一项或在界面配置页恢复默认即可重新显示。它不停用插件，不隐藏插件自己的快捷胶囊，也不移除「全部功能」或「对话详情」中的面板。`plugins.seats` 控制插件槽位；`chat.panel` 和 `dsh-go.panel` 都不是这枚 App 胶囊的名字。
+
 弹层里先是原生面板（`placement: "chat.panel"`，按插件名排），再是网页插件放在聊天页的部件：这 7 个 slot 的第三方条目——`conversation.session.header.actions`、`conversation.session.header.utilities`、`conversation.input.dock`、`conversation.input.left`、`conversation.input.right`、`conversation.input.overlay`、`conversation.composer.dock`。它们装在**一个**面板岛里，按网页上的顺序竖排，官方条目已遮掉；岛上方一行写着是哪些插件的。
 
 - 岛在打开弹层时才建，关掉 30 秒后回收，不拖慢聊天页。

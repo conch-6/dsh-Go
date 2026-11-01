@@ -199,9 +199,10 @@ class SlashInput {
   bool get hasArgs => rest != null;
 }
 
-/// Parses a composer value as a command line (slash at offset 0, then a name
-/// up to the first whitespace); null when it is not one.
+/// Parses a composer value as a command line (slash as the first token,
+/// then a name up to the first whitespace); null when it is not one.
 SlashInput? parseSlashInput(String text) {
+  text = text.trimLeft();
   if (!text.startsWith('/')) return null;
   final match = RegExp(r'\s').firstMatch(text);
   if (match == null) return SlashInput(text.substring(1), null);

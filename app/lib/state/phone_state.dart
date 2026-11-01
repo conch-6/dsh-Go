@@ -210,7 +210,7 @@ class PhoneController extends Notifier<PhoneState> {
 
   Future<PhoneResult> adbPair(String code, {int? port}) => _thenRefresh(_channel.adbPair(code, port: port));
 
-  Future<PhoneResult> adbConnect() => _thenRefresh(_channel.adbConnect());
+  Future<PhoneResult> adbConnect({int? port}) => _thenRefresh(_channel.adbConnect(port: port));
 
   /// Changes one app's rule; false when the native side refused (nothing changes).
   Future<bool> setRule(String package, AppRule rule) async {

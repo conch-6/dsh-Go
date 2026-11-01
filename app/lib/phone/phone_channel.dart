@@ -809,7 +809,7 @@ class PhoneChannel {
   /// The in-app fallback: the six-digit code (and port) typed here.
   Future<PhoneResult> adbPair(String code, {int? port}) => _result('adbPair', {'code': code, 'port': port});
 
-  Future<PhoneResult> adbConnect() => _result('adbConnect');
+  Future<PhoneResult> adbConnect({int? port}) => _result('adbConnect', port == null ? null : {'port': port});
 
   Future<PhonePolicies?> getPolicies() async {
     try {

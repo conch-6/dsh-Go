@@ -140,7 +140,7 @@
     {
       "pointer": "/hide/1",
       "kind": "invalid",
-      "message": "不支持的值「everything」，可选：turnFooter、tokenCount、reasoningDetails、activityStrip、whaleTail、todoPill、goalBar"
+      "message": "不支持的值「everything」，可选：turnFooter、tokenCount、reasoningDetails、activityStrip、whaleTail、todoPill、goalBar、pluginCapsule"
     },
     {
       "pointer": "/hide/2",

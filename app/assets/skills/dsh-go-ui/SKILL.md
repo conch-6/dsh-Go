@@ -58,7 +58,7 @@ dsh-go App 会读 `$DSH_HOME/dsh-go/ui.json`（`DSH_HOME` 默认 `~/.dsh`），�
 | `drawer.sort` | `activity`（最近活动）或 `created`（创建时间） |
 | `drawer.filter` | 打开抽屉时的筛选：`all`、`running`、`pending`、`unread` |
 | `density` | `compact` 或 `comfortable` |
-| `hide` | 要藏起来的元素：`turnFooter`（回合脚注）、`tokenCount`（token 数）、`reasoningDetails`（思考过程）、`activityStrip`（生成中的活动条）、`whaleTail`（鲸尾动画）、`todoPill`（待办条）、`goalBar`（目标条） |
+| `hide` | 要藏起来的元素：`turnFooter`（回合脚注）、`tokenCount`（token 数）、`reasoningDetails`（思考过程）、`activityStrip`（生成中的活动条）、`whaleTail`（鲸尾动画）、`todoPill`（待办条）、`goalBar`（目标条）、`pluginCapsule`（聊天输入框上方由 App 绘制的「插件」入口） |
 | `theme.mode` | `system`、`light`、`dark` |
 | `theme.accentPreset` | `mist` 雾蓝、`daiqing` 黛青、`dusk` 暮紫、`turquoise` 松石、`amber` 琥珀、`graphite` 石墨 |
 | `theme.accent` | 自定义强调色 `#RRGGBB`（App 会自动调到对比度达标）；和 `accentPreset` 二选一 |
@@ -67,6 +67,8 @@ dsh-go App 会读 `$DSH_HOME/dsh-go/ui.json`（`DSH_HOME` 默认 `~/.dsh`），�
 | `plugins.seats` | 插件在原生界面里怎么出现：`{ "<slot>": { "<npm 包名>": "native" \| "island" \| "web" \| "hidden" } }`（原生画 / 内嵌网页 / 在网页版打开 / 隐藏）。slot 名见 `schema.json` 的 `x-dsh-go.slots.known`；`unseatable` 里的是 App 自己的界面，不放插件 |
 
 图标（`icon`）：bolt star sparkle heart flag bookmark pin bell clock alarm calendar todo note document folder search code terminal globe chart lightbulb book puzzle robot chat mail translate image camera mic link summary wrench bug travel school home play refresh archive team wallet palette
+
+要隐藏聊天页的「插件」入口，把 `pluginCapsule` 加进现有 `hide` 数组，例如 `{"version":1,"hide":["pluginCapsule"]}`。它只隐藏 App 的聚合入口，不停用插件、不隐藏插件自己的快捷胶囊，也不改变「全部功能」或「对话详情」的入口。删除该项或在界面配置页恢复默认即可显示。`plugins.seats` 配置的是插件的槽位，不是这个 App 入口；不要用 `chat.panel` / `dsh-go.panel` 座位设置替代。
 
 ## 动作（action）
 

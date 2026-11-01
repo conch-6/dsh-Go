@@ -80,12 +80,12 @@ class SessionSearchBar extends ConsumerWidget {
 }
 
 /// Opens the search page; resolves to the picked session id, or null.
-Future<String?> showSessionSearch(BuildContext context) {
+Future<String?> showSessionSearch(BuildContext context, {bool archivedOnly = false}) {
   return Navigator.of(context).push<String>(
     PageRouteBuilder<String>(
       transitionDuration: AppMotion.of(context, AppMotion.standard),
       reverseTransitionDuration: AppMotion.of(context, AppMotion.quick),
-      pageBuilder: (_, _, _) => const SessionSearchPage(),
+      pageBuilder: (_, _, _) => SessionSearchPage(archivedOnly: archivedOnly),
       transitionsBuilder: (_, animation, _, child) {
         final curved = CurvedAnimation(parent: animation, curve: AppMotion.enter, reverseCurve: AppMotion.exit);
         return FadeTransition(
@@ -105,7 +105,10 @@ Future<String?> showSessionSearch(BuildContext context) {
 /// with an excerpt, archived conversations come last and can be restored.
 /// Pops with the picked session id.
 class SessionSearchPage extends ConsumerStatefulWidget {
-  const SessionSearchPage({super.key, this.now});
+  const SessionSearchPage({super.key, this.now, this.archivedOnly = false});
+
+  /// Browse archived chats without first knowing a title or search keyword.
+  final bool archivedOnly;
 
   /// A window [width] wide centres the field over the results' reading
   /// column when that clears the back key (12 + 44 + 8 from the edge).
@@ -171,7 +174,13 @@ class _SessionSearchPageState extends ConsumerState<SessionSearchPage> {
                           tooltip: l10n.commonBack,
                           onPressed: () => Navigator.of(context).maybePop(),
                         );
-                        final field = _SearchField(controller: _field, focusNode: _focus, onClear: _clear);
+                        final field = _SearchField(
+                          controller: _field,
+                          focusNode: _focus,
+                          onClear: _clear,
+                          autofocus: !widget.archivedOnly,
+                          hint: widget.archivedOnly ? l10n.shellArchived : null,
+                        );
                         // Wide: the field over the results' column, centred;
                         // the back key stays at the edge, like a page's.
                         if (SessionSearchPage.centresField(constraints.maxWidth + 24)) {
@@ -198,7 +207,11 @@ class _SessionSearchPageState extends ConsumerState<SessionSearchPage> {
                   ),
                 ),
                 Expanded(
-                  child: _SearchBody(now: widget.now, onPick: (id) => Navigator.of(context).pop(id)),
+                  child: _SearchBody(
+                    now: widget.now,
+                    archivedOnly: widget.archivedOnly,
+                    onPick: (id) => Navigator.of(context).pop(id),
+                  ),
                 ),
               ],
             ),
@@ -210,7 +223,16 @@ class _SessionSearchPageState extends ConsumerState<SessionSearchPage> {
 }
 
 class _SearchField extends StatelessWidget {
-  const _SearchField({required this.controller, required this.focusNode, required this.onClear});
+  const _SearchField({
+    required this.controller,
+    required this.focusNode,
+    required this.onClear,
+    this.autofocus = true,
+    this.hint,
+  });
+
+  final bool autofocus;
+  final String? hint;
 
   final TextEditingController controller;
   final FocusNode focusNode;
@@ -233,7 +255,7 @@ class _SearchField extends StatelessWidget {
         child: TextField(
           controller: controller,
           focusNode: focusNode,
-          autofocus: true,
+          autofocus: autofocus,
           textInputAction: TextInputAction.search,
           inputFormatters: [LengthLimitingTextInputFormatter(200)],
           // The search key shows the results the keyboard was hiding.
@@ -246,7 +268,7 @@ class _SearchField extends StatelessWidget {
             enabledBorder: none,
             focusedBorder: none,
             isCollapsed: true,
-            hintText: l10n.shellSearchChats,
+            hintText: hint ?? l10n.shellSearchChats,
             hintStyle: theme.textTheme.bodyLarge?.copyWith(fontSize: 15, height: 1.3, color: tertiary),
             prefixIcon: Icon(AppIcons.search, size: 20, color: tertiary),
             prefixIconConstraints: const BoxConstraints(minWidth: 42, minHeight: 44),
@@ -273,7 +295,9 @@ class _SearchField extends StatelessWidget {
 }
 
 class _SearchBody extends ConsumerWidget {
-  const _SearchBody({required this.onPick, this.now});
+  const _SearchBody({required this.onPick, this.now, this.archivedOnly = false});
+
+  final bool archivedOnly;
 
   final ValueChanged<String> onPick;
   final DateTime? now;
@@ -301,7 +325,7 @@ class _SearchBody extends ConsumerWidget {
         action: (l10n.commonRetry, () => ref.read(sessionsProvider.notifier).refresh()),
       );
     }
-    if (view.query.isEmpty) {
+    if (view.query.isEmpty && !archivedOnly) {
       final titlesOnly = ref.watch(sessionContentSearchProvider)?.knownUnsupported ?? false;
       return _Notice(
         icon: AppIcons.search,
@@ -311,7 +335,19 @@ class _SearchBody extends ConsumerWidget {
     }
     if (sessions.value == null) return _Notice(icon: AppIcons.loading, title: l10n.shellLoadingChatsEllipsis);
 
-    final results = view.results;
+    final archived = ref.read(sessionsProvider.notifier).archivedSessions;
+    final results = !archivedOnly
+        ? view.results
+        : SessionSearchResults(
+            terms: view.results.terms,
+            archived: view.query.isEmpty
+                ? [for (final session in archived) SessionSearchResult(session: session, archived: true, byTitle: true)]
+                : view.results.archived,
+            showFolders: view.query.isEmpty ? archived.map((s) => s.cwd).toSet().length > 1 : view.results.showFolders,
+          );
+    if (archivedOnly && view.query.isEmpty && archived.isEmpty) {
+      return _Notice(icon: AppIcons.archive, title: l10n.shellArchived, body: l10n.shellNoChatsYet);
+    }
     if (results.isEmpty) {
       if (view.content == ContentSearchStatus.pending) {
         return const Padding(padding: EdgeInsets.only(top: 12), child: _ContentFooter.pending());
@@ -357,44 +393,62 @@ class _SearchBody extends ConsumerWidget {
   /// Archived conversations can't be opened as they are (the Host stops their
   /// work); offer to restore first, like DSH Web's search does.
   Future<void> _openArchived(BuildContext context, WidgetRef ref, SessionSummary session) async {
-    final restore = await showAppSheet<bool>(
-      context,
-      builder: (sheet) => SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SheetHeader(sessionTitle(session)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(kSheetGutter, 0, kSheetGutter, 8),
-              child: Text(
-                context.l10n.shellRestoreBeforeOpening,
-                style: Theme.of(sheet).textTheme.bodyMedium
-                    ?.copyWith(color: Theme.of(sheet).colorScheme.onSurfaceVariant),
-              ),
-            ),
-            SheetGroup(
-              children: [
-                ListTile(
-                  leading: const Icon(AppIcons.unarchive),
-                  title: Text(context.l10n.shellRestoreAndOpen),
-                  onTap: () => Navigator.pop(sheet, true),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-          ],
-        ),
-      ),
-    );
-    if (restore != true || !context.mounted) return;
-    final messenger = ScaffoldMessenger.maybeOf(context);
+    final container = ProviderScope.containerOf(context, listen: false);
+    final owner = container.read(activeHostProvider);
+    final connection = container.read(activeConnectionProvider).value;
+    final generation = connection?.client.mux.generation;
+    var retired = false;
+    final hosts = container.listen(activeHostProvider, (_, next) {
+      if (next != owner) retired = true;
+    });
+    final connections = container.listen(activeConnectionProvider, (_, next) {
+      if (next.isLoading || next.hasError || !identical(next.value, connection)) retired = true;
+    });
+    bool owned() =>
+        !retired && !hosts.closed && !connections.closed && identical(connection?.client.mux.generation, generation);
     try {
-      await unarchiveSession(ref, session.sessionId);
-      if (context.mounted) onPick(session.sessionId);
-    } catch (_) {
-      messenger?.showSnackBar(SnackBar(content: Text(appL10n.shellRestoreFailed)));
+      final restore = await showAppSheet<bool>(
+        context,
+        builder: (sheet) => SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SheetHeader(sessionTitle(session)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(kSheetGutter, 0, kSheetGutter, 8),
+                child: Text(
+                  context.l10n.shellRestoreBeforeOpening,
+                  style: Theme.of(sheet).textTheme.bodyMedium
+                      ?.copyWith(color: Theme.of(sheet).colorScheme.onSurfaceVariant),
+                ),
+              ),
+              SheetGroup(
+                children: [
+                  ListTile(
+                    leading: const Icon(AppIcons.unarchive),
+                    title: Text(context.l10n.shellRestoreAndOpen),
+                    onTap: () => Navigator.pop(sheet, true),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      );
+      if (restore != true || !context.mounted || !owned()) return;
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      try {
+        await unarchiveSession(ref, session.sessionId);
+        if (context.mounted && owned()) onPick(session.sessionId);
+      } catch (_) {
+        if (context.mounted && owned()) messenger?.showSnackBar(SnackBar(content: Text(appL10n.shellRestoreFailed)));
+      }
+    } finally {
+      hosts.close();
+      connections.close();
     }
   }
 }

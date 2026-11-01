@@ -53,6 +53,7 @@ class Composer extends StatefulWidget {
     this.waitHint,
     this.onContentInserted,
     this.maxLines = 6,
+    this.hardwareEnterSends = false,
   });
 
   final TextEditingController controller;
@@ -116,6 +117,9 @@ class Composer extends StatefulWidget {
   /// Visible editor lines. Multiline text remains scrollable when limited.
   final int maxLines;
 
+  /// Opt-in physical Enter-to-send; never changes the software IME action.
+  final bool hardwareEnterSends;
+
   /// Editor lines for a page whose [pageContext] still carries the keyboard
   /// inset: six, or as many as fit in two fifths of the height above the
   /// keyboard at the current text size, never under two (two keep newlines
@@ -155,11 +159,12 @@ class _ComposerState extends State<Composer> {
     widget.onStop();
   }
 
-  /// Hardware keyboards: Ctrl/⌘+Enter sends (plain Enter is a new line);
+  /// Hardware keyboards: Ctrl/⌘+Enter sends; optionally plain Enter does too.
+  /// Shift+Enter remains a new line. IME composition never sends.
   /// Two consecutive Esc presses within 500 ms stop the turn. The pair is
   /// local to the focused, eligible editor; a single Esc never leaves it.
   KeyEventResult _hardwareKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
     final composing = widget.controller.value.composing;
     if (composing.isValid && !composing.isCollapsed) {
       _lastEscape = null;
@@ -168,13 +173,18 @@ class _ComposerState extends State<Composer> {
     final keys = HardwareKeyboard.instance;
     final key = event.logicalKey;
     if (key != LogicalKeyboardKey.escape) _lastEscape = null;
-    if ((keys.isControlPressed || keys.isMetaPressed) &&
-        (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter)) {
+    final sendEnter =
+        keys.isControlPressed ||
+        keys.isMetaPressed ||
+        (widget.hardwareEnterSends && !keys.isShiftPressed && !keys.isAltPressed);
+    if (sendEnter && (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter)) {
+      if (event is KeyRepeatEvent) return KeyEventResult.handled;
       final draft = widget.controller.text.trim().isNotEmpty || widget.hasAttachments;
       final dictating = widget.voice?.active ?? false;
       if (draft && widget.connected && !widget.busy && !dictating) _send();
       return KeyEventResult.handled;
     }
+    if (event is KeyRepeatEvent) return KeyEventResult.ignored;
     if (key != LogicalKeyboardKey.escape || !widget.running) {
       _lastEscape = null;
       return KeyEventResult.ignored;

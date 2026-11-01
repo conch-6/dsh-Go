@@ -89,6 +89,19 @@ void main() {
       });
     }
 
+    test('hardware Enter preference defaults off, persists, and reloads', () async {
+      start();
+      await loaded(container);
+      expect(container.read(settingsProvider).hardwareEnterSends, isFalse);
+      await container.read(settingsProvider.notifier).setHardwareEnterSends(true);
+      expect(container.read(settingsProvider).hardwareEnterSends, isTrue);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('hardware_enter_sends'), isTrue);
+      container.invalidate(settingsProvider);
+      await loaded(container);
+      expect(container.read(settingsProvider).hardwareEnterSends, isTrue);
+    });
+
     test('low device defaults do not create user preference keys', () async {
       start();
       await loaded(container);

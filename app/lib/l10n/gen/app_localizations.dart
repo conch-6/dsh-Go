@@ -10070,6 +10070,12 @@ abstract class L10n {
   /// **'上下文长度'**
   String get engineModelContextLength;
 
+  /// No description provided for @engineModelContextOverrideHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'留空使用渠道目录里的值；改大后引擎按新值计算上下文占用与压缩。'**
+  String get engineModelContextOverrideHint;
+
   /// No description provided for @engineModelMaxOutput.
   ///
   /// In zh, this message translates to:
@@ -13244,6 +13250,48 @@ abstract class L10n {
   /// **'手机布局'**
   String get hubInterfacePhoneLayout;
 
+  /// No description provided for @hubTableTint.
+  ///
+  /// In zh, this message translates to:
+  /// **'表格底色'**
+  String get hubTableTint;
+
+  /// No description provided for @hubTableTintFollow.
+  ///
+  /// In zh, this message translates to:
+  /// **'跟随主题'**
+  String get hubTableTintFollow;
+
+  /// No description provided for @hubTableTintFill.
+  ///
+  /// In zh, this message translates to:
+  /// **'淡底整表'**
+  String get hubTableTintFill;
+
+  /// No description provided for @hubTableTintNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'无底色'**
+  String get hubTableTintNone;
+
+  /// No description provided for @hubTableTintFillHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'隔行淡一档，长表格更好扫读'**
+  String get hubTableTintFillHint;
+
+  /// No description provided for @hubTableTintFollowHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'表头浅底，表身跟随正文'**
+  String get hubTableTintFollowHint;
+
+  /// No description provided for @hubTableTintNoneHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'只剩网格线，最轻'**
+  String get hubTableTintNoneHint;
+
   /// No description provided for @hubAbout.
   ///
   /// In zh, this message translates to:
@@ -13327,6 +13375,18 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'手机操控确认'**
   String get hubPermissionPhoneConfirm;
+
+  /// No description provided for @hubHardwareEnterSends.
+  ///
+  /// In zh, this message translates to:
+  /// **'外接键盘按 Enter 发送'**
+  String get hubHardwareEnterSends;
+
+  /// No description provided for @hubHardwareEnterSendsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'开启后，Shift+Enter 换行。屏幕键盘仍换行；Ctrl/⌘+Enter 始终可发送。'**
+  String get hubHardwareEnterSendsHint;
 
   /// No description provided for @launchScreenTitle.
   ///
@@ -17173,6 +17233,24 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'退出码 {code}'**
   String phoneLaunchExited(String code);
+
+  /// No description provided for @phoneDndManualConnect.
+  ///
+  /// In zh, this message translates to:
+  /// **'手动连接'**
+  String get phoneDndManualConnect;
+
+  /// No description provided for @phoneDndConnectPortLabel.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接端口'**
+  String get phoneDndConnectPortLabel;
+
+  /// No description provided for @phoneDndConnectPortHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'在系统「无线调试」首页查看「IP 地址和端口」，填写冒号后的端口。请不要使用配对码页面的端口。'**
+  String get phoneDndConnectPortHint;
 
   /// No description provided for @phoneTaskResultReady.
   ///
@@ -23930,6 +24008,12 @@ abstract class L10n {
   /// **'字号,字体,文字大小,大字,字体大小'**
   String get searchKwTextSize;
 
+  /// No description provided for @searchKwTableTint.
+  ///
+  /// In zh, this message translates to:
+  /// **'表格,底色,表头,斑马纹,条纹,背景'**
+  String get searchKwTableTint;
+
   /// No description provided for @searchKwFoldTurns.
   ///
   /// In zh, this message translates to:
@@ -24325,6 +24409,138 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'统计,使用统计,匿名,隐私,数据,改进,遥测,分析'**
   String get searchKwUsageStats;
+
+  /// No description provided for @shellDeletePermanently.
+  ///
+  /// In zh, this message translates to:
+  /// **'永久删除'**
+  String get shellDeletePermanently;
+
+  /// No description provided for @shellDeleteNoUndo.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法撤销，与归档不同'**
+  String get shellDeleteNoUndo;
+
+  /// No description provided for @shellDeleteChecking.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在检查此主机是否支持永久删除…'**
+  String get shellDeleteChecking;
+
+  /// No description provided for @shellDeleteUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'此主机不支持安全永久删除，仍可使用归档。'**
+  String get shellDeleteUnsupported;
+
+  /// No description provided for @shellDeleteUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'安全永久删除暂不可用，请重连或更新此主机；不会改为归档。'**
+  String get shellDeleteUnavailable;
+
+  /// No description provided for @shellDeleteChatConfirmation.
+  ///
+  /// In zh, this message translates to:
+  /// **'永久删除「{title}」？'**
+  String shellDeleteChatConfirmation(String title);
+
+  /// No description provided for @shellDeleteChatsConfirmation.
+  ///
+  /// In zh, this message translates to:
+  /// **'永久删除 {count} 个对话？'**
+  String shellDeleteChatsConfirmation(int count);
+
+  /// No description provided for @shellDeleteWarning.
+  ///
+  /// In zh, this message translates to:
+  /// **'将从此主机永久删除所选对话记录，无法撤销，与归档不同。\n\n工作目录、生成的文件、分叉对话、共享附件和已发布的云端分享都会保留。云端分享需另行删除。主机会拒绝删除仍有任务或关联工作的对话。'**
+  String get shellDeleteWarning;
+
+  /// No description provided for @shellDeleteOwnerChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机或连接已变化。请取消后重新发起删除，原确认不再有效。'**
+  String get shellDeleteOwnerChanged;
+
+  /// No description provided for @shellDeletingChats.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在删除对话…'**
+  String get shellDeletingChats;
+
+  /// No description provided for @shellChatsDeleted.
+  ///
+  /// In zh, this message translates to:
+  /// **'已永久删除 {count} 个对话'**
+  String shellChatsDeleted(int count);
+
+  /// No description provided for @shellDeletePartial.
+  ///
+  /// In zh, this message translates to:
+  /// **'已删除 {deleted} 个，失败 {failed} 个'**
+  String shellDeletePartial(int deleted, int failed);
+
+  /// No description provided for @shellDeleteRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先停止运行中的工作；主机还会检查活动任务和定时任务。'**
+  String get shellDeleteRunning;
+
+  /// No description provided for @shellDeleteRelated.
+  ///
+  /// In zh, this message translates to:
+  /// **'此对话有关联的子代理工作，主机为保护它们拒绝删除。'**
+  String get shellDeleteRelated;
+
+  /// No description provided for @shellDeleteWriterHeld.
+  ///
+  /// In zh, this message translates to:
+  /// **'其他进程正在使用此对话，请先在该进程中关闭后重试。'**
+  String get shellDeleteWriterHeld;
+
+  /// No description provided for @shellDeleteNotFound.
+  ///
+  /// In zh, this message translates to:
+  /// **'此主机上已没有这个对话，请刷新列表。'**
+  String get shellDeleteNotFound;
+
+  /// No description provided for @shellDeleteConnectionLost.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接已断开，删除结果未确认，请刷新对话列表后再操作。'**
+  String get shellDeleteConnectionLost;
+
+  /// No description provided for @shellDeleteArchivePending.
+  ///
+  /// In zh, this message translates to:
+  /// **'此对话正在等待归档，请先完成或撤销归档。'**
+  String get shellDeleteArchivePending;
+
+  /// No description provided for @shellDeleteInventoryChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'对话列表已变化，请刷新后重新选择。'**
+  String get shellDeleteInventoryChanged;
+
+  /// No description provided for @shellDeleteProtocolError.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除结果未确认，请刷新对话列表后再操作。'**
+  String get shellDeleteProtocolError;
+
+  /// No description provided for @shellDeleteNotAttempted.
+  ///
+  /// In zh, this message translates to:
+  /// **'未执行，请核对对话列表后重试。'**
+  String get shellDeleteNotAttempted;
+
+  /// No description provided for @shellDeleteFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机无法确认删除结果，请刷新后再决定是否重试。'**
+  String get shellDeleteFailed;
 
   /// No description provided for @setupAppearanceTitle.
   ///

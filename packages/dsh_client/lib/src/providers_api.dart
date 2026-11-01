@@ -70,7 +70,9 @@ const List<String> piAiThinkingLevels = ['off', 'minimal', 'low', 'medium', 'hig
 /// One entry of a profile's `models` list. Fields this client does not model
 /// (`compat`, …) ride along in [extra] so an edit writes them back untouched;
 /// so does `reasoningEfforts`, read through [reasoningEfforts] and replaced
-/// with [withReasoningEfforts].
+/// with [withReasoningEfforts]. A level the adapter does not know is dropped
+/// when the entry is read, so an entry that came from an endpoint offering such
+/// a level cannot keep a value that fails `llm-pi-ai`'s own config validation.
 class ProviderModelSpec {
   const ProviderModelSpec({
     required this.id,
@@ -94,12 +96,31 @@ class ProviderModelSpec {
       input: input?.whereType<String>().toList(growable: false),
       extra: {
         for (final entry in map.entries)
-          if (!_modelFields.contains(entry.key)) entry.key: entry.value,
+          if (!_modelFields.contains(entry.key))
+            entry.key: entry.key == 'reasoningEfforts' ? _knownReasoningEfforts(entry.value) : entry.value,
       },
     );
   }
 
   static const _modelFields = {'id', 'name', 'contextWindow', 'maxTokens', 'input'};
+
+  /// [raw] as a `reasoningEfforts` map `llm-pi-ai` accepts: only the levels in
+  /// [piAiThinkingLevels] survive. A route the Host reads back may carry a level
+  /// this adapter does not know (a gateway answering `none`, say); keeping it
+  /// would fail the plugin's config validation on the next start, so the whole
+  /// adapter would not activate and every custom route would go missing.
+  /// With no remaining thinking level, explicitly disable reasoning: an empty
+  /// or off-only map is invalid, while omitting the field could inherit levels
+  /// from the installed catalog that this imported model does not support.
+  /// Anything but a map is left alone, keeping the round trip lossless.
+  static Object? _knownReasoningEfforts(Object? raw) {
+    if (raw is! Map) return raw;
+    final known = <String, Object?>{
+      for (final MapEntry(:key, :value) in raw.entries)
+        if (key is String && piAiThinkingLevels.contains(key)) key: value,
+    };
+    return known.keys.any((level) => level != 'off') ? known : false;
+  }
 
   final String id;
 
@@ -154,7 +175,8 @@ class ProviderModelSpec {
   /// A level kept from before keeps its configured value; a new one sends
   /// its own name, `off` nothing. Empty or null declares no levels: the
   /// field is dropped (a hand-declared model then does not think) unless it
-  /// was an explicit `false`, which stays.
+  /// was an explicit `false`, which stays. Selecting only `off` or unknown
+  /// levels explicitly disables reasoning instead of writing an invalid map.
   ProviderModelSpec withReasoningEfforts(Iterable<String>? levels) {
     final before = reasoningEfforts ?? const <String, String?>{};
     final wanted = {...?levels};
@@ -162,13 +184,13 @@ class ProviderModelSpec {
     if (wanted.isEmpty) {
       if (next['reasoningEfforts'] != false) next.remove('reasoningEfforts');
     } else {
-      next['reasoningEfforts'] = <String, String?>{
+      next['reasoningEfforts'] = _knownReasoningEfforts(<String, String?>{
         for (final level in piAiThinkingLevels)
           if (wanted.contains(level))
             level: before.containsKey(level) && (before[level] != null || level == 'off')
                 ? before[level]
                 : (level == 'off' ? null : level),
-      };
+      });
     }
     return ProviderModelSpec(
       id: id,
@@ -190,6 +212,74 @@ class ProviderModelSpec {
   };
 }
 
+/// One `providers.<route>.modelOverrides.<modelId>` entry: a field-by-field
+/// override of a model the installed pi-ai catalog ships.
+///
+/// A catalog route (the ChatGPT / Claude subscriptions, or any route pi-ai
+/// describes) lists its shipped models untouched, so the only way to correct
+/// one fact about one of them — a context length the catalog gets wrong, an
+/// output cap — is an override. The model id is the dict key, never a field
+/// here; `compat` and `reasoningEfforts` ride along in [extra] so a write
+/// keeps what this client does not model.
+class ModelOverride {
+  const ModelOverride({this.name, this.contextWindow, this.maxTokens, this.input, this.extra = const {}});
+
+  static ModelOverride? fromJson(Object? json) {
+    final map = asMap(json);
+    if (map == null) return null;
+    final input = asList(map['input']);
+    return ModelOverride(
+      name: asString(map['name']),
+      contextWindow: asInt(map['contextWindow']),
+      maxTokens: asInt(map['maxTokens']),
+      input: input?.whereType<String>().toList(growable: false),
+      extra: {
+        for (final entry in map.entries)
+          if (!_fields.contains(entry.key)) entry.key: entry.value,
+      },
+    );
+  }
+
+  static const _fields = {'contextWindow', 'maxTokens', 'name', 'input'};
+
+  /// Picker label; the adapter falls back to the catalog's name.
+  final String? name;
+
+  /// How much the model holds, when the override sizes it. Null: the
+  /// installed catalog's figure.
+  final int? contextWindow;
+  final int? maxTokens;
+
+  /// `text` / `image`; null: the catalog's modalities.
+  final List<String>? input;
+
+  /// Fields this client does not model (`compat`, `reasoningEfforts`, …),
+  /// kept verbatim.
+  final Map<String, Object?> extra;
+
+  /// Says nothing — the entry can go.
+  bool get isEmpty =>
+      name == null && contextWindow == null && maxTokens == null && (input?.isEmpty ?? true) && extra.isEmpty;
+
+  /// This entry with its context length set — or cleared, back to the
+  /// catalog's figure, when [value] is null.
+  ModelOverride withContextWindow(int? value) => ModelOverride(
+    name: name,
+    contextWindow: value,
+    maxTokens: maxTokens,
+    input: input,
+    extra: extra,
+  );
+
+  Map<String, Object?> toJson() => {
+    ...extra,
+    if (name != null && name!.isNotEmpty) 'name': name,
+    'contextWindow': ?contextWindow,
+    'maxTokens': ?maxTokens,
+    'input': ?input,
+  };
+}
+
 /// One `providers.<route>` profile of the pi-ai section.
 class ProviderProfile {
   const ProviderProfile({
@@ -200,6 +290,7 @@ class ProviderProfile {
     this.apiKeyEnv,
     this.models = const [],
     this.headers = const {},
+    this.modelOverrides = const {},
     this.defaultContextWindow,
     this.defaultMaxTokens,
     this.defaultInput,
@@ -208,6 +299,11 @@ class ProviderProfile {
   factory ProviderProfile.fromJson(String route, Object? json) {
     final map = asMapOrEmpty(json);
     final headers = asMapOrEmpty(map['headers']);
+    final overrides = <String, ModelOverride>{};
+    for (final entry in asMapOrEmpty(map['modelOverrides']).entries) {
+      final override = ModelOverride.fromJson(entry.value);
+      if (override != null) overrides[entry.key] = override;
+    }
     return ProviderProfile(
       route: route,
       displayName: asString(map['displayName']),
@@ -219,6 +315,7 @@ class ProviderProfile {
         for (final entry in headers.entries)
           if (entry.value is String) entry.key: entry.value as String,
       },
+      modelOverrides: overrides,
       defaultContextWindow: asInt(map['defaultContextWindow']),
       defaultMaxTokens: asInt(map['defaultMaxTokens']),
       defaultInput: asList(map['defaultInput'])?.whereType<String>().toList(growable: false),
@@ -236,6 +333,11 @@ class ProviderProfile {
   final String? apiKeyEnv;
   final List<ProviderModelSpec> models;
   final Map<String, String> headers;
+
+  /// Field-by-field corrections of models the installed catalog ships, by
+  /// model id (catalog routes only: a hand-declared route replaces the
+  /// catalog with [models] and sets its fields there).
+  final Map<String, ModelOverride> modelOverrides;
 
   /// What the route assumes for a model that does not say (read back with
   /// the schema's defaults filled in; null on a profile built here). Not
@@ -262,6 +364,8 @@ class ProviderProfile {
     'apiKeyEnv': ?apiKeyEnv,
     'models': [for (final m in models) m.toJson()],
     if (headers.isNotEmpty) 'headers': headers,
+    if (modelOverrides.isNotEmpty)
+      'modelOverrides': {for (final entry in modelOverrides.entries) entry.key: entry.value.toJson()},
     'defaultContextWindow': ?defaultContextWindow,
     'defaultMaxTokens': ?defaultMaxTokens,
     'defaultInput': ?defaultInput,
@@ -433,6 +537,44 @@ extension ProvidersApi on DshClient {
     ];
     if (ops.isEmpty) throw ArgumentError('nothing to update');
     final section = await mutateSettings(piAiSettingsNs, ops, expectedRevision: expectedRevision);
+    return ProviderSettings.fromSection(section);
+  }
+
+  /// Sets one `modelOverrides.<modelId>` entry of an existing route — the
+  /// only way to correct one fact about a model a catalog route serves (its
+  /// context length, say) without restating that route's whole model list.
+  /// The Host validates the route on write and the change takes effect on the
+  /// next request.
+  Future<ProviderSettings> setModelOverride(
+    String route,
+    String modelId,
+    ModelOverride override, {
+    int? expectedRevision,
+  }) async {
+    _checkRoute(route);
+    final id = modelId.trim();
+    if (id.isEmpty) throw ArgumentError.value(modelId, 'modelId', 'must not be empty');
+    final section = await mutateSettings(piAiSettingsNs, [
+      SettingsOp.set(['providers', route, 'modelOverrides', id], override.toJson()),
+    ], expectedRevision: expectedRevision);
+    return ProviderSettings.fromSection(section);
+  }
+
+  /// Drops one `modelOverrides.<modelId>` entry, back to the shipped catalog
+  /// figure. Pass [last] when it was the route's only override, so the empty
+  /// `modelOverrides` dict goes with it and the route reads as untouched.
+  Future<ProviderSettings> clearModelOverride(
+    String route,
+    String modelId, {
+    bool last = false,
+    int? expectedRevision,
+  }) async {
+    _checkRoute(route);
+    final section = await mutateSettings(piAiSettingsNs, [
+      last
+          ? SettingsOp.unset(['providers', route, 'modelOverrides'])
+          : SettingsOp.unset(['providers', route, 'modelOverrides', modelId.trim()]),
+    ], expectedRevision: expectedRevision);
     return ProviderSettings.fromSection(section);
   }
 

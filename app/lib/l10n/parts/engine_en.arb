@@ -325,6 +325,7 @@
   "engineFieldEnterBoundedRange": "Enter a number from {min} to {max}",
   "engineModelTokenLimits": "Token limits",
   "engineModelContextLength": "Context length",
+  "engineModelContextOverrideHint": "Empty uses the catalog's figure. A larger value is what the engine counts context pressure and compaction against.",
   "engineModelMaxOutput": "Max output",
   "engineModelDefaultSize": "Default {size}",
   "@engineModelDefaultSize": {

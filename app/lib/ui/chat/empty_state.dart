@@ -94,6 +94,7 @@ class ChatEmptyState extends StatelessWidget {
     this.suggestions = defaultSuggestions,
     this.workspace,
     this.onWorkspace,
+    this.folderPicker,
   });
 
   final bool connected;
@@ -120,6 +121,9 @@ class ChatEmptyState extends StatelessWidget {
 
   /// Switches [workspace].
   final VoidCallback? onWorkspace;
+
+  /// Optional drawer-folder choice for the new conversation.
+  final Widget? folderPicker;
 
   /// 测试注入;默认取当前时间。
   final DateTime? now;
@@ -235,6 +239,10 @@ class ChatEmptyState extends StatelessWidget {
                     child: AnimatedSwitcher(duration: AppMotion.of(context, AppMotion.quick), child: slot),
                   ),
                 ),
+              ],
+              if (connected && folderPicker != null) ...[
+                const SizedBox(height: 8),
+                enter(Center(child: folderPicker!)),
               ],
               if (suggestions.isNotEmpty)
                 ExpandReveal(

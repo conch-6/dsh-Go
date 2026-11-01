@@ -743,8 +743,8 @@ class _ModelGrid extends StatelessWidget {
   }
 }
 
-/// 一张模型卡:短名 + 一行描述,右上角选择圈。选中时卡面染一层很淡的主色、
-/// 描一圈主色细边、圈里是实心对勾 —— 这一屏唯一的实心主色。
+/// 一张模型卡:短名(最多两行)+ 一行描述,右上角选择圈。选中时卡面染一层
+/// 很淡的主色、描一圈主色细边、圈里是实心对勾 —— 这一屏唯一的实心主色。
 class _ModelCard extends StatelessWidget {
   const _ModelCard({super.key, required this.model, required this.selected, required this.onTap});
 
@@ -800,12 +800,15 @@ class _ModelCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
+                    // 14 / two lines: the row leaves the name ~109 dp on a
+                    // 390 dp phone, so "GPT 5.6 Terra" at titleMedium's 16 was
+                    // cut after the first words.
                     Expanded(
                       child: Text(
                         name,
-                        maxLines: 1,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(height: 1.35),
+                        style: theme.textTheme.titleSmall?.copyWith(height: 1.35),
                       ),
                     ),
                     const SizedBox(width: 8),

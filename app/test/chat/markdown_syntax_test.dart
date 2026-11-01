@@ -167,4 +167,43 @@ void main() {
       expect(boldTableHeaders('a | b\n---'), 'a | b\n---');
     });
   });
+
+  group('blankLineBeforeTables', () {
+    test('a table glued to the paragraph above gets a blank line', () {
+      expect(
+        blankLineBeforeTables('按症状查的清单：\n| 症状 | 方向 |\n|---|---|\n| 卡顿 | CPU |'),
+        '按症状查的清单：\n\n| 症状 | 方向 |\n|---|---|\n| 卡顿 | CPU |',
+      );
+    });
+
+    test('a table already separated, or under a block that ends it, is left alone', () {
+      for (final source in [
+        '清单：\n\n| a | b |\n|---|---|',
+        '## 清单\n| a | b |\n|---|---|',
+        '- 清单\n| a | b |\n|---|---|',
+      ]) {
+        expect(blankLineBeforeTables(source), source);
+      }
+    });
+
+    test('a table inside a quote keeps the quote marker', () {
+      expect(
+        blankLineBeforeTables('> 清单：\n> | a | b |\n> |---|---|'),
+        '> 清单：\n>\n> | a | b |\n> |---|---|',
+      );
+    });
+
+    test('fenced code and indented tables are untouched', () {
+      for (final source in [
+        '```\n说明：\n| a | b |\n|---|---|\n```',
+        '- 条目：\n  | a | b |\n  |---|---|',
+      ]) {
+        expect(blankLineBeforeTables(source), source);
+      }
+    });
+
+    test('a bare rule stays a rule', () {
+      expect(blankLineBeforeTables('标题\n---'), '标题\n---');
+    });
+  });
 }

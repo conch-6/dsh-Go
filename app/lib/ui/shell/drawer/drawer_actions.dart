@@ -2,8 +2,8 @@
 // the flows behind the sheets, bulk 归档 / 置顶 / 移到文件夹, and the undo
 // toasts. Archiving follows the single-row archive in sessions_drawer.dart
 // (hide at once; stop running work and archive when the undo window ends).
-// DSH never deletes a conversation (archive is its delete), so there is no
-// bulk 删除; a folder can be deleted, with undo.
+// Permanent session deletion lives in session_deletion.dart and has no undo;
+// deleting a folder here keeps its conversations and can be undone.
 
 import 'dart:async';
 
@@ -19,6 +19,7 @@ import '../../../state/read_list_identity.dart';
 import '../../../state/sessions_state.dart';
 import '../../../state/workspaces_state.dart';
 import 'folder_sheets.dart';
+import '../session_search_page.dart' show showSessionSearch;
 import 'archive_notice.dart';
 import '../../common/brief_notice.dart';
 
@@ -35,10 +36,15 @@ void _toast(ScaffoldMessengerState? messenger, String text, {String? undoLabel, 
 }
 
 /// 「对话列表」: the sheet, then what was picked in it.
-Future<void> openDrawerViewOptions(BuildContext context, WidgetRef ref) async {
+Future<void> openDrawerViewOptions(BuildContext context, WidgetRef ref, {VoidCallback? onClose}) async {
   final action = await showDrawerViewSheet(context);
   if (!context.mounted || action == null) return;
   switch (action) {
+    case DrawerViewAction.archived:
+      final sessionId = await showSessionSearch(context, archivedOnly: true);
+      if (sessionId == null || !context.mounted) return;
+      ref.read(currentSessionProvider.notifier).select(sessionId);
+      onClose?.call();
     case DrawerViewAction.newFolder:
       await createFolderFlow(context, ref);
     case DrawerViewAction.manageFolders:
@@ -68,9 +74,14 @@ Future<void> editFolderFlow(BuildContext context, WidgetRef ref, DrawerFolder fo
   await view.updateFolder(folder.id, name: draft.name, tint: () => draft.tint, emoji: () => draft.emoji);
 }
 
-/// Long press on a folder: 编辑 or 删除文件夹 (its conversations stay; undo
-/// puts it back).
-Future<void> folderActionsFlow(BuildContext context, WidgetRef ref, DrawerFolder folder) async {
+/// Long press on a folder: start a chat, edit, or delete the folder.
+/// Deleting keeps its conversations; undo puts the folder back.
+Future<void> folderActionsFlow(
+  BuildContext context,
+  WidgetRef ref,
+  DrawerFolder folder, {
+  VoidCallback? onNewChat,
+}) async {
   final container = ProviderScope.containerOf(context, listen: false);
   final owner = container.read(activeHostProvider);
   var retired = false;
@@ -83,6 +94,11 @@ Future<void> folderActionsFlow(BuildContext context, WidgetRef ref, DrawerFolder
     final action = await showFolderActionSheet(context, folder);
     if (!context.mounted || action == null || !owned()) return;
     switch (action) {
+      case FolderAction.newChat:
+        if (ref.read(drawerViewProvider).byId(folder.id) == null) return;
+        ref.read(currentSessionProvider.notifier).select(null);
+        ref.read(pendingSessionFolderProvider.notifier).select(folder.id);
+        onNewChat?.call();
       case FolderAction.edit:
         await editFolderFlow(context, ref, folder);
       case FolderAction.delete:

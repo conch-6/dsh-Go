@@ -57,11 +57,16 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
     fun uid(): Int = runCatching { Shizuku.getUid() }.getOrDefault(-1)
 
     /** A one-line reason when not ready, else null. */
-    fun reason(): String? = when {
-        !installed() -> AppStrings.get(context, R.string.background_shizuku_missing)
-        !running() -> AppStrings.get(context, R.string.background_shizuku_stopped)
-        !granted() -> AppStrings.get(context, R.string.background_shizuku_permission)
-        else -> null
+    fun reason(): String? {
+        val status = status()
+        return when {
+            // Sui supplies the same Binder API without a Shizuku manager APK.
+            // Installation is guidance only while no service is available.
+            !status.running -> AppStrings.get(context, if (status.installed)
+                R.string.background_shizuku_stopped else R.string.background_shizuku_missing)
+            !status.granted -> AppStrings.get(context, R.string.background_shizuku_permission)
+            else -> null
+        }
     }
 
     fun ensureListeners() {

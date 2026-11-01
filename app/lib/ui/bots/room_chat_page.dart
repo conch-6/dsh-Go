@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../state/settings_state.dart';
 import '../../state/bots_state.dart';
 import '../chat/composer.dart';
 import '../chat/widgets/chat_card.dart';
@@ -321,6 +322,7 @@ class _RoomChatPageState extends ConsumerState<RoomChatPage> {
           onDismiss: () => ref.read(roomChatProvider(widget.roomId).notifier).dismissError(),
         ),
         Composer(
+          hardwareEnterSends: ref.watch(settingsProvider.select((s) => s.hardwareEnterSends)),
           controller: _input,
           placeholder: l10n.botsGroupComposerHint,
           focusNode: _focus,

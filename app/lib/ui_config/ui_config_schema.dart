@@ -63,7 +63,8 @@ abstract final class UiSchema {
   /// turnFooter: the per-turn footnote (turn_footnote.dart); tokenCount: the
   /// token figures in it and in the activity strip; reasoningDetails: the
   /// thinking row (thinking_pill.dart); activityStrip, whaleTail; todoPill
-  /// and goalBar: the dock bars (chat/dock/).
+  /// and goalBar: the dock bars (chat/dock/); pluginCapsule: the app-owned
+  /// Plugins entry, not the plugins' individual composer actions.
   static const hideItems = [
     'turnFooter',
     'tokenCount',
@@ -72,6 +73,7 @@ abstract final class UiSchema {
     'whaleTail',
     'todoPill',
     'goalBar',
+    'pluginCapsule',
   ];
   static const themeModes = ['system', 'light', 'dark'];
 

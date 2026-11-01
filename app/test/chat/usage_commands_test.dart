@@ -85,6 +85,9 @@ void main() {
       expect((partial.token, partial.hasArgs), ('per', false));
       final full = parseSlashInput('/permission read-only')!;
       expect((full.token, full.rest), ('permission', ' read-only'));
+      final indented = parseSlashInput(' \t/permission read-only')!;
+      expect((indented.token, indented.rest), ('permission', ' read-only'));
+      expect(parseSlashInput(' \thello /permission'), isNull);
       expect(resolveSlashCommand(all, '压缩')?.name, 'compact');
       expect(resolveSlashCommand(all, 'perm'), isNull);
     });
@@ -97,6 +100,19 @@ void main() {
       expect((hint! as PaletteHint).command.name, 'permission');
       expect(PaletteContent.of(all, '/compact now'), isNull);
       expect(PaletteContent.of(all, '/sdcard/a.txt 看看'), isNull);
+    });
+
+    test('palette filters the first token only up to the caret', () {
+      final inserted = PaletteContent.of(all, '/已有文字', caret: 1) as PaletteMatches;
+      expect(inserted.commands, all);
+      expect(inserted.typed, isFalse);
+      expect(PaletteContent.of(all, ' \t/已有文字', caret: 3), isA<PaletteMatches>());
+      final partial = PaletteContent.of(all, '/permission read-only', caret: 4) as PaletteMatches;
+      expect(partial.commands.first.name, 'permission');
+      expect(PaletteContent.of(all, 'hello /', caret: 7), isNull);
+      expect(PaletteContent.of(all, '/', caret: 0), isNull);
+      expect(PaletteContent.of(all, '/', caret: -1), isNull);
+      expect(PaletteContent.of(all, '/', caret: 2), isNull);
     });
   });
 
@@ -147,11 +163,20 @@ void main() {
     });
 
     test('token and percent formatting', () {
+      // K/M in every language: no 万/亿, whatever the UI language is.
       expect(formatTokens(0), '0');
-      expect(formatTokens(8421), '8,421');
-      expect(formatTokens(15000), '1.5 万');
-      expect(formatTokens(1000000), '100 万');
-      expect(formatTokens(150000000), '1.5 亿');
+      expect(formatTokens(999), '999');
+      expect(formatTokens(1000), '1K');
+      expect(formatTokens(8421), '8.4K');
+      expect(formatTokens(15000), '15K');
+      expect(formatTokens(43000), '43K');
+      expect(formatTokens(500000), '500K');
+      expect(formatTokens(999999), '1M'); // never 1000K
+      expect(formatTokens(1000000), '1M');
+      expect(formatTokens(1048576), '1.05M');
+      expect(formatTokens(1050000), '1.05M');
+      expect(formatTokens(100000000), '100M');
+      expect(formatTokens(150000000), '150M');
       expect(formatPercent(0.004), '<1%');
       expect(formatPercent(0), '0%');
       expect(formatPercent(0.876), '88%');

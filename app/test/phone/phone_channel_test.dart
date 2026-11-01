@@ -102,6 +102,7 @@ void main() {
     await channel.setEnabled(true);
     await channel.setBackgroundMode(PhoneBackgroundMode.adb);
     await channel.adbPair('482913', port: 37123);
+    await channel.adbConnect(port: 45269);
     await channel.actionLog(limit: 7);
     await channel.setPolicies(
       const PhonePolicies(
@@ -113,6 +114,7 @@ void main() {
     expect(native.callsOf('setEnabled').single.arguments, {'enabled': true});
     expect(native.callsOf('setBackgroundMode').single.arguments, {'mode': 'adb'});
     expect(native.callsOf('adbPair').single.arguments, {'code': '482913', 'port': 37123});
+    expect(native.callsOf('adbConnect').single.arguments, {'port': 45269});
     expect(native.callsOf('actionLog').single.arguments, {'limit': 7});
     // Only the two lists and the confirm mode go over the wire.
     expect(native.callsOf('setPolicies').single.arguments, {

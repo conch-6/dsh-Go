@@ -114,7 +114,7 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                 val code = call.argument<String>("code")?.trim().orEmpty()
                 if (code.isEmpty()) mapOf("ok" to false, "reason" to AppStrings.get(appContext, R.string.pairing_enter_code_error)) else control.background.adbPair(code, call.argument<Int>("port"))
             }
-            "adbConnect" -> async(result) { control.background.adbConnect() }
+            "adbConnect" -> async(result) { control.background.adbConnect(call.argument<Int>("port")) }
             "getPolicies" -> async(result) { control.policiesMap() }
             "setPolicies" -> async(result) { control.setPolicies(call.arguments as? Map<*, *>) }
             "actionLog" -> result.success(control.log.toMaps(call.argument<Int>("limit") ?: 100))

@@ -16,6 +16,7 @@ import 'package:dsh_app/ui/common/sheet_title_bar.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -77,6 +78,22 @@ final crowdedCatalog = ModelCatalog(
   failures: const [],
 );
 
+/// A third-party channel whose long names the user saw cut ("GPT 5.6 ···").
+/// The name lane is only ~109 dp on a 390 dp phone: 16 on one line does not fit.
+const longNameCatalog = ModelCatalog(
+  defaultSelection: ModelSelection(provider: 'chatgpt', model: 'gpt-6-astra-pro'),
+  routableProviders: ['chatgpt'],
+  groups: [
+    ProviderGroup('chatgpt', 'ChatGPT', [
+      ModelInfo(provider: 'chatgpt', id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', description: '长上下文，擅长复杂推理'),
+      ModelInfo(provider: 'chatgpt', id: 'gpt-6-astra', name: 'GPT-6 Astra', description: '新一代旗舰'),
+      ModelInfo(provider: 'chatgpt', id: 'gpt-5.6-mini', name: 'GPT-5.6 Mini', description: '轻量快速'),
+      ModelInfo(provider: 'chatgpt', id: 'gpt-6-astra-pro', name: 'GPT-6 Astra Pro', description: '代理与工具调用'),
+    ]),
+  ],
+  failures: [],
+);
+
 ChatHarness _harness(ModelCatalog catalog, {ModelSelection? model}) => ChatHarness(
   session: model == null ? null : 's1',
   states: {if (model != null) 's1': ChatState(loading: false, model: model)},
@@ -95,6 +112,33 @@ Future<ChatHarness> _openSheet(
   await tester.tap(find.byType(ModelChip));
   await pumpFrames(tester, 8);
   return harness;
+}
+
+/// Opens the sheet from a bare page, so a large-text test measures the sheet
+/// itself rather than the chat shell behind it.
+Future<void> _openSheetAlone(WidgetTester tester, ModelCatalog catalog, {double textScale = 1}) async {
+  usePhoneView(tester);
+  tester.platformDispatcher.textScaleFactorTestValue = textScale;
+  addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+  mockClipboard(tester);
+  await tester.pumpWidget(
+    testApp(
+      Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: TextButton(
+              onPressed: () => showModelSheet(context, current: catalog.defaultSelection, onSelected: (_) {}),
+              child: const Text('打开模型'),
+            ),
+          ),
+        ),
+      ),
+      overrides: _harness(catalog).overrides,
+    ),
+  );
+  await pumpFrames(tester, 4);
+  await tester.tap(find.text('打开模型'));
+  await pumpFrames(tester, 8);
 }
 
 Finder _card(String name) => find.ancestor(of: find.text(name), matching: find.byType(GlassSurface)).first;
@@ -298,6 +342,55 @@ void main() {
       expect(find.text('暂无可用模型'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, '管理渠道'), findsOneWidget);
       expect(find.text('添加其他渠道'), findsNothing);
+    });
+  });
+
+  group('long names', () {
+    testWidgets('a third-party name shows whole instead of one cut line', (tester) async {
+      await _openSheet(tester, _harness(longNameCatalog));
+      for (final name in const ['GPT 5.6 Terra', 'GPT 6 Astra']) {
+        final text = find.text(name);
+        expect(text, findsOneWidget);
+        expect(tester.widget<Text>(text).maxLines, 2, reason: 'a long name may use a second line');
+        expect(tester.renderObject<RenderParagraph>(text).didExceedMaxLines, isFalse, reason: '$name fits whole');
+      }
+      // The description keeps its single line, cut with an ellipsis.
+      expect(tester.widget<Text>(find.text('长上下文，擅长复杂推理')).maxLines, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    for (final scale in [1.0, 1.3]) {
+      testWidgets('long names wrap whole and the row stays equal (text ×$scale)', (tester) async {
+        await _openSheetAlone(tester, longNameCatalog, textScale: scale);
+        for (final name in const ['GPT 5.6 Terra', 'GPT 6 Astra']) {
+          final text = find.text(name);
+          expect(tester.widget<Text>(text).maxLines, 2);
+          expect(tester.renderObject<RenderParagraph>(text).didExceedMaxLines, isFalse, reason: '$name fits whole');
+        }
+        final terra = tester.getRect(_card('GPT 5.6 Terra'));
+        final astra = tester.getRect(_card('GPT 6 Astra'));
+        expect(terra.width, moreOrLessEquals(astra.width, epsilon: 0.5));
+        expect(
+          terra.height,
+          moreOrLessEquals(astra.height, epsilon: 0.5),
+          reason: 'the row is as tall as its taller name',
+        );
+        expect(terra.top, moreOrLessEquals(astra.top, epsilon: 0.5));
+        expect(astra.left - terra.right, moreOrLessEquals(12, epsilon: 0.5));
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('long names keep their two lines at 2× text, nothing overflows', (tester) async {
+      await _openSheetAlone(tester, longNameCatalog, textScale: 2);
+      expect(find.text('GPT 5.6 Terra'), findsOneWidget);
+      expect(find.text('GPT 6 Astra'), findsOneWidget);
+      final terra = tester.getRect(_card('GPT 5.6 Terra'));
+      final astra = tester.getRect(_card('GPT 6 Astra'));
+      expect(terra.width, moreOrLessEquals(astra.width, epsilon: 0.5));
+      expect(terra.height, moreOrLessEquals(astra.height, epsilon: 0.5));
+      expect(terra.top, moreOrLessEquals(astra.top, epsilon: 0.5));
+      expect(tester.takeException(), isNull);
     });
   });
 

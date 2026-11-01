@@ -65,7 +65,7 @@ void main() {
       expect(trace.waitTime, const Duration(seconds: 48));
       expect(trace.ttft, const Duration(milliseconds: 1100));
       expect(trace.usage.total, 8226 + 69888 + 1970);
-      expect(TurnFootnote.variants(trace).first, '1 分 23 秒 · 5 步 · 8 万 tokens');
+      expect(TurnFootnote.variants(trace).first, '1 分 23 秒 · 5 步 · 80.1K tokens');
 
       final rows = trajectoryRows(trace);
       final labels = [

@@ -46,6 +46,7 @@ dependencies:
   shared_preferences: ^2.5.6
   flutter_secure_storage: ^11.2.0
   webview_flutter: ^4.14.1
+  webview_flutter_android: ^4.14.1
   gpt_markdown: ^1.4.0
   # gpt_markdown's own maths engine, used directly for the formula fallback.
   val_latex_flutter: ^0.1.3

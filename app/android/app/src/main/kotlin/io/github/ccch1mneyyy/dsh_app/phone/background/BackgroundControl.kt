@@ -78,6 +78,16 @@ class BackgroundControl private constructor(context: Context) {
             return mapOf("ok" to true)
         }
         if (!androidOk()) return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_requires_android))
+        if (mode != newMode) {
+            endTask()
+            // A prepared ADB connection must not reuse the old Shizuku channel
+            // (or vice versa) when the user enables the selected transport.
+            channel = null
+            if (mode == "shizuku") shizuku.disconnect()
+            else if (mode == "adb") adb.disconnect()
+            trustedDisplayOk = null
+            injectOk = null
+        }
         mode = newMode
         if (newMode == "shizuku") shizuku.ensureListeners()
         notifyChanged()
@@ -96,9 +106,16 @@ class BackgroundControl private constructor(context: Context) {
 
     fun adbPair(code: String, port: Int?): Map<String, Any?> = adb.pair(code, port)
 
-    fun adbConnect(): Map<String, Any?> {
-        val reason = runGateProbe()
-        return mapOf("ok" to (reason == null), "reason" to reason)
+    fun adbConnect(port: Int? = null): Map<String, Any?> {
+        if (!androidOk()) return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_requires_android))
+        if (port != null && port !in 1..65535) {
+            return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_adb_invalid_port))
+        }
+        // Prepare the transport before the user enables background control. Running
+        // the mode/readiness gate here creates an off -> connect -> enable cycle.
+        val connected = adb.connect(port) != null
+        notifyChanged()
+        return mapOf("ok" to connected, "reason" to if (connected) null else adb.reason())
     }
 
     // ---- 自动恢复无障碍 (WRITE_SECURE_SETTINGS through the engine) -------------

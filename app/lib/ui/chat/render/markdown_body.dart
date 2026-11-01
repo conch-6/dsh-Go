@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../l10n/l10n.dart';
 import '../../../links/page_links.dart' show openReplyPageLink;
 import '../../../state/artifacts.dart';
+import '../../../state/table_tint_state.dart';
 import '../../../state/workspace_state.dart';
 import '../../common/edge_fade.dart';
 import '../../common/streaming_cursor.dart';
@@ -72,17 +73,32 @@ class MarkdownBody extends StatefulWidget {
   static final _secondaryThemes = <String, Expando<GptMarkdownThemeData>>{};
 
   /// 每个 ThemeData 只建一次(工厂内部会构造整套 ThemeData,不便宜)。
-  static GptMarkdownThemeData _themeFor(ThemeData theme, bool secondary, L10n l10n) {
+  ///
+  /// 缓存按语言 + 表格底色的组合分开:同一页里"跟随主题"和"无底色"是两份
+  /// 主题,换设置后不必把旧的丢掉再重建。
+  static GptMarkdownThemeData _themeFor(ThemeData theme, bool secondary, L10n l10n, TableTint tint) {
     final cache = (secondary ? _secondaryThemes : _themes).putIfAbsent(
-      l10n.localeName,
+      '${l10n.localeName}|${tint.name}',
       () => Expando<GptMarkdownThemeData>('markdownTheme'),
     );
-    return cache[theme] ??= _buildTheme(theme, l10n, secondary: secondary);
+    return cache[theme] ??= _buildTheme(theme, l10n, secondary: secondary, tint: tint);
   }
 
-  static GptMarkdownThemeData _buildTheme(ThemeData theme, L10n l10n, {bool secondary = false}) {
+  static GptMarkdownThemeData _buildTheme(
+    ThemeData theme,
+    L10n l10n, {
+    bool secondary = false,
+    TableTint tint = TableTint.follow,
+  }) {
     final colors = theme.colorScheme;
     final dsh = theme.extension<DshColors>()!;
+    // 表格底色三档只在两个填充上不同;隔行比表头再淡一档,能看出条带又不
+    // 抢文字。
+    final tableFills = tableTintFills(
+      tint,
+      headerColor: dsh.codeWellHeader,
+      stripeColor: colors.onSurface.withValues(alpha: theme.brightness == Brightness.dark ? 0.06 : 0.05),
+    );
     final shrink = secondary ? 0.9 : 1.0;
     TextStyle heading(double size, {double height = 1.45}) => TextStyle(
       fontSize: size * shrink,
@@ -151,14 +167,18 @@ class MarkdownBody extends StatefulWidget {
           decorationThickness: 0.6,
         ),
         hr: HrStyle(thickness: 0.5, color: colors.outlineVariant),
-        // 表格:细线网格、圆角与代码井一致、表头加粗;列宽随内容,但单列
+        // 表格:细线网格、方角、表头加粗;列宽随内容,但单列
         // 不超过 [_maxColumnWidth](长文字在列内换行),整表放不下时横向滚动。
+        // 方角:表头与隔行的底色是矩形填充,没有跟着圆角裁剪(gpt_markdown
+        // 1.4.0),圆角会让四角露出方形色块;上游修好后可换回 AppShape.md。
         table: TableStyle(
           // 比代码井的描边重一点:深色下行线也要看得见。
           borderColor: colors.onSurface.withValues(alpha: theme.brightness == Brightness.dark ? 0.18 : 0.14),
           borderWidth: 0.5,
-          borderRadius: const Radius.circular(AppShape.md),
-          headerBackground: dsh.codeWellHeader,
+          borderRadius: Radius.zero,
+          // 三档底色的差别只在这两个填充(设置 → 界面 → 表格底色)。
+          headerBackground: tableFills.header,
+          rowStripeColor: tableFills.stripe,
           cellPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           columnWidth: const MinColumnWidth(IntrinsicColumnWidth(), FixedColumnWidth(_maxColumnWidth)),
           overflow: TableOverflow.scroll,
@@ -462,13 +482,16 @@ class MarkdownBody extends StatefulWidget {
   }
 
   /// What gpt_markdown is given for [text]: maths delimiters normalised,
-  /// table headers bold and, while [streaming], the unfinished tail
-  /// repaired and the cursor sentinel placed.
+  /// tables separated from the paragraph above and their headers bold, and,
+  /// while [streaming], the unfinished tail repaired and the cursor sentinel
+  /// placed.
   @visibleForTesting
-  static String prepareSource(String text, {bool streaming = false}) {
-    final source = boldTableHeaders(normalizeMath(text, streaming: streaming));
+  static String prepareSource(String text, {bool streaming = false}) => _prepareSource(text, streaming: streaming);
+
+  static String _prepareSource(String text, {bool streaming = false, StreamingMarkdownRepair? repair}) {
+    final source = boldTableHeaders(blankLineBeforeTables(normalizeMath(text, streaming: streaming)));
     if (!streaming) return source;
-    return _withCursor(repairStreamingMarkdown(source));
+    return _withCursor(repair?.repair(source) ?? repairStreamingMarkdown(source));
   }
 
   /// [text] with the cursor sentinel where the reader's eye is: at the end
@@ -502,16 +525,36 @@ class MarkdownBody extends StatefulWidget {
 }
 
 class _MarkdownBodyState extends State<MarkdownBody> {
+  StreamingMarkdownRepair? _repair;
+
   // Preparation depends only on text and streaming, not theme, text scale or
   // selection. Keep one result for this mounted body; unrelated stream rows
   // can rebuild its parent without rescanning the unchanged Markdown.
-  late String _source = MarkdownBody.prepareSource(widget.text, streaming: widget.streaming);
+  late String _source = _prepareSource();
+
+  String _prepareSource() {
+    _repair = widget.streaming ? (_repair ?? StreamingMarkdownRepair()) : null;
+    return MarkdownBody._prepareSource(widget.text, streaming: widget.streaming, repair: _repair);
+  }
+
+  /// 这棵树里有没有 ProviderScope。只在依赖变化时向上找一次 —— 正文随流式
+  /// 每 32ms 重建一次，不必每次都走一遍 InheritedWidget 的查找。
+  ///
+  /// ProviderScope 挂在应用根上，装好之后不会中途消失，所以缓存到下一次
+  /// didChangeDependencies 为止是安全的。
+  bool _scoped = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scoped = _hasProviderScope(context);
+  }
 
   @override
   void didUpdateWidget(MarkdownBody oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.text != widget.text || oldWidget.streaming != widget.streaming) {
-      _source = MarkdownBody.prepareSource(widget.text, streaming: widget.streaming);
+      _source = _prepareSource();
     }
   }
 
@@ -524,32 +567,51 @@ class _MarkdownBodyState extends State<MarkdownBody> {
         : AppType.chatBody(context, color: theme.colorScheme.onSurface);
     final source = _source;
 
-    Widget markdown = GptMarkdownTheme(
-      gptThemeData: MarkdownBody._themeFor(theme, widget.secondary, l10n),
-      child: GptMarkdown(
-        source,
-        style: body,
-        followLinkColor: false,
-        htmlTags: _htmlTags,
-        // The tail is repaired here (and open formulas shown as source), so
-        // the package must not complete open `\(` / `\[` on its own.
-        isStreaming: false,
-        inlinePatterns: widget.streaming ? MarkdownBody._streamingPatterns : null,
-        onLinkTap: (url, title) => MarkdownBody._onLinkTap(context, url, title),
-        codeBuilder: MarkdownBody._codeBuilder,
-        inlineCodeBuilder: MarkdownBody._inlineCodeBuilder,
-        checkboxBuilder: MarkdownBody._checkboxBuilder,
-        headingBuilder: MarkdownBody._headingBuilder,
-        inlineLatexBuilder: MarkdownMath.inline,
-        blockLatexBuilder: MarkdownMath.block,
-        imageBuilder: markdownImageBuilder,
-        orderedListBuilder: MarkdownLists.ordered,
-        unOrderedListBuilder: MarkdownLists.unordered,
-      ),
+    // 表格底色是用户设置，只有主题跟着它变；正文 widget 本身保持同一个实例，
+    // 切设置时不让 gpt_markdown 重新解析一遍。
+    final text = GptMarkdown(
+      source,
+      style: body,
+      followLinkColor: false,
+      htmlTags: _htmlTags,
+      // The tail is repaired here (and open formulas shown as source), so
+      // the package must not complete open `\(` / `\[` on its own.
+      isStreaming: false,
+      inlinePatterns: widget.streaming ? MarkdownBody._streamingPatterns : null,
+      onLinkTap: (url, title) => MarkdownBody._onLinkTap(context, url, title),
+      codeBuilder: MarkdownBody._codeBuilder,
+      inlineCodeBuilder: MarkdownBody._inlineCodeBuilder,
+      checkboxBuilder: MarkdownBody._checkboxBuilder,
+      headingBuilder: MarkdownBody._headingBuilder,
+      inlineLatexBuilder: MarkdownMath.inline,
+      blockLatexBuilder: MarkdownMath.block,
+      imageBuilder: markdownImageBuilder,
+      orderedListBuilder: MarkdownLists.ordered,
+      unOrderedListBuilder: MarkdownLists.unordered,
     );
+
+    Widget withTint(TableTint tint) => GptMarkdownTheme(
+      gptThemeData: MarkdownBody._themeFor(theme, widget.secondary, l10n, tint),
+      child: text,
+    );
+
+    // Golden 和几何测试不套 ProviderScope:那时按默认那一档画。
+    Widget markdown = _scoped
+        ? Consumer(builder: (context, ref, _) => withTint(ref.watch(tableTintProvider)))
+        : withTint(TableTint.follow);
     // 表格、成块公式横向放不下时,两端淡出提示还能横滑。
     markdown = ScrollConfiguration(behavior: const EdgeFadeScrollBehavior(), child: markdown);
     if (widget.selectable) markdown = SelectionArea(child: markdown);
     return markdown;
+  }
+}
+
+/// 当前子树里有没有 ProviderScope;没有就按默认表格底色画。
+bool _hasProviderScope(BuildContext context) {
+  try {
+    ProviderScope.containerOf(context, listen: false);
+    return true;
+  } on StateError {
+    return false;
   }
 }

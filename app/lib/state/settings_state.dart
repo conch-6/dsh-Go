@@ -20,6 +20,7 @@ class AppSettings {
     this.autoApproveCommands = false,
     this.phoneStorage = false,
     this.webPhoneLayout = true,
+    this.hardwareEnterSends = false,
     this.chatTextScale = 1.0,
     this.foldCompletedTurns = true,
     this.visualReplies = true,
@@ -46,6 +47,9 @@ class AppSettings {
   /// Fit the embedded DSH Web to a phone (`assets/web/`). Off shows the
   /// official layout untouched, e.g. to check a plugin that restyles it.
   final bool webPhoneLayout;
+
+  /// Hardware Enter sends; Shift+Enter and the software keyboard still insert newlines.
+  final bool hardwareEnterSends;
 
   /// Size of chat content relative to the system setting (header and
   /// composer keep theirs). One of [chatTextScales].
@@ -79,6 +83,7 @@ class AppSettings {
     bool? autoApproveCommands,
     bool? phoneStorage,
     bool? webPhoneLayout,
+    bool? hardwareEnterSends,
     double? chatTextScale,
     bool? foldCompletedTurns,
     bool? visualReplies,
@@ -92,6 +97,7 @@ class AppSettings {
     autoApproveCommands: autoApproveCommands ?? this.autoApproveCommands,
     phoneStorage: phoneStorage ?? this.phoneStorage,
     webPhoneLayout: webPhoneLayout ?? this.webPhoneLayout,
+    hardwareEnterSends: hardwareEnterSends ?? this.hardwareEnterSends,
     chatTextScale: chatTextScale ?? this.chatTextScale,
     foldCompletedTurns: foldCompletedTurns ?? this.foldCompletedTurns,
     visualReplies: visualReplies ?? this.visualReplies,
@@ -115,6 +121,7 @@ class SettingsController extends Notifier<AppSettings> {
   static const _autoApproveKey = 'auto_approve_commands';
   static const _phoneStorageKey = 'phone_storage';
   static const _webPhoneLayoutKey = 'web_phone_layout';
+  static const _hardwareEnterKey = 'hardware_enter_sends';
   static const _chatTextScaleKey = 'chat_text_scale';
   static const _foldTurnsKey = 'fold_completed_turns';
   static const _visualRepliesKey = 'visual_replies';
@@ -160,6 +167,7 @@ class SettingsController extends Notifier<AppSettings> {
       autoApproveCommands: prefs.getBool(_autoApproveKey) ?? false,
       phoneStorage: prefs.getBool(_phoneStorageKey) ?? false,
       webPhoneLayout: prefs.getBool(_webPhoneLayoutKey) ?? true,
+      hardwareEnterSends: prefs.getBool(_hardwareEnterKey) ?? false,
       chatTextScale: _knownScale(prefs.getDouble(_chatTextScaleKey)),
       foldCompletedTurns: prefs.getBool(_foldTurnsKey) ?? true,
       visualReplies: prefs.getBool(_visualRepliesKey) ?? true,
@@ -237,6 +245,14 @@ class SettingsController extends Notifier<AppSettings> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_webPhoneLayoutKey, value);
     state = state.copyWith(webPhoneLayout: value);
+  }
+
+  Future<void> setHardwareEnterSends(bool value) async {
+    await _loaded;
+    if (!ref.mounted) return;
+    state = state.copyWith(hardwareEnterSends: value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_hardwareEnterKey, value);
   }
 
   Future<void> setAutoStartLocal(bool value) async {

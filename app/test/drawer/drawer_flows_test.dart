@@ -63,6 +63,28 @@ Future<(DrawerHost, ProviderContainer)> _start(
 Finder _tile(String title) => find.widgetWithText(SessionTile, title);
 
 void main() {
+  testWidgets('a folder can start a new chat without creating an empty engine session', (tester) async {
+    final (host, container) = await _start(
+      tester,
+      prefs: storedView(
+        const DrawerView(
+          loaded: true,
+          folders: [DrawerFolder(id: 'f1', name: '工作')],
+        ),
+      ),
+    );
+    await tester.longPress(find.widgetWithText(DrawerFolderHeader, '工作'));
+    await _settle(tester);
+    await tester.tap(find.text('新对话').last);
+    await _settle(tester);
+    expect(container.read(currentSessionProvider), isNull);
+    expect(container.read(pendingSessionFolderProvider), 'f1');
+    expect(host.argsOf('session/create'), isEmpty);
+
+    container.read(currentSessionProvider.notifier).select('s2');
+    expect(container.read(pendingSessionFolderProvider), isNull);
+  });
+
   testWidgets('新建文件夹 from the options sheet, then file a conversation in it and undo', (tester) async {
     final (_, container) = await _start(tester);
     await tester.tap(find.byType(DrawerViewButton));

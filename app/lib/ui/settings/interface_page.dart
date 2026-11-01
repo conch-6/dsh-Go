@@ -11,11 +11,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../l10n/l10n.dart';
 import '../../state/engine_settings_state.dart';
 import '../../state/settings_state.dart';
+import '../../state/table_tint_state.dart';
 import '../../state/ui_mode_state.dart';
 import '../engine_settings/namespace_copy.dart';
 import '../engine_settings/schema_form.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
+import '../theme/theme.dart';
 import '../web/local_web_screen.dart';
 import 'settings_widgets.dart';
 
@@ -40,6 +42,7 @@ class InterfacePage extends ConsumerWidget {
     final l10n = context.l10n;
     final mode = ref.watch(uiModeProvider.select((s) => s.mode));
     final settings = ref.watch(settingsProvider);
+    final tableTint = ref.watch(tableTintProvider);
     final engine = ref.watch(engineSettingsProvider).value;
     return AppPage.list(
       title: l10n.hubSettingsInterface,
@@ -84,6 +87,55 @@ class InterfacePage extends ConsumerWidget {
             ),
           ],
         ),
+        SettingsSection(
+          title: l10n.hubSettingsChat,
+          children: [
+            SettingsSwitchTile(
+              spot: Spots.hardwareEnterSends,
+              subtitle: l10n.hubHardwareEnterSendsHint,
+              value: settings.hardwareEnterSends,
+              onChanged: (v) => unawaited(ref.read(settingsProvider.notifier).setHardwareEnterSends(v)),
+            ),
+          ],
+        ),
+        SettingsSection(
+          title: l10n.hubTableTint,
+          spot: Spots.tableTint,
+          children: [
+            for (final tint in TableTint.values)
+              Semantics(
+                checked: tint == tableTint,
+                inMutuallyExclusiveGroup: true,
+                child: SettingsTile(
+                  key: ValueKey('table-tint-${tint.name}'),
+                  title: switch (tint) {
+                    TableTint.follow => l10n.hubTableTintFollow,
+                    TableTint.fill => l10n.hubTableTintFill,
+                    TableTint.none => l10n.hubTableTintNone,
+                  },
+                  subtitle: switch (tint) {
+                    TableTint.follow => l10n.hubTableTintFollowHint,
+                    TableTint.fill => l10n.hubTableTintFillHint,
+                    TableTint.none => l10n.hubTableTintNoneHint,
+                  },
+                  // 一眼看出这一档长什么样：缩略图和正文表格同一套配色。
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _TableTintPreview(tint: tint, selected: tint == tableTint),
+                      const SizedBox(width: 10),
+                      Icon(
+                        tint == tableTint ? AppIcons.radioOn : AppIcons.radioOff,
+                        size: 24,
+                        color: tint == tableTint ? Theme.of(context).colorScheme.primary : null,
+                      ),
+                    ],
+                  ),
+                  onTap: () => unawaited(ref.read(tableTintProvider.notifier).set(tint)),
+                ),
+              ),
+          ],
+        ),
         // The host's own: only once it has said what it keeps.
         if (engine != null && namespaces.any(engine.served))
           ...schemaFormGroups([
@@ -104,4 +156,96 @@ class InterfacePage extends ConsumerWidget {
       ],
     );
   }
+}
+
+/// 表格底色每档的迷你示意：两列三行，表头一档、隔行一档，和正文表格
+/// 用同一套颜色，深浅主题都对得上。
+class _TableTintPreview extends StatelessWidget {
+  const _TableTintPreview({required this.tint, required this.selected});
+
+  final TableTint tint;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final dsh = DshColors.of(context);
+    return SizedBox(
+      width: 58,
+      height: 38,
+      child: CustomPaint(
+        painter: _TableTintPainter(
+          header: tint == TableTint.none ? null : dsh.codeWellHeader,
+          stripe: tint == TableTint.fill ? colors.onSurface.withValues(alpha: 0.05) : null,
+          line: colors.outlineVariant,
+          border: selected ? colors.primary : colors.outlineVariant,
+          borderWidth: selected ? 1.4 : 0.8,
+        ),
+      ),
+    );
+  }
+}
+
+class _TableTintPainter extends CustomPainter {
+  const _TableTintPainter({
+    required this.header,
+    required this.stripe,
+    required this.line,
+    required this.border,
+    required this.borderWidth,
+  });
+
+  final Color? header;
+  final Color? stripe;
+  final Color line;
+  final Color border;
+  final double borderWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final row = size.height / 3;
+    final outline = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(5));
+
+    // 填充和网格都裁进圆角里，和修好之后的正文表格一个规矩。
+    canvas.save();
+    canvas.clipRRect(outline);
+    final fill = Paint();
+    if (header != null) {
+      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, row), fill..color = header!);
+    }
+    if (stripe != null) {
+      canvas.drawRect(Rect.fromLTWH(0, row * 2, size.width, row), fill..color = stripe!);
+    }
+    final grid = Paint()
+      ..color = line
+      ..strokeWidth = 0.7
+      ..style = PaintingStyle.stroke;
+    canvas.drawPath(
+      Path()
+        ..moveTo(size.width / 2, 0)
+        ..lineTo(size.width / 2, size.height)
+        ..moveTo(0, row)
+        ..lineTo(size.width, row)
+        ..moveTo(0, row * 2)
+        ..lineTo(size.width, row * 2),
+      grid,
+    );
+    canvas.restore();
+
+    canvas.drawRRect(
+      outline,
+      Paint()
+        ..color = border
+        ..strokeWidth = borderWidth
+        ..style = PaintingStyle.stroke,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_TableTintPainter old) =>
+      old.header != header ||
+      old.stripe != stripe ||
+      old.line != line ||
+      old.border != border ||
+      old.borderWidth != borderWidth;
 }

@@ -33,6 +33,7 @@ class DraftStore extends Notifier<DraftState> {
   static const limit = 30;
 
   Timer? _write;
+  final _forgotten = <String>{};
   late Future<void> _restored;
 
   @override
@@ -60,7 +61,10 @@ class DraftStore extends Notifier<DraftState> {
     }
     if (!ref.mounted) return;
     // Anything typed before the load finished wins.
-    state = DraftState(drafts: _latest({...restored, ...state.drafts}), loaded: true);
+    state = DraftState(
+      drafts: _latest({...restored, ...state.drafts}..removeWhere((key, _) => _forgotten.contains(key))),
+      loaded: true,
+    );
   }
 
   Map<String, ChatDraft> _latest(Map<String, ChatDraft> drafts) {
@@ -70,6 +74,7 @@ class DraftStore extends Notifier<DraftState> {
 
   /// Empty text and no attachments drops the slot.
   void save(String key, String text, List<DraftAttachment> attachments) {
+    if (_forgotten.contains(key)) return;
     final current = state.drafts[key];
     if ((current?.text ?? '') == text && listEquals(current?.attachments ?? const [], attachments)) {
       return;
@@ -86,6 +91,15 @@ class DraftStore extends Notifier<DraftState> {
   }
 
   void clear(String key) => save(key, '', const []);
+
+  /// A deleted session cannot regain a draft through a late preferences load
+  /// or the outgoing chat screen's save-on-selection/dispose callback.
+  void forget(String key) {
+    _forgotten.add(key);
+    state = DraftState(drafts: Map.unmodifiable({...state.drafts}..remove(key)), loaded: state.loaded);
+    _write?.cancel();
+    _write = Timer(const Duration(milliseconds: 400), () => unawaited(flush()));
+  }
 
   /// Writes the texts now (also done 400 ms after the last change).
   Future<void> flush() async {

@@ -3492,6 +3492,7 @@
   },
   "engineModelTokenLimits": "Token 上限",
   "engineModelContextLength": "上下文长度",
+  "engineModelContextOverrideHint": "留空使用渠道目录里的值；改大后引擎按新值计算上下文占用与压缩。",
   "engineModelMaxOutput": "最大输出",
   "engineModelDefaultSize": "默认 {size}",
   "@engineModelDefaultSize": {
@@ -4716,6 +4717,13 @@
   "hubInterfaceWebHint": "DSH 官方网页版",
   "hubInterfaceOpenWeb": "打开网页版",
   "hubInterfacePhoneLayout": "手机布局",
+  "hubTableTint": "表格底色",
+  "hubTableTintFollow": "跟随主题",
+  "hubTableTintFill": "淡底整表",
+  "hubTableTintNone": "无底色",
+  "hubTableTintFillHint": "隔行淡一档，长表格更好扫读",
+  "hubTableTintFollowHint": "表头浅底，表身跟随正文",
+  "hubTableTintNoneHint": "只剩网格线，最轻",
   "hubAbout": "关于 DSH Go",
   "hubAboutNewVersion": "有新版本",
   "hubValueSet": "已设置",
@@ -4744,6 +4752,8 @@
   "hubThemeLightDark": "明暗",
   "hubPermissionPhone": "手机",
   "hubPermissionPhoneConfirm": "手机操控确认",
+  "hubHardwareEnterSends": "外接键盘按 Enter 发送",
+  "hubHardwareEnterSendsHint": "开启后，Shift+Enter 换行。屏幕键盘仍换行；Ctrl/⌘+Enter 始终可发送。",
   "launchScreenTitle": "启动画面",
   "launchDefault": "默认",
   "launchCustom": "自定义",
@@ -5798,6 +5808,9 @@
       }
     }
   },
+  "phoneDndManualConnect": "手动连接",
+  "phoneDndConnectPortLabel": "连接端口",
+  "phoneDndConnectPortHint": "在系统「无线调试」首页查看「IP 地址和端口」，填写冒号后的端口。请不要使用配对码页面的端口。",
   "phoneTaskResultReady": "任务完成 · 查看结果",
   "phoneTaskEndedResult": "任务已结束 · 查看结果",
   "phoneBackgroundGuideTitle": "后台确认与返回",
@@ -8415,6 +8428,7 @@
   "searchKwPhoneFiles": "存储,文件,相册,下载,手机存储",
   "searchKwVisualReplies": "图表,卡片,可视化,选项",
   "searchKwTextSize": "字号,字体,文字大小,大字,字体大小",
+  "searchKwTableTint": "表格,底色,表头,斑马纹,条纹,背景",
   "searchKwFoldTurns": "收起,折叠,过程,步骤",
   "searchKwWebPhoneLayout": "网页版手机布局,布局",
   "searchKwShareConfig": "分享,导出配置,分享码,配置",
@@ -8488,6 +8502,59 @@
   "searchKwWebBusySend": "发送,排队,插话,AI 工作时",
   "searchKwPluginsMarket": "插件市场,安装插件,市场,获取插件",
   "searchKwUsageStats": "统计,使用统计,匿名,隐私,数据,改进,遥测,分析",
+  "shellDeletePermanently": "永久删除",
+  "shellDeleteNoUndo": "无法撤销，与归档不同",
+  "shellDeleteChecking": "正在检查此主机是否支持永久删除…",
+  "shellDeleteUnsupported": "此主机不支持安全永久删除，仍可使用归档。",
+  "shellDeleteUnavailable": "安全永久删除暂不可用，请重连或更新此主机；不会改为归档。",
+  "shellDeleteChatConfirmation": "永久删除「{title}」？",
+  "@shellDeleteChatConfirmation": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "shellDeleteChatsConfirmation": "永久删除 {count} 个对话？",
+  "@shellDeleteChatsConfirmation": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "shellDeleteWarning": "将从此主机永久删除所选对话记录，无法撤销，与归档不同。\n\n工作目录、生成的文件、分叉对话、共享附件和已发布的云端分享都会保留。云端分享需另行删除。主机会拒绝删除仍有任务或关联工作的对话。",
+  "shellDeleteOwnerChanged": "主机或连接已变化。请取消后重新发起删除，原确认不再有效。",
+  "shellDeletingChats": "正在删除对话…",
+  "shellChatsDeleted": "已永久删除 {count} 个对话",
+  "@shellChatsDeleted": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "shellDeletePartial": "已删除 {deleted} 个，失败 {failed} 个",
+  "@shellDeletePartial": {
+    "placeholders": {
+      "deleted": {
+        "type": "int"
+      },
+      "failed": {
+        "type": "int"
+      }
+    }
+  },
+  "shellDeleteRunning": "请先停止运行中的工作；主机还会检查活动任务和定时任务。",
+  "shellDeleteRelated": "此对话有关联的子代理工作，主机为保护它们拒绝删除。",
+  "shellDeleteWriterHeld": "其他进程正在使用此对话，请先在该进程中关闭后重试。",
+  "shellDeleteNotFound": "此主机上已没有这个对话，请刷新列表。",
+  "shellDeleteConnectionLost": "连接已断开，删除结果未确认，请刷新对话列表后再操作。",
+  "shellDeleteArchivePending": "此对话正在等待归档，请先完成或撤销归档。",
+  "shellDeleteInventoryChanged": "对话列表已变化，请刷新后重新选择。",
+  "shellDeleteProtocolError": "删除结果未确认，请刷新对话列表后再操作。",
+  "shellDeleteNotAttempted": "未执行，请核对对话列表后重试。",
+  "shellDeleteFailed": "主机无法确认删除结果，请刷新后再决定是否重试。",
   "setupAppearanceTitle": "选择外观",
   "setupAppearanceMessage": "随时可以在设置里更改",
   "setupLightMode": "轻量模式",

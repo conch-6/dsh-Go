@@ -143,7 +143,7 @@
     "drawerFilter": { "enum": ["all", "running", "pending", "unread"] },
     "density": { "enum": ["compact", "comfortable"] },
     "hideItem": {
-      "enum": ["turnFooter", "tokenCount", "reasoningDetails", "activityStrip", "whaleTail", "todoPill", "goalBar"]
+      "enum": ["turnFooter", "tokenCount", "reasoningDetails", "activityStrip", "whaleTail", "todoPill", "goalBar", "pluginCapsule"]
     },
     "themeMode": { "enum": ["system", "light", "dark"] },
     "accentPreset": { "enum": ["mist", "daiqing", "dusk", "turquoise", "amber", "graphite"] },

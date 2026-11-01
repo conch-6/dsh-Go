@@ -120,6 +120,21 @@ void refreshAfterSubscriptionChange(WidgetRef ref) {
   ref.invalidate(modelCatalogProvider);
 }
 
+/// 订阅在 pi-ai 里的 route profile（`providers.openai-codex` 之类），
+/// 模型覆盖（上下文长度）从这里读写。未连接 / 引擎没挂 pi-ai / 桥还没声明
+/// route 时为 null。
+final subscriptionProfileProvider = FutureProvider.autoDispose.family<ProviderProfile?, Subscription>((
+  ref,
+  subscription,
+) async {
+  final backend = ref.watch(providerBackendProvider);
+  if (backend == null) return null;
+  final sub = backend.changes.listen((_) => ref.invalidateSelf());
+  ref.onDispose(() => unawaited(sub.cancel()));
+  final settings = await backend.read();
+  return settings?.byRoute(subscription.wire);
+});
+
 /// One sign-in attempt, polled about once a second while its sheet is open.
 ///
 /// ```

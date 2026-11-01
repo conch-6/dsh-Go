@@ -291,6 +291,13 @@
   "hubInterfaceWebHint": "DSH 官方网页版",
   "hubInterfaceOpenWeb": "打开网页版",
   "hubInterfacePhoneLayout": "手机布局",
+  "hubTableTint": "表格底色",
+  "hubTableTintFollow": "跟随主题",
+  "hubTableTintFill": "淡底整表",
+  "hubTableTintNone": "无底色",
+  "hubTableTintFillHint": "隔行淡一档，长表格更好扫读",
+  "hubTableTintFollowHint": "表头浅底，表身跟随正文",
+  "hubTableTintNoneHint": "只剩网格线，最轻",
   "hubAbout": "关于 DSH Go",
   "hubAboutNewVersion": "有新版本",
   "hubValueSet": "已设置",
@@ -318,5 +325,7 @@
   "hubEngineStartup": "启动",
   "hubThemeLightDark": "明暗",
   "hubPermissionPhone": "手机",
-  "hubPermissionPhoneConfirm": "手机操控确认"
+  "hubPermissionPhoneConfirm": "手机操控确认",
+  "hubHardwareEnterSends": "外接键盘按 Enter 发送",
+  "hubHardwareEnterSendsHint": "开启后，Shift+Enter 换行。屏幕键盘仍换行；Ctrl/⌘+Enter 始终可发送。"
 }

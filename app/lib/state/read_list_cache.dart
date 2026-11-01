@@ -148,6 +148,18 @@ class ReadListCache {
     }
   }
 
+  /// Invalidate every workspace projection after a server-confirmed mutation.
+  void invalidateKind(ReadListKind kind, ReadListIdentity? identity) {
+    final keys = _entries.keys.where((key) => key.kind == kind && key.identity == identity).toList();
+    for (final key in keys) {
+      _remove(key);
+    }
+    if (keys.isNotEmpty) {
+      _arm();
+      _notify();
+    }
+  }
+
   /// Projection is evaluated only for a confirmed, correctly attributed
   /// result; repeated widget builds cannot refresh its age or extend TTL.
   bool put(ReadListKey? key, Object source, ReadListData Function() project, {String? projection}) {

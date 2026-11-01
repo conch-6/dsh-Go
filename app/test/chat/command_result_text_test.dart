@@ -6,7 +6,7 @@ String? copy(String name, String text) => commandResultCopy(CommandNotice(id: 'c
 
 void main() {
   final cases = <(String, String, String)>[
-    ('compact', 'Compacted 9 history items (~34000 tokens).', '已压缩 9 条历史记录（约 3.4 万 tokens）'),
+    ('compact', 'Compacted 9 history items (~34000 tokens).', '已压缩 9 条历史记录（约 34K tokens）'),
     ('compact', 'No compactable history yet.', '还没有可压缩的内容'),
     ('compact', 'Compaction cancelled.', '已取消压缩'),
     (

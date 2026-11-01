@@ -8,6 +8,7 @@
     <string name="background_shizuku_permission">Shizuku permission not granted</string>
     <string name="background_adb_not_paired">Wireless debugging isn’t paired</string>
     <string name="background_adb_disconnected">Not connected to local adbd. Turn on wireless debugging and reconnect</string>
+    <string name="background_adb_invalid_port">Enter a port from 1 to 65535</string>
     <string name="background_unsupported">This system doesn’t support the required trusted virtual display (possibly Android 15 QPR2)</string>
     <string name="background_off">Background mode is off</string>
     <string name="background_requires_android">Background mode needs Android 14 or later</string>

@@ -33,7 +33,10 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
     private val pairedFlag = File(File(context.filesDir, "phone-adb"), "paired").apply { parentFile?.mkdirs() }
 
     private val manager = object : AbsAdbConnectionManager() {
-        init { setApi(Build.VERSION.SDK_INT) }
+        init {
+            setApi(Build.VERSION.SDK_INT)
+            setTimeout(8, TimeUnit.SECONDS)
+        }
         override fun getPrivateKey(): PrivateKey = keys.privateKey()
         override fun getCertificate(): Certificate = keys.certificate()
         override fun getDeviceName(): String = "dsh-app"
@@ -41,10 +44,8 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
 
     @Volatile private var pairingMdns: AdbMdns? = null
     @Volatile private var connectMdns: AdbMdns? = null
-    @Volatile private var pairHost: InetAddress? = null
-    @Volatile private var pairPort: Int = -1
-    @Volatile private var connectHost: InetAddress? = null
-    @Volatile private var connectPort: Int = -1
+    @Volatile private var pairEndpoint: AdbEndpoint? = null
+    @Volatile private var connectEndpoint: AdbEndpoint? = null
     @Volatile private var channel: AdbChannel? = null
 
     fun status(): AdbStatus = AdbStatus(wirelessDebugging(), pairedFlag.exists(), channel?.alive() == true)
@@ -65,11 +66,13 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
     /** Begins mDNS discovery of the pairing service so [pair] can target the live port. */
     fun startPairing(): Map<String, Any?> {
         stopMdns()
+        pairEndpoint = null
+        connectEndpoint = null
         pairingMdns = AdbMdns(context, AdbMdns.SERVICE_TYPE_TLS_PAIRING) { address, port ->
-            pairHost = address; pairPort = port; onChanged()
+            AdbEndpoint.discovered(address, port)?.let { pairEndpoint = it; onChanged() }
         }.also { it.start() }
         connectMdns = AdbMdns(context, AdbMdns.SERVICE_TYPE_TLS_CONNECT) { address, port ->
-            connectHost = address; connectPort = port; onChanged()
+            AdbEndpoint.discovered(address, port)?.let { connectEndpoint = it; onChanged() }
         }.also { it.start() }
         return mapOf("ok" to true)
     }
@@ -77,9 +80,10 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
     /** Pairs with the 6-digit code. [port] overrides mDNS (for the App's manual fallback dialog). */
     fun pair(code: String, port: Int?): Map<String, Any?> {
         if (!code.matches(Regex("\\d{6}"))) return fail(AppStrings.get(context, R.string.pairing_invalid_code))
-        val host = pairHost ?: loopback()
-        val target = port ?: pairPort
-        if (target <= 0) return fail(AppStrings.get(context, R.string.pairing_port_missing))
+        val discovered = pairEndpoint
+        val host = if (port != null) loopback() else discovered?.address ?: loopback()
+        val target = port ?: discovered?.port ?: return fail(AppStrings.get(context, R.string.pairing_port_missing))
+        if (target !in 1..65535) return fail(AppStrings.get(context, R.string.background_adb_invalid_port))
         return try {
             val ok = manager.pair(host.hostAddress ?: "127.0.0.1", target, code)
             if (ok) { pairedFlag.writeText("ok"); onChanged() }
@@ -88,16 +92,34 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
             fail(AppStrings.get(context, R.string.pairing_error, e.javaClass.simpleName))
         } finally {
             runCatching { pairingMdns?.stop() }; pairingMdns = null
+            pairEndpoint = null
         }
     }
 
     /** Connects to the local adbd and launches the privileged app_process. */
-    fun connect(): PrivilegedChannel? {
+    fun connect(port: Int? = null): PrivilegedChannel? {
+        if (port != null && port !in 1..65535) return null
         channel?.takeIf { it.alive() }?.let { return it }
         if (!pairedFlag.exists()) return null
+        channel?.let { runCatching { it.close() } }
+        channel = null
+        runCatching { manager.disconnect() }
         return try {
-            val connected = if (connectPort > 0) {
-                manager.connect((connectHost ?: loopback()).hostAddress ?: "127.0.0.1", connectPort)
+            val discovered = connectEndpoint
+            val connected = if (port != null) {
+                // The connect port on Wireless debugging's main page is different
+                // from its short-lived pairing port. Manual input targets this device.
+                manager.connect("127.0.0.1", port)
+            } else if (discovered != null) {
+                val cached = runCatching {
+                    manager.connect(discovered.address.hostAddress ?: "127.0.0.1", discovered.port)
+                }.getOrDefault(false)
+                if (cached) true else {
+                    // Toggling wireless debugging or changing networks rotates the port.
+                    connectEndpoint = null
+                    runCatching { manager.disconnect() }
+                    manager.autoConnect(context, TimeUnit.SECONDS.toMillis(8))
+                }
             } else {
                 manager.autoConnect(context, TimeUnit.SECONDS.toMillis(8))
             }
@@ -108,7 +130,13 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
             if (probe.getBoolean(Proto.OK) && probe.getString("revision") == Proto.REVISION) {
                 channel = value; onChanged(); value
             } else { value.close(); null }
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            connectEndpoint = null
+            runCatching { manager.disconnect() }
+            null
+        } finally {
+            onChanged()
+        }
     }
 
     fun disconnect() {
@@ -116,6 +144,8 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
         channel = null
         runCatching { manager.disconnect() }
         stopMdns()
+        pairEndpoint = null
+        connectEndpoint = null
         onChanged()
     }
 

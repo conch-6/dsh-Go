@@ -10,6 +10,10 @@ void main() {
     WidgetTester tester, {
     String text = '',
     bool running = false,
+    bool enterSends = false,
+    bool connected = true,
+    bool busy = false,
+    bool sessionReady = true,
     VoidCallback? send,
     VoidCallback? stop,
   }) async {
@@ -23,7 +27,10 @@ void main() {
           body: Composer(
             controller: input,
             focusNode: focus,
-            connected: true,
+            connected: connected,
+            busy: busy,
+            sessionReady: sessionReady,
+            hardwareEnterSends: enterSends,
             running: running,
             onSend: send ?? () {},
             onStop: stop ?? () {},
@@ -46,6 +53,69 @@ void main() {
       await tester.sendKeyUpEvent(modifier);
       expect(sends, 1);
       expect(input.text, '草稿');
+    });
+  }
+
+  testWidgets('opt-in Enter sends once; Shift+Enter and software IME keep newlines', (tester) async {
+    var sends = 0;
+    final (input, _) = await pump(tester, text: '草稿', enterSends: true, send: () => sends++);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(sends, 1);
+    expect(input.text, '草稿');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    expect(sends, 1);
+    expect(tester.widget<TextField>(find.byType(TextField)).textInputAction, TextInputAction.newline);
+    await tester.testTextInput.receiveAction(TextInputAction.newline);
+    expect(sends, 1);
+  });
+
+  testWidgets('holding Enter does not send repeatedly or insert repeat newlines', (tester) async {
+    var sends = 0;
+    final (_, node) = await pump(tester, text: '草稿', enterSends: true, send: () => sends++);
+    final focus = tester.widget<Focus>(
+      find.byWidgetPredicate((w) => w is Focus && !w.canRequestFocus && w.skipTraversal && w.onKeyEvent != null).first,
+    );
+    expect(
+      focus.onKeyEvent!(
+        node,
+        const KeyRepeatEvent(
+          physicalKey: PhysicalKeyboardKey.enter,
+          logicalKey: LogicalKeyboardKey.enter,
+          timeStamp: Duration(milliseconds: 30),
+        ),
+      ),
+      KeyEventResult.handled,
+    );
+    expect(sends, 0);
+  });
+
+  testWidgets('opt-in Enter leaves IME composition alone and supports numpad Enter', (tester) async {
+    var sends = 0;
+    final (input, _) = await pump(tester, text: '拼', enterSends: true, send: () => sends++);
+    input.value = const TextEditingValue(text: '拼', composing: TextRange(start: 0, end: 1));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(sends, 0);
+    input.clearComposing();
+    await tester.sendKeyEvent(LogicalKeyboardKey.numpadEnter);
+    expect(sends, 1);
+  });
+
+  for (final disabled in ['disconnected', 'busy', 'unready', 'empty']) {
+    testWidgets('opt-in Enter cannot send when $disabled', (tester) async {
+      var sends = 0;
+      await pump(
+        tester,
+        text: disabled == 'empty' ? '' : '草稿',
+        enterSends: true,
+        connected: disabled != 'disconnected',
+        busy: disabled == 'busy',
+        sessionReady: disabled != 'unready',
+        send: () => sends++,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(sends, 0);
     });
   }
 

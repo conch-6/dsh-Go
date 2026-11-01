@@ -58,7 +58,18 @@ Map<String, Object?> _piAiView({int revision = 4}) => {
         'defaultMaxTokens': 32768,
         'defaultInput': ['text'],
       },
-      'openai': {'apiKeyEnv': 'OPENAI_API_KEY', 'defaultContextWindow': 262144},
+      'openai': {
+        'apiKeyEnv': 'OPENAI_API_KEY',
+        'defaultContextWindow': 262144,
+        'modelOverrides': {
+          'gpt-6.1-sol': {
+            'contextWindow': 1000000,
+            'maxTokens': 128000,
+            'compat': {'supportsStore': true},
+          },
+          'dropped-because-value-is-null': null,
+        },
+      },
       'acme': {'displayName': 'Acme', 'api': 'anthropic-messages', 'baseURL': 'https://acme.example'},
     },
   },
@@ -144,6 +155,17 @@ void main() {
       final openai = settings.byRoute('openai')!;
       expect(openai.handDeclared, isFalse, reason: 'a catalog route narrowed by settings');
       expect(openai.label, 'openai');
+      final corrected = openai.modelOverrides['gpt-6.1-sol']!;
+      expect(corrected.contextWindow, 1000000, reason: 'a catalog route corrects one model in place');
+      expect(corrected.maxTokens, 128000);
+      expect(corrected.extra, {
+        'compat': {'supportsStore': true},
+      }, reason: 'unmodelled override fields ride along');
+      expect(
+        openai.modelOverrides.keys,
+        ['gpt-6.1-sol'],
+        reason: 'an override whose value does not read as a dict is skipped',
+      );
       expect(settings.byRoute('acme')!.handDeclared, isFalse, reason: 'no models');
 
       expect(settings.removable('custom-mygw'), isTrue);
@@ -274,6 +296,57 @@ void main() {
       });
     });
 
+    test('setModelOverride writes one entry, the model id in the path', () async {
+      final client = await connect();
+      await client.setModelOverride(
+        'openai-codex',
+        'gpt-6.1-sol',
+        const ModelOverride(contextWindow: 1000000),
+        expectedRevision: 4,
+      );
+      expect(mutations.single, {
+        'ns': 'llm-pi-ai',
+        'ops': [
+          {
+            'op': 'set',
+            'path': ['providers', 'openai-codex', 'modelOverrides', 'gpt-6.1-sol'],
+            'value': {'contextWindow': 1000000},
+          },
+        ],
+        'expectedRevision': 4,
+      });
+      expect(
+        () => client.setModelOverride('openai-codex', '  ', const ModelOverride(contextWindow: 1)),
+        throwsArgumentError,
+      );
+    });
+
+    test('clearModelOverride unsets one entry, or the whole dict when it was the last', () async {
+      final client = await connect();
+      await client.clearModelOverride('openai-codex', 'gpt-6.1-sol');
+      await client.clearModelOverride('openai-codex', 'gpt-6.1-sol', last: true);
+      expect(mutations, [
+        {
+          'ns': 'llm-pi-ai',
+          'ops': [
+            {
+              'op': 'unset',
+              'path': ['providers', 'openai-codex', 'modelOverrides', 'gpt-6.1-sol'],
+            },
+          ],
+        },
+        {
+          'ns': 'llm-pi-ai',
+          'ops': [
+            {
+              'op': 'unset',
+              'path': ['providers', 'openai-codex', 'modelOverrides'],
+            },
+          ],
+        },
+      ]);
+    });
+
     test('invalid routes never reach the wire', () async {
       final client = await connect();
       expect(() => client.saveProvider(const ProviderProfile(route: 'My GW')), throwsArgumentError);
@@ -360,6 +433,52 @@ void main() {
       }, reason: 'the false was replaced by the dict, so turning thinking off again drops the field');
     });
 
+    test('a level the adapter does not know is dropped on read, so an imported route still validates', () {
+      final imported = ProviderModelSpec.fromJson(const {
+        'id': 'glm-5.3-flash',
+        'reasoningEfforts': {'none': 'none', 'minimal': 'minimal', 'max': 'max'},
+      })!;
+      expect(imported.toJson()['reasoningEfforts'], {
+        'minimal': 'minimal',
+        'max': 'max',
+      }, reason: 'none is not a level dsh-llm-pi-ai accepts');
+      expect(imported.thinkingLevels, ['minimal', 'max']);
+      expect(imported.thinks, isTrue);
+
+      final unknownOnly = ProviderModelSpec.fromJson(const {
+        'id': 'x',
+        'reasoningEfforts': {'none': 'none'},
+      })!;
+      expect(unknownOnly.toJson()['reasoningEfforts'], false);
+      expect(unknownOnly.thinkingLevels, isEmpty);
+      expect(unknownOnly.thinks, isFalse);
+    });
+
+    test('empty and off-only imported declarations disable thinking without inheriting catalog levels', () {
+      for (final raw in [
+        <String, Object?>{},
+        {'off': null},
+        {'none': 'none', 'off': 'none'},
+      ]) {
+        final imported = ProviderModelSpec.fromJson({'id': 'catalog-model', 'reasoningEfforts': raw})!;
+        expect(imported.toJson()['reasoningEfforts'], false, reason: '$raw');
+        expect(imported.thinks, isFalse);
+        expect(jsonRoundTrip(imported).toJson(), imported.toJson(), reason: 'repeated editing stays valid');
+      }
+    });
+
+    test('selecting only off or unknown levels never writes a map the adapter rejects', () {
+      for (final selected in [
+        ['off'],
+        ['off', 'none'],
+        ['none'],
+      ]) {
+        final edited = plain.withReasoningEfforts(selected);
+        expect(edited.toJson()['reasoningEfforts'], false, reason: '$selected');
+        expect(edited.thinks, isFalse);
+      }
+    });
+
     test('only off is not thinking; an unreadable dict reads as none and still rides along', () {
       expect(plain.withReasoningEfforts(['off']).thinks, isFalse);
       const odd = ProviderModelSpec(
@@ -392,6 +511,29 @@ void main() {
       expect(read.defaultMaxTokens, 8192);
       expect(read.defaultInput, ['text', 'image']);
       expect(read.toJson()['defaultInput'], ['text', 'image']);
+    });
+
+    test('a model override round-trips and can be cleared field by field', () {
+      const override = ModelOverride(
+        contextWindow: 1000000,
+        extra: {
+          'reasoningEfforts': {'low': 'low'},
+        },
+      );
+      expect(override.isEmpty, isFalse);
+      expect(override.toJson(), {
+        'reasoningEfforts': {'low': 'low'},
+        'contextWindow': 1000000,
+      }, reason: 'the id is the dict key, never a field');
+      final back = ModelOverride.fromJson(jsonDecode(jsonEncode(override.toJson())))!;
+      expect(back.contextWindow, 1000000);
+      expect(back.extra, {'reasoningEfforts': {'low': 'low'}});
+
+      final cleared = override.withContextWindow(null);
+      expect(cleared.contextWindow, isNull);
+      expect(cleared.toJson().containsKey('contextWindow'), isFalse);
+      expect(cleared.extra, {'reasoningEfforts': {'low': 'low'}}, reason: 'other fields stay');
+      expect(const ModelOverride().isEmpty, isTrue);
     });
 
     test('thinking levels are the adapter\'s, in its order', () {

@@ -15,7 +15,13 @@ sealed class PaletteContent {
 
   /// 输入框里的内容需要面板吗(以 `/` 开头,且还在打指令名,或者是一个
   /// 带参数提示的已知指令)。
-  static PaletteContent? of(List<SlashCommand> commands, String text) {
+  static PaletteContent? of(List<SlashCommand> commands, String text, {int? caret}) {
+    if (caret != null) {
+      if (caret < 0 || caret > text.length) return null;
+      // Text after the cursor may be an existing draft. It must not become
+      // part of the command-name filter while inserting a leading slash.
+      text = text.substring(0, caret);
+    }
     final input = parseSlashInput(text);
     if (input == null) return null;
     if (!input.hasArgs) {

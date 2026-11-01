@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../state/settings_state.dart';
 import '../../state/bots_state.dart';
 import '../../state/connection_state.dart';
 import '../chat/composer.dart';
@@ -202,6 +203,7 @@ class _BotChatPageState extends ConsumerState<BotChatPage> {
           onDismiss: () => ref.read(botChatProvider(widget.botId).notifier).dismissError(),
         ),
         Composer(
+          hardwareEnterSends: ref.watch(settingsProvider.select((s) => s.hardwareEnterSends)),
           controller: _input,
           focusNode: _focus,
           connected: api != null && !readOnly,

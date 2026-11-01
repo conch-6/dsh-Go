@@ -363,7 +363,7 @@ ctx.dshGoPanels.register({
 | `emptyState.suggestions` | ≤ 6 张卡；`title` ≤ 20 字，`subtitle` ≤ 40 字 | — |
 | `drawer` | `groups` 顺序与可见性（取值对齐 `drawer_view_state.dart` 的 `SessionDay` 与置顶、文件夹）；`sort`：activity / created；`filter`：all / running / pending / unread | 抽屉排序、筛选 |
 | `density` | compact / comfortable | （新设置） |
-| `hide` | 枚举：turnFooter、tokenCount、reasoningDetails、activityStrip、whaleTail、todoPill、goalBar（实现时与现有组件逐个对齐） | 「折叠已完成回合」等对应项 |
+| `hide` | 枚举：turnFooter、tokenCount、reasoningDetails、activityStrip、whaleTail、todoPill、goalBar、pluginCapsule（App 的「插件」聚合入口） | 「折叠已完成回合」等对应项 |
 | `theme` | `mode`：system / light / dark；`accentPreset`：mist / daiqing / dusk / turquoise / amber / graphite（`app/lib/ui/theme/accent.dart`）；或 `accent`：`#RRGGBB` | 外观页的主题、强调色 |
 | `pet` | `id`、`position`（四角）、`quiet`；宠物功能落地前只校验不生效 | 宠物设置 |
 | `shortcuts` | 平板键盘；`keys` 形如 `ctrl+k`、`ctrl+shift+n`，不得覆盖系统和输入法保留键；≤ 20 条 | — |

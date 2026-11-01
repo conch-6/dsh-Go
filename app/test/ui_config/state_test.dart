@@ -227,6 +227,23 @@ void main() {
     expect(state.load, isNotNull);
   });
 
+  test('pluginCapsule hide applies from the host file and restore-default ignores it', () async {
+    final local = FakeUiSource();
+    final c = container({HostRef.local: local});
+    c.listen(uiHiddenProvider(UiHideItem.pluginCapsule), (_, _) {});
+    local.text('{"version":1,"hide":["pluginCapsule"]}');
+    await settle();
+    expect(c.read(uiConfigProvider(HostRef.local)).load!.appliedCount, 1);
+    expect(c.read(uiHiddenProvider(UiHideItem.pluginCapsule)), isTrue);
+    await restoreUiDefault(
+      c.read(uiOverridesProvider),
+      c.read(uiIgnoresProvider.notifier),
+      UiSettingKey.hide(UiHideItem.pluginCapsule),
+    );
+    await settle();
+    expect(c.read(uiHiddenProvider(UiHideItem.pluginCapsule)), isFalse);
+  });
+
   test('plugins.seats reach the seat planner as SeatOverrides', () async {
     final local = FakeUiSource();
     final c = container({HostRef.local: local});

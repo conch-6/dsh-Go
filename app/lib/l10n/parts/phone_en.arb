@@ -421,5 +421,8 @@
         "type": "String"
       }
     }
-  }
+  },
+  "phoneDndManualConnect": "Connect manually",
+  "phoneDndConnectPortLabel": "Connection port",
+  "phoneDndConnectPortHint": "On the main Wireless debugging settings page, find “IP address & port” and enter the port after the colon. Do not use the pairing-code dialog’s port."
 }

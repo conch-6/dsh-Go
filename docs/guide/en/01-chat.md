@@ -80,10 +80,13 @@ Touch and hold your own message for **Copy**, **Select text** and **Edit and res
 
 ## Organize the chat list
 
-Touch and hold a chat for **Pin**, **Rename**, **Move to folder**, **Share**, **Select** and **Archive**.
+Touch and hold a chat for **Pin**, **Rename**, **Move to folder**, **Share**, **Select**, **Archive** and **Delete permanently**.
 
 - **Archive** stops a turn in progress. Tap **Undo** on the notice within 4 seconds to keep the chat as it was, turn included; leaving the app archives it at once.
-- Chats can't be deleted; archiving removes them from the list. To get one back, tap **Search chats**, find it and tap **Restore and open**.
+- **Delete permanently** removes the chat record from this host and cannot be undone — unlike archive. The working folder, generated files, branched chats, shared attachments and published cloud shares stay; delete cloud shares separately.
+- Deletion asks for confirmation first. A running chat must be stopped; the host also refuses while a chat has subagents, related jobs or reminders. It needs a host that supports it: on an older host the action says so and archive stays the only option — it never falls back to archive silently.
+- After selecting several chats, **Delete** in the action bar removes them in one go; failures are listed one by one and only acknowledged chats leave the list. If the connection drops and the result is unconfirmed, the rest of the batch stops — refresh the list before deciding.
+- To get an archived chat back, tap **Search chats**, find it and tap **Restore and open**.
 - Filter the list with **All**, **Running**, **Pending** and **Unread**. The ⋯ at the end of the workspace row sorts by **Recent activity** or **Date created**, and has **New folder** and **Manage folders**.
 
 ## Hardware keyboard

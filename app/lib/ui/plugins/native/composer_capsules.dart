@@ -248,10 +248,11 @@ class _ComposerCapsuleBarState extends ConsumerState<ComposerCapsuleBar> {
   Widget build(BuildContext context) {
     final quick = ref.watch(uiOverridesProvider.select((o) => o.config.quickActions)) ?? const <UiQuickAction>[];
     final plugins = ref.watch(nativeComposerActionsProvider);
+    final hidePluginCapsule = ref.watch(uiHiddenProvider(UiHideItem.pluginCapsule));
     final session = widget.sessionId;
     final items = [
       ...composerCapsules(context, ref, sessionId: session, quick: quick, plugins: plugins),
-      if (session != null && ref.watch(chatPluginsHaveContentProvider(session)))
+      if (!hidePluginCapsule && session != null && ref.watch(chatPluginsHaveContentProvider(session)))
         CapsuleItem(
           id: chatPluginsCapsuleId,
           label: context.l10n.plugslotsChatEntry,

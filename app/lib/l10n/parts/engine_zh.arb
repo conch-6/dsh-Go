@@ -663,6 +663,7 @@
   },
   "engineModelTokenLimits": "Token 上限",
   "engineModelContextLength": "上下文长度",
+  "engineModelContextOverrideHint": "留空使用渠道目录里的值；改大后引擎按新值计算上下文占用与压缩。",
   "engineModelMaxOutput": "最大输出",
   "engineModelDefaultSize": "默认 {size}",
   "@engineModelDefaultSize": {

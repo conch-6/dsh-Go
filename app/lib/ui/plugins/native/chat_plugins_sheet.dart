@@ -10,6 +10,12 @@
 // ui.json asking for the web) and the budget has room; it gets 8 s to show
 // (IslandTiming.sheetReady).
 // Anything else — and an island that gives up — is one 「在网页版打开」 row.
+//
+// Under the island every web plugin gets its ways into the app as rows: the
+// conversation tabs it registered (`sidebar.right.pane.tab`, its own page)
+// and its settings. A part that is only a switch for something outside the
+// island (one that opens a panel the island never shows) then still has a
+// way in, instead of a button that does nothing visible.
 
 import 'dart:async';
 
@@ -27,7 +33,9 @@ import '../../common/list_page_row.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 import '../../web/web_target.dart';
-import '../seats/seat_links.dart' show seatBundleOf, seatWebOpenerProvider;
+import '../plugin_detail_sheet.dart' show showBundleSheet;
+import '../seats/plugin_seat_page.dart';
+import '../seats/seat_links.dart' show seatBundleOf, seatEntryTitle, seatWebOpenerProvider, seatWebTarget;
 import 'native_panel.dart';
 
 /// The measured geometry (`chat_plugins_sheet_test.dart`).
@@ -127,6 +135,21 @@ final chatPluginsHaveContentProvider = Provider.autoDispose.family<bool, String>
       ref.watch(chatNativePanelsProvider).isNotEmpty || !ref.watch(chatWebPluginsProvider(sessionId)).isEmpty,
 );
 
+/// The conversation's plugin tabs (`sidebar.right.pane.tab`) and views
+/// (`conversation.view`): a web plugin's own pages in the app. The sheet
+/// lists them under its parts, so a plugin whose part is a switch for
+/// something the island never shows still has a way in
+/// (`docs/design/plugin-ui-v3.md` §3.3).
+final chatSheetPagesProvider = Provider.autoDispose.family<List<SeatItem>, String>((ref, sessionId) {
+  final tabs = ref.watch(
+    seatPlanProvider(SeatRequest(slot: Slots.rightPaneTab, placement: SeatPlacement.page, sessionId: sessionId)),
+  );
+  final views = ref.watch(
+    seatPlanProvider(SeatRequest(slot: Slots.conversationView, placement: SeatPlacement.page, sessionId: sessionId)),
+  );
+  return [...tabs.visible, ...views.visible];
+});
+
 Future<void> showChatPluginsSheet(BuildContext context, {required String sessionId}) =>
     showAppSheet<void>(context, isScrollControlled: true, builder: (_) => ChatPluginsSheet(sessionId: sessionId));
 
@@ -200,7 +223,7 @@ class _WebPlugins extends ConsumerStatefulWidget {
 }
 
 class _WebPluginsState extends ConsumerState<_WebPlugins> {
-  /// The island that fell back: the row from then on.
+  /// The island that fell back: the rows from then on.
   IslandSpec? _fallen;
 
   @override
@@ -212,30 +235,22 @@ class _WebPluginsState extends ConsumerState<_WebPlugins> {
     final names = [for (final package in web.packages) seatBundleOf(bundles, package)?.title() ?? package];
     final spec = web.island;
     final island = ref.watch(seatRenderersProvider).island;
-    Widget link(BuildContext context) => ListPageCard(
-      key: const ValueKey('chat-plugins-web-link'),
-      margin: EdgeInsets.zero,
-      children: [
-        ListPageRow(
-          icon: AppIcons.webApp,
-          title: l10n.commonOpenInWeb,
-          meta: l10n.commonWeb,
-          chevron: true,
-          onTap: () => ref.read(seatWebOpenerProvider)(context, ref, DshWebTarget(sessionId: widget.sessionId)),
-        ),
-      ],
-    );
+    final pages = [
+      for (final item in ref.watch(chatSheetPagesProvider(widget.sessionId)))
+        if (web.packages.contains(item.occupant.package)) item,
+    ];
     Widget fallback(BuildContext context) {
       if (_fallen != spec) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) setState(() => _fallen = spec);
         });
       }
-      return link(context);
+      // The ways in below cover it: nothing to show in the island's place.
+      return const SizedBox.shrink();
     }
 
-    final body = spec == null || spec == _fallen || island == null
-        ? link(context)
+    final islandBody = spec == null || spec == _fallen || island == null
+        ? null
         : GlassSurface(
             key: const ValueKey('chat-plugins-island'),
             tier: GlassTier.card,
@@ -245,6 +260,45 @@ class _WebPluginsState extends ConsumerState<_WebPlugins> {
               child: Builder(builder: (context) => island(context, spec, web.items, fallback)),
             ),
           );
+
+    // A conversation tab of one of them: its own page in the app.
+    Widget pageRow(SeatItem item) {
+      final o = item.occupant;
+      final bundle = seatBundleOf(bundles, o.package);
+      final title = seatEntryTitle(o, bundle: bundle);
+      // Nothing native or on an island: the tab is the way to DSH Web.
+      final onWeb = item.mode == SeatMode.webLink;
+      return Builder(
+        key: ValueKey('chat-plugins-page|${o.package}|${o.cell}'),
+        builder: (context) => ListPageRow(
+          icon: AppIcons.plugin,
+          title: title,
+          meta: onWeb ? l10n.commonWeb : null,
+          chevron: true,
+          onTap: () {
+            if (onWeb) {
+              final target = seatWebTarget(o, sessionId: widget.sessionId, bundle: bundle);
+              ref.read(seatWebOpenerProvider)(context, ref, target);
+            } else {
+              Navigator.of(context).push(
+                PluginSeatPage.route(
+                  title: title,
+                  request: SeatRequest(
+                    slot: o.slot,
+                    placement: SeatPlacement.page,
+                    sessionId: widget.sessionId,
+                    package: o.package,
+                    cell: o.cell,
+                  ),
+                ),
+              );
+            }
+          },
+        ),
+      );
+    }
+
+    // The ways in: one row per conversation tab, its settings, DSH Web.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -259,8 +313,36 @@ class _WebPluginsState extends ConsumerState<_WebPlugins> {
             style: theme.textTheme.bodySmall?.copyWith(color: DshColors.of(context).textTertiary),
           ),
         ),
+        if (islandBody != null) ...[
+          const SizedBox(height: ChatPluginsMetrics.sourcesGap),
+          islandBody,
+        ],
         const SizedBox(height: ChatPluginsMetrics.sourcesGap),
-        body,
+        ListPageCard(
+          key: const ValueKey('chat-plugins-ways-in'),
+          margin: EdgeInsets.zero,
+          children: [
+            for (final item in pages) pageRow(item),
+            for (final package in web.packages)
+              if (seatBundleOf(bundles, package) case final bundle?)
+                ListPageRow(
+                  key: ValueKey('chat-plugins-settings|$package'),
+                  icon: AppIcons.settings,
+                  title: l10n.commonSettings,
+                  meta: web.packages.length > 1 ? bundle.title() : null,
+                  chevron: true,
+                  onTap: () => unawaited(showBundleSheet(context, bundle)),
+                ),
+            ListPageRow(
+              key: const ValueKey('chat-plugins-web-link'),
+              icon: AppIcons.webApp,
+              title: l10n.commonOpenInWeb,
+              meta: l10n.commonWeb,
+              chevron: true,
+              onTap: () => ref.read(seatWebOpenerProvider)(context, ref, DshWebTarget(sessionId: widget.sessionId)),
+            ),
+          ],
+        ),
       ],
     );
   }

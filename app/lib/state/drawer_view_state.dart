@@ -283,8 +283,14 @@ class DrawerViewController extends Notifier<DrawerView> {
 
   /// Moves [ids] into [folderId] (null: out of any folder). Returns where
   /// each one was before, for [restoreAssignments].
-  Future<Map<String, String?>> moveSessions(Iterable<String> ids, String? folderId) async {
+  Future<Map<String, String?>> moveSessions(
+    Iterable<String> ids,
+    String? folderId, {
+    bool Function()? isCurrent,
+  }) async {
+    final key = _key;
     await _loading;
+    if (key != _key || (isCurrent != null && !isCurrent())) return const {};
     final moving = ids.toList();
     final before = state.folderOf;
     final previous = {for (final id in moving) id: before[id]};
@@ -306,6 +312,7 @@ class DrawerViewController extends Notifier<DrawerView> {
               _without(f, set),
         ],
       ),
+      isCurrent: isCurrent,
     );
     return previous;
   }
@@ -338,6 +345,13 @@ class DrawerViewController extends Notifier<DrawerView> {
   });
 
   Future<void> setSort(DrawerSort sort) => _update((view) => view.copyWith(sort: sort));
+
+  /// Drops only confirmed deleted members, including the last session in a
+  /// folder; unlike a guessed empty inventory this is authoritative.
+  Future<void> forgetSessions(Set<String> ids, {required bool Function() isCurrent}) => _update(
+    (view) => view.copyWith(folders: [for (final folder in view.folders) _without(folder, ids)]),
+    isCurrent: isCurrent,
+  );
 
   /// Drops members the host no longer has ([known]: every stored
   /// conversation, archived ones included, so an unarchive finds its folder).
@@ -680,11 +694,13 @@ List<DrawerBlock> drawerBlocks({
       if (byId[id] case final s? when !folderOf.containsKey(id)) s,
   ];
   if (pinned.isNotEmpty) blocks.add(PinnedBlock(pinned));
+  final membersByFolder = <String, List<SessionSummary>>{};
+  for (final s in sorted) {
+    final folderId = folderOf[s.sessionId];
+    if (folderId != null) membersByFolder.putIfAbsent(folderId, () => []).add(s);
+  }
   for (final folder in view.folders) {
-    final members = [
-      for (final s in sorted)
-        if (folderOf[s.sessionId] == folder.id) s,
-    ];
+    final members = membersByFolder[folder.id] ?? const <SessionSummary>[];
     if (members.isEmpty && scoped) continue;
     blocks.add(
       FolderBlock(folder, [

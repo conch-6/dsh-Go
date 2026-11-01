@@ -115,6 +115,13 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
     await _run(() => _phone.adbPair(entered.$1, port: entered.$2), done: l10n.phoneDndPairedConnect);
   }
 
+  Future<void> _manualConnect() async {
+    final l10n = context.l10n;
+    final port = await showDialog<int>(context: context, builder: (_) => const _ConnectDialog());
+    if (port == null || !mounted) return;
+    await _run(() => _phone.adbConnect(port: port), done: l10n.phoneDndConnected);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -174,10 +181,10 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
     final s = bg.shizuku;
     final sdk = ref.watch(phoneProvider.select((p) => p.status.device.sdkInt));
     final android17 = (sdk ?? 0) >= 37;
-    final allSet = s.installed && s.running && s.granted;
+    final allSet = s.running && s.granted;
     final inUse = bg.mode == PhoneBackgroundMode.shizuku;
     final Widget next;
-    if (!s.installed) {
+    if (!s.running && !s.installed) {
       next = _Next(
         text: context.l10n.phoneDndInstallShizuku,
         button: OutlinedButton.icon(
@@ -201,7 +208,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
         margin: _groupMargin,
         title: 'Shizuku',
         children: [
-          CheckRow(label: context.l10n.phoneDndShizukuInstalled, done: s.installed),
+          if (s.installed || !s.running) CheckRow(label: context.l10n.phoneDndShizukuInstalled, done: s.installed),
           CheckRow(label: context.l10n.phoneDndShizukuRunning, done: s.running),
           CheckRow(label: context.l10n.phoneDndShizukuGranted, done: s.granted),
           next,
@@ -275,6 +282,13 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextButton(
+              onPressed: usable && a.paired && !_busy ? _manualConnect : null,
+              child: Text(context.l10n.phoneDndManualConnect),
+            ),
+          ),
         ],
       ),
       if (!inUse)
@@ -334,6 +348,54 @@ class _PairDialog extends StatefulWidget {
 
   @override
   State<_PairDialog> createState() => _PairDialogState();
+}
+
+/// ROMs with broken mDNS can connect to the device's current adbd port directly.
+class _ConnectDialog extends StatefulWidget {
+  const _ConnectDialog();
+
+  @override
+  State<_ConnectDialog> createState() => _ConnectDialogState();
+}
+
+class _ConnectDialogState extends State<_ConnectDialog> {
+  final _port = TextEditingController();
+
+  @override
+  void dispose() {
+    _port.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final port = int.tryParse(_port.text.trim());
+    final valid = port != null && port >= 1 && port <= 65535;
+    return AlertDialog(
+      title: Text(l10n.phoneDndManualConnect),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(l10n.phoneDndConnectPortHint),
+          TextField(
+            key: const ValueKey('adb-connect-port'),
+            controller: _port,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            maxLength: 5,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: InputDecoration(labelText: l10n.phoneDndConnectPortLabel),
+            onChanged: (_) => setState(() {}),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(l10n.commonCancel)),
+        FilledButton(onPressed: valid ? () => Navigator.pop(context, port) : null, child: Text(l10n.phoneDndConnect)),
+      ],
+    );
+  }
 }
 
 class _PairDialogState extends State<_PairDialog> {

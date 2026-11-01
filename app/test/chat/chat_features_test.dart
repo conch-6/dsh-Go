@@ -278,6 +278,54 @@ void main() {
       expect(chat.sent, ['/sdcard/notes.txt 总结一下']);
     });
 
+    testWidgets('inserting a leading slash opens the palette and keeps the existing draft', (tester) async {
+      final harness = _changesHarness();
+      await pumpChat(tester, harness);
+      final field = find.byType(TextField);
+      final controller = tester.widget<TextField>(field).controller!;
+      controller.value = const TextEditingValue(text: '/已有文字', selection: TextSelection.collapsed(offset: 1));
+      await pumpFrames(tester, 3);
+      final palette = find.byType(SlashPalette);
+      expect(palette, findsOneWidget);
+      await tester.tap(find.descendant(of: palette, matching: find.textContaining('/permission')).first);
+      await pumpFrames(tester, 3);
+      expect(controller.text, '/permission 已有文字');
+      expect(harness.controllers['s1']!.commandLines, isEmpty);
+      expect(harness.controllers['s1']!.sent, isEmpty);
+
+      // A command that normally runs immediately must also retain the draft
+      // until the user explicitly sends it.
+      controller.value = const TextEditingValue(text: '  /已有文字', selection: TextSelection.collapsed(offset: 3));
+      await pumpFrames(tester, 3);
+      await tester.tap(find.descendant(of: palette, matching: find.textContaining('/compact')).first);
+      await pumpFrames(tester, 3);
+      expect(controller.text, '  /compact 已有文字');
+      expect(harness.controllers['s1']!.commandLines, isEmpty);
+
+      // Completing inside a known name replaces it without duplicating its
+      // unselected suffix or discarding the arguments.
+      controller.value = const TextEditingValue(
+        text: '/permission read-only',
+        selection: TextSelection.collapsed(offset: 4),
+      );
+      await pumpFrames(tester, 3);
+      await tester.tap(find.descendant(of: palette, matching: find.textContaining('/permission')).first);
+      await pumpFrames(tester, 3);
+      expect(controller.text, '/permission read-only');
+
+      controller.value = const TextEditingValue(text: 'hello /', selection: TextSelection.collapsed(offset: 7));
+      await pumpFrames(tester, 3);
+      expect(palette, findsNothing);
+
+      // Sending still resolves the complete command line, independent of
+      // where the cursor was left while editing it.
+      controller.value = const TextEditingValue(text: '/comp', selection: TextSelection.collapsed(offset: 0));
+      await tester.tap(find.byIcon(AppIcons.send));
+      await pumpFrames(tester, 3);
+      expect(harness.controllers['s1']!.commandLines, ['/compact']);
+      expect(controller.text, isEmpty);
+    });
+
     testWidgets('/model opens the model sheet, /new starts a new chat', (tester) async {
       final harness = _changesHarness();
       await pumpChat(tester, harness);
@@ -319,7 +367,7 @@ void main() {
       await pumpFrames(tester, 8);
       expect(find.text('用量'), findsOneWidget);
       expect(find.text('6%'), findsNWidgets(2)); // the ring and the sheet
-      expect(find.text('7.1 万'), findsOneWidget); // input incl. cache
+      expect(find.text('71K'), findsOneWidget); // input incl. cache
       expect(find.text('74%'), findsOneWidget); // cache hit rate
       expect(find.text('¥110.00'), findsOneWidget);
       expect(harness.balanceRequests, [testKey], reason: 'throttled');

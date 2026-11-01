@@ -21,6 +21,8 @@ A plugin that registers a View of a conversation in DSH Web (`conversation.view`
 
 The last capsule above the chat page's composer, **Plugins** (a puzzle icon), opens the conversation's plugin sheet. It shows only while the sheet has something, outside the eight capsules, and steps aside with the row while a reply is generating.
 
+To hide this app-owned entry, add `pluginCapsule` to the existing `hide` array in `$DSH_HOME/dsh-go/ui.json`, for example `{"version":1,"hide":["pluginCapsule"]}`. Remove it, or restore that setting to its default in the app, to show the entry again. This does not disable plugins, hide their own composer actions, or remove panels from All features / Chat details. The `plugins.seats` map configures plugin slots; `chat.panel` and `dsh-go.panel` do not name this built-in capsule.
+
 The sheet holds the native panels first (`placement: "chat.panel"`, by plugin name), then the web plugins' chat-page parts: the third-party entries of these seven slots — `conversation.session.header.actions`, `conversation.session.header.utilities`, `conversation.input.dock`, `conversation.input.left`, `conversation.input.right`, `conversation.input.overlay`, `conversation.composer.dock`. They share **one** panel island, stacked in page order, with the official entries masked; a line above it says whose they are.
 
 - The island is made when the sheet opens and goes 30 s after it closes, so the chat page stays light.

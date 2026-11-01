@@ -39,6 +39,25 @@ abstract class ProviderBackend {
 
   Future<ProviderSettings> remove(String id, {int? expectedRevision});
 
+  /// Writes one `modelOverrides.<modelId>` entry of a catalog route — how a
+  /// model the installed catalog ships (a subscription's, say) gets a
+  /// corrected context length without restating the route's model list.
+  Future<ProviderSettings> setModelOverride(
+    String route,
+    String modelId,
+    ModelOverride override, {
+    int? expectedRevision,
+  });
+
+  /// Drops one model override, back to the catalog's figure. [last] also
+  /// removes the then-empty `modelOverrides` dict.
+  Future<ProviderSettings> clearModelOverride(
+    String route,
+    String modelId, {
+    bool last = false,
+    int? expectedRevision,
+  });
+
   Future<void> storeKey(String ref, String key);
 
   Future<void> clearKey(String ref);
@@ -109,6 +128,22 @@ class ClientProviderBackend implements ProviderBackend {
   @override
   Future<ProviderSettings> remove(String id, {int? expectedRevision}) =>
       client.removeProvider(id, expectedRevision: expectedRevision);
+
+  @override
+  Future<ProviderSettings> setModelOverride(
+    String route,
+    String modelId,
+    ModelOverride override, {
+    int? expectedRevision,
+  }) => client.setModelOverride(route, modelId, override, expectedRevision: expectedRevision);
+
+  @override
+  Future<ProviderSettings> clearModelOverride(
+    String route,
+    String modelId, {
+    bool last = false,
+    int? expectedRevision,
+  }) => client.clearModelOverride(route, modelId, last: last, expectedRevision: expectedRevision);
 
   @override
   Future<void> storeKey(String ref, String key) => client.setProviderKey(key, ref: ref);

@@ -16,6 +16,7 @@ import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'web_back.dart';
+import 'web_file_chooser.dart';
 import 'web_navigation.dart';
 import 'web_target.dart';
 import 'web_view_guard.dart';
@@ -529,6 +530,7 @@ class _WebViewPageState extends State<WebViewPage> {
   late WebViewController _controller;
   late final AppLifecycleListener _lifecycle;
   late final WebViewGuard _guard = WebViewGuard(onGone: _onRendererGone);
+  final _files = WebFileChooser();
   int _progress = 0;
   bool _loading = true;
   String? _error;
@@ -564,6 +566,7 @@ class _WebViewPageState extends State<WebViewPage> {
 
   /// A new WebView for [WebViewPage.url].
   void _open() {
+    _files.invalidate();
     final controller = _controller = WebViewController();
     _loading = true;
     _progress = 0;
@@ -576,14 +579,19 @@ class _WebViewPageState extends State<WebViewPage> {
     await Future.wait(
       [
         controller.setJavaScriptMode(JavaScriptMode.unrestricted),
+        _files.attach(controller),
         controller.setNavigationDelegate(
           NavigationDelegate(
             // DSH Web keeps to its own origin; other pages open in the browser.
             onNavigationRequest: widget.dshWeb ? _onDshWebNavigation : null,
-            onPageStarted: (_) => _set(() {
-              _loading = true;
-              _error = null;
-            }),
+            onPageStarted: (_) {
+              if (!mounted || controller != _controller) return;
+              _files.invalidate();
+              _set(() {
+                _loading = true;
+                _error = null;
+              });
+            },
             onProgress: (p) => _set(() => _progress = p),
             onPageFinished: (_) {
               _set(() => _loading = false);
@@ -631,6 +639,7 @@ class _WebViewPageState extends State<WebViewPage> {
 
   void _onRendererGone(bool crashed) {
     if (_gone || !mounted) return;
+    _files.invalidate();
     setState(() {
       _gone = true;
       _loading = false;
@@ -851,6 +860,7 @@ class _WebViewPageState extends State<WebViewPage> {
   void dispose() {
     widget.link?._detach(this);
     _keyboardRest?.cancel();
+    _files.dispose();
     _guard.dispose();
     _lifecycle.dispose();
     super.dispose();

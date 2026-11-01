@@ -58,6 +58,74 @@ List<String> _cellsOf(String row) {
   return t.split(_pipe);
 }
 
+/// [source] with a blank line inserted before a pipe table that is written
+/// flush against the paragraph above it.
+///
+/// A table may not interrupt a paragraph: a header row written straight under
+/// a text line is read as one more paragraph line, so the pipes show as
+/// literal text (`② 按症状查的清单` followed by `| 症状 | … |`). The blank line
+/// ends the paragraph first, and the table is recognised.
+///
+/// Only a table at the left margin, or inside a `>` quote, is moved: one
+/// indented under a list item keeps its place, and fenced code is skipped.
+String blankLineBeforeTables(String source) {
+  if (!source.contains('|') || !source.contains('-')) return source;
+  final lines = source.split('\n');
+  final out = <String>[];
+  String? fence;
+  var changed = false;
+  for (var i = 0; i < lines.length; i++) {
+    final line = lines[i];
+    final marker = _fence.firstMatch(line)?.group(1);
+    if (fence != null) {
+      final close = _fenceClose.firstMatch(line)?.group(1);
+      if (close != null && close[0] == fence[0] && close.length >= fence.length) fence = null;
+      out.add(line);
+      continue;
+    }
+    if (marker != null) {
+      fence = marker;
+      out.add(line);
+      continue;
+    }
+    if (i + 1 < lines.length &&
+        line.contains('|') &&
+        _isDelimiterRow(lines[i + 1], _cellsOf(_unquoted(line)).length) &&
+        _needsBreakAbove(out.isEmpty ? null : out.last, line)) {
+      out.add(_quotePrefix(line));
+      changed = true;
+    }
+    out.add(line);
+  }
+  return changed ? out.join('\n') : source;
+}
+
+/// Whether the table header [line] is glued to the paragraph line above it.
+bool _needsBreakAbove(String? previous, String line) {
+  if (previous == null || previous.trim().isEmpty) return false;
+  // Indented: the table belongs to the list item above it.
+  if (line.startsWith(' ') || line.startsWith('\t')) return false;
+  final quoted = _quotePrefix(line).isNotEmpty;
+  // A quote block cannot be opened by a blank line from outside it.
+  if (quoted && _quotePrefix(previous).isEmpty) return false;
+  final body = _unquoted(previous).trimRight();
+  if (body.isEmpty) return false;
+  // These lines already end a block, so the table starts one on its own.
+  return !_blockLine.hasMatch(body);
+}
+
+/// The `>` markers a blank line inside the same quote carries: `>` for
+/// `> | a |`, so the table stays in the quote.
+String _quotePrefix(String line) =>
+    RegExp(r'^[ \t]*(?:>[ \t]?)+').firstMatch(line)?.group(0)?.trimRight() ?? '';
+
+final _blockLine = RegExp(
+  r'^(?:#{1,6}(?:[ \t]|$)'
+  r'|(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)'
+  r'|(?:-{3,}|\*{3,}|_{3,})[ \t]*$'
+  r'|(?:`{3,}|~{3,}))',
+);
+
 /// The header row with each cell's text in `**…**`, keeping the row's quote
 /// prefix, its pipes and the spaces around each cell.
 String _boldRow(String line) {

@@ -21,11 +21,16 @@ List<Override> searchOverrides(FakeContentSearch backend, {String? current}) => 
   currentSessionProvider.overrideWith(() => FakeCurrentSession(current)),
 ];
 
-Future<void> pumpPage(WidgetTester tester, FakeContentSearch backend, {String? current}) async {
+Future<void> pumpPage(
+  WidgetTester tester,
+  FakeContentSearch backend, {
+  String? current,
+  bool archivedOnly = false,
+}) async {
   usePhoneSurface(tester);
   await tester.pumpWidget(
     goldenApp(
-      home: SessionSearchPage(now: searchNow),
+      home: SessionSearchPage(now: searchNow, archivedOnly: archivedOnly),
       brightness: Brightness.light,
       overrides: searchOverrides(backend, current: current),
     ),
@@ -44,6 +49,29 @@ Finder tileOf(String title) => find.ancestor(of: find.text(title), matching: fin
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('archive browser lists archived chats before searching and never mixes active hits', (tester) async {
+    final backend = FakeContentSearch(results: {'登录': (items: loginHits, hasMore: false)});
+    await pumpPage(tester, backend, archivedOnly: true);
+    expect(find.byType(SearchResultTile), findsOneWidget);
+    expect(tileOf('旧版登录接口迁移笔记'), findsOneWidget);
+    expect(tester.widget<TextField>(find.byType(TextField)).autofocus, isFalse);
+    expect(backend.calls, isEmpty);
+
+    await tester.enterText(find.byType(TextField), '登录');
+    await settleSearch(tester);
+    expect(find.byType(SearchResultTile), findsOneWidget);
+    expect(tileOf('修复登录按钮重复提交'), findsNothing);
+    expect(tileOf('Retrofit 拦截器加 token 刷新'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), 'README');
+    await settleSearch(tester);
+    expect(find.byType(SearchResultTile), findsNothing);
+    expect(find.text('没有相关对话'), findsOneWidget);
+    await tester.tap(find.byTooltip('清除'));
+    await tester.pump();
+    expect(tileOf('旧版登录接口迁移笔记'), findsOneWidget);
+  });
 
   testWidgets('titles match as you type; the Host adds content hits after a pause', (tester) async {
     final backend = FakeContentSearch(results: {'登录': (items: loginHits, hasMore: false)});

@@ -39,6 +39,7 @@
   "searchKwPhoneFiles": "storage,files,downloads,photos",
   "searchKwVisualReplies": "charts,cards,visual,options",
   "searchKwTextSize": "font,font size,text size,larger text",
+  "searchKwTableTint": "table,tint,header,stripe,row,background",
   "searchKwFoldTurns": "collapse,fold,steps",
   "searchKwWebPhoneLayout": "web phone layout,layout",
   "searchKwShareConfig": "share,export,share code,config",

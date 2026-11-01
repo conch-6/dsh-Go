@@ -147,10 +147,75 @@ class FakeProviderBackend implements ProviderBackend {
       apiKeyEnv: apiKeyEnv ?? old.apiKeyEnv,
       models: models ?? old.models,
       headers: old.headers,
+      modelOverrides: old.modelOverrides,
+      defaultContextWindow: old.defaultContextWindow,
+      defaultMaxTokens: old.defaultMaxTokens,
+      defaultInput: old.defaultInput,
     );
     revision++;
     return _settings;
   }
+
+  @override
+  Future<ProviderSettings> setModelOverride(
+    String route,
+    String modelId,
+    ModelOverride override, {
+    int? expectedRevision,
+  }) async {
+    calls.add((
+      'setModelOverride',
+      {
+        'route': route,
+        'modelId': modelId,
+        'override': override.toJson(),
+        'expectedRevision': ?expectedRevision,
+      },
+    ));
+    final i = profiles.indexWhere((p) => p.route == route);
+    if (i < 0) throw StateError('no $route route');
+    final old = profiles[i];
+    profiles[i] = _withOverrides(old, {...old.modelOverrides, modelId: override});
+    revision++;
+    notifyChanged();
+    return _settings;
+  }
+
+  @override
+  Future<ProviderSettings> clearModelOverride(
+    String route,
+    String modelId, {
+    bool last = false,
+    int? expectedRevision,
+  }) async {
+    calls.add((
+      'clearModelOverride',
+      {'route': route, 'modelId': modelId, 'last': last, 'expectedRevision': ?expectedRevision},
+    ));
+    final i = profiles.indexWhere((p) => p.route == route);
+    if (i < 0) throw StateError('no $route route');
+    final old = profiles[i];
+    final remaining = {...old.modelOverrides}..remove(modelId);
+    profiles[i] = _withOverrides(old, last ? const {} : remaining);
+    revision++;
+    notifyChanged();
+    return _settings;
+  }
+
+  static ProviderProfile _withOverrides(ProviderProfile old, Map<String, ModelOverride> overrides) =>
+      ProviderProfile(
+        route: old.route,
+        displayName: old.displayName,
+        api: old.api,
+        baseUrl: old.baseUrl,
+        apiKeyEnv: old.apiKeyEnv,
+        models: old.models,
+        headers: old.headers,
+        modelOverrides: overrides,
+        defaultContextWindow: old.defaultContextWindow,
+        defaultMaxTokens: old.defaultMaxTokens,
+        defaultInput: old.defaultInput,
+      );
 
   @override
   Future<ProviderSettings> remove(String id, {int? expectedRevision}) async {
