@@ -60,6 +60,70 @@ Map<String, Object?> phoneStatus({
   'device': ?device,
 };
 
+/// [phoneStatus] from a native module with the versioned five-channel block
+/// (`background.privileged` v1, `background.root`, the shared API's source),
+/// the old fields projected as it projects them: Sui is Shizuku, root is off.
+Map<String, Object?> privilegedStatus({
+  String mode = 'off',
+  bool ready = false,
+  String? reason,
+  String recommended = 'off',
+  String grantPath = 'setup',
+  bool? rootSelected,
+  String? provider,
+  bool shizukuApp = false,
+  bool running = false,
+  bool granted = false,
+  Map<String, Object?> root = const {},
+  bool? wirelessDebugging = false,
+  bool paired = false,
+  bool adbConnected = false,
+  bool androidOk = true,
+  bool enabled = true,
+  Map<String, Object?>? keep,
+}) {
+  final base = phoneStatus(
+    enabled: enabled,
+    androidOk: androidOk,
+    wirelessDebugging: wirelessDebugging,
+    paired: paired,
+    adbConnected: adbConnected,
+  );
+  final legacy = switch (mode) {
+    'sui' => 'shizuku',
+    'root' => 'off',
+    _ => mode,
+  };
+  return {
+    ...base,
+    'background': {
+      ...(base['background'] as Map).cast<String, Object?>(),
+      'mode': legacy,
+      'ready': ready && legacy != 'off',
+      'reason': reason,
+      'shizuku': {
+        'installed': shizukuApp || provider != null,
+        'appInstalled': shizukuApp,
+        'running': running,
+        'granted': granted,
+        'provider': provider,
+      },
+      'root': {'checked': false, 'available': null, 'connected': false, 'starting': false, 'reasonCode': null, ...root},
+      'privileged': {
+        'v': 1,
+        'mode': mode,
+        'ready': ready,
+        'reason': reason,
+        'supportedModes': const ['off', 'shizuku', 'sui', 'root', 'adb'],
+        'recommendedMode': recommended,
+        'grantPath': grantPath,
+        'rootSelected': rootSelected ?? mode == 'root',
+        'keep': ?keep,
+      },
+    },
+  };
+}
+
 Map<String, Object?> defaultPolicies() => {
   'denyPackages': ['com.eg.android.AlipayGphone', 'com.unionpay', 'cmb.pb', 'com.icbc'],
   'confirmEveryWritePackages': ['com.tencent.mm'],
@@ -191,15 +255,21 @@ class FakePhoneNative {
       case 'setBackgroundMode':
         final r = results[call.method] ?? {'ok': true};
         if (r['ok'] == true) {
+          final mode = args['mode'];
           status = {
             ...status,
-            'background': {..._background, 'mode': args['mode']},
+            'background': {
+              ..._background,
+              'mode': mode,
+              if (_background['privileged'] case final Map privileged)
+                'privileged': {...privileged, 'mode': mode, 'ready': mode != 'off', 'reason': null},
+            },
           };
         }
         return r;
       case 'requestShizukuPermission':
         return true;
-      case 'adbStartPairing' || 'adbPair' || 'adbConnect':
+      case 'adbStartPairing' || 'adbPair' || 'adbConnect' || 'prepareRoot':
         return results[call.method] ?? {'ok': true};
       case 'grantSecureSettings':
         final result = results[call.method] ?? {'ok': true};

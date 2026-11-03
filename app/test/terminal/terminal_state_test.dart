@@ -2,6 +2,8 @@
 // resize, exit, drops and reconnects, close, rename, shell memory and the
 // font size.
 
+import 'dart:async';
+
 import 'package:dsh_app/state/terminal_state.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -259,6 +261,65 @@ void main() {
     expect(read().selected!.title, '构建');
   });
 
+  Future<TerminalWorkspace> openRename(_PendingRenameBackend fake) async {
+    backend = fake;
+    container = ProviderContainer(overrides: [terminalBackendProvider(_session).overrideWithValue(fake)]);
+    addTearDown(container.dispose);
+    final ready = Completer<void>();
+    container.listen(terminalWorkspaceProvider(_session), (_, next) {
+      if (next.selected?.phase == TerminalPhase.live && !ready.isCompleted) ready.complete();
+    });
+    await ready.future;
+    return container.read(terminalWorkspaceProvider(_session).notifier);
+  }
+
+  test('a rename failure after page disposal returns false without updating disposed state', () async {
+    final fake = _PendingRenameBackend();
+    final workspace = await openRename(fake);
+    final result = workspace.rename('a', '构建');
+    await fake.renameStarted.future;
+    expect(read().selected!.title, '构建');
+    container.dispose();
+    final checked = expectLater(result, completion(isFalse));
+    fake.renameResult.completeError(const DshTransportException('connection closed'));
+    await checked;
+  });
+
+  test('a previous backend rename failure does not change the rebuilt terminal', () async {
+    final previous = _PendingRenameBackend();
+    final workspace = await openRename(previous);
+    final result = workspace.rename('a', '旧请求');
+    await previous.renameStarted.future;
+    final current = _PendingRenameBackend(title: '新主机');
+    final ready = Completer<void>();
+    container.listen(terminalWorkspaceProvider(_session), (_, next) {
+      if (next.selected?.phase == TerminalPhase.live && next.selected?.title == '新主机' && !ready.isCompleted) {
+        ready.complete();
+      }
+    });
+    container.updateOverrides([terminalBackendProvider(_session).overrideWithValue(current)]);
+    await container.pump();
+    await ready.future;
+    expect(identical(container.read(terminalWorkspaceProvider(_session).notifier), workspace), isTrue);
+    expect(read().selected!.title, '新主机');
+    final checked = expectLater(result, completion(isFalse));
+    previous.renameResult.completeError(const DshTransportException('old connection closed'));
+    await checked;
+    expect(read().selected!.title, '新主机');
+  });
+
+  test('a current backend rename failure still restores the previous title', () async {
+    final fake = _PendingRenameBackend();
+    final workspace = await openRename(fake);
+    final result = workspace.rename('a', '构建');
+    await fake.renameStarted.future;
+    expect(read().selected!.title, '构建');
+    final checked = expectLater(result, completion(isFalse));
+    fake.renameResult.completeError(const DshTransportException('rename refused'));
+    await checked;
+    expect(read().selected!.title, 'bash');
+  });
+
   test('leaving the page detaches without closing terminals', () async {
     await open(FakeTerminalBackend(terminals: [infoJson('a')]));
     container.dispose();
@@ -307,4 +368,18 @@ void main() {
     await _settle();
     expect(again.read(terminalFontSizeProvider), TerminalFontSize.max);
   });
+}
+
+class _PendingRenameBackend extends FakeTerminalBackend {
+  _PendingRenameBackend({String title = 'bash'}) : super(terminals: [infoJson('a', title: title)]);
+
+  final renameStarted = Completer<void>();
+  final renameResult = Completer<void>();
+
+  @override
+  Future<void> rename(String id, String title) {
+    calls.add('rename');
+    renameStarted.complete();
+    return renameResult.future;
+  }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../state/live_activity_state.dart';
 import '../../state/notify_state.dart';
 import '../phone/phone_widgets.dart';
 import '../shell/page_frame.dart';
@@ -19,7 +20,12 @@ mixin _RefreshOnResume<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   @override
   void initState() {
     super.initState();
-    _lifecycle = AppLifecycleListener(onResume: () => ref.invalidate(notifySystemStatusProvider));
+    _lifecycle = AppLifecycleListener(
+      onResume: () {
+        ref.invalidate(notifySystemStatusProvider);
+        ref.invalidate(liveSystemStatusProvider);
+      },
+    );
   }
 
   @override
@@ -125,14 +131,45 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
     );
   }
 
+  /// The live activity is on here but the system holds it back: the way to its switch.
+  Widget _liveNote() => PhoneNote(
+    tone: NoteTone.warn,
+    icon: AppIcons.notificationsOff,
+    title: appL10n.liveBlockedTitle,
+    text: appL10n.liveBlockedText,
+    margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+    action: TextButton.icon(
+      style: TextButton.styleFrom(
+        foregroundColor: DshColors.of(context).onWarningContainer,
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 0),
+      ),
+      iconAlignment: IconAlignment.end,
+      icon: const Icon(AppIcons.forward, size: 16),
+      onPressed: () => unawaited(_openLive()),
+      label: Text(appL10n.pluginsTurnOn),
+    ),
+  );
+
+  Future<void> _openLive() async {
+    final opened = await ref.read(notifyChannelProvider).openLiveSettings();
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(appL10n.pluginsNotificationSettingsFailed)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final prefs = ref.watch(notifyPrefsProvider);
     final notifier = ref.read(notifyPrefsProvider.notifier);
     final system = ref.watch(notifySystemStatusProvider).value ?? const NotifySystemStatus();
+    // Unknown until the phone answers: no 「不支持」 flashing up meanwhile.
+    final live = ref.watch(liveSystemStatusProvider).value;
+    final liveSupported = live?.supported ?? true;
     final on = prefs.enabled;
     final note = on ? _systemNote(system) : null;
+    final liveBlocked = on && prefs.live && live != null && live.supported && !live.allowed;
 
     return AppPage.list(
       title: l10n.pluginsNotifications,
@@ -176,6 +213,19 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
               subtitle: l10n.pluginsQuestionsDescription,
               value: prefs.question,
               onChanged: on ? (v) => unawaited(notifier.setQuestion(v)) : null,
+            ),
+          ],
+        ),
+        if (liveBlocked) _liveNote(),
+        SettingsSection(
+          title: l10n.liveSettingsTitle,
+          footer: Text(l10n.liveSettingsFooter),
+          children: [
+            SettingsSwitchTile(
+              spot: Spots.notifyLive,
+              subtitle: liveSupported ? l10n.liveSettingsSubtitle : l10n.liveUnsupported,
+              value: prefs.live && liveSupported,
+              onChanged: on && liveSupported ? (v) => unawaited(notifier.setLive(v)) : null,
             ),
           ],
         ),

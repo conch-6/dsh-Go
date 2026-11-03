@@ -45,6 +45,7 @@ class TarExtractor(
 
     private val rootCanonical: String = root.canonicalPath
     private val deferredDirModes = ArrayList<Pair<File, Int>>()
+    private val copyBuffer = ByteArray(1 shl 16)
 
     fun extract(raw: InputStream, fileName: String) {
         val counting = CountingStream(raw.buffered(1 shl 16), onProgress)
@@ -53,12 +54,15 @@ class TarExtractor(
             fileName.endsWith(".xz") -> XZInputStream(counting)
             else -> counting
         }
+        extractDecoded(decoded)
+    }
+
+    fun extractDecoded(decoded: InputStream) {
         decoded.buffered(1 shl 16).use {
             readArchive(it)
             // Consume the tar's trailing padding so the whole compressed asset is read
             // (callers may be hashing the raw stream).
-            val buf = ByteArray(1 shl 16)
-            while (it.read(buf) >= 0) Unit
+            while (it.read(copyBuffer) >= 0) {}
         }
         // Directory modes last, so read-only directories can still be populated.
         for ((dir, mode) in deferredDirModes.asReversed()) chmod(dir, mode)
@@ -215,7 +219,7 @@ class TarExtractor(
     }
 
     private fun copyExactly(input: InputStream, out: FileOutputStream, size: Long) {
-        val buf = ByteArray(1 shl 16)
+        val buf = copyBuffer
         var left = size
         while (left > 0) {
             val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
@@ -240,7 +244,7 @@ class TarExtractor(
 
     private fun skip(input: InputStream, n: Long) {
         var left = n
-        val buf = ByteArray(8192)
+        val buf = copyBuffer
         while (left > 0) {
             val r = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
             if (r < 0) throw IOException("truncated tar padding")

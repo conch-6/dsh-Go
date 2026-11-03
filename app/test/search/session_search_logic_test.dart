@@ -4,6 +4,7 @@
 
 import 'dart:async';
 
+import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/session_search.dart';
 import 'package:dsh_app/state/sessions_state.dart';
 import 'package:dsh_app/ui/shell/session_search_page.dart' show searchDateLabel;
@@ -12,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../plugins/support/fake_plugin_host.dart' show FakePluginCarrier;
 import 'support.dart';
 
 List<String> ids(List<SessionSearchResult> results) => [for (final r in results) r.session.sessionId];
@@ -200,12 +202,13 @@ void main() {
   });
 
   group('controller', () {
+    final sessionsOverride = sessionsProvider.overrideWith(
+      () => SearchSessions(sampleSearchSessions(), sampleArchivedSessions()),
+    );
+
     ProviderContainer containerWith(FakeContentSearch? backend) {
       final container = ProviderContainer(
-        overrides: [
-          sessionContentSearchProvider.overrideWithValue(backend),
-          sessionsProvider.overrideWith(() => SearchSessions(sampleSearchSessions(), sampleArchivedSessions())),
-        ],
+        overrides: [sessionContentSearchProvider.overrideWithValue(backend), sessionsOverride],
       );
       addTearDown(container.dispose);
       container.listen(sessionSearchProvider, (_, _) {});
@@ -223,6 +226,192 @@ void main() {
             composing: composing,
           ),
         );
+
+    void replaceBackend(ProviderContainer c, FakeContentSearch? backend) {
+      c.updateOverrides([sessionContentSearchProvider.overrideWithValue(backend), sessionsOverride]);
+    }
+
+    testWidgets('a connection becoming available searches the current offline query', (tester) async {
+      final c = containerWith(null);
+      final controller = c.read(sessionSearchProvider.notifier);
+      type(c, '登录');
+      await tester.pump(SessionSearchController.debounce);
+      expect(c.read(sessionSearchProvider).content, ContentSearchStatus.idle);
+      final backend = FakeContentSearch(results: {'登录': (items: loginHits, hasMore: true)});
+      replaceBackend(c, backend);
+      await tester.pump();
+      expect(c.read(sessionSearchProvider.notifier), same(controller));
+      expect(c.read(sessionSearchProvider).text, '登录');
+      await tester.pump(SessionSearchController.debounce);
+      expect(backend.calls, ['登录']);
+      expect(c.read(sessionSearchProvider).hits, loginHits);
+      await tester.pump(Duration.zero); // Riverpod's own refresh tick.
+    });
+
+    for (final refused in [false, true]) {
+      testWidgets('a retired backend ${refused ? "refusal" : "answer"} cannot publish into the new connection', (
+        tester,
+      ) async {
+        final old = FakeContentSearch(
+          results: {'登录': (items: loginHits, hasMore: true)},
+          error: refused ? searchDisabled : null,
+        )..gate = Completer<void>();
+        final current = FakeContentSearch()..gate = Completer<void>();
+        final c = containerWith(old);
+        addTearDown(() {
+          for (final backend in [old, current]) {
+            if (!backend.gate!.isCompleted) backend.gate!.complete();
+          }
+        });
+        type(c, '登录');
+        await tester.pump(SessionSearchController.debounce);
+        expect(old.calls, ['登录']);
+        replaceBackend(c, current);
+        await tester.pump();
+        await tester.pump(SessionSearchController.debounce);
+        old.gate!.complete();
+        await tester.pump();
+        expect(c.read(sessionSearchProvider).content, ContentSearchStatus.pending);
+        expect(c.read(sessionSearchProvider).hits, isEmpty);
+        expect(c.read(sessionSearchProvider).hasMore, isFalse);
+        expect(current.calls, ['登录']);
+        current.gate!.complete();
+        await tester.pump();
+        expect(c.read(sessionSearchProvider).content, ContentSearchStatus.ready);
+        expect(c.read(sessionSearchProvider).hits, isEmpty);
+        expect(current.knownUnsupported, isFalse);
+        await tester.pump(Duration.zero); // Riverpod's own refresh tick.
+      });
+    }
+
+    testWidgets('the same backend notification preserves its one pending query', (tester) async {
+      final backend = FakeContentSearch(results: {'登录': (items: loginHits, hasMore: false)})..gate = Completer<void>();
+      final c = containerWith(backend);
+      addTearDown(() {
+        if (!backend.gate!.isCompleted) backend.gate!.complete();
+      });
+      type(c, '登录');
+      await tester.pump(SessionSearchController.debounce);
+      replaceBackend(c, backend);
+      await tester.pump();
+      replaceBackend(c, backend);
+      await tester.pump(SessionSearchController.debounce);
+      expect(backend.calls, ['登录']);
+      backend.gate!.complete();
+      await tester.pump();
+      expect(c.read(sessionSearchProvider).hits, loginHits);
+      await tester.pump(Duration.zero); // Riverpod's own refresh tick.
+    });
+
+    testWidgets('a connection change preserves unfinished IME text without searching it', (tester) async {
+      final old = FakeContentSearch(results: {'登录': (items: loginHits, hasMore: true)})..gate = Completer<void>();
+      final c = containerWith(old);
+      addTearDown(() {
+        if (!old.gate!.isCompleted) old.gate!.complete();
+      });
+      type(c, '登录');
+      await tester.pump(SessionSearchController.debounce);
+      type(c, 'denglu', composing: const TextRange(start: 0, end: 6));
+      final backend = FakeContentSearch();
+      replaceBackend(c, backend);
+      await tester.pump();
+      await tester.pump(SessionSearchController.debounce);
+      expect(c.read(sessionSearchProvider).text, 'denglu');
+      expect(c.read(sessionSearchProvider).composing, isTrue);
+      expect(backend.calls, isEmpty);
+      old.gate!.complete();
+      await tester.pump();
+      expect(c.read(sessionSearchProvider).content, ContentSearchStatus.idle);
+      expect(c.read(sessionSearchProvider).hits, isEmpty);
+      type(c, '登录');
+      await tester.pump(SessionSearchController.debounce);
+      expect(backend.calls, ['登录']);
+      await tester.pump(Duration.zero); // Riverpod's own refresh tick.
+    });
+
+    testWidgets('a backend change restarts the ordinary debounce without sending early', (tester) async {
+      final old = FakeContentSearch();
+      final current = FakeContentSearch();
+      final c = containerWith(old);
+      type(c, '登录');
+      await tester.pump(const Duration(milliseconds: 100));
+      replaceBackend(c, current);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 249));
+      expect(old.calls, isEmpty);
+      expect(current.calls, isEmpty);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(current.calls, ['登录']);
+      await tester.pump(Duration.zero);
+    });
+
+    testWidgets('connection metadata changes keep the same client backend and pending RPC', (tester) async {
+      final response = Completer<Object?>();
+      final carrier = FakePluginCarrier()..handlers['session/search'] = (_) => response.future;
+      final client = DshClient.withCarrier(carrier);
+      addTearDown(client.close);
+      addTearDown(() {
+        if (!response.isCompleted) response.complete({'items': [], 'hasMore': false});
+      });
+      HostConnection connection(String name) => HostConnection(client: client, isLocal: true, name: name);
+      final c = ProviderContainer(
+        overrides: [activeConnectionProvider.overrideWithValue(AsyncData(connection('first'))), sessionsOverride],
+      );
+      addTearDown(c.dispose);
+      c.listen(sessionSearchProvider, (_, _) {});
+      type(c, '登录');
+      await tester.pump(SessionSearchController.debounce);
+      expect(carrier.argsOf('session/search'), hasLength(1));
+      c.updateOverrides([
+        activeConnectionProvider.overrideWithValue(AsyncData(connection('renamed'))),
+        sessionsOverride,
+      ]);
+      expect(c.read(activeConnectionProvider).value!.name, 'renamed');
+      await tester.pump(SessionSearchController.debounce);
+      expect(carrier.argsOf('session/search'), hasLength(1));
+      response.complete({
+        'items': [
+          {'sessionId': 's1', 'snippet': '登录'},
+        ],
+        'hasMore': false,
+      });
+      await tester.pump();
+      expect(c.read(sessionSearchProvider).content, ContentSearchStatus.ready);
+      expect(c.read(sessionSearchProvider).hits.single.sessionId, 's1');
+      await tester.pump(Duration.zero);
+    });
+
+    testWidgets('a new client immediately followed by input sends only one debounced RPC', (tester) async {
+      final oldCarrier = FakePluginCarrier()..handlers['session/search'] = (_) => {'items': []};
+      final currentCarrier = FakePluginCarrier()..handlers['session/search'] = (_) => {'items': []};
+      final oldClient = DshClient.withCarrier(oldCarrier);
+      final currentClient = DshClient.withCarrier(currentCarrier);
+      addTearDown(oldClient.close);
+      addTearDown(currentClient.close);
+      final c = ProviderContainer(
+        overrides: [
+          activeConnectionProvider.overrideWithValue(AsyncData(HostConnection(client: oldClient, isLocal: true))),
+          sessionsOverride,
+        ],
+      );
+      addTearDown(c.dispose);
+      c.listen(sessionSearchProvider, (_, _) {});
+      type(c, 'old');
+      c.updateOverrides([
+        activeConnectionProvider.overrideWithValue(AsyncData(HostConnection(client: currentClient, isLocal: true))),
+        sessionsOverride,
+      ]);
+      // Do not pump/read the backend between the connection update and input.
+      type(c, 'new');
+      await tester.pump(const Duration(milliseconds: 249));
+      expect(oldCarrier.argsOf('session/search'), isEmpty);
+      expect(currentCarrier.argsOf('session/search'), isEmpty);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(oldCarrier.argsOf('session/search'), isEmpty);
+      expect(currentCarrier.argsOf('session/search'), hasLength(1));
+      expect(currentCarrier.argsOf('session/search').single['request'], {'query': 'new'});
+      await tester.pump(Duration.zero);
+    });
 
     testWidgets('waits for a pause and only asks for the last query', (tester) async {
       final backend = FakeContentSearch(results: {'登录': (items: loginHits, hasMore: true)});

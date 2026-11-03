@@ -97,6 +97,37 @@ void main() {
     }, failA: true),
   );
 
+  test(
+    'default persistence failure keeps the applied session model and reports only the save failure',
+    () => scenario((h) async {
+      h.host.handlers['session/selectModel'] = (args) => {
+        'ok': true,
+        'value': {
+          'selected': _appliedA.toJson(),
+          'defaultSave': {'status': 'failed', 'code': 'settings/default-save-failed'},
+        },
+      };
+      expect(await h.chat.setModel(_a), isTrue);
+      expect(h.state.model!.toJson(), _appliedA.toJson());
+      expect(h.state.error, isNull);
+      expect(h.state.defaultModelSaveFailed, isTrue);
+      expect(h.methods, ['session/selectModel']);
+      for (final status in [null, 'unknown', 'saved', 'failed', 'skipped']) {
+        h.host.handlers['session/selectModel'] = (args) => {
+          'ok': true,
+          'value': {
+            'selected': _b.toJson(),
+            if (status != null) 'defaultSave': {'status': status},
+          },
+        };
+        expect(await h.chat.setModel(_b), isTrue);
+        expect(h.state.defaultModelSaveFailed, status != 'saved' && status != 'skipped');
+      }
+      h.chat.dismissDefaultModelSaveWarning();
+      expect(h.state.defaultModelSaveFailed, isFalse);
+    }),
+  );
+
   for (final failA in [false, true]) {
     test('old host ${failA ? 'error' : 'success'} cannot alter the replacement host model', () async {
       final hold = ReplyHold()..arm('session/selectModel');

@@ -104,6 +104,17 @@ void main() {
       }
     });
 
+    test('assets named to climb out of the download directory are left out', () {
+      final release = parseUpdateManifest({
+        'version': '1.2.0',
+        'assets': {
+          'arm64': {'name': '../../shared_prefs/x.xml', 'url': 'https://dl.example.com/x', 'sha256': 'a' * 64},
+          'x64': {'name': '.hidden', 'url': 'https://dl.example.com/x', 'sha256': 'a' * 64},
+        },
+      });
+      expect(release.apks, isEmpty);
+    });
+
     test('future schemas and bad versions are refused', () {
       expect(() => parseUpdateManifest({'schema': 2, 'version': '1.0.0'}), throwsFormatException);
       expect(() => parseUpdateManifest({'version': 'soon'}), throwsFormatException);

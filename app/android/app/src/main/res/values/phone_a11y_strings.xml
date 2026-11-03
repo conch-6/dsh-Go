@@ -4,9 +4,26 @@
 <resources>
     <string name="phone_a11y_label">DSH Phone Control</string>
     <string name="phone_a11y_description">Works only when you ask DSH to do something on your phone: it reads the text on the current screen (and takes a screenshot when needed), then taps, types and swipes as you ask. Screen content is sent to the DeepSeek model you chose in DSH. While it works, a bar at the top of the screen lets you pause, stop or steer at any time; actions like sending, paying or deleting ask you first. DSH never fills in passwords or verification codes, never pays for you, and never changes system settings or permissions.</string>
-    <!-- The folded control pill (phone/a11y/OverlayBall.kt), for screen readers. -->
-    <string name="overlay_ball_running">DSH is using your phone. Tap to expand</string>
-    <string name="overlay_ball_paused">Paused. Tap to expand</string>
+    <!-- The control: ball, capsule and card (phone/a11y/OverlayBall.kt, OverlayCapsule.kt); docs/design/phone-overlay.md. -->
+    <string name="overlay_ball_running">DSH is using your phone. Tap to expand, hold to stop</string>
+    <string name="overlay_ball_paused">Paused. Tap to expand, hold to stop</string>
+    <string name="overlay_ball_waiting">DSH is waiting for you. Tap to expand</string>
     <string name="overlay_ball_stopped">Stopped</string>
-    <string name="overlay_collapse">Collapse</string>
+    <string name="overlay_collapse">Hide details</string>
+    <string name="overlay_expand">Show details</string>
+    <string name="overlay_fold">Shrink to a ball</string>
+    <string name="overlay_fold_row">Shrink to a ball</string>
+    <string name="overlay_hold_hint">Hold the ball for a second to stop</string>
+    <string name="overlay_stop_description">Stop DSH’s actions</string>
+    <string name="overlay_paused_short">Paused</string>
+    <string name="overlay_waiting">Waiting for you below</string>
+    <string name="overlay_waived">No approval needed</string>
+    <string name="overlay_meta_separator">" · "</string>
+    <string name="overlay_unlocks_review">Review</string>
+    <string name="overlay_unlock_system">system settings</string>
+    <string name="overlay_unlock_secrets">passwords and codes</string>
+    <string name="overlay_unlock_own_app">DSH Go itself</string>
+    <string name="overlay_list_separator">", "</string>
+    <!-- The ball's screen-reader action that stops the task. -->
+    <item type="id" name="overlay_action_stop" />
 </resources>

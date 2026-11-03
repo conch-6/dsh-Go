@@ -219,6 +219,8 @@ final class DshUiOptions extends DshUiNode {
     required this.id,
     required this.options,
     this.multi = false,
+    this.freetext = false,
+    this.freetextHint,
     this.selected = const [],
     super.truncation,
   });
@@ -228,6 +230,12 @@ final class DshUiOptions extends DshUiNode {
   final String id;
   final List<DshUiOption> options;
   final bool multi;
+
+  /// 用户还能在选项之外自己填一句（`freetext: true`，或直接给一个提示词）。
+  final bool freetext;
+
+  /// 输入框的提示词；null 用 App 的「其他（自己填）」。
+  final String? freetextHint;
 
   /// 插件视图：当前选中项的 [DshUiOption.key]（由插件维护）。
   final List<String> selected;
@@ -1047,11 +1055,17 @@ DshUiNode _options(Map<String, Object?> raw, String path, _Ctx ctx) {
     return ctx.broken('$path.options', appL10n.viewUiNoOptions, type: 'options');
   }
   final multi = raw['multi'];
+  // `freetext: true` 开一个「自己填」；给字符串时同时当输入框提示词。
+  final rawFreetext = raw['freetext'];
+  final hint = rawFreetext is String ? _clip(rawFreetext.trim(), DshUiLimits.label) : null;
+  final freetext = rawFreetext == true || rawFreetext == 'true' || (hint != null && hint.isNotEmpty);
   return DshUiOptions(
     path: path,
     id: ctx.p.plugin ? _pluginActionId(raw['id'], '$path.id', ctx) ?? '' : _string(raw['id']) ?? 'options',
     options: List.unmodifiable(options),
     multi: multi == true || multi == 'true',
+    freetext: freetext,
+    freetextHint: hint == null || hint.isEmpty ? null : hint,
     selected: ctx.p.plugin ? _selected(raw['selected']) : const [],
     truncation: truncation,
   );
@@ -1316,10 +1330,12 @@ String formatDshUiCompact(double value) {
 // ───────────────────────── 复制 / 导出 ─────────────────────────
 
 /// 把 Markdown 里的 ```` ```dsh-ui ```` 块换成一行摘要（复制、分享、导出用）。
-/// 没闭合的块（被中断）也换掉。其他代码块原样保留。
+/// 没闭合的块（被中断）也换掉；忘了写围栏的裸 JSON 先补上围栏再换。
+/// 其他代码块原样保留。
 String dshUiPlainText(String markdown) {
-  if (!markdown.contains('dsh-ui')) return markdown;
-  final lines = markdown.split('\n');
+  final repaired = fenceBareDshUiViews(markdown);
+  if (!repaired.contains('dsh-ui')) return repaired;
+  final lines = repaired.split('\n');
   final out = <String>[];
   var i = 0;
   final open = RegExp(r'^(\s{0,3})(`{3,}|~{3,})\s*dsh-ui\s*$');
@@ -1363,6 +1379,103 @@ bool _closes(String line, String fence) {
   if (t.length < fence.length) return false;
   final ch = fence[0];
   return t.split('').every((c) => c == ch);
+}
+
+/// 模型偶尔不写围栏:把视图 JSON 直接当正文发出来(AGENTS.md 早先的示例就是
+/// 这种写法,模型照着学会)。渲染前把这些裸 JSON 补成 ```` ```dsh-ui ```` 围栏,
+/// 后面的围栏链路就能照常画成卡片。
+///
+/// 只认「单独成段、能完整解析成视图」的 JSON 对象:行内提到的 JSON、已有围栏
+/// 里的内容、还没写完的流式半截都原样保留。
+String fenceBareDshUiViews(String markdown) {
+  if (!markdown.contains('{')) return markdown;
+  final lines = markdown.split('\n');
+  final out = <String>[];
+  var i = 0;
+  while (i < lines.length) {
+    final fence = _openingFence(lines[i]);
+    if (fence != null) {
+      // 别人的围栏:整块照抄,里面的裸 JSON 不补。
+      out.add(lines[i]);
+      i++;
+      while (i < lines.length) {
+        out.add(lines[i]);
+        final closed = _closes(lines[i], fence);
+        i++;
+        if (closed) break;
+      }
+      continue;
+    }
+    if (lines[i].trimLeft().startsWith('{')) {
+      final block = _jsonBlockAt(lines, i);
+      if (block != null && parseDshUi(block.source) is DshUiParsed) {
+        out.add('```dsh-ui');
+        out.add(block.source);
+        out.add('```');
+        i = block.end;
+        continue;
+      }
+    }
+    out.add(lines[i]);
+    i++;
+  }
+  return out.join('\n');
+}
+
+/// 这一行开了一个围栏时返回围栏标记(``` 或 ~~~),否则 null。
+String? _openingFence(String line) {
+  final match = RegExp(r'^\s{0,3}(`{3,}|~{3,})').firstMatch(line);
+  return match?.group(1);
+}
+
+/// 没有可选标注,最多扫这么多:再长也不会是视图。
+const _bareViewScanLimit = 64 * 1024;
+
+/// 从 [start] 行起的整体 JSON 对象;跨行、能配平才返回(流式半截返回 null)。
+/// 对象所在的最后一行后面不能有别的内容 —— 只认单独成段的 JSON。
+({String source, int end})? _jsonBlockAt(List<String> lines, int start) {
+  final buffer = StringBuffer();
+  var depth = 0;
+  var inString = false;
+  var escaped = false;
+  for (var i = start; i < lines.length; i++) {
+    final line = i == start ? lines[i].trimLeft() : lines[i];
+    var consumed = line.length;
+    for (var j = 0; j < line.length; j++) {
+      final unit = line.codeUnitAt(j);
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5C) {
+          escaped = true;
+        } else if (unit == 0x22) {
+          inString = false;
+        }
+        continue;
+      }
+      if (unit == 0x22) {
+        inString = true;
+      } else if (unit == 0x7B) {
+        depth++;
+      } else if (unit == 0x7D) {
+        depth--;
+        if (depth == 0) {
+          consumed = j + 1;
+          break;
+        }
+      }
+    }
+    if (i > start) buffer.write('\n');
+    buffer.write(line);
+    if (depth == 0 && !inString) {
+      // 对象在这行的第 consumed 个字符收尾;后面只能有空白。
+      if (line.substring(consumed).trim().isNotEmpty) return null;
+      final source = buffer.toString().substring(0, buffer.length - (line.length - consumed)).trimRight();
+      return (source: source, end: i + 1);
+    }
+    if (buffer.length > _bareViewScanLimit) return null;
+  }
+  return null;
 }
 
 // ───────────────────────── 缓存 ─────────────────────────

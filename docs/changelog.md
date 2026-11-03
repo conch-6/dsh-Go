@@ -2,6 +2,150 @@
 
 每个版本先中文、后英文。发版时把对应版本的正文（不含版本标题）作为 Release 正文，见 `docs/release.md`。
 
+## 1.0.9 · 2026-11-02
+
+### 中文
+
+- Android 17：不打扰模式能点了。系统删掉了后台屏下发输入要用的隐藏接口，root、Sui、Shizuku、自连 ADB 四条通道都只能读屏、点不了，现在改用还在的接口。我们手上没有 Android 17 真机，遇到问题请开 issue 反馈。
+- Android 17：自连 ADB 用的 TLS 库（Conscrypt）升到 2.8.0，在 16 KB 内存页的设备上也能加载。
+- 不打扰模式：新增「保持 X 通道」开关，默认关。打开后，通道断开、App 被杀或手机重启，都会自己连回去。root 打开后 DSH Go 会自己再向 root 管理器申请，给不给仍由管理器决定；没打开就绝不会自动执行 `su`。这个开关还没在真机上验证过，遇到问题请开 issue 反馈。
+- 不打扰模式：读后台屏时按包名取目标 App 的窗口，不再只看第一个窗口；每次点按、滑动、按键只发一次，系统没确认时不再说「系统拒绝」，也不再让你去开 USB 调试；对后台屏按 HOME 这类系统键会直接失败，不再把物理屏送回桌面；root 的一键授权复用已连接的 root，不再多跑一次 `su`。
+- 自连 ADB：在通知里输入配对码现在真的能配对了（以前每次都失败，结果还被丢掉，看起来没有任何反应），通知会显示配对结果。
+- 手机操控悬浮条：胶囊 3 秒不碰就按「闲置时不透明度」变淡，碰一下恢复；卡片和等你处理的时候不变淡。开了「闲置时自动收起」的，还是先收成小球再变淡。
+- 新增左滑快捷入口：在聊天区左滑，从右侧打开插件、引擎、设置等常用入口。可以在 设置 → 界面 里关掉，或者选显示哪些、调顺序。
+- 会话：永久删除不再误报「此主机不支持」，引擎还没准备好时提示暂不可用；刚新建、还没写到磁盘的会话也能删了；删除一次只发一个请求。会话搜索跟随当前连接，不再用旧连接的结果回答。
+- 对话：准备失败或中断时，还没被接收的输入按原顺序放回队列，不会丢。图片被拒时，不再一律让你换 V4.1 Flash，而是说明当前模型没声明支持图片，可以换模型或把自定义模型的输入类型改成「文本和图片」。
+- 附件：单个文件上限从 30 MB 提到 200 MB，单条消息总量 400 MB；文件走引擎的流式上传。旧版主机上仍是 30 MB。
+- 网络：引擎把 IPv4 和 IPv6 分开解析，网络拒绝 IPv6 查询时不再连带 IPv4 一起失败。PRoot 里的 git、curl、pip 这次没有覆盖到。
+- 引擎：卡死时，停止和重置会等旧进程真正退出；启动早期堆内存耗尽会计入自动安全模式，不再每次打开都加载同一个插件。
+- 更新：优先从 dl.dshtui.com 下载，并支持增量更新（这一版换了运行时，还是下整包，下一版起才会变小）；点了安装后没等到系统结果时，不再说「已取消安装」，安装包会留着。
+- 插件市场：优先从 dl.dshtui.com 读目录，手机上留一份，读不到时用这份。
+- 分享：导出和分享对话时，`Authorization` 请求头里的凭据会被隐藏。
+- 文件：XLSX 预览的预算把铺开的空单元格也算进去；刷新之后不再被更早的修改时间覆盖。
+- 终端：改名失败的结果晚到时，不再影响已离开的页面或重建后的终端。
+- 插件：重载之后才完成的面板视图不再用旧注册回答；App 在后台时新建的流也会按时关闭；被关闭的连接中止的文件回调不再算成插件的错。
+- 手机操控工具：`run_code` 能看到 intent、collect、tap_xy 的参数了；tap_xy 缺屏幕号时报错说对参数名。
+- 诊断：快照里的内存和剩余存储单位对了，不再把 GiB 显示成 MB。
+- 插件开发：插件技能和检查清单按 view v2 写，不再说只有 16 个组件。
+- 性能：解压运行时并行解码；引擎日志成批处理；长对话只折叠新增的部分；重复打开会话列表跳过没变的记录；启动缓存在 Direct 模式下也生效；本机连接不等 mux 就能先加载会话列表。
+
+### English
+
+- Android 17: Do Not Disturb can tap again. The system removed the hidden interface the background screen used to send input, so root, Sui, Shizuku and self-paired ADB could all read the screen but not touch it; it now uses the one that remains. We don't have an Android 17 device, so please open an issue if it misbehaves.
+- Android 17: the TLS library self-paired ADB uses (Conscrypt) is now 2.8.0, which loads on 16 KB-page devices.
+- Do Not Disturb: a new "Keep this channel" switch, off by default. With it on, the channel reconnects by itself after a drop, the app being killed or a reboot. For root, DSH Go asks your root manager again by itself and the manager still decides; with it off, `su` never runs on its own. This switch hasn't been tried on a real device yet, so please open an issue if it misbehaves.
+- Do Not Disturb: reading the background screen picks the target app's window by package instead of only looking at the first; each tap, swipe and key is sent once, and when the system doesn't confirm one it no longer says "rejected" or sends you to USB debugging settings; HOME and similar system keys on the background screen fail outright instead of sending the physical screen home; the one-tap root grant reuses the connected root instead of running `su` again.
+- Self-paired ADB: typing the pairing code into the notification now really pairs (it used to fail every time and drop the result, so nothing seemed to happen), and the notification shows the outcome.
+- Phone control overlay: the capsule fades to Idle opacity after 3 seconds untouched and comes back at a touch; the card and anything waiting for you stay solid. With Collapse when idle on, it still shrinks to a ball first and the ball fades.
+- New left-swipe shortcuts: swipe left over the chat to open plugins, engine, settings and other common places from the right. Turn it off or choose and order the items in Settings → Interface.
+- Sessions: permanent delete no longer says "this host doesn't support it" while the engine is starting; a new session that was never written to disk can be deleted; one delete sends one request. Session search follows the current connection instead of answering from the old one.
+- Chat: input not yet accepted goes back to the queue in order when preparing fails or a turn is interrupted, so it isn't lost. Image refusals no longer send everyone to V4.1 Flash: they say the model doesn't declare image input, and that you can switch models or set a custom model's Input to Text + image.
+- Attachments: up to 200 MB per file (was 30 MB) and 400 MB per message, uploaded through the engine's streaming route. Older hosts stay at 30 MB.
+- Network: the engine resolves IPv4 and IPv6 separately, so a network that refuses IPv6 lookups no longer takes IPv4 down too. git, curl and pip inside PRoot aren't covered yet.
+- Engine: when it hangs, stop and reset wait for the old process to really exit; running out of heap early in startup now counts toward safe mode, so the same plugin isn't loaded on every launch.
+- Updates: downloads come from dl.dshtui.com first, with delta updates (this version changes the runtime, so it's still a full download; they get smaller from the next one); an install with no result from the system no longer says "cancelled", and the package is kept.
+- Plugin market: the catalog comes from dl.dshtui.com first, with a copy kept on the phone for when it can't be read.
+- Sharing: credentials in `Authorization` headers are hidden in exports and shares.
+- Files: the XLSX preview's budget counts the empty cells it lays out; an older modified time can't overwrite a newer one after a refresh.
+- Terminal: a late rename failure can't touch a page you left or a rebuilt terminal.
+- Plugins: a panel view that finishes after a reload no longer answers from the old registration; a stream made while the app is in the background still closes on time; a file callback stopped by a closed connection isn't counted against the plugin.
+- Phone control tools: `run_code` now sees the parameters of intent, collect and tap_xy; tap_xy's missing-screen error names the right parameter.
+- Diagnostics: memory and free storage in the snapshot have the right units, no longer showing GiB as MB.
+- Plugin development: the plugin skill and checklist describe view v2, not only 16 components.
+- Performance: the runtime unpacks with parallel decoding; engine logs are batched; long chats fold only what's new; re-opening the session list skips unchanged records; the boot cache also works in Direct mode; the local connection can load the session list before the mux is up.
+
+## 1.0.8 · 2026-11-01
+
+### 中文
+
+- 不打扰模式：「Shizuku 可用」改为看接口本身，不再要求装 Shizuku App——只装了 Sui（Magisk / KernelSU 模块）的设备也能直接用，状态里写明接口来自 Sui 还是 Shizuku；两者都没有、和有 Sui 但还没授权，提示分开说。
+- 不打扰模式：新增 root 通道，给已 root（Magisk / KernelSU / APatch）但没有 Shizuku 的设备。只有你在页面上选了 root 才会第一次执行 `su`，授权走 root 管理器自己的弹窗；「自动恢复无障碍」的一键授予也能走 root。
+- 不打扰模式：通道选择改成一个面板——关闭 / Shizuku / Sui / root / 自连 ADB，各自写明适合谁、现在什么状态，并标出推荐的那个（只推荐，不替你选）；失败时显示真实原因，不会悄悄换到别的通道。Sui 和 root 两条通道还没在真机上验证过，遇到问题请开 issue 反馈。
+- 自连 ADB：修了「连接 → 启用」的检查死循环，端口可以手动填；切换通道时只断开要离开的那条，已经连好的 ADB 不再被一并断掉；一次操作被超时或停止打断后，不再复用旧连接，避免下一步收到上一步迟到的结果。
+- 会话：可以永久删除对话（长按单删、多选批量删）；可以浏览并恢复已归档的对话；可以直接在某个文件夹里新建对话。
+- 悬浮宠物：App 外的宠物和 App 内一样大；思考、子代理等动画完整显示，不再被裁掉；App 在后台时一轮结束，宠物气泡和通知照常出现；App 在后台时暂停宠物动画计时。
+- 实时活动：运行状态显示在状态栏、锁屏和厂商灵动岛（如小米焦点通知），配宠物头像。
+- 输入框上方：自动允许、插件胶囊不再各占一行；目标、待办、插件和状态条可以叠成一行卡片，点开有展开动画，叠着时左右滑动换到最前面。可以在 ui.json 里隐藏内置的插件胶囊。
+- 手机操控悬浮条：重做成圆球、胶囊、圆角卡片三级，最常用的操作信息放在最前，暂停 / 停止重新排布，次要信息收进下一层。
+- 插件设置：插件声明的字段都能显示，有中文标题优先用中文；十个常用插件补了中文字段说明；改一个字段只刷新那一行，不再卡；跳到网页版设置不再和它抢着改、也不会卡住。
+- 图像与视频：设置页按服务商整理，同一服务商的几项服务共用一把 key，预设自动填好地址和模型。
+- 对话：外接键盘可选 Enter 发送；在光标处输入 `/` 也能补全命令，不丢草稿；表格底色三档可选（带预览），表格紧贴段落也能正常显示；模型卡长名字完整显示，token 统一用 K / M；订阅渠道的上下文长度可以自己设。
+- 外观：原生界面跟随主机设定的深浅色。
+- 网页版：App 内的网页版可以上传文件。
+- 渠道：思考级别留空不再让渠道失效。
+- 性能：流式输出时复用已有的行和索引、复用已完成段落的扫描结果；侧边栏按需构造会话条目；顶栏状态文字不再重复测量。
+- 源码：1.0.5–1.0.7 的源码已补进公开仓库，保留逐个提交的历史，对应的 tag 也改指到了正确的提交。
+
+### English
+
+- Do Not Disturb: Shizuku is now judged by its interface, not by the Shizuku app — devices with only Sui (a Magisk / KernelSU module) work as is, and the status says whether the interface comes from Sui or Shizuku. "Neither installed" and "Sui present but not authorized" are told apart.
+- Do Not Disturb: a new root channel for rooted devices (Magisk / KernelSU / APatch) without Shizuku. `su` runs for the first time only after you pick root on the page, and the prompt is your root manager's own. The one-tap grant for auto-restoring accessibility can use root too.
+- Do Not Disturb: picking a channel is one panel — off / Shizuku / Sui / root / self-paired ADB, each with who it's for and its current state, the recommended one marked (marked, never picked for you). Failures show the real reason and never switch channels behind your back. The Sui and root channels have not been tried on real devices yet — please open an issue if something goes wrong.
+- Self-paired ADB: the connect → enable check no longer loops and the port can be entered by hand; switching channels closes only the one being left, so a connected ADB stays connected; after a step is interrupted by a timeout or Stop, the old connection is retired instead of reused, so the next step can't receive the previous one's late reply.
+- Sessions: delete conversations for good (long-press one, or select several); browse and restore archived conversations; start a new conversation inside a folder.
+- Floating pet: the pet outside the app is the same size as inside; thinking, subagent and other animations are drawn whole instead of clipped; a turn that ends while the app is in the background still reaches the pet's bubble and the notification; the pet's animation timer pauses while the app is in the background.
+- Live activity: run status in the status bar, on the lock screen and in vendor islands (e.g. Xiaomi focus notifications), with the pet's portrait.
+- Above the composer: auto-approve and plugin chips no longer take a row each; goal, todos, plugins and the status strip can stack into one row of cards that expands with an animation, and swiping a folded stack brings another card to the front. The built-in Plugins chip can be hidden from ui.json.
+- Phone control overlay: redesigned as ball, capsule and rounded card on one surface — the operation info that matters up front, pause / stop re-laid, the rest one level down.
+- Plugin settings: every declared field shows up, Chinese titles first; ten popular plugins get Chinese field copy; editing a field redraws only its row, so no more lag; handing over to the web settings no longer races them or freezes.
+- Images & video: the settings page is organized by provider; a provider's services share one key, and presets fill in the address and models.
+- Chat: optional Enter-to-send for hardware keyboards; `/` at the cursor completes commands without losing the draft; three table tint levels (with preview), and tables written flush against a paragraph still render; long model names show in full, token counts use K / M; the context length of subscription providers is configurable.
+- Appearance: the native app follows the host's light / dark setting.
+- Web: file uploads work in the in-app web view.
+- Providers: an empty thinking level no longer breaks a provider.
+- Performance: streaming reuses existing rows, indices and the scan of finished lines; the drawer builds session rows on demand; the top bar's status text is measured once.
+- Source: the 1.0.5–1.0.7 source is now in the public repository with its commit-by-commit history, and those tags point at the right commits.
+
+## 1.0.7 · 2026-10-31
+
+### 中文
+
+- 排障：引擎起来后，App 会把一份脱敏的本机诊断写进引擎（`$DSH_HOME/dsh-app/diagnostics.md`）：版本、设备、运行时、启动方式、连接、性能档位、最近错误和日志尾部。新增内置技能 `dsh-go-support`，教 AI 先读它再排查，并按症状给出可直接粘贴的 issue 草稿。
+- 设置 → 诊断新增「让 AI 看诊断」：手动刷新这份快照，然后问 AI「看下诊断」就行。
+- 更新：修了「已经是 1.0.4 却提示最新」——某个更新源停在旧版本时，不再就此收工，会继续问其它源，取更新的那个；公测包也不再带内测通道令牌，免得一个过期的内测清单盖住 GitHub 的新版本。
+
+### English
+
+- Support: once the engine is up, the app writes a redacted local diagnostics snapshot into it (`$DSH_HOME/dsh-app/diagnostics.md`): versions, device, runtime, launch mode, connection, performance tier, recent errors and log tails. The new bundled `dsh-go-support` skill tells the agent to read it first, walk the symptom, and draft an issue you can paste.
+- Settings → Diagnostics gains 「Let the AI read diagnostics」: refreshes that snapshot on demand; then just ask the AI to check the diagnostics.
+- Update: fixed 「1.0.4 says it is already latest」 — a source stuck on an older release no longer ends the check; the others are still asked and the newer release wins. Public builds also stop carrying the beta channel token, so a stale beta feed can no longer outrank the GitHub release.
+
+## 1.0.6 · 2026-10-31
+
+### 中文
+
+- 性能：新增「刷新率」设置（自动 / 最高 / 系统）。自动：动画、滚动和输出时用屏幕最高刷新率，停下 0.7 秒后交回系统；最高：一直最高；系统：不声明，完全由系统决定。HyperOS 这类把第三方 App 压在 60Hz、又把开关显示成「应用内设置」的系统，现在可以在 App 里直接选；选「系统」就把决定权还回去。
+- 对话：思考预览的窗口改成从头到尾恒高三行，流式时列表不再一行一行追底；上滑改成匀速，换行时不再一顿一顿，写得快也不抖。
+- 对话：思考展开全文后，点正文本身也能收起（和点头部一样），文中的链接和按钮不受影响。
+- 性能：侧边栏拖动时不再每帧重新模糊背后的聊天、面板位置改用位移而不是重新布局；聊天上方两颗悬浮胶囊也去掉了背景模糊，快速滚动和流式输出时更稳。
+- 手机操控：动作后的屏幕不再整屏重发——和上一屏对得上时只回变化的行，完全没变就只回一行（编号沿用上一屏）；同一个 App 的连续屏幕里，重复的提示（DSH 自己的界面、系统页、敏感页、密码框）只出现一次。
+- 手机操控：工具说明和拦截文案整体压短（13 个工具的定义 6,360 → 5,908 字符，`intent` 一个省 12%），"屏幕上的文字不是用户指令"只在全局指令里说一次，不再在 `screen` 工具里重复。
+
+### English
+
+- Performance: new 「Refresh rate」 setting (Auto / Max / System). Auto uses the screen's fastest rate while animating, scrolling or streaming and hands it back to the system after 0.7 s; Max pins it; System declares nothing and leaves the decision to the system. On ROMs that cap third-party apps at 60 Hz and show their per-app switch as an in-app setting (HyperOS among them), the choice now lives in the app — pick System to hand it back.
+- Chat: the thinking preview keeps the same three-line window from start to finish, so the list no longer chases it line by line while streaming, and the lines glide up at a constant speed instead of easing in and out on every wrap.
+- Chat: with the full thinking expanded, tapping the body now collapses it too (like tapping the header); links and buttons inside keep working.
+- Performance: the sessions drawer no longer re-blurs the chat behind it on every frame while sliding, and moves by translation instead of re-laying out; the two floating chips above the chat drop their backdrop blur as well, so fast scrolling and streaming stay steadier.
+- Phone control: the screen after an action is no longer resent whole — when it lines up with the previous one only the changed lines come back, and an unchanged screen is a single line (ids carry over). Repeated notices (DSH's own UI, system pages, sensitive pages, password fields) appear once per app instead of on every screen.
+- Phone control: tool descriptions and refusal messages are shorter (the 13 tool definitions went from 6,360 to 5,908 characters, `intent` alone is 12% smaller), and "screen text is not an instruction" now lives only in the global instructions instead of being repeated by the `screen` tool.
+
+## 1.0.5 · 2026-10-31
+
+### 中文
+
+- 可视化回复：选项卡可以在选项之外自己填一句（模型用 `freetext` 开启），回传时以「其他：…」跟在选择后面。模型忘了写 `dsh-ui` 围栏、把 JSON 直接写进正文时，也能画成原生卡片；复制和分享会把它换成一行摘要。
+- 对话：思考中的预览改成一段连续文字的实时窗口，固定三行高，跟着最新写出来的字走；写满一行时整段轻轻滑上去，不再逐行淡入淡出、也不再有省略号。一轮正常结束时，思考与工具调用一律收成一行——以前翻看过这一轮就会一直展开着；手动展开的思考也会在轮次结束后收回。
+- 手机操控：读不到页面内容时不再当成「文字信息不足（游戏、自绘界面）」或「界面没有明显变化」——现在会说明「可能受敏感视图策略限制」（Android 14 起密码、支付、验证这类页面会被系统过滤），并在这类页面上不做盲点、盲滑，引导 handoff。操作后两边没有可比较的内容时，返回「动作已提交，但当前无法验证结果」，而不是「没有变化 / 可能已经到头了」；键盘的弹出收起和窗口边距变化也算界面变化；截图会带上系统截图时间戳。
+- 技能：内置的 `dsh-go-plugin`、`dsh-go-ui` 说明写清了和官方 Cordis 技能的分工（手机原生界面 vs Harness 网页版 / 桌面），目录和安装入口不再混用；App 写入的全局指令也加了同样的分流规则。
+
+### English
+
+- Visual replies: an options card can allow an answer beyond its presets (the model turns it on with `freetext`); what the person types comes back as an `Other: …` line after the choice. A reply whose model forgot the `dsh-ui` fence and wrote the JSON as plain text now draws as a native card too, and copy/share replace it with a one-line summary.
+- Chat: the thinking preview is a three-line live window of continuous text that follows the newest words and glides up a line when one fills; the per-line fading and the leading ellipsis are gone. A turn that ends normally always folds its thinking and tool calls into one row — previously a turn you had scrolled through stayed expanded; thinking you expanded by hand folds back when the turn ends.
+- Phone control: a page whose content cannot be read is no longer reported as a poor tree ("game / custom-drawn UI") or as "no visible change" — it now says the content may be blocked by the sensitive-view policy (Android 14+ filters pages like passwords, payments and verification), stops blind taps and swipes there and points to handoff. When an action leaves nothing comparable on either side it reports "submitted, but the result cannot be verified" instead of "unchanged / probably at the end of the list"; IME show/hide and window inset changes count as screen changes, and a screenshot carries the system timestamp.
+- Skills: the bundled `dsh-go-plugin` and `dsh-go-ui` instructions now spell out how they divide work with the official Cordis skills (phone-native UI vs Harness Web / desktop), so directories and install entries are no longer mixed; the app's global instructions follow the same routing rule.
+
 ## 1.0.4 · 2026-10-31
 
 ### 中文

@@ -45,6 +45,34 @@ class GuestAgentsModeTest {
         } finally { root.deleteRecursively() }
     }
 
+    @Test fun diagnosticsSectionNamesThePathForEachLaunchMode() {
+        val root = kotlin.io.path.createTempDirectory("agents-diagnostics").toFile()
+        try {
+            val file = File(root, "root/.dsh/AGENTS.md")
+            GuestSetup.writeAgentsMd(root, phoneStorage = false)
+            val proot = file.readText()
+            assertTrue(proot.contains("## 本机诊断"))
+            assertTrue(proot.contains("`\$DSH_HOME/dsh-app/diagnostics.md`"))
+            assertTrue(proot.contains("dsh-go-support"))
+            GuestSetup.writeAgentsMd(root, phoneStorage = false, directEngine = true)
+            val direct = file.readText()
+            assertTrue(direct.contains("`${root.canonicalPath}/root/.dsh/dsh-app/diagnostics.md`"))
+            assertFalse(direct.contains("\$DSH_HOME/dsh-app/diagnostics.md"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun diagnosticsSnapshotIsWrittenWhereTheEngineCanReadIt() {
+        val root = kotlin.io.path.createTempDirectory("agents-write").toFile()
+        try {
+            val file = GuestSetup.writeDiagnostics(root, "# first\n")
+            assertEquals(File(root, "root/.dsh/dsh-app/diagnostics.md").absoluteFile, file.absoluteFile)
+            assertEquals("# first\n", file.readText())
+            GuestSetup.writeDiagnostics(root, "# second\n")
+            assertEquals("# second\n", file.readText())
+            assertEquals(0, file.parentFile!!.listFiles()!!.count { it.name.startsWith(".diagnostics") })
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun unchangedDefaultStartupDoesNotRewriteAnExistingManagedFile() {
         val root = kotlin.io.path.createTempDirectory("agents-unchanged").toFile()
         try {

@@ -5,14 +5,19 @@
 //   DELETE /api/v1/c/<id>                 Bearer <deleteToken>, or X-Admin-Key
 //   GET    /c/<id>                        the viewer page (decrypts with #k=…)
 //   GET    /                              the home page (site/home/), its files
-//                                         at /app.js, /assets/… (src/site.ts)
-//   GET    /share/                        the landing page
+//                                         at /app.js, /assets/…, and the landing
+//                                         page at /share/: static files, served
+//                                         without the Worker (src/site.ts)
 //   GET    /beta, /beta/…                 beta builds behind an access key (src/beta.ts)
 //   GET    /download, /download/…         the same builds for anyone, once
 //                                         DOWNLOAD_ACCESS=public (src/download.ts)
 //   POST   /api/usage/v1                  the app's anonymous usage report (src/usage.ts)
 //   GET    /api/github/stars              the repository's star count, for the home page
 //                                         (src/github.ts)
+//   GET    /market/index.json, /market/dsh-go.json, /p/<package>
+//                                         the official plugin market (src/market.ts),
+//                                         also put on the public bucket every 10
+//                                         minutes (the cron, below)
 //
 // Downloads, update checks and usage reports are counted in Analytics Engine
 // without keeping IPs (src/stats.ts); scripts/stats.sh reads them.
@@ -28,9 +33,9 @@ import { accessMode, download, isDownloadPath } from './download';
 export { StatsSalt } from './stats';
 import { usage } from './usage';
 import { githubStars } from './github';
-import { isMarketPath, market } from './market';
+import { isMarketPath, market, publishMarket } from './market';
 import type { Ctx } from './files';
-import { HOME_PAGE, LANDING_PAGE, VIEWER_PAGE, asset, homeFile, notFound, redirect } from './site';
+import { notFound, redirect, viewer } from './site';
 
 const VIEWER_PATH = /^\/c\/([0-9A-Za-z]{6,32})\/?$/;
 const BLOB_PATH = /^\/api\/v1\/c\/([^/]+)$/;
@@ -62,18 +67,12 @@ async function route(request: Request, env: Env, ctx: Ctx): Promise<Response> {
   if (isMarketPath(path)) return market(request, env);
   if (isBetaPath(path)) return beta(request, env, ctx);
   if (isDownloadPath(path) && accessMode(env) === 'public') return download(request, env, ctx);
-  // public/home/ is served at the root only.
-  if (RETIRED.test(path) || path.startsWith('/__edge/') || path.startsWith('/home/')) return notFound();
+  if (RETIRED.test(path) || path.startsWith('/__edge/')) return notFound();
   if (method !== 'GET' && method !== 'HEAD') return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } });
-  if (path === '/') return asset(request, env, HOME_PAGE);
-  const home = homeFile(path);
-  if (home) return asset(request, env, home);
+  if (VIEWER_PATH.test(path)) return viewer(request, env);
   if (path === '/share') return redirect('/share/', 301);
-  if (path === '/share/' || path === '/share/index.html') return asset(request, env, LANDING_PAGE);
-  if (VIEWER_PATH.test(path)) return asset(request, env, VIEWER_PAGE);
-  if (path === VIEWER_PAGE) return notFound();
-  if (path.endsWith('/') || path.endsWith('.html')) return notFound();
-  return asset(request, env, path);
+  // The site's files never get here (wrangler.jsonc assets): no such file, or a hidden one.
+  return notFound();
 }
 
 export default {
@@ -84,5 +83,8 @@ export default {
       console.error('unhandled', e instanceof Error ? e.message : String(e));
       return json(500, { error: 'internal' });
     }
+  },
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    await publishMarket(env);
   },
 } satisfies ExportedHandler<Env>;

@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:dsh_app/performance/performance_state.dart';
+import 'package:dsh_app/ui_config/ui_config.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 
 PerformanceSnapshot snapshot(DeviceTier tier, {bool hot = false, int sequence = 1}) => PerformanceSnapshot(
   sequence: sequence,
@@ -20,3 +22,9 @@ class FakePerformanceChannel extends PerformanceChannel {
   @override
   Stream<PerformanceSnapshot> get changes => events.stream;
 }
+
+/// These tests mount the whole DshApp, whose theme follows the active host's
+/// ui.json since #226; the local host's file follows the runtime's platform
+/// events, which a widget test has no plugin for. Nothing here reads ui.json:
+/// no source, as for a host that can't be read now.
+final Override noUiJson = uiConfigSourceBuilderProvider.overrideWithValue((ref, host) => null);

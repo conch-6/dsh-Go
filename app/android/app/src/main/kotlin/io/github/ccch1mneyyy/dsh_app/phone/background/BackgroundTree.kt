@@ -43,6 +43,15 @@ object BackgroundTree {
     const val LINE_CAP = 60
     const val SCREEN_CAP = 3000
 
+    internal data class WindowSelection(val index: Int, val complete: Boolean)
+
+    internal fun selectApplicationWindow(packages: List<String?>, target: String): WindowSelection? {
+        val index = packages.indexOfFirst { it == target }
+        if (index < 0) return null
+        // A viewport image includes other application windows whose nodes we have not scanned.
+        return WindowSelection(index, packages.size == 1)
+    }
+
     fun isSensitiveLabel(label: String): Boolean = SensitiveWords.confirmHit(label, null) != null
 
     fun isSecretHint(text: String): Boolean = SensitiveWords.secretHit(text, null, null) != null

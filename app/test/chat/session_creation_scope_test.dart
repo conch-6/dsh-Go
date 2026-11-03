@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/pets/pet_signals.dart';
 import 'package:dsh_app/pets/pet_state.dart';
 import 'package:dsh_app/state/chat_state.dart';
@@ -455,6 +456,41 @@ void main() {
       }
     });
   }
+
+  testWidgets('new chat keeps default-save warning through model selection, first prompt and fresh snapshot', (
+    tester,
+  ) async {
+    final c = await _CreationHarness.start(tester);
+    try {
+      c.h.host.handlers['session/selectModel'] = (args) => {
+        'ok': true,
+        'value': {
+          'selected': args['request'],
+          'defaultSave': {'status': 'failed', 'code': 'settings/default-save-failed'},
+        },
+      };
+      c.h.container.read(pendingModelProvider.notifier).select(_model);
+      await c.typeAndSend(tester, 'first prompt after model choice');
+      c.sessions.finish(0);
+      await fixture.settleIo(tester, () => c.h.container.read(chatProvider('S')).defaultModelSaveFailed);
+      await c.baseline(tester, 'S');
+      await fixture.settleIo(tester, () => fixture.writes(c.h).isNotEmpty && !c.busy(tester));
+      _expectPrompt(c, 'S', 'first prompt after model choice');
+      expect(c.h.container.read(chatProvider('S')).model!.toJson(), _model.toJson());
+      expect(c.h.container.read(chatProvider('S')).error, isNull);
+      expect(c.h.container.read(chatProvider('S')).defaultModelSaveFailed, isTrue);
+      expect(find.text(appL10n.engineModelDefaultSaveFailed), findsOneWidget);
+      final banner = tester.widget<ErrorBanner>(find.byType(ErrorBanner));
+      expect(banner.message, appL10n.engineModelDefaultSaveFailed);
+      banner.onDismiss!();
+      await pumpFrames(tester);
+      expect(c.h.container.read(chatProvider('S')).defaultModelSaveFailed, isFalse);
+      expect(find.text(appL10n.engineModelDefaultSaveFailed), findsNothing);
+      expect(tester.takeException(), isNull);
+    } finally {
+      await c.close(tester);
+    }
+  });
 
   testWidgets('late model completion cannot send S or release a newer creation and its model', (tester) async {
     final hold = ReplyHold()..arm('session/selectModel');

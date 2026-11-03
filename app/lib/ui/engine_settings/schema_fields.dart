@@ -4,6 +4,8 @@
 
 import 'dart:math' as math;
 
+import 'package:dsh_client/dsh_client.dart' show LocalizedText;
+
 import '../../l10n/l10n.dart';
 import '../../state/engine_settings_state.dart';
 
@@ -45,7 +47,8 @@ enum FieldKind {
   /// object → its own group of fields.
   group,
 
-  /// Anything else (union of objects, tuples, `any`): shown, not edited.
+  /// Anything else (union of objects, tuples, `any`, collections holding
+  /// secrets, objects with no declared fields): shown, not edited.
   readOnly,
 
   /// Hidden, `role('credential-ref')` plumbing, or constant markers.
@@ -70,12 +73,17 @@ bool _containsSecret(SchemaNode source, [Set<SchemaNode>? ancestors]) {
   ].any((child) => _containsSecret(child, next));
 }
 
+/// The node a field's control edits: what wrappers resolve to, the string
+/// input of a built-in date() / regExp(), and the value of an optional field
+/// ([schemaValueOf]). The field's default and description stay on [source].
+SchemaNode valueNodeOf(SchemaNode source) => textInputNodeOf(schemaValueOf(source));
+
 /// The control for [node].
 FieldKind kindOf(SchemaNode node) {
   final effective = node.effective;
   if (effective.meta.hidden || node.meta.hidden || effective.isCredentialRef) return FieldKind.hidden;
   if (effective.isSecret || node.isSecret) return FieldKind.secret;
-  final n = textInputNodeOf(node);
+  final n = valueNodeOf(node);
   switch (n.type) {
     case 'boolean':
       return FieldKind.toggle;
@@ -105,14 +113,17 @@ FieldKind kindOf(SchemaNode node) {
       return n.fields == null ? FieldKind.readOnly : FieldKind.group;
     case 'array':
       final inner = n.inner;
-      if (inner == null) return FieldKind.readOnly;
+      // Item editors show and write values in the clear; the Host never
+      // returns a secret and refuses writes over one.
+      if (inner == null || _containsSecret(inner)) return FieldKind.readOnly;
       if (inner.effective.type == 'boolean') return FieldKind.sequence;
       if (_primitive(inner)) return FieldKind.list;
-      if (inner.fields != null) return FieldKind.objectList;
+      // `array(object({}))` declares nothing to fill in: its items are opaque.
+      if (inner.fields?.isNotEmpty ?? false) return FieldKind.objectList;
       return FieldKind.readOnly;
     case 'dict':
       final inner = n.inner?.effective;
-      if (inner == null) return FieldKind.readOnly;
+      if (inner == null || _containsSecret(n.inner!)) return FieldKind.readOnly;
       if (inner.type == 'boolean' || _primitive(inner)) return FieldKind.dict;
       return FieldKind.readOnly;
   }
@@ -539,46 +550,128 @@ String plainSchemaText(String text) => text
     .replaceFirst(RegExp(r'^\s*(#{1,6}|[-*+]|\d+\.)\s+'), '')
     .trim();
 
-String? _plainDescription(SchemaNode node) {
-  final description = (node.meta.description ?? node.effective.meta.description)?.resolve(
-    AppLocale.current.languageCode,
-  );
-  return description == null ? null : plainSchemaText(description.trim());
+/// [text] in the UI language, as plain text (see [LocalizedText.resolve]:
+/// Chinese, then English, then whatever there is).
+String? _plainText(LocalizedText? text) {
+  final resolved = text?.resolve(AppLocale.current.languageCode);
+  return resolved == null ? null : plainSchemaText(resolved.trim());
 }
 
-/// The field's title: page copy, a short schema description, a known key,
-/// then the key in words.
+/// The description on the field, else on what it wraps or holds.
+String? _plainDescription(SchemaNode node) =>
+    _plainText(node.meta.description ?? node.effective.meta.description ?? valueNodeOf(node).meta.description);
+
+/// The longest description that reads as a title.
+const _titleRunes = 18;
+
+final _han = RegExp(r'[\u3400-\u9fff]');
+
+bool _fitsTitle(String text) => text.runes.length <= _titleRunes && !text.contains('\n');
+
+String _firstSentence(String text) {
+  // l10n:keep schema sentence boundary pattern
+  final first = text.split(RegExp(r'(?<=[。.!?！？])\s*|\n')).first.trim();
+  return first.runes.length > 40 ? '${String.fromCharCodes(first.runes.take(39))}…' : first;
+}
+
+/// A long description that opens with a name: Chinese text before an
+/// opening bracket, a colon, a semicolon, a line break or the end of its
+/// first sentence, and the rest that explains it (「兼容接口返回格式（按模型目录；
+/// GPT Image 留空）」 → 「兼容接口返回格式」 / 「按模型目录；GPT Image 留空」).
+/// Null when that text is not 2–18 characters of Chinese: an English clause
+/// seldom reads as a name, and a comma usually ends a condition, not a name.
+({String title, String rest})? leadingPhrase(String text) {
+  // l10n:keep schema punctuation pattern
+  final stop = RegExp(r'[（(：；;。！？\n]|:(?!//)').firstMatch(text);
+  if (stop == null) return null;
+  final title = text.substring(0, stop.start).trim();
+  final length = title.runes.length;
+  if (length < 2 || length > _titleRunes || !_han.hasMatch(title)) return null;
+  // l10n:keep schema punctuation pattern
+  String trimmed(String s) => s.replaceFirst(RegExp(r'^[\s，,。.；;：:、]+'), '').trim();
+  var rest = text.substring(stop.end);
+  final close = switch (stop[0]) {
+    // l10n:keep schema punctuation pattern
+    '（' => '）',
+    '(' => ')',
+    _ => null,
+  };
+  final end = close == null ? -1 : rest.indexOf(close);
+  if (end >= 0) {
+    // What the brackets hold, then whatever follows them.
+    final inside = rest.substring(0, end).trim();
+    final after = trimmed(rest.substring(end + 1));
+    // l10n:keep schema punctuation joining a Chinese phrase
+    rest = after.isEmpty ? inside : (inside.isEmpty ? after : '$inside，$after');
+  }
+  return (title: title, rest: trimmed(rest));
+}
+
+/// What a field's own description gives its row: a title when it is short
+/// or opens with a name ([leadingPhrase]), and the line under the title.
+({String? title, String? hint}) _describedText(SchemaNode node) {
+  final text = _plainDescription(node);
+  if (text == null || text.isEmpty) return (title: null, hint: null);
+  // l10n:keep schema punctuation pattern
+  if (_fitsTitle(text)) return (title: text.replaceFirst(RegExp(r'[。.]$'), ''), hint: null);
+  if (leadingPhrase(text) case (:final title, :final rest)) {
+    // The rest can open a Markdown list of its own.
+    final more = plainSchemaText(rest);
+    return (title: title, hint: more.isEmpty ? null : _firstSentence(more));
+  }
+  return (title: null, hint: _firstSentence(text));
+}
+
+/// The field's title: page copy, the schema's description when it is short
+/// or opens with a name (in the UI language when it has one, else English),
+/// a known key, then the key in words.
 String labelFor(String key, SchemaNode node, FieldCopy copy) {
   if (copy.label case final label?) return label;
-  final description = _plainDescription(node);
-  if (description != null && description.isNotEmpty && description.runes.length <= 18 && !description.contains('\n')) {
-    // l10n:keep schema punctuation pattern
-    return description.replaceFirst(RegExp(r'[。.]$'), '');
-  }
-  return commonKeyLabels[key] ?? humanizeKey(key);
+  return _describedText(node).title ?? commonKeyLabels[key] ?? humanizeKey(key);
 }
 
-/// The field's second line: page copy, else a longer schema description's
-/// first sentence.
+/// The field's second line: page copy, else what a longer schema description
+/// adds to the title.
 String? hintFor(SchemaNode node, FieldCopy copy) {
   if (copy.hint case final hint?) return hint;
-  final description = _plainDescription(node);
-  if (description == null || description.isEmpty || description.runes.length <= 18) return null;
-  // l10n:keep schema sentence boundary pattern
-  final first = description.split(RegExp(r'(?<=[。.!?！？])\s*|\n')).first.trim();
-  return first.runes.length > 40 ? '${String.fromCharCodes(first.runes.take(39))}…' : first;
+  if (copy.label == null) return _describedText(node).hint;
+  // The page names the field; a description longer than a title explains it.
+  final text = _plainDescription(node);
+  return text == null || text.isEmpty || _fitsTitle(text) ? null : _firstSentence(text);
 }
 
 /// The choices a choice field offers, in order, with labels.
 List<(Object?, String)> choicesFor(SchemaNode node, FieldCopy copy) {
   if (copy.choices.isNotEmpty) return [for (final MapEntry(:key, :value) in copy.choices.entries) (key, value)];
-  return [for (final v in node.effective.enumValues ?? const []) (v, valueLabel(v, copy))];
+  return [for (final v in node.effective.enumValues ?? const []) (v, valueLabel(v, copy, node: node))];
 }
 
-/// A constant in words.
-String valueLabel(Object? value, FieldCopy copy) {
+/// The name an option of [node] gives itself: `const(v).description(…)`
+/// (schemastery's way to label a choice), when it reads as a title.
+String? _optionLabel(SchemaNode? node, Object? value) {
+  if (node == null) return null;
+  final n = node.effective;
+  final options = n.type == 'const' ? [n] : [if (n.type == 'union') ...n.list];
+  for (final option in options) {
+    final constant = option.effective;
+    if (constant.type != 'const' || !jsonEquals(constant.value, value)) continue;
+    final text = _plainText(option.meta.description ?? constant.meta.description);
+    if (text == null || text.isEmpty) return null;
+    if (_fitsTitle(text)) return text;
+    return leadingPhrase(text)?.title;
+  }
+  return null;
+}
+
+/// A constant in words: page copy, the option's own description in [node],
+/// a well-known value, then the value itself (nothing and the empty string
+/// read 「未设置」).
+String valueLabel(Object? value, FieldCopy copy, {SchemaNode? node}) {
   final v = copy.aliases[value] ?? value;
-  return copy.choices[v] ?? commonValueLabels[v] ?? (v == null ? appL10n.commonNotSet : '$v');
+  return copy.choices[v] ??
+      _optionLabel(node, v) ??
+      commonValueLabels[v] ??
+      (v == null || v == '' ? appL10n.commonNotSet : '$v');
 }
 
 /// The choice a stored value reads as (aliases applied).

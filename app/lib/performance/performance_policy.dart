@@ -40,25 +40,48 @@ class PerformanceSnapshot {
   Map<String, Object?> toMap() => {'available': available, 'loaded': loaded, 'device': device, 'thermal': thermal};
 }
 
+/// 屏幕刷新率(设置 → 性能)。有些系统把第三方 App 默认压在 60Hz;App 一旦声明
+/// 自己管刷新率,系统就会把开关显示成「应用内设置」——所以这里必须真的给用户一个
+/// 选择,包括「跟随系统」把决定权还回去。
+enum RefreshRateMode {
+  /// 动画、滚动、流式输出时用屏幕最高刷新率;停下来交回系统。
+  auto,
+
+  /// 一直用最高刷新率。
+  max,
+
+  /// 不声明偏好,完全由系统的刷新率设置决定。
+  system,
+}
+
 /// Null per-feature values mean "use the current profile". Defaults are never persisted.
 class PerformancePrefs {
-  const PerformancePrefs({this.mode = PerformanceMode.auto, this.blur, this.animations, this.loaded = false});
+  const PerformancePrefs({
+    this.mode = PerformanceMode.auto,
+    this.blur,
+    this.animations,
+    this.refreshRate = RefreshRateMode.auto,
+    this.loaded = false,
+  });
 
   final PerformanceMode mode;
   final bool? blur;
   final bool? animations;
+  final RefreshRateMode refreshRate;
   final bool loaded;
 
   PerformancePrefs copyWith({
     PerformanceMode? mode,
     bool? blur,
     bool? animations,
+    RefreshRateMode? refreshRate,
     bool? loaded,
     bool resetEffects = false,
   }) => PerformancePrefs(
     mode: mode ?? this.mode,
     blur: resetEffects ? null : blur ?? this.blur,
     animations: resetEffects ? null : animations ?? this.animations,
+    refreshRate: refreshRate ?? this.refreshRate,
     loaded: loaded ?? this.loaded,
   );
 }

@@ -20,10 +20,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../l10n/l10n.dart';
 import '../../../state/connection_state.dart';
 import '../../../state/features_state.dart';
+import '../../../state/hosts_state.dart';
 import '../../../state/models_state.dart';
 import '../../../state/schedule_editor_state.dart';
 import '../../../state/sessions_state.dart';
 import '../../chat/model_sheet.dart';
+import '../../chat/widgets/question_card.dart';
 import '../../common/discard_guard.dart';
 import '../../common/smooth_size.dart';
 import '../../providers/provider_widgets.dart';
@@ -33,6 +35,7 @@ import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 import '../feature_widgets.dart';
 import 'cron.dart';
+import 'schedule_authorization.dart';
 import 'schedule_draft.dart';
 import 'schedule_pickers.dart';
 import 'time_zones.dart';
@@ -72,6 +75,8 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
   ModelSelection? _model;
 
   bool _saving = false;
+  ScheduleAuthorization? _authorization;
+  String? _authorizationError;
   Map<_F, String> _errors = const {};
   String? _formError;
 
@@ -105,6 +110,8 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
 
   @override
   void dispose() {
+    _authorization?.dispose();
+    _authorization = null;
     _title.dispose();
     _prompt.dispose();
     _interval.dispose();
@@ -177,7 +184,7 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
   }
 
   Future<void> _pickZone(ScheduleDraft draft, String device) async {
-    final picked = await showZoneSheet(context, selected: draft.timeZone, device: device);
+    final picked = await showZoneSheet(context, selected: draft.timeZone, device: device, at: _now);
     if (picked == null || !mounted) return;
     _update(_draft!.copyWith(timeZone: picked));
   }
@@ -254,19 +261,68 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
     if (errors.isNotEmpty) return;
     final conn = ref.read(activeConnectionProvider).value;
     if (conn == null) return setState(() => _formError = context.l10n.commonEngineUnreachable);
-    setState(() => _saving = true);
+    final authorization = ScheduleAuthorization(
+      conn.client,
+      sessionId: widget.task?.sessionId ?? _sessionId,
+      onChanged: _authorizationChanged,
+    );
+    _authorization = authorization;
+    setState(() {
+      _saving = true;
+      _authorizationError = null;
+    });
     try {
+      await authorization.start();
+      if (!_currentSave(authorization)) return;
       if (widget.task case final task?) {
-        await _saveEdit(conn.client, task, draft);
+        await _saveEdit(authorization, task, draft);
       } else {
-        await _create(conn.client, draft);
+        await _create(authorization, draft);
+      }
+    } on Object catch (e) {
+      if (_currentSave(authorization)) {
+        setState(() => _formError = context.l10n.featuresScheduleSaveError(_short(e)));
       }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (identical(_authorization, authorization)) {
+        _authorization = null;
+        authorization.dispose();
+        if (mounted) setState(() => _saving = false);
+      }
     }
   }
 
-  Future<void> _saveEdit(DshClient client, ScheduleTask task, ScheduleDraft draft) async {
+  bool _currentSave(ScheduleAuthorization authorization) =>
+      mounted &&
+      identical(_authorization, authorization) &&
+      authorization.active &&
+      identical(ref.read(activeConnectionProvider).value?.client, authorization.client);
+
+  void _authorizationChanged() {
+    if (mounted) setState(() => _authorizationError = null);
+  }
+
+  Future<void> _answerAuthorization(
+    ScheduleAuthorization authorization,
+    UserQuestionRequest request,
+    List<QuestionAnswer>? answers,
+  ) async {
+    if (!_currentSave(authorization)) return;
+    try {
+      if (answers == null) {
+        await authorization.reject(request);
+      } else {
+        await authorization.answer(request, answers);
+      }
+    } on Object catch (e) {
+      if (_currentSave(authorization)) {
+        setState(() => _authorizationError = context.l10n.featuresScheduleSaveError(_short(e)));
+      }
+    }
+  }
+
+  Future<void> _saveEdit(ScheduleAuthorization authorization, ScheduleTask task, ScheduleDraft draft) async {
+    final client = authorization.client;
     final title = _title.text.trim();
     final prompt = _prompt.text.trim();
     final timing = draft == _initial ? null : draft.toTiming();
@@ -281,23 +337,25 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
         prompt: prompt == task.prompt ? null : prompt,
         timing: timing,
       );
+      if (!mounted || !_currentSave(authorization)) return;
       ref.invalidate(schedulesProvider);
-      if (!mounted) return;
       if (result.task case final saved?) {
         Navigator.of(context).pop(saved);
         return;
       }
       setState(() => _formError = scheduleUpdateError(result.code));
     } on Object catch (e) {
-      if (mounted) setState(() => _formError = context.l10n.featuresScheduleSaveError(_short(e)));
+      if (_currentSave(authorization)) setState(() => _formError = context.l10n.featuresScheduleSaveError(_short(e)));
     }
   }
 
-  Future<void> _create(DshClient client, ScheduleDraft draft) async {
+  Future<void> _create(ScheduleAuthorization authorization, ScheduleDraft draft) async {
+    final client = authorization.client;
     String? sessionId = _sessionId;
     try {
       sessionId ??= await startConversation(ref, ConversationPlan(workspaceId: _workspaceId, model: _model));
-      if (!mounted) return;
+      if (!_currentSave(authorization)) return;
+      authorization.setSession(sessionId);
       final title = _title.text.trim();
       final created = await requestSchedule(
         client,
@@ -311,10 +369,11 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
         ),
         timeZone: ref.read(deviceTimeZoneProvider).value,
       );
+      if (!mounted || !_currentSave(authorization)) return;
       ref.invalidate(schedulesProvider);
-      if (mounted) Navigator.of(context).pop(created);
+      Navigator.of(context).pop(created);
     } on ScheduleCreateFailure catch (f) {
-      if (mounted) {
+      if (_currentSave(authorization)) {
         setState(() {
           _formError = context.l10n.featuresScheduleCreateError(f.message);
           _failedSession = sessionId;
@@ -323,7 +382,7 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
         });
       }
     } on Object catch (e) {
-      if (mounted) {
+      if (_currentSave(authorization)) {
         setState(() {
           _formError = context.l10n.featuresScheduleCreateError(_short(e));
           _failedSession = sessionId;
@@ -333,8 +392,24 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
     }
   }
 
+  void _abandonSave() {
+    final authorization = _authorization;
+    if (authorization == null) return;
+    _authorization = null;
+    authorization.dispose();
+    setState(() {
+      _saving = false;
+      _authorizationError = null;
+      _formError = context.l10n.commonEngineUnreachable;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    ref.listen(activeHostProvider, (_, _) => _abandonSave());
+    ref.listen(activeConnectionProvider.select((value) => value.value?.client), (_, client) {
+      if (_authorization case final authorization? when !identical(authorization.client, client)) _abandonSave();
+    });
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -475,6 +550,31 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
               ),
             ),
           ),
+          if (_authorization case final authorization? when authorization.requests.isNotEmpty)
+            Positioned.fill(
+              child: Material(
+                color: scheme.surface,
+                child: SafeArea(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Align(alignment: Alignment.centerLeft, child: BackButton()),
+                        QuestionCard(
+                          key: ValueKey(authorization.requests.first.eventId),
+                          request: authorization.requests.first,
+                          onAnswer: (request, answers) => _answerAuthorization(authorization, request, answers),
+                          onReject: (request) => _answerAuthorization(authorization, request, null),
+                        ),
+                        if (_authorizationError case final error?)
+                          Text(error, style: theme.textTheme.bodySmall?.copyWith(color: colors.danger)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

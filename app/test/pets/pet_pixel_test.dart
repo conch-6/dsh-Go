@@ -128,4 +128,29 @@ void main() {
       }
     }
   });
+
+  test('the out-of-app overlay uses the same k: pinned here and in PetPackTest.kt', () {
+    // The floating pet (Kotlin PetPack.screenScale / devicePixels) must draw
+    // at these numbers too, else it is a size off from the chat page. The
+    // same table is asserted in
+    // app/android/app/src/test/kotlin/io/github/ccch1mneyyy/dsh_app/pet/PetPackTest.kt
+    // (`screenScaleMatchesTheAppForTheShippedPacks`): change one, change both.
+    const expected = [
+      ('whale-girl', 2.0, [1, 2, 3]),
+      ('whale-girl', 2.625, [1, 2, 3]),
+      ('whale-girl', 2.75, [1, 2, 3]),
+      ('whale-girl', 3.0, [1, 2, 3]),
+      ('whale-girl', 3.5, [2, 3, 4]),
+      ('deepy-whale', 2.0, [2, 3, 4]),
+      ('deepy-whale', 2.625, [3, 4, 5]),
+      ('deepy-whale', 2.75, [3, 4, 5]),
+      ('deepy-whale', 3.0, [3, 4, 5]),
+      ('deepy-whale', 3.5, [4, 5, 6]),
+    ];
+    final packs = {'whale-girl': girl, 'deepy-whale': deepy};
+    for (final (id, dpr, ks) in expected) {
+      final pack = packs[id]!;
+      expect([for (final s in PetSize.values) petDevicePixels(pack, s, dpr)], ks, reason: '$id at $dpr×');
+    }
+  });
 }

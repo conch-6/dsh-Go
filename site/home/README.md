@@ -6,7 +6,7 @@
 
 ## 怎么上线
 
-`services/share-worker/scripts/build-site.mjs` 把 `dist/` 拷进 Worker 的 `public/home/`，Worker 在 `/` 返回 `index.html`，页面里的相对路径（`/app.js`、`/assets/…`）按原路径提供，`/home/…` 本身是 404。部署照旧：`CF_TOKEN_FILE=… services/share-worker/scripts/provision.sh deploy`。路由、安全头和缓存见 [share-links.md](../../docs/design/share-links.md) §2。
+`services/share-worker/scripts/build-site.mjs` 把 `dist/` 拷进 Worker 静态资源 `public/` 的根下，`/` 返回 `index.html`（直接访问 `/index.html` 是 404），页面里的相对路径（`/app.js`、`/assets/…`）按原路径提供，都不经过 Worker；每个文件的安全头写在生成的 `public/_headers` 里。部署照旧：`CF_TOKEN_FILE=… services/share-worker/scripts/provision.sh deploy`。路由、安全头和缓存见 [share-links.md](../../docs/design/share-links.md) §2。
 
 - **CSP**：写在 `dist/index.html` 的 `<meta>` 里，Worker 构建时取出来作为响应头（再加 `frame-ancestors 'none'`）。脚本只能是本站文件，没有内联脚本和事件属性；样式表只能是本站文件，允许内联 `style` 属性（开场动画用 `style="--order:…"` 这类 CSS 变量）；图片只能是本站的；`connect-src` 只有本站（Star 数）。所以头像、二维码要放在 `dist/assets/author/`，不能填外链。
 - **Star 数**：页面向本站的 `GET /api/github/stars` 要数（`services/share-worker/src/github.ts`），由 Worker 去问 GitHub、缓存 10 分钟，访客的浏览器不连 GitHub。拿不到数时气泡照常显示，只是没有数字。Worker 固定查 `ccch1mneyyy/dsh-go`。

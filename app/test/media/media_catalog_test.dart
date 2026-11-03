@@ -387,4 +387,113 @@ void main() {
       expect((fitted.aspect, fitted.count, fitted.quality), ('1:1', 2, null));
     });
   });
+
+  group('provider presets and per-kind defaults', () {
+    SettingsNamespaceView viewOf(Map<String, Object?> describe) =>
+        SettingsDescription.fromJson(describe).namespaces['dsh-media']!;
+
+    test('an older catalogue without presets uses the app\'s fallback list', () {
+      final presets = mediaPresetsOf(viewOf(_m0()));
+      expect(presets.map((p) => p.id), containsAll(['ark-image', 'openai-image', 'gemini-image']));
+      expect(presets.firstWhere((p) => p.id == 'gemini-image').responseFormat, 'b64_json');
+      expect(presets.firstWhere((p) => p.id == 'ark-image').keyGroup, 'ark');
+    });
+
+    test('a 0.3 catalogue\'s presets win; an unreadable row is skipped', () {
+      final describe = _m0();
+      _catalog(describe)['presets'] = [
+        {
+          'id': 'ark-image',
+          'label': '火山方舟 · 图片',
+          'labelEn': 'Volcengine Ark · Image',
+          'provider': 'ark',
+          'profile': 'ark-image',
+          'baseUrl': 'https://ark.cn-beijing.volces.com',
+          'responseFormat': '',
+          'models': ['doubao-seedream-5-0-pro-260628'],
+          'kind': 'image',
+          'keyGroup': 'ark',
+        },
+        {
+          'id': 'bad',
+          'label': '',
+          'provider': 'x',
+          'profile': 'p',
+          'baseUrl': 'http://not-https',
+          'models': <Object?>[],
+          'kind': 'image',
+        },
+      ];
+      final presets = mediaPresetsOf(viewOf(describe));
+      expect(presets, hasLength(1));
+      expect(presets.single.id, 'ark-image');
+      expect(presets.single.title(true), 'Volcengine Ark · Image');
+    });
+
+    test('an empty preset list means none, not the app fallback', () {
+      final describe = _m0();
+      _catalog(describe)['presets'] = <Object?>[];
+      expect(mediaPresetsOf(viewOf(describe)), isEmpty);
+    });
+
+    test('a catalog without the key at all uses the app fallback', () {
+      final describe = _m0();
+      _catalog(describe).remove('presets');
+      expect(mediaPresetsOf(viewOf(describe)), fallbackMediaPresets);
+    });
+
+    test('all catalogue models are known, even ones no service serves yet', () {
+      final catalog = _read(_m0());
+      expect(catalog.modelOf('gpt-image-2')?.label, 'GPT Image 2');
+      expect(catalog.modelOf('gpt-image-2.5-sunburst')?.label, 'GPT Image 2.5 Sunburst');
+      expect(catalog.modelOf('not-a-model'), isNull);
+    });
+
+    test('image and video defaults are separate; the legacy pair still works', () {
+      final describe = _m0();
+      _value(describe)['defaults'] = {'serviceId': 'office', 'modelId': 'gpt-image-2'};
+      expect(_read(describe).defaultFor(GenerateKind.image)?.model.id, 'gpt-image-2');
+
+      _value(describe)['defaults'] = {
+        'serviceId': 'office',
+        'modelId': 'gpt-image-2',
+        'imageServiceId': 'office',
+        'imageModelId': 'gpt-image-2.5-flare',
+        'videoServiceId': 'office',
+        'videoModelId': 'gpt-image-2',
+      };
+      expect(_read(describe).defaultFor(GenerateKind.image)?.model.id, 'gpt-image-2.5-flare');
+      expect(_read(describe).defaultFor(GenerateKind.video), isNull);
+
+      _value(describe)['defaults'] = {
+        'serviceId': 'office',
+        'modelId': 'gpt-image-2',
+        'imageServiceId': 'gone',
+        'imageModelId': 'gpt-image-2.5-sunburst',
+      };
+      expect(_read(describe).defaultFor(GenerateKind.image)?.model.id, 'gpt-image-2');
+    });
+
+    test('the kind service wins even when its model went away, like the plugin', () {
+      final describe = _m0();
+      _value(describe)['services'] = [
+        _service('office', models: 'gpt-image-2'),
+        _service('home', models: 'gpt-image-2.5-flare', keyRef: 'DSH_MEDIA_SLOT_2_API_KEY'),
+      ];
+      _value(describe)['defaults'] = {'imageServiceId': 'home', 'imageModelId': 'gone-model'};
+      final chosen = _read(describe).defaultFor(GenerateKind.image);
+      expect(chosen?.service.id, 'home');
+      expect(chosen?.model.id, 'gpt-image-2.5-flare');
+
+      _value(describe)['defaults'] = {
+        'serviceId': 'office',
+        'modelId': 'gpt-image-2',
+        'imageModelId': 'gpt-image-2.5-flare',
+      };
+      // No kind service: the legacy service stays; a kind model it can't
+      // serve falls back to the legacy model, as in the plugin.
+      final legacy = _read(describe).defaultFor(GenerateKind.image);
+      expect((legacy?.service.id, legacy?.model.id), ('office', 'gpt-image-2'));
+    });
+  });
 }

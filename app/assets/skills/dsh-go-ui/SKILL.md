@@ -1,8 +1,8 @@
 ---
 # dsh-go:managed — the dsh-go app keeps this skill up to date; delete this line to keep your own edits.
 name: dsh-go-ui
-description: dsh-go 手机 App 原生界面的配置（$DSH_HOME/dsh-go/ui.json）：顶栏按钮、输入框上方的快捷胶囊、新对话建议卡、抽屉分组与排序、密度、隐藏元素、主题和强调色、平板快捷键、插件座位。用户要改 App 本身的样子时先加载它，比如「把顶栏的 XX 换成 YY」「输入框上面加个总结按钮」「新对话页放几个常用问题」「抽屉按创建时间排」「把回合脚注藏掉」「换成暗色 / 黛青」「加个 ctrl+k 打开搜索」。Change how the dsh-go phone app's native screens look and behave by editing ui.json — header buttons, quick-action capsules, suggestion cards, drawer, density, hidden elements, theme, shortcuts.
-whenToUse: The user asks to change the dsh-go app (手机 App / 原生界面) itself. Not for the web UI or for DSH settings; anything that needs logic or data is a plugin (dsh-go-plugin).
+description: dsh-go 手机 App 原生界面的配置（$DSH_HOME/dsh-go/ui.json）：顶栏按钮、输入框上方的快捷胶囊、新对话建议卡、抽屉分组与排序、密度、隐藏元素、主题和强调色、平板快捷键、插件座位。只改 **dsh-go 手机原生界面**；用户要改 Harness 网页版 / 桌面端、做 Cordis 插件或网页插件时，用官方技能，不要用本技能。用户要改 App 本身的样子时先加载它，比如「把顶栏的 XX 换成 YY」「输入框上面加个总结按钮」「新对话页放几个常用问题」「抽屉按创建时间排」「把回合脚注藏掉」「换成暗色 / 黛青」「加个 ctrl+k 打开搜索」。Change how the dsh-go phone app's native screens look and behave by editing ui.json; the Harness Web UI / Cordis plugins are the official skills' business.
+whenToUse: The user asks to change the dsh-go app (手机 App / 原生界面) itself. Not for the Harness Web UI, Cordis plugins or DSH settings; anything that needs logic or data is a plugin (dsh-go-plugin).
 ---
 
 # dsh-go 界面配置（ui.json）
@@ -10,6 +10,13 @@ whenToUse: The user asks to change the dsh-go app (手机 App / 原生界面) it
 dsh-go App 会读 `$DSH_HOME/dsh-go/ui.json`（`DSH_HOME` 默认 `~/.dsh`），按里面的声明改自己的原生界面。改完保存，App 一两秒内自动生效，不用重启。
 
 文件只能声明，不能执行：没有脚本、没有网络请求、不能装东西。按钮能做的事只有四种动作（见下），而且都要用户亲手点才会发生。
+
+## 和官方技能的分工
+
+- **本技能**：改 dsh-go 手机 App 的原生界面（ui.json）。
+- **dsh-go-plugin**：给手机 App 加胶囊、菜单、状态条、原生面板、工具卡；要逻辑或数据时用它，不用 ui.json。
+- **官方 `cordis-plugin-development` 等**：Harness Web UI / 桌面端的插件、装饰、槽位、页面和 MCP；目录在工作区，安装走 `plugin_manager → install_bundle`。
+- 用户没点名界面载体时，手机上默认是 dsh-go 原生界面；先确定载体再选技能，不看加载顺序。两套配置（ui.json / Cordis bundle）不要混写，也不要拿官方网页插件的做法套到 App 上。
 
 ## 怎么改
 

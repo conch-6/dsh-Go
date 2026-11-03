@@ -188,7 +188,7 @@ abstract final class SafeModeActions {
       lines = await container.read(runtimeBridgeProvider).failureLog();
     } catch (_) {}
     if (lines.isEmpty) {
-      final logs = container.read(localRuntimeProvider).logs;
+      final logs = container.read(localRuntimeLogsProvider);
       lines = logs.length > 300 ? logs.sublist(logs.length - 300) : logs;
     }
     if (!context.mounted) return;

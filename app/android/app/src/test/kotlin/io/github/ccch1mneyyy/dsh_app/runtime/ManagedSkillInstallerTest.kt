@@ -348,7 +348,7 @@ class ManagedSkillInstallerTest {
             }) { synchronized(results) { results.add(it) } }
             assertTrue(staged.await(5, TimeUnit.SECONDS))
             retired.set(true)
-            worker.execute { activateRootfs(base, "new-version"); activated.countDown() }
+            worker.execute { activateRootfs(base, "new-version", sync = {}); activated.countDown() }
             assertFalse(activated.await(50, TimeUnit.MILLISECONDS))
             resume.countDown()
             assertTrue(activated.await(5, TimeUnit.SECONDS))

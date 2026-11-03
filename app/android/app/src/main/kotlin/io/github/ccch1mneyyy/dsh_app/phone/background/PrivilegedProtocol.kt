@@ -56,6 +56,10 @@ object Proto {
     const val APP_PACKAGE = "io.github.ccch1mneyyy.dsh_app"
 
     const val INJECT_OK = "injectOk"
+    /** Gate only, with INJECT_OK false: the failing injection's [ERROR] code. Older cores omit it. */
+    const val INJECT_ERROR = "injectError"
+    /** With [ERROR] deviceUnavailable: the failing step's exception type, never its message. Older cores omit it. */
+    const val ERROR_DETAIL = "errorDetail"
 
     // response keys
     const val OK = "ok"
@@ -94,6 +98,10 @@ object Proto {
 
 /** Stable reason codes → one short Chinese sentence for the model (after Phase's set). */
 object Reasons {
+    fun of(code: String?, detail: String?): String = withDetail(of(code), detail)
+
+    fun withDetail(reason: String, detail: String?): String = reason + detail?.let { "（$it）" }.orEmpty()
+
     fun of(code: String?): String = when (code) {
         null -> ""
         // l10n:keep privileged protocol
@@ -135,7 +143,9 @@ object Reasons {
         // l10n:keep privileged protocol
         "textReadbackMismatch" -> "文字已提交，但输入框内容与预期不一致"
         // l10n:keep privileged protocol
-        "inputRejected" -> "系统拒绝了后台屏输入，未重试动作"
+        "inputApiUnavailable" -> "此系统没有可用的后台屏输入接口，无法点按或输入"
+        // l10n:keep privileged protocol
+        "inputRejected" -> "未能确认后台屏输入结果；动作可能已发出，请重新观察，不要重复动作"
         // l10n:keep privileged protocol
         "screenshotFailed" -> "未取得后台屏画面，可重新观察；不要重放已派发的动作"
         // l10n:keep privileged protocol

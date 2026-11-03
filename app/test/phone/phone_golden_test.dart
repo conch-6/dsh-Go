@@ -1,12 +1,12 @@
 // Golden screenshots of phone control: the main page (mid-setup and off), the
-// 显著披露 sheet, the restricted-settings guide, 不打扰模式 and the app list.
+// 显著披露 sheet, the restricted-settings guide and the app list (不打扰模式 is
+// dnd_mode_golden_test.dart).
 //
 //   flutter test --update-goldens test/phone/phone_golden_test.dart
 
 import 'package:dsh_app/phone/phone_channel.dart';
 import 'package:dsh_app/ui/phone/app_rules_page.dart';
 import 'package:dsh_app/ui/phone/a11y_restore_sheet.dart';
-import 'package:dsh_app/ui/phone/dnd_mode_page.dart';
 import 'package:dsh_app/ui/phone/hold_to_confirm.dart';
 import 'package:dsh_app/ui/phone/phone_control_screen.dart';
 import 'package:dsh_app/ui/phone/phone_unlock_page.dart';
@@ -48,14 +48,16 @@ void main() {
     'a11y_restore',
     () => const Scaffold(body: A11yRestoreSheet()),
     size: const Size(320, 680),
-    native: () => FakePhoneNative(status: {
-      ...phoneStatus(),
-      'a11yKeeper': {
-        'granted': false,
-        'path': 'shizuku',
-        'command': 'adb shell pm grant io.github.ccch1mneyyy.dsh_app android.permission.WRITE_SECURE_SETTINGS',
+    native: () => FakePhoneNative(
+      status: {
+        ...phoneStatus(),
+        'a11yKeeper': {
+          'granted': false,
+          'path': 'shizuku',
+          'command': 'adb shell pm grant io.github.ccch1mneyyy.dsh_app android.permission.WRITE_SECURE_SETTINGS',
+        },
       },
-    }),
+    ),
   );
 
   phoneGolden(
@@ -86,17 +88,6 @@ void main() {
   );
 
   phoneGolden('phone_restricted_guide', () => const RestrictedSettingsGuidePage(), size: const Size(390, 1240));
-
-  phoneGolden(
-    'phone_dnd_adb',
-    () => const PhoneDndPage(),
-    size: const Size(390, 1500),
-    native: () => FakePhoneNative(status: phoneStatus(wirelessDebugging: true, paired: true)),
-    before: (tester) async {
-      await tester.tap(find.text('自连 ADB'));
-      await tester.pumpAndSettle();
-    },
-  );
 
   phoneGolden('phone_app_rules', () => const PhoneAppRulesPage(), size: const Size(390, 1000));
 

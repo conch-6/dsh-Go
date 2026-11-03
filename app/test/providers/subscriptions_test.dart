@@ -129,7 +129,7 @@ void main() {
         for (final row in tester.widgetList<ListPageRow>(find.byType(ListPageRow)))
           row.title ?? row.spot?.title(appL10n),
       ];
-      expect(titles, ['DeepSeek', 'ChatGPT', 'Claude', 'My Gateway', '添加渠道']);
+      expect(titles, [appL10n.viewModelSelect, 'DeepSeek', 'ChatGPT', 'Claude', 'My Gateway', '添加渠道']);
       // Plain letters, no brand marks: 「G」 and 「C」.
       expect(find.text('G'), findsOneWidget);
       expect(find.text('C'), findsOneWidget);

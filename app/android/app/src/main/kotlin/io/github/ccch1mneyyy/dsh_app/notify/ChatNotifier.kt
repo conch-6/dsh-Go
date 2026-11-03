@@ -276,22 +276,24 @@ class ChatNotifier(private val app: Context) {
         nm.notify(tag, SUMMARY_ID, summary)
     }
 
-    private fun openIntent(post: Post, tag: String, id: Int): PendingIntent {
+    private fun openIntent(post: Post, tag: String, id: Int): PendingIntent =
+        sessionIntent(post.sessionId, post.host, post.kind, post.eventId, 31 * tag.hashCode() + id)
+
+    /**
+     * A tap that opens [sessionId] on [host], the way a chat notification's does (it carries the
+     * secret [takeTap] checks). Extras don't make PendingIntents distinct: give each notification
+     * its own [requestCode].
+     */
+    fun sessionIntent(sessionId: String, host: String, kind: String, eventId: String?, requestCode: Int): PendingIntent {
         val intent = Intent(app, MainActivity::class.java)
             .setAction(ACTION_OPEN)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(EXTRA_TOKEN, token())
-            .putExtra(EXTRA_SESSION, post.sessionId)
-            .putExtra(EXTRA_HOST, post.host)
-            .putExtra(EXTRA_KIND, post.kind)
-            .putExtra(EXTRA_EVENT, post.eventId)
-        // Extras don't make PendingIntents distinct: one request code per notification does.
-        return PendingIntent.getActivity(
-            app,
-            31 * tag.hashCode() + id,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
+            .putExtra(EXTRA_SESSION, sessionId)
+            .putExtra(EXTRA_HOST, host)
+            .putExtra(EXTRA_KIND, kind)
+            .putExtra(EXTRA_EVENT, eventId)
+        return PendingIntent.getActivity(app, requestCode, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     private fun actionIntent(post: Post, decision: String): PendingIntent {

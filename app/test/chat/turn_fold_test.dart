@@ -71,15 +71,6 @@ void main() {
       }
     });
 
-    test('a turn being read stays flat until openTurns is cleared', () {
-      final s = runInfoState(finished: true);
-      final rows = deriveRows(items: s.items, turns: s.turns, foldTurns: true, openTurns: {s.turns.single.startSeq});
-      expect(rows.whereType<TurnProcessRow>(), isEmpty);
-      expect(rows.whereType<ToolCallRow>(), isNotEmpty);
-      final folded = deriveRows(items: s.items, turns: s.turns, foldTurns: true);
-      expect(folded.whereType<TurnProcessRow>(), hasLength(1));
-    });
-
     test('off by default: the rows are what they always were', () {
       final s = runInfoState(finished: true);
       final rows = deriveRows(items: s.items, turns: s.turns);
@@ -161,14 +152,12 @@ void main() {
 
   group('thinking preview', () {
     test('settled: the first line, without bold markers', () {
-      expect(thinkingPreview('**看需求**\n用户想折叠工具调用', active: false), '看需求');
+      expect(thinkingPreview('**看需求**\n用户想折叠工具调用'), '看需求');
     });
 
-    test('live: the first line of the latest paragraph whose line is done', () {
-      expect(thinkingPreview('先看看', active: true), '');
-      expect(thinkingPreview('先看看\n然后', active: true), '先看看');
-      expect(thinkingPreview('第一段\n细节\n\n第二段写到一半', active: true), '第一段');
-      expect(thinkingPreview('第一段\n\n**第二段**\n继续', active: true), '第二段');
+    test('the live window keeps the tail, without bold markers or blank runs', () {
+      expect(thinkingTickerText('第一段\n**第二段**\n\n\n第三段\n正在写'), '第一段\n第二段\n第三段\n正在写');
+      expect(thinkingTickerText('  先看看\n然后  '), '先看看\n然后');
     });
   });
 }

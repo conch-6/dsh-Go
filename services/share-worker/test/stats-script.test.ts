@@ -12,12 +12,14 @@ const fakes = join(worker, 'test/publish-fakes');
 const dir = mkdtempSync(join(tmpdir(), 'dshgo-stats-'));
 const TOKEN = 'fake-analytics-token-' + Math.random().toString(36).slice(2);
 writeFileSync(join(dir, 'token'), TOKEN + '\n', { mode: 0o600 });
-const ACCOUNT = /"account_id": *"([0-9a-f]+)"/.exec(readFileSync(join(worker, 'wrangler.jsonc'), 'utf8'))![1];
+// Made up: the public wrangler.jsonc only has a placeholder, and the machine's own
+// ~/keys/dshgo-cloudflare-account-id must not leak into the test.
+const ACCOUNT = '0123456789abcdef0123456789abcdef';
 
 function sh(script: string, args: string[], env: Record<string, string> = {}): Promise<{ code: number; out: string }> {
   const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CF_|GH_|CLOUDFLARE|STATS_)/.test(k)));
   return new Promise((done) => {
-    execFile(join(worker, 'scripts', script), args, { cwd: worker, env: { ...clean, ...env }, timeout: 60_000 }, (error, stdout, stderr) =>
+    execFile(join(worker, 'scripts', script), args, { cwd: worker, env: { ...clean, CF_ACCOUNT_ID: ACCOUNT, ...env }, timeout: 60_000 }, (error, stdout, stderr) =>
       done({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, out: stdout + stderr }),
     );
   });

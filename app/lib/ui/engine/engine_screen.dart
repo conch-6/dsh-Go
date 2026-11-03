@@ -134,7 +134,7 @@ class EngineScreen extends ConsumerWidget {
             if (!missing)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                child: TerminalCard(title: l10n.phoneEngineLogs, lines: state.logs, height: logHeight),
+                child: TerminalCard(title: l10n.phoneEngineLogs, lines: ref.watch(localRuntimeLogsProvider), height: logHeight),
               ),
             // Their home is 设置; the way in from here keeps the name.
             SettingsSection(

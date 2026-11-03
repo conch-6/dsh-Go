@@ -411,12 +411,25 @@ class DshConnection {
   Future<WebSocket> connectWebSocket(String path, {Duration? timeout}) async {
     final headers = <String, Object>{if (cookie != null) 'Cookie': cookie!.header, 'Host': ?hostHeader};
     final uri = webSocketUri(path);
+    var abandoned = false;
     try {
-      return await WebSocket.connect(
-        uri.toString(),
-        headers: headers,
-        customClient: _http,
-      ).timeout(timeout ?? connectTimeout);
+      return await WebSocket.connect(uri.toString(), headers: headers, customClient: _http)
+          .then((socket) {
+            // A timeout does not cancel the upgrade. Own a late socket until it
+            // can be handed to the caller; closing HttpClient cannot reclaim it.
+            if (abandoned || _closed) {
+              unawaited(socket.close().catchError((_) {}));
+              throw const DshClosedException('WebSocket connection abandoned');
+            }
+            return socket;
+          })
+          .timeout(
+            timeout ?? connectTimeout,
+            onTimeout: () {
+              abandoned = true;
+              throw TimeoutException('WebSocket connect timed out');
+            },
+          );
     } on WebSocketException catch (error) {
       final status = error.httpStatusCode;
       if (status != null) {

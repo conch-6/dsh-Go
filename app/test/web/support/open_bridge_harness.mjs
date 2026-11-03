@@ -51,6 +51,7 @@ const document = {
     return null;
   },
   querySelectorAll: () => [],
+  addEventListener: () => {},
 };
 const window = {
   DshAppOpen: { postMessage: (m) => out.reports.push(JSON.parse(m)) },

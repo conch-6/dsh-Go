@@ -78,7 +78,9 @@ class _AssistantMessageState extends State<AssistantMessage> {
   Widget _markdown(String text, bool streaming) {
     if (_body == null || _bodyText != text || _bodyStreaming != streaming) {
       // Long-press opens the menu; selecting text is one of its entries.
-      _body = MarkdownBody(text: text, streaming: streaming, selectable: false);
+      // repairBareViews: a model that forgets the ```dsh-ui fence still gets
+      // its view drawn instead of a wall of JSON.
+      _body = MarkdownBody(text: text, streaming: streaming, selectable: false, repairBareViews: true);
       _bodyText = text;
       _bodyStreaming = streaming;
     }
@@ -114,7 +116,7 @@ class _AssistantMessageState extends State<AssistantMessage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (reasoning.isNotEmpty) ...[
-            ThinkingPill(reasoning: reasoning, active: streaming && text.isEmpty),
+            ThinkingPill(reasoning: reasoning, active: streaming && text.isEmpty, streaming: streaming),
             if (text.isNotEmpty) const SizedBox(height: 8),
           ],
           if (text.isNotEmpty) _markdown(text, streaming),

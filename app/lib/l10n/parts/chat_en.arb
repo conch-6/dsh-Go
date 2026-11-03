@@ -5,6 +5,9 @@
   "chatChats": "Chats",
   "chatViewChatDetails": "View chat details",
   "chatUnsent": "Not sent",
+  "chatFailedSubmission": "Failed · Input kept",
+  "chatEditFailedSubmission": "Edit and resend",
+  "chatErrReasoningEffortUnsupported": "This model does not support the selected reasoning effort. Change the effort or model.",
   "chatSteerNextStep": "Steer · Next step",
   "chatQueuedAfterTurn": "Queued · Next turn",
   "chatSteering": "Steering",
@@ -77,6 +80,18 @@
   "chatTodoSemantics": "To-do {count}, {label}",
   "chatCollapseTodos": "Collapse list",
   "chatExpandTodos": "Expand list",
+  "chatDockFolded": "{count, plural, =1{1 status bar stacked} other{{count} status bars stacked}}",
+  "@chatDockFolded": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "chatDockSpread": "Expand",
+  "chatDockFold": "Fold the status bars",
+  "chatDockNext": "Next card",
+  "chatDockPrevious": "Previous card",
   "chatTodoNotStarted": "Not started",
   "chatFile": "File",
   "chatFolder": "Folder",

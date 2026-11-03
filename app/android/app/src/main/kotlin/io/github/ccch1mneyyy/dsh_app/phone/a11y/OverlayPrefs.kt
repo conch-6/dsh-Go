@@ -5,10 +5,10 @@ import android.content.SharedPreferences
 import kotlin.math.roundToInt
 
 /**
- * 设置 → 手机操控 → 悬浮条: the pill's 闲置时不透明度 and 「闲置时自动收起」, in the overlay's own
- * preferences file (with the ball's dock). The settings page writes them through `dsh/phone`
- * (`setOverlayPrefs`); a showing overlay picks changes up at once through
- * [SharedPreferences.OnSharedPreferenceChangeListener].
+ * 设置 → 手机操控 → 悬浮条: 闲置时不透明度 (the ball's, when left alone) and 「闲置时自动收起」
+ * (an idle capsule folds into the ball), in the overlay's own preferences file (with the ball's
+ * dock). The settings page writes them through `dsh/phone` (`setOverlayPrefs`); a showing
+ * overlay picks changes up at once through [SharedPreferences.OnSharedPreferenceChangeListener].
  */
 data class OverlayPrefs(val idleOpacity: Float = DEFAULT_OPACITY, val autoFold: Boolean = false) {
     fun toMap(): Map<String, Any?> = linkedMapOf("idleOpacity" to idleOpacity.toDouble(), "autoCollapse" to autoFold)
@@ -19,9 +19,9 @@ data class OverlayPrefs(val idleOpacity: Float = DEFAULT_OPACITY, val autoFold: 
         const val K_AUTO_FOLD = "autoFold"
 
         /**
-         * 70 %: on the emulator's light and dark pages, and over the opposite theme's page, the line
-         * stays readable at a glance while the page shows through. Text and keys never fade (only
-         * the surface does) and carry a halo of the surface colour, so even the 30 % floor reads.
+         * 70 %: an idle ball still reads as there, while the page behind shows through it. Only
+         * the ball fades (all of it alike); the capsule and the card stay solid, since they carry
+         * the line (docs/design/phone-overlay.md).
          */
         const val DEFAULT_OPACITY = 0.7f
         const val MIN_OPACITY = 0.3f

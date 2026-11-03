@@ -3,8 +3,9 @@
 // notices.
 //
 // - Credentials: the chat's own recogniser (`secret_mask.dart`: `sk-…`,
-//   `ghp_…`, JWTs, private key blocks, passwords in URLs), and values
-//   assigned to names like `API_KEY=` / `"token":` that no format catches.
+//   `ghp_…`, JWTs, private key blocks, passwords in URLs), Bearer / Basic
+//   values in `Authorization:` headers, and values assigned to names like
+//   `API_KEY=` / `"token":` that no format catches.
 // - Home folders: `/home/<name>`, `/Users/<name>`, `C:\Users\<name>` become
 //   `~` (the name is the person's account). `/root` stays: it is every
 //   on-device engine's home and says nothing about anyone.
@@ -32,10 +33,17 @@ final _assignment = RegExp(
 /// `<token>`, `***`).
 final _placeholder = RegExp(r'^(?:\$|<|\{|\*|•|%|xxx)', caseSensitive: false);
 
+// Require header context so ordinary prose such as "basic usage" stays readable.
+final _authorization = RegExp(
+  r'''(\b(?:proxy-)?authorization["']?\s*[:=]\s*["']?(?:Bearer|Basic)\s+)([A-Za-z0-9._~+/=-]+)''',
+  caseSensitive: false,
+);
+
 /// [text] as it may leave the device.
 String redactText(String text) {
   if (text.isEmpty) return text;
-  var out = maskSecrets(text, mark: redactMark);
+  var out = text.replaceAllMapped(_authorization, (m) => '${m[1]}${redactMark * 6}');
+  out = maskSecrets(out, mark: redactMark);
   out = out.replaceAllMapped(_assignment, (m) {
     final value = m.group(3)!;
     if (_placeholder.hasMatch(value)) return m.group(0)!;

@@ -1,7 +1,7 @@
 // Generation mode (media-generation §4.2, revised 2026-10-28): 生成 in the ＋
 // panel only where the host has the media plugin; the mode capsule on the
-// composer's edge (left on the composer, 32 high, equal end insets, beside a
-// 32 round ⚠ when the permission pill shows); the parameter sheet; and a send
+// composer's edge (left on the composer, 34 high, equal end insets, beside a
+// 34 round ⚠ when the permission pill shows); the parameter sheet; and a send
 // that is an ordinary message with the parameter header (v1, §4.6). What the
 // host offers comes from its catalogue (§4.3): none it can read, no mode.
 
@@ -241,7 +241,7 @@ void main() {
 
   group('geometry', () {
     for (final scale in [1.0, 1.3]) {
-      testWidgets('capsule: on the composer\'s left edge, 32 high, 12 at both ends (×$scale)', (tester) async {
+      testWidgets('capsule: on the composer\'s left edge, 34 high, 12 at both ends (×$scale)', (tester) async {
         await pumpGenerate(tester, scale: scale);
         await enterMode(tester);
         final capsule = tester.getRect(_capsule);
@@ -258,7 +258,7 @@ void main() {
         expect(exit.center.dy, moreOrLessEquals(capsule.center.dy, epsilon: 0.01));
       });
 
-      testWidgets('with the permission pill: a 32 round ⚠ first, the capsule 8 after it, both one height (×$scale)', (
+      testWidgets('with the permission pill: a 34 round ⚠ first, the capsule 8 after it, both one height (×$scale)', (
         tester,
       ) async {
         await pumpGenerate(
@@ -270,7 +270,7 @@ void main() {
         final pill = tester.getRect(find.byType(PermissionPill));
         final capsule = tester.getRect(_capsule);
         final composer = tester.getRect(find.byType(Composer));
-        expect(pill.size, const Size.square(32));
+        expect(pill.size, const Size.square(PermissionPillMetrics.height));
         expect(pill.left, moreOrLessEquals(composer.left, epsilon: 0.01));
         expect(capsule.left - pill.right, moreOrLessEquals(GenerateCapsuleMetrics.gap, epsilon: 0.01));
         expect(capsule.top, pill.top);

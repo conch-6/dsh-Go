@@ -263,8 +263,8 @@ bool isContentSearchUnsupported(Object error) {
 }
 
 final sessionContentSearchProvider = Provider<SessionContentSearch?>((ref) {
-  final conn = ref.watch(activeConnectionProvider).value;
-  return conn == null ? null : HostContentSearch(conn.client);
+  final client = ref.watch(activeConnectionProvider.select((connection) => connection.value?.client));
+  return client == null ? null : HostContentSearch(client);
 });
 
 // ── Controller ───────────────────────────────────────────────────────────────
@@ -350,6 +350,16 @@ class SessionSearchController extends Notifier<SessionSearchState> {
   @override
   SessionSearchState build() {
     ref.onDispose(() => _timer?.cancel());
+    ref.listen(sessionContentSearchProvider, (_, _) {
+      state = state.copyWith(content: ContentSearchStatus.idle, hits: const [], hasMore: false);
+      if (state.composing) {
+        // Retire the old Host's answer without submitting unfinished IME text.
+        _timer?.cancel();
+        ++_generation;
+      } else {
+        _schedule(state.text.trim());
+      }
+    });
     return const SessionSearchState();
   }
 

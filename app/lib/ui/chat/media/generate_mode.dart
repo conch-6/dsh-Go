@@ -1,11 +1,11 @@
 // Generation mode on the composer (docs/design/media-generation.md §4.2): the
 // mode capsule on the composer's top-left edge — where the permission pill
-// sits, and beside it (as a 32 round ⚠) when both show — and the 首帧 / 尾帧
+// sits, and beside it (as a 34 round ⚠) when both show — and the 首帧 / 尾帧
 // labels on a video's reference pictures.
 //
 // ```
 //  ╭──────────────────────────╮
-//  │ ◧  视频 · 5 秒 · 720p  × │   32 high, 12 in on both sides
+//  │ ◧  视频 · 5 秒 · 720p  × │   34 high, 12 in on both sides
 //  ╰──────────────────────────╯
 //  ╭────────────────────────────────────╮
 //  │ (＋)  描述画面和镜头…          (↑) │
@@ -22,7 +22,8 @@ import 'media_format.dart';
 
 /// The capsule's measured geometry; `test/media/generate_mode_test.dart`.
 abstract final class GenerateCapsuleMetrics {
-  static const height = 32.0;
+  /// As high as the plugin capsules beside it.
+  static const height = 34.0;
 
   /// Capsule edge → the type icon, and → the ×'s circle.
   static const inset = 12.0;

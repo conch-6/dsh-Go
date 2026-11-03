@@ -51,6 +51,7 @@ Future<ProviderContainer> mount(
     overrides: [
       performanceChannelProvider.overrideWithValue(native),
       appLanguageProvider.overrideWith(() => _Language(language)),
+      noUiJson,
       ...overrides,
     ],
   );

@@ -24,10 +24,24 @@
 
 ## 3. 数据：两个文件
 
-都由市场仓库的 CI 生成，经 `go.dshtui.com` 提供（Worker 从 GitHub Pages 或仓库发布分支取，缓存 10 分钟）。
+都由市场仓库的 CI 生成，发到 GitHub Pages（`MARKET_SOURCE_URL`，默认 `https://ccch1mneyyy.github.io/dsh-go-market/`）。App 不直接读那里：
 
-- `https://go.dshtui.com/market/index.json`：**格式 1**，必须通过 DSH 0.2.1 官方校验器（`dsh-plugin-market-index`）。DSH 网页版、dsh-TUI 也能直接添加这个地址。每个插件**只列锁定的那一个版本**。
-- `https://go.dshtui.com/market/dsh-go.json`：格式 1 装不下的东西，App 用。
+```
+GitHub Pages
+  → Worker 的 Cron（每 10 分钟，src/market.ts publishMarket）：取两个文件，一起校验（validateCatalog）
+      通过 → 写到公开桶 dshgo-dl 的 market/index.json、market/dsh-go.json
+             （application/json; charset=utf-8，Cache-Control: public, max-age=300），
+             同一份快照也存进 Worker 自己的缓存（KV）
+      失败 → 什么都不写，桶里和缓存里还是上一份
+  → https://dl.dshtui.com/market/…   App 1.0.9 起先读这里（CDN 按 max-age 缓存，不经过 Worker）
+  → https://go.dshtui.com/market/…   Worker 照常提供同一份快照，作为后备；
+                                      旧版 App 来这里会被 zone 的 Redirect Rule 302 到 dl（带 Origin 头的网页请求不跳，
+                                      照旧拿 Worker 的 CORS 头）
+```
+
+- `https://go.dshtui.com/market/index.json`（= `https://dl.dshtui.com/market/index.json`）：**格式 1**，必须通过 DSH 0.2.1 官方校验器（`dsh-plugin-market-index`）。DSH 网页版、dsh-TUI 也能直接添加这个地址。每个插件**只列锁定的那一个版本**。
+- `https://go.dshtui.com/market/dsh-go.json`（= `https://dl.dshtui.com/market/dsh-go.json`）：格式 1 装不下的东西，App 用。
+- 两个文件在 CDN 上各自缓存，目录变化后的 5 分钟内可能拿到新旧不配套的一对：App 照常显示（版本对不上的 sidecar 条目不用），但不存下来，下次再取（§6）。
 
 ```jsonc
 // dsh-go.json
@@ -109,6 +123,7 @@ scripts/build.mjs                         生成 index.json + dsh-go.json
 ## 6. App 侧
 
 - 市场页三个分区：官方 / 适配 DSH Go / 全部。前两个来自官方索引，第三个是 dshfind。
+- 读官方索引（1.0.9 起，`app/lib/state/plugins_state.dart` `fetchOfficialMarket`）：先 `https://dl.dshtui.com/market/`，不行再 `https://go.dshtui.com/market/`。最近一份读得通、且每个插件都有锁定版本的 listing 的目录，连同两个文件的 ETag 存在手机上（SharedPreferences `market.official`）：6 小时内直接用，不发请求；过了 6 小时带 `If-None-Match` 重新验证（304 就续期）；下拉刷新和「重试」总是重新验证；两个地址都连不上时用手机上那份（不论多旧）。手机上没有时照旧：哪儿都没发布（404）是空市场，其余是错误。
 - 卡片：分区标记 + 风险标签（low 不显示，medium 黄色，high 红色）。
 - 详情页：截图、中文介绍、风险逐条解释、版本、来源链接。
 - 安装：装到当前主机，用索引锁定的版本（`name@version`），装前核对 integrity。medium / high 先弹确认，列出风险。
@@ -130,6 +145,6 @@ App 在删除旧版本或开始安装之前，通过现有 `ShareNet.npmFacts` �
 | 部分 | 谁做 |
 |---|---|
 | `@ccch1mneyyy/dsh-media`：补视频生成、编辑图片、国内服务商，整理发包 | Pro（后端） |
-| 市场仓库、检查与生成脚本、GitHub Actions、Worker 的 `/market/*` 和 `/p/<包名>` | Pro（后端） |
+| 市场仓库、检查与生成脚本、GitHub Actions、Worker 的 `/market/*`、`/p/<包名>` 和写 `dl` 的 Cron | Pro（后端） |
 | App 市场页、风险展示、安装与更新、媒体入口 | Claude（前端） |
 | npm 组织 `dsh-go` 和发包令牌、市场仓库的创建 | owner |

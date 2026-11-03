@@ -265,6 +265,7 @@ class RemoteAccount {
     this.preferredTransports,
     this.onDirectFallback,
     this.directTimeout = const Duration(seconds: 8),
+    this.iceServersTimeout = const Duration(seconds: 10),
   }) : serverUrl = normalizeServerUrl(serverUrl ?? defaultRemoteServer),
        _secrets = secrets,
        _socketConnector = socketConnector {
@@ -299,6 +300,10 @@ class RemoteAccount {
   /// How long a direct attempt may take to open its DataChannel before the
   /// next path is tried (the Server's larger deadline is capped at 15 s).
   final Duration directTimeout;
+
+  /// Budget for each connection's fresh STUN/TURN credential request,
+  /// separate from the DataChannel negotiation deadline.
+  final Duration iceServersTimeout;
   late final RemoteServerApi api;
   final SecretStore _secrets;
   final ControlSocketConnector? _socketConnector;
@@ -987,14 +992,9 @@ class RemoteAccount {
     RemoteNetworkFallbackReason? reason = skipDirect ? RemoteNetworkFallbackReason.directRecentlyFailed : null;
     var wantDirect = !skipDirect && preferred.any((p) => p == RemoteTransportMode.lan || p == RemoteTransportMode.p2p);
     var wantTurn = !skipTurn && preferred.contains(RemoteTransportMode.turn);
-    var turnAvailable = false;
-    Future<List<RemoteIceServer>> fetchIce(String id) async {
-      final servers = await api.turnCredentials(token, id);
-      turnAvailable = servers.any(
-        (s) => s.urls.any((u) => RegExp(r'^turns?:', caseSensitive: false).hasMatch(u.trim())),
-      );
-      return servers;
-    }
+    // Credentials belong to a connectionId. A failed direct-stage lookup
+    // must not suppress a fresh lookup on the separately authorized TURN stage.
+    Future<List<RemoteIceServer>> fetchIce(String id) => api.turnCredentials(token, id);
 
     if (!wantDirect && !wantTurn) return _TransportSelection(await _connectRelay(token, hostId), reason);
     var control = await _connectRelay(token, hostId, direct: true, preferred: preferred);
@@ -1003,6 +1003,7 @@ class RemoteAccount {
     }
     wantDirect = wantDirect && control.directTransports.any((p) => p == 'lan' || p == 'p2p');
     wantTurn = wantTurn && control.directTransports.contains('turn');
+    var directFailed = false;
     if (wantDirect) {
       try {
         final rtc = await WebRtcTransport.negotiate(
@@ -1010,14 +1011,15 @@ class RemoteAccount {
           connector: connector,
           iceServers: fetchIce,
           timeout: directTimeout,
+          iceServersTimeout: iceServersTimeout,
         );
         return _TransportSelection(rtc, reason);
       } on WebRtcUnavailable catch (error) {
+        directFailed = true;
         reason = error.timedOut ? RemoteNetworkFallbackReason.directTimeout : RemoteNetworkFallbackReason.directFailed;
         _directCooldown[hostId] = DateTime.now().add(const Duration(seconds: 45));
         _notifyFallback(reason);
       }
-      wantTurn = wantTurn && turnAvailable;
       if (wantTurn) control = await _connectRelay(token, hostId, direct: true, preferred: preferred);
     }
     if (wantTurn) {
@@ -1027,6 +1029,7 @@ class RemoteAccount {
           connector: connector,
           iceServers: fetchIce,
           timeout: directTimeout,
+          iceServersTimeout: iceServersTimeout,
           relayOnly: true,
         );
         return _TransportSelection(rtc, reason);
@@ -1037,7 +1040,10 @@ class RemoteAccount {
           reason = error.timedOut ? RemoteNetworkFallbackReason.turnTimeout : RemoteNetworkFallbackReason.turnFailed;
         }
         _turnCooldown[hostId] = DateTime.now().add(const Duration(seconds: 45));
-        _notifyFallback(reason);
+        // Missing credentials should not duplicate the direct-stage reason.
+        if (!error.turnUnavailable || !directFailed) {
+          _notifyFallback(reason);
+        }
       }
     } else if (!wantDirect) {
       await control.close();

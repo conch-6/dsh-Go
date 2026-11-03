@@ -21,6 +21,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import io.github.ccch1mneyyy.dsh_app.MainActivity
 import io.github.ccch1mneyyy.dsh_app.R
+import io.github.ccch1mneyyy.dsh_app.notify.LiveActivity
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.A11yKeeper
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.PhoneA11yService
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundControl
@@ -347,6 +348,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
             runCatching { background.endTask(s.id) }
         }
         DshService.updateNotification(app)
+        LiveActivity.refresh(app)
         emitStatus()
     }
 
@@ -354,7 +356,17 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         if (statusLine == text) return
         statusLine = text
         DshService.updateNotification(app)
+        LiveActivity.refresh(app)
     }
+
+    /** What the live activity shows while a task runs: what DSH does now, in which app; null otherwise. */
+    fun liveTask(): LiveTask? {
+        val s = tasks.snapshot()
+        if (!s.active) return null
+        return LiveTask(s.id, statusLine, s.app, s.paused)
+    }
+
+    data class LiveTask(val id: Long, val line: String?, val app: String?, val paused: Boolean)
 
     /** The engine notification's text while a task runs (with a 停止操作 button); null otherwise. */
     fun foregroundLine(): String? {
@@ -584,7 +596,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     override fun backgroundUnavailable(): String {
         val reason = (backgroundStatus()["reason"] as? String)?.let { "（$it）" } ?: ""
         // l10n:keep agent stop reason
-        return "不打扰模式（后台屏）现在用不了$reason。只能在主屏（s 开头的屏幕号）上操作；要用后台屏，请用户在 DSH 设置 → 手机操控 → 不打扰模式 里开通。"
+        return "不打扰模式（后台屏）用不了$reason。只能在主屏操作；要用后台屏请用户到 设置 → 手机操控 → 不打扰模式 开通。"
     }
 
     override fun system(): SystemApi = system

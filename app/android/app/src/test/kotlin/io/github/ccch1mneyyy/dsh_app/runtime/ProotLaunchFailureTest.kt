@@ -1,0 +1,88 @@
+package io.github.ccch1mneyyy.dsh_app.runtime
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class ProotLaunchFailureTest {
+    private val reported = listOf(
+        "proot error: execve(\"/usr/bin/env\"): Permission denied",
+        "proot error: execve(\"/usr/bin/env\"): Too many symbolic links encountered",
+    )
+
+    private fun classify(
+        tail: List<String>,
+        readyAt: Long? = null,
+        exitCode: Int = 1,
+        safe: Boolean = false,
+        direct: Boolean = false,
+    ) = CrashClassifier.classify(exitCode, readyAt, 180_000L, 123L, tail, safe, direct)
+
+    @Test fun preservesReportedProotExecErrorsInsteadOfCallingThemAndroidKills() {
+        for (error in reported) {
+            val failure = classify(listOf(
+                error,
+                "proot info: possible causes:",
+                "  * the loader was not found or doesn't work.",
+                "fatal error: see `libproot.so --help`.",
+            ))
+            assertEquals(error, FailureKind.LAUNCH_FAILED, failure.kind)
+            assertEquals(error, failure.summary)
+            assertNull(failure.upSeconds)
+            assertEquals("launchFailed", failure.toMap()["kind"])
+        }
+    }
+
+    @Test fun onlyAcceptsTheInitialProotCommandBeforeReadyOnAFailedProotRun() {
+        for (error in reported) {
+            assertEquals(FailureKind.KILLED, classify(listOf(error), readyAt = 0L).kind)
+            assertEquals(FailureKind.KILLED, classify(listOf(error), exitCode = 0).kind)
+            assertEquals(FailureKind.KILLED, classify(listOf(error), direct = true).kind)
+            assertEquals(FailureKind.KILLED, classify(listOf("plugin says: $error")).kind)
+            assertEquals(FailureKind.KILLED, classify(listOf(error.replace("/usr/bin/env", "/tmp/plugin-helper"))).kind)
+        }
+        for (line in listOf(
+            "Permission denied",
+            "Too many symbolic links encountered",
+            "proot error: can't chmod '/tmp/proot-file': No such file or directory",
+            "proot error: execve(\"/usr/bin/env\"): unexpected plugin output",
+            "  * the loader was not found or doesn't work.",
+        )) assertEquals(line, FailureKind.KILLED, classify(listOf(line)).kind)
+    }
+
+    @Test fun diskFullAndDshFatalKeepTheirPriority() {
+        val fatal = "dsh: startup failed: required row missing"
+        for (error in reported) {
+            assertEquals(FailureKind.NO_SPACE, classify(listOf(error, "ENOSPC")).kind)
+            val failure = classify(listOf(error, fatal))
+            assertEquals(FailureKind.STARTUP_FAILED, failure.kind)
+            assertEquals("startup failed: required row missing", failure.summary)
+        }
+    }
+
+    @Test fun environmentFailuresDoNotBlamePluginsOrTriggerRecoveryLoops() {
+        for (error in reported) {
+            for (safe in listOf(false, true)) {
+                val failure = classify(listOf(error), safe = safe)
+                assertEquals(FailureKind.LAUNCH_FAILED, failure.kind)
+                assertFalse(failure.kind.counts)
+                assertFalse(SafePolicy.directLaunchFailed(failure, direct = false))
+                for (state in SafeState.entries) {
+                    val outcome = SafePolicy.onFailure(state, 1, failure, true)
+                    assertEquals(state, outcome.state)
+                    assertEquals(1, outcome.strikes)
+                    assertFalse(outcome.restartSafe)
+                }
+                assertNull(SafePolicy.autoRestartDelay(failure.kind, failure.exitCode, null, emptyList(), 180_000L))
+                assertNull(SafePolicy.autoRestartDelay(failure.kind, failure.exitCode, 90_000L, emptyList(), 180_000L))
+                val briefing = SafeMode.renderBriefing(SafeMode.Briefing(
+                    failure = failure.copy(recent = listOf("unrelated-plugin"), requiredRows = listOf("unrelated-row")),
+                    reason = SafePolicy.REASON_MANUAL, moved = emptyList(), lkgAt = null,
+                    lkgBundles = emptyList(), lkgVersions = emptyMap(), failureLog = listOf(error),
+                ))
+                assertTrue(briefing.contains(error))
+                assertFalse(briefing.contains("unrelated-plugin"))
+                assertFalse(briefing.contains("unrelated-row"))
+            }
+        }
+    }
+}

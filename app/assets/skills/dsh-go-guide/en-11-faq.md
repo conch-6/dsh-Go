@@ -15,6 +15,8 @@ Reset and uninstall both delete data on this phone; you rarely need them to fix 
 
 To report a problem, export a diagnostics bundle here. It includes the version, device, logs and the latest crash, never keys or tokens.
 
+To let the AI look into it: tap **Let the AI read diagnostics**. The app writes the same (redacted) snapshot into the engine, then ask the AI to "check the diagnostics" — the bundled `dsh-go-support` skill walks the symptoms and drafts an issue you can paste.
+
 ## The engine stops in the background, or notifications don't arrive
 
 <!-- nav: commonSettings,phoneEngineKeepAlive -->
@@ -46,7 +48,7 @@ If a task stopped midway: turning the screen off, locking the phone, or DSH maki
 
 ## The floating bar is in the way
 
-Tap **Collapse** on the bar to shrink it to a ball, or on the phone control page turn on **Collapse when idle** or lower **Idle opacity**.
+Tap the dot at the bar's left end (or **Shrink to a ball** in its card) to shrink it to a ball you can drag out of the way, or turn on **Collapse when idle** on the phone control page. The capsule and the ball fade when idle; lower **Idle opacity** to fade them more.
 
 ## The pet is gone
 

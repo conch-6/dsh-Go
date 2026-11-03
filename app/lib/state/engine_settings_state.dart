@@ -73,10 +73,22 @@ enum FieldLayer {
   locked,
 }
 
+/// What a value at [node] is once it is there: the one member of an optional
+/// value (`union([X, const(undefined)])`, schemastery's "X or nothing", as
+/// `fallback: union([object({provider, model}), const(undefined)])` in
+/// @nanmicoder/dsh-agent-teams 0.1.27), else [node] with wrappers resolved.
+/// A single constant stays a union: "this value or nothing" is a choice.
+SchemaNode schemaValueOf(SchemaNode node) {
+  final n = node.effective;
+  if (!n.nullable) return n;
+  final members = n.members;
+  return members.length == 1 && members.single.type != 'const' ? members.single : n;
+}
+
 /// The schema node at [path] under [root] (object fields, array items by
 /// index, dict values by key); null when the schema has no such field.
 Map<String, SchemaNode>? schemaObjectFields(SchemaNode root, [Set<SchemaNode>? ancestors]) {
-  final node = root.effective;
+  final node = schemaValueOf(root);
   final seen = ancestors ?? <SchemaNode>{};
   if (seen.contains(node)) return null;
   if (node.type == 'object') return node.dict;
@@ -93,7 +105,7 @@ Map<String, SchemaNode>? schemaObjectFields(SchemaNode root, [Set<SchemaNode>? a
 SchemaNode? schemaAt(SchemaNode root, List<String> path) {
   SchemaNode? node = root;
   for (final key in path) {
-    final current = node?.effective;
+    final current = node == null ? null : schemaValueOf(node);
     if (current == null) return null;
     final fields = schemaObjectFields(current);
     if (fields != null) {
@@ -113,9 +125,9 @@ SchemaNode? schemaAt(SchemaNode root, List<String> path) {
 /// A disabled object locks its descendants as well as its own row.
 bool schemaPathDisabled(SchemaNode root, List<String> path) {
   bool? walk(SchemaNode source, List<String> remaining, bool inherited, Set<SchemaNode> ancestors) {
-    final node = source.effective;
+    final node = schemaValueOf(source);
     if (ancestors.contains(node)) return null;
-    final disabled = inherited || source.meta.disabled || node.meta.disabled;
+    final disabled = inherited || source.meta.disabled || source.effective.meta.disabled || node.meta.disabled;
     if (remaining.isEmpty) return disabled;
     final next = {...ancestors, node};
     if (node.type == 'intersect') {
@@ -142,6 +154,9 @@ bool schemaPathDisabled(SchemaNode root, List<String> path) {
 
   return walk(root, path, false, <SchemaNode>{}) ?? false;
 }
+
+/// [EngineSettings.isLocked] by snapshot (snapshots never change).
+final _lockedOf = Expando<Map<String, bool>>('EngineSettings.isLocked');
 
 /// The active engine's settings as the pages read them: the namespaces (with
 /// optimistic edits applied), credential states and what is saving or failed.
@@ -221,8 +236,11 @@ class EngineSettings {
   }
 
   /// Whole namespace decided above the profile: refused once, or its values
-  /// differ from what its layers give.
-  bool isLocked(String ns) {
+  /// differ from what its layers give. Every row of a form asks (twice) and
+  /// the answer walks the whole namespace: worked out once per snapshot.
+  bool isLocked(String ns) => (_lockedOf[this] ??= <String, bool>{})[ns] ??= _isLocked(ns);
+
+  bool _isLocked(String ns) {
     if (locked.contains(ns)) return true;
     final view = namespaces[ns];
     if (view == null) return false;
@@ -495,6 +513,20 @@ class SettingsEditSession implements SettingsEditor {
     _checkSecretTarget(field);
     await _controller.clearSecret(field);
   }
+
+  /// Writes a credential the page names itself, against the snapshot this
+  /// editor came from: a key sheet left open across a host switch must not
+  /// store the key on the new host.
+  Future<void> setCredential(String ref, String value) async {
+    if (!active) throw EngineSettingsFailure(_staleEditorMessage);
+    await _controller.setCredentialFor(_snapshot._origin!, ref, value);
+  }
+
+  /// Removes a directly named credential, with the same snapshot affinity.
+  Future<void> clearCredential(String ref) async {
+    if (!active) throw EngineSettingsFailure(_staleEditorMessage);
+    await _controller.clearCredentialFor(_snapshot._origin!, ref);
+  }
 }
 
 String get _staleEditorMessage => appL10n.engineSettingsHostChanged;
@@ -503,18 +535,25 @@ String get _staleEditorMessage => appL10n.engineSettingsHostChanged;
 /// engine says a namespace or a credential changed.
 class EngineSettingsController extends AsyncNotifier<EngineSettings?> {
   DshClient? _client;
+  MuxGeneration? _generation;
   Object _origin = Object();
   final Map<String, _CredentialRead> _credentialReads = {};
   final Map<String, CredentialStatus> _credentialCache = {};
 
   SettingsEditSession edit(EngineSettings snapshot) => SettingsEditSession._(this, snapshot);
 
-  bool _accepts(Object? origin) =>
-      ref.mounted &&
-      origin != null &&
-      identical(origin, _origin) &&
-      _client != null &&
-      identical(ref.read(activeConnectionProvider).value?.client, _client);
+  bool _accepts(Object? origin) {
+    if (!ref.mounted || origin == null || !identical(origin, _origin) || _client == null) return false;
+    final connection = ref.read(activeConnectionProvider);
+    final mux = _client!.mux;
+    return !connection.isLoading &&
+        !connection.hasError &&
+        identical(connection.value?.client, _client) &&
+        identical(mux.generation, _generation) &&
+        mux.state != DshConnectionState.reconnecting &&
+        mux.state != DshConnectionState.unauthorized &&
+        mux.state != DshConnectionState.closed;
+  }
 
   /// What the Host last confirmed, per namespace (edits not applied).
   Map<String, SettingsNamespaceView> _confirmed = const {};
@@ -529,9 +568,11 @@ class EngineSettingsController extends AsyncNotifier<EngineSettings?> {
 
   @override
   Future<EngineSettings?> build() async {
-    final conn = ref.watch(activeConnectionProvider.select((c) => c.value));
+    final connection = ref.watch(activeConnectionProvider);
+    final conn = connection.isLoading || connection.hasError ? null : connection.value;
     final origin = _origin = Object();
     _client = conn?.client;
+    _generation = conn?.client.mux.generation;
     _confirmed = const {};
     _credentialReads.clear();
     _credentialCache.clear();
@@ -543,6 +584,11 @@ class EngineSettingsController extends AsyncNotifier<EngineSettings?> {
     if (conn == null) return null;
     final client = conn.client;
     final sub = client.hostEvents.listen((event) {
+      if (!ref.mounted || !identical(origin, _origin)) return;
+      if (event is HostReadyEvent && !identical(client.mux.generation, _generation)) {
+        ref.invalidateSelf();
+        return;
+      }
       if (!_accepts(origin)) return;
       switch (event) {
         case SettingsUpdatedEvent() || HostReadyEvent():
@@ -869,6 +915,46 @@ class EngineSettingsController extends AsyncNotifier<EngineSettings?> {
       if (!ok) throw EngineSettingsFailure(_current?.errorOf(field) ?? appL10n.commonSaveFailed);
       return;
     }
+    try {
+      await client.clearProviderKey(ref: ref);
+    } catch (error) {
+      throw EngineSettingsFailure(describeSettingsError(error));
+    }
+    if (!_accepts(origin)) throw EngineSettingsFailure(_staleEditorMessage);
+    await _refreshCredentials();
+  }
+
+  /// Stores a credential the page names itself, not one a schema field
+  /// declares. The media settings page gives every service its own
+  /// environment-style reference (`DSH_MEDIA_<SERVICE>_API_KEY`), so its key
+  /// rows write here instead of through a fixed secret slot. Throws
+  /// [EngineSettingsFailure]; the host decides whether [ref] may be written.
+  Future<void> setCredential(String ref, String value) => setCredentialFor(_origin, ref, value);
+
+  /// [setCredential] against the host generation [origin] the caller's
+  /// snapshot came from, so a page or sheet built against an older host
+  /// cannot acquire the new one's credential store.
+  Future<void> setCredentialFor(Object origin, String ref, String value) async {
+    if (!_accepts(origin)) throw EngineSettingsFailure(_staleEditorMessage);
+    final client = _client;
+    if (client == null || _current == null) throw EngineSettingsFailure(appL10n.commonEngineUnreachable);
+    try {
+      await client.setProviderKey(value, ref: ref);
+    } catch (error) {
+      throw EngineSettingsFailure(describeSettingsError(error));
+    }
+    if (!_accepts(origin)) throw EngineSettingsFailure(_staleEditorMessage);
+    await _refreshCredentials();
+  }
+
+  /// Removes a credential named directly, as [setCredential] wrote it.
+  Future<void> clearCredential(String ref) => clearCredentialFor(_origin, ref);
+
+  /// [clearCredential] against the snapshot's host generation.
+  Future<void> clearCredentialFor(Object origin, String ref) async {
+    if (!_accepts(origin)) throw EngineSettingsFailure(_staleEditorMessage);
+    final client = _client;
+    if (client == null || _current == null) throw EngineSettingsFailure(appL10n.commonEngineUnreachable);
     try {
       await client.clearProviderKey(ref: ref);
     } catch (error) {

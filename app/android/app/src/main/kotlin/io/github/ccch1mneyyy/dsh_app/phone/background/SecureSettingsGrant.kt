@@ -20,6 +20,11 @@ object SecureSettingsGrant {
     /** Shizuku runs but hasn't let us in: the tap asks it first, then grants. */
     const val SHIZUKU_PERMISSION = "shizukuPermission"
 
+    // Names exposed only by background.privileged v1; legacy a11yKeeper.path stays unchanged.
+    const val SUI = "sui"
+    const val SUI_PERMISSION = "suiPermission"
+    const val ROOT = "root"
+
     /** Neither is set up (不打扰模式's page sets up both). */
     const val SETUP = "setup"
 
@@ -32,4 +37,17 @@ object SecureSettingsGrant {
     }
 
     fun command(packageName: String): String = "adb shell pm grant $packageName $PERMISSION"
+
+    /** `background.privileged.grantPath`: a chosen root never falls back to another provider. */
+    fun privilegedPath(granted: Boolean, shizuku: ShizukuStatus, adb: AdbStatus, rootSelected: Boolean, rootConnected: Boolean): String {
+        val legacy = path(granted, shizuku, adb)
+        return when {
+            granted -> GRANTED
+            rootSelected -> if (rootConnected) ROOT else SETUP
+            shizuku.provider != ShizukuStatus.SUI -> legacy
+            legacy == SHIZUKU -> SUI
+            legacy == SHIZUKU_PERMISSION -> SUI_PERMISSION
+            else -> legacy
+        }
+    }
 }

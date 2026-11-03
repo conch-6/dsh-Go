@@ -34,6 +34,8 @@ class _Settings extends SettingsController {
 
 class _Bridge extends RuntimeBridge {
   @override
+  Stream<RuntimeEvent> get events => const Stream.empty();
+  @override
   Future<List<String>> logs({int lines = 500}) async => const [];
 }
 

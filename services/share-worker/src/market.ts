@@ -161,6 +161,37 @@ function snapshot(value: unknown): value is Snapshot {
     return false;
   }
 }
+/** Why a refresh failed, without URLs, response bodies or upstream exception messages. */
+function logFailure(what: string, e: unknown): void {
+  const reason = e instanceof MarketError ? e.reason
+    : e instanceof Error && ['TypeError', 'SyntaxError', 'AbortError', 'TimeoutError'].includes(e.name)
+      ? e.name : 'Error';
+  console.error(what, reason, e instanceof MarketError ? e.status ?? null : null);
+}
+/** Both files from [base], validated together. */
+async function fetchCatalog(base: string): Promise<Snapshot> {
+  const [index, sidecar] = await Promise.all(
+    ['index.json', 'dsh-go.json'].map(async (file) =>
+      body(await fetch(base + file, {
+        headers: { Accept: 'application/json', 'User-Agent': 'dshgo-share (+https://go.dshtui.com)' },
+        // workerd rejects 'error'; manual + body() rejects every 3xx without following it.
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10_000),
+      })),
+    ),
+  );
+  if (!validateCatalog(JSON.parse(index!), JSON.parse(sidecar!))) throw new MarketError('invalid-catalog');
+  return { at: Date.now(), index: index!, sidecar: sidecar! };
+}
+async function remember(env: Env, key: string, value: Snapshot): Promise<void> {
+  if (memory.size > 4) memory.delete(memory.keys().next().value!);
+  memory.set(key, value);
+  try {
+    await env.QUOTA?.put(key, JSON.stringify(value));
+  } catch {
+    /* current response remains available; old KV copy survives */
+  }
+}
 async function catalog(env: Env): Promise<{ value: Snapshot; stale: boolean }> {
   const base = source(env),
     key = 'market:v1:' + base;
@@ -177,35 +208,35 @@ async function catalog(env: Env): Promise<{ value: Snapshot; stale: boolean }> {
   }
   if (previous && Date.now() - previous.at < TTL) return { value: previous, stale: false };
   try {
-    const [index, sidecar] = await Promise.all(
-      ['index.json', 'dsh-go.json'].map(async (file) =>
-        body(await fetch(base + file, {
-          headers: { Accept: 'application/json', 'User-Agent': 'dshgo-share (+https://go.dshtui.com)' },
-          // workerd rejects 'error'; manual + body() rejects every 3xx without following it.
-          redirect: 'manual',
-          signal: AbortSignal.timeout(10_000),
-        })),
-      ),
-    );
-    if (!validateCatalog(JSON.parse(index!), JSON.parse(sidecar!))) throw new MarketError('invalid-catalog');
-    const value: Snapshot = { at: Date.now(), index: index!, sidecar: sidecar! };
-    if (memory.size > 4) memory.delete(memory.keys().next().value!);
-    memory.set(key, value);
-    try {
-      await env.QUOTA?.put(key, JSON.stringify(value));
-    } catch {
-      /* current response remains available; old KV copy survives */
-    }
+    const value = await fetchCatalog(base);
+    await remember(env, key, value);
     return { value, stale: false };
   } catch (e) {
-    // Never log URLs, response bodies, or arbitrary upstream exception messages.
-    const reason = e instanceof MarketError ? e.reason
-      : e instanceof Error && ['TypeError', 'SyntaxError', 'AbortError', 'TimeoutError'].includes(e.name)
-        ? e.name : 'Error';
-    console.error('market refresh failed', reason, e instanceof MarketError ? e.status ?? null : null);
+    logFailure('market refresh failed', e);
     if (previous) return { value: previous, stale: true };
     throw e;
   }
+}
+/** The cron (wrangler.jsonc, every 10 minutes): a fresh valid catalog onto
+ *  the public bucket, market/index.json and market/dsh-go.json, where apps
+ *  read it without the Worker (DL_BASE_URL, docs/design/plugin-market.md §3),
+ *  and into the snapshot the /market/ routes serve. A failure leaves both as
+ *  they were. */
+export async function publishMarket(env: Env): Promise<void> {
+  const base = source(env);
+  let value: Snapshot;
+  try {
+    value = await fetchCatalog(base);
+  } catch (e) {
+    logFailure('market publish failed', e);
+    return;
+  }
+  const httpMetadata = { contentType: 'application/json; charset=utf-8', cacheControl: 'public, max-age=300' };
+  await Promise.all([
+    env.DL.put('market/index.json', value.index, { httpMetadata }),
+    env.DL.put('market/dsh-go.json', value.sidecar, { httpMetadata }),
+    remember(env, 'market:v1:' + base, value),
+  ]);
 }
 export function isMarketPath(path: string): boolean {
   return path === '/market' || path.startsWith('/market/') || path === '/p' || path.startsWith('/p/');

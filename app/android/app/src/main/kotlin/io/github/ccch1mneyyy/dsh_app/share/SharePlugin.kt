@@ -260,10 +260,10 @@ class SharePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         const val MAX_ITEMS = 9
 
         /** `maxFileBytes` there. */
-        const val MAX_FILE_BYTES = 30L * 1024 * 1024
+        const val MAX_FILE_BYTES = 200L * 1024 * 1024
 
-        /** All files of one share, held in memory on the Dart side until sent. */
-        const val MAX_TOTAL_BYTES = 60L * 1024 * 1024
+        /** All files of one share: the memory budget on the Dart side until sent. */
+        const val MAX_TOTAL_BYTES = 400L * 1024 * 1024
         const val MAX_TEXT_CHARS = 200_000
         private const val KEEP_SLOTS = 4
 

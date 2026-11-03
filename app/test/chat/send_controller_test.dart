@@ -164,7 +164,7 @@ void main() {
       expect(client.prompts[1].images, 0);
       expect(client.prompts[1].receipts, ['receipt-notes.md', 'receipt-cat.png']);
       expect(client.prompts[1].requestId, client.prompts[0].requestId);
-      expect(state().notice, contains('只能读文字'));
+      expect(state().notice, contains('已按文件发送'));
       expect(state().error, isNull);
 
       chat().dismissNotice();
@@ -321,7 +321,7 @@ void main() {
     expect(client.uploads, isEmpty);
     expect(client.prompts, hasLength(1));
     expect(state().pending, isEmpty);
-    expect(state().error, '当前模型看不了图片，换成 V4.1 Flash 再发');
+    expect(state().error, '当前模型未声明支持图片。请换模型，或把自定义模型的输入类型设为「文本和图片」再发');
   });
 
   group('unknown outcome', () {
@@ -463,6 +463,285 @@ void main() {
         expect(state().pending.map((p) => p.requestId), [inFlight]);
       });
     }
+
+    for (final reason in ['error', 'aborted', 'interrupted']) {
+      for (final terminal in ['live', 'resync', 'restored-before', 'restored-after']) {
+        test('unadmitted $reason input stays recoverable: $terminal', () async {
+          var seq = 0;
+          Map<String, Object?> event(String type, Map<String, Object?> data) => {
+            'seq': ++seq,
+            'time': 1792700000000 + seq,
+            'type': type,
+            'data': data,
+          };
+          void emit(String type, Map<String, Object?> data) =>
+              client.events.add(SessionLogEvent.fromJson(event(type, data)));
+          void splice({int removed = 0, List<Map<String, Object?>> inserted = const []}) => emit(
+            'agent/inbox/spliced',
+            {'target': 'next-turn', 'start': 0, 'removedCount': removed, 'inserted': inserted},
+          );
+
+          expect(await chat().send('new input', attachments: [image, file]), isTrue);
+          final requestId = client.prompts.single.requestId!;
+          splice(inserted: [msg('original', 'new input', requestId)]);
+          emit('turn/start', {'turn': 1});
+          splice(removed: 1);
+          if (terminal == 'restored-before') splice(inserted: [msg('original', 'new input', requestId)]);
+          final end = event('turn/end', {
+            'turn': 1,
+            'reason': {'kind': reason},
+          });
+          if (terminal == 'resync') {
+            client.events.add(
+              SessionSnapshotEvent.fromJson('s1', {
+                'cursor': seq,
+                'records': [
+                  {'type': 'event', 'event': end},
+                ],
+              }, isResync: true),
+            );
+          } else {
+            client.events.add(SessionLogEvent.fromJson(end));
+          }
+          await settle();
+          final pending = state().pending.single;
+          expect(pending.requestId, requestId);
+          expect(pending.text, 'new input');
+          expect(pending.attachments, [image, file]);
+          expect(pending.failed, terminal != 'restored-before');
+          expect(state().running, isFalse);
+          expect(client.prompts, hasLength(1), reason: 'Recovery never automatically resends.');
+          if (terminal == 'restored-after') {
+            splice(inserted: [msg('original', 'new input', requestId)]);
+            await settle();
+            expect(state().pending.single.failed, isFalse);
+            expect(state().pending.single.inboxId, 'original');
+            expect(state().pending.single.attachments, [image, file]);
+          }
+          if (terminal.startsWith('restored-')) {
+            // Restored requests can later be consumed normally, without a
+            // stale failed/claimed mark resurrecting the recovery card.
+            emit('turn/start', {'turn': 2});
+            splice(removed: 1);
+            emit('turn/end', {
+              'turn': 2,
+              'reason': {'kind': 'blocked'},
+            });
+            await settle();
+            expect(state().pending, isEmpty);
+          }
+        });
+      }
+    }
+
+    for (final fate in ['claimed', 'canceled', 'echoed', 'restored']) {
+      test('a snapshot reconstructs an entirely missed request outcome: $fate', () async {
+        await chat().send('missed during disconnect', attachments: [image, file]);
+        final requestId = client.prompts.single.requestId!;
+        await chat().send('newer unclaimed input');
+        final newerId = client.prompts.last.requestId!;
+        var seq = 0;
+        Map<String, Object?> record(String type, Map<String, Object?> data) => {
+          'type': 'event',
+          'event': {'seq': ++seq, 'time': 1792700000000 + seq, 'type': type, 'data': data},
+        };
+        final records = [
+          // Replayed endings older than this request must not consume it.
+          record('turn/end', {
+            'turn': 0,
+            'reason': {'kind': 'completed'},
+          }),
+          record('agent/inbox/spliced', {
+            'target': 'next-turn',
+            'start': 0,
+            'removedCount': 0,
+            'inserted': [msg('missed', 'missed during disconnect', requestId)],
+          }),
+          record('turn/start', {'turn': 1}),
+          record('agent/inbox/spliced', {
+            'target': 'next-turn',
+            'start': 0,
+            'removedCount': 1,
+            'inserted': <Object?>[],
+            if (fate == 'canceled') 'outcome': 'canceled',
+          }),
+          if (fate == 'echoed') record('user/message', msg('missed', 'missed during disconnect', requestId)),
+          if (fate == 'restored')
+            record('agent/inbox/spliced', {
+              'target': 'next-turn',
+              'start': 0,
+              'removedCount': 0,
+              'inserted': [msg('missed', 'missed during disconnect', requestId)],
+            }),
+          record('turn/end', {
+            'turn': 1,
+            'reason': {'kind': 'error'},
+          }),
+        ];
+        client.events.add(SessionSnapshotEvent.fromJson('s1', {'cursor': seq, 'records': records}, isResync: true));
+        await settle();
+        final pending = state().pending;
+        expect(pending.last.requestId, newerId);
+        expect(pending.last.failed, isFalse, reason: 'An unrelated unclaimed request is not settled by turn/end.');
+        if (fate == 'canceled' || fate == 'echoed') {
+          expect(pending.map((p) => p.requestId), [newerId]);
+        } else {
+          expect(pending.first.requestId, requestId);
+          expect(pending.first.failed, fate == 'claimed');
+          expect(pending.first.attachments, [image, file]);
+        }
+        expect(client.prompts, hasLength(2), reason: 'Snapshot recovery does not trigger a retry.');
+      });
+    }
+
+    Future<PendingPrompt> failedSubmission() async {
+      await chat().send('original input', attachments: [image, file]);
+      final requestId = client.prompts.single.requestId!;
+      final records = [
+        (
+          'agent/inbox/spliced',
+          <String, Object?>{
+            'target': 'next-turn',
+            'start': 0,
+            'removedCount': 0,
+            'inserted': [msg('original', 'original input', requestId)],
+          },
+        ),
+        ('turn/start', <String, Object?>{'turn': 1}),
+        (
+          'agent/inbox/spliced',
+          <String, Object?>{'target': 'next-turn', 'start': 0, 'removedCount': 1, 'inserted': <Object?>[]},
+        ),
+        (
+          'turn/end',
+          <String, Object?>{
+            'turn': 1,
+            'reason': {'kind': 'error'},
+          },
+        ),
+      ];
+      for (var i = 0; i < records.length; i++) {
+        client.events.add(
+          SessionLogEvent.fromJson({
+            'seq': i + 1,
+            'time': 1792700000000 + i,
+            'type': records[i].$1,
+            'data': records[i].$2,
+          }),
+        );
+      }
+      await settle();
+      return state().pending.single;
+    }
+
+    test('editing a failed submission preserves attachments and uses a new identity', () async {
+      final failed = await failedSubmission();
+      expect(await chat().retryFailed(failed, 'edited input'), isTrue);
+      expect(client.calls.last, 'prompt:queue:edited input');
+      expect(client.prompts.last.requestId, isNot(failed.requestId));
+      expect(client.prompts.last.images, 1);
+      expect(client.prompts.last.receipts, ['receipt-notes.md']);
+      expect(state().pending.single.text, 'edited input');
+      expect(state().pending.single.attachments, [image, file]);
+      expect(state().pending.single.failed, isFalse);
+    });
+
+    test('a failed manual resend keeps the edited text and attachments', () async {
+      final failed = await failedSubmission();
+      client.promptError = const DshCarrierLostException('offline');
+      expect(await chat().retryFailed(failed, 'edited input'), isFalse);
+      expect(state().pending.single.requestId, failed.requestId);
+      expect(state().pending.single.text, 'edited input');
+      expect(state().pending.single.attachments, [image, file]);
+      expect(state().pending.single.failed, isTrue);
+      final unsettled = client.prompts.last.requestId;
+      client.promptError = null;
+      expect(await chat().retryFailed(state().pending.single, 'edited input'), isTrue);
+      expect(client.prompts.last.requestId, unsettled, reason: 'Unknown network outcomes retain normal dedup.');
+    });
+
+    test('a restored queue item retires an open failed editor without a duplicate send', () async {
+      final failed = await failedSubmission();
+      client.events.add(
+        SessionLogEvent.fromJson({
+          'seq': 5,
+          'time': 1792700000005,
+          'type': 'agent/inbox/spliced',
+          'data': {
+            'target': 'next-turn',
+            'start': 0,
+            'removedCount': 0,
+            'inserted': [msg('original', 'original input', failed.requestId)],
+          },
+        }),
+      );
+      await settle();
+      expect(await chat().retryFailed(failed, 'edited input'), isFalse);
+      expect(client.prompts, hasLength(1));
+      expect(state().pending.single.failed, isFalse);
+      expect(state().pending.single.attachments, [image, file]);
+    });
+
+    test('a late echo retires an open failed editor without replaying an older prompt', () async {
+      final failed = await failedSubmission();
+      client.events.add(
+        SessionLogEvent.fromJson({
+          'seq': 5,
+          'time': 1792700000005,
+          'type': 'user/message',
+          'data': msg('original', 'original input', failed.requestId),
+        }),
+      );
+      await settle();
+      expect(await chat().retryFailed(failed, 'edited input'), isFalse);
+      expect(client.prompts, hasLength(1));
+      expect(state().pending, isEmpty);
+    });
+
+    test('an explicitly cancelled queue item is not a failed claim', () async {
+      await chat().send('cancel this', mode: SendMode.queue);
+      final requestId = client.prompts.single.requestId!;
+      client.events.add(
+        SessionLogEvent.fromJson({
+          'seq': 1,
+          'time': 1792700000001,
+          'type': 'agent/inbox/spliced',
+          'data': {
+            'target': 'next-turn',
+            'start': 0,
+            'removedCount': 0,
+            'inserted': [msg('cancelled', 'cancel this', requestId)],
+          },
+        }),
+      );
+      client.events.add(
+        SessionLogEvent.fromJson({
+          'seq': 2,
+          'time': 1792700000002,
+          'type': 'agent/inbox/spliced',
+          'data': {
+            'target': 'next-turn',
+            'start': 0,
+            'removedCount': 1,
+            'inserted': <Object?>[],
+            'outcome': 'canceled',
+          },
+        }),
+      );
+      client.events.add(
+        SessionLogEvent.fromJson({
+          'seq': 3,
+          'time': 1792700000003,
+          'type': 'turn/end',
+          'data': {
+            'turn': 1,
+            'reason': {'kind': 'aborted'},
+          },
+        }),
+      );
+      await settle();
+      expect(state().pending, isEmpty);
+    });
 
     test('pending prompts take their slot; prompts from elsewhere show too', () async {
       client.events.add(const SessionStatusEvent('s1', true));

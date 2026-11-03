@@ -2,9 +2,11 @@
 // BETA_SECRET and USAGE_SECRET are Worker secrets (provision.sh, beta-keys.sh
 // init, docs/release.md「统计」), and so is the optional GITHUB_TOKEN (the home
 // page's star count, src/github.ts); the API token is passed in by the scripts.
-// Forks: put your own Cloudflare account id, route and KV namespace id below (the
-// public tree carries zero placeholders); provision.sh creates the bucket and the
-// KV namespace and writes the KV id here.
+// The account id and the KV namespace id below are placeholders in the public
+// tree: the scripts take the real ones from the environment or ~/keys and run
+// wrangler with a copy of this file that has them (scripts/cloudflare.sh);
+// provision.sh apply creates the bucket and the KV namespace. Forks: your own
+// ids there, and your own route.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dshgo-share",
@@ -21,15 +23,29 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    // Every request goes through the Worker, which picks the file and adds
-    // the security headers; paths are taken literally.
-    "run_worker_first": true,
+    // The site is served as files, without running the Worker (no request
+    // counted against its limits), with the headers in public/_headers and
+    // / and /share/ from public/_redirects. The Worker runs first only for
+    // its own routes (src/index.ts) and the files it hides (/c.html,
+    // /index.html: 404). Paths are taken literally; one with no file goes
+    // to the Worker too (its 404).
+    "run_worker_first": [
+      "/api/*", "/c/*", "/market", "/market/*", "/p", "/p/*", "/beta", "/beta/*",
+      "/download", "/download/*", "/share", "/c.html", "/index.html"
+    ],
     "html_handling": "none",
     "not_found_handling": "none"
   },
-  // Lifecycle rules on this bucket: 7d/ → 7 days, 30d/ → 30 days (provision.sh).
-  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "dshgo-share" }],
-  // Hourly upload counters (src/limits.ts). provision.sh fills in the id.
+  // Every 10 minutes: the plugin market onto dshgo-dl (src/market.ts publishMarket).
+  "triggers": { "crons": ["*/10 * * * *"] },
+  "r2_buckets": [
+    // Lifecycle rules on this bucket: 7d/ → 7 days, 30d/ → 30 days (provision.sh).
+    { "binding": "BUCKET", "bucket_name": "dshgo-share" },
+    // The public download bucket at DL_BASE_URL (publish-release.sh fills it);
+    // the Worker only writes market/ there.
+    { "binding": "DL", "bucket_name": "dshgo-dl" }
+  ],
+  // Hourly upload counters (src/limits.ts). The id: scripts/cloudflare.sh.
   "kv_namespaces": [{ "binding": "QUOTA", "id": "00000000000000000000000000000000" }],
   // Wrong beta access keys, one object per client (src/beta-guard.ts); the
   // day's random salt for device codes, one object (src/stats.ts).
@@ -43,11 +59,15 @@
     { "tag": "v1", "new_sqlite_classes": ["BetaGuard"] },
     { "tag": "v2", "new_sqlite_classes": ["StatsSalt"] }
   ],
-  // No Analytics Engine datasets (it isn't enabled on the account): downloads
-  // and update checks aren't counted and /api/usage/v1 is 404 (src/stats.ts,
-  // src/usage.ts). To count again, enable Analytics Engine and bind
-  // DOWNLOADS → dshgo_downloads, CHECKS → dshgo_checks, USAGE → dshgo_usage
-  // under "analytics_engine_datasets".
+  // Download clicks, update checks, the app's usage reports (src/stats.ts,
+  // src/usage.ts). provision.sh deploys them unless --no-analytics (or
+  // DSH_ANALYTICS=0), for an account without Analytics Engine: then nothing
+  // is counted and /api/usage/v1 is 404. docs/design/share-links.md §15.
+  "analytics_engine_datasets": [
+    { "binding": "DOWNLOADS", "dataset": "dshgo_downloads" },
+    { "binding": "CHECKS", "dataset": "dshgo_checks" },
+    { "binding": "USAGE", "dataset": "dshgo_usage" }
+  ],
   "ratelimits": [
     { "name": "UPLOAD_BURST", "namespace_id": "42001", "simple": { "limit": 5, "period": 60 } },
     { "name": "READ_LIMIT", "namespace_id": "42002", "simple": { "limit": 120, "period": 60 } },
@@ -59,9 +79,11 @@
     // "key": /beta asks for an access key (the private beta). "public": anyone
     // downloads at /download, and /beta redirects there (docs/release.md「公测」).
     "DOWNLOAD_ACCESS": "public",
-    // Public /download redirects here for now: APK downloads go through GitHub Releases.
-    // In-app updates keep reading /download/<version>/<file> and /beta from R2. Empty: show the page.
-    "DOWNLOAD_REDIRECT": "https://github.com/ccch1mneyyy/dsh-go/releases/latest",
+    // The public download bucket dshgo-dl (releases only), files at
+    // <base>download/<version>/<file>, the latest manifest at <base>update.json.
+    // The Global button points there once a release's `routes` has dl (else at
+    // /download/<version>/<file>). publish-release.sh reads it too; empty: off.
+    "DL_BASE_URL": "https://dl.dshtui.com/",
     // The China route: public base URL of the Hong Kong bucket, files at
     // <base><version>/<file>. Empty: not offered. publish-release.sh reads it too.
     "CN_BASE_URL": ""

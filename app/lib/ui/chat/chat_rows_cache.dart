@@ -11,7 +11,6 @@ import 'chat_rows.dart';
 class ChatRowsCache {
   ChatState? _state;
   bool _foldTurns = false;
-  Set<int> _openTurns = const {};
   List<TurnArtifacts> _artifacts = const [];
   List<ChatRow> _rows = const [];
   Map<String, int> _index = const {};
@@ -21,14 +20,12 @@ class ChatRowsCache {
   List<ChatRow> update(
     ChatState state, {
     required bool foldTurns,
-    required Set<int> openTurns,
     List<TurnArtifacts> artifacts = const [],
   }) {
     final previous = _state;
     List<ChatRow>? reused;
     if (previous != null &&
         foldTurns == _foldTurns &&
-        setEquals(openTurns, _openTurns) &&
         listEquals(artifacts, _artifacts) &&
         state.running == previous.running &&
         listEquals(state.approvals, previous.approvals) &&
@@ -41,7 +38,6 @@ class ChatRowsCache {
     }
     _state = state;
     _foldTurns = foldTurns;
-    _openTurns = openTurns;
     _artifacts = artifacts;
     if (reused != null) {
       _rows = reused;
@@ -56,7 +52,6 @@ class ChatRowsCache {
         commands: state.commands,
         turns: state.turns,
         foldTurns: foldTurns,
-        openTurns: openTurns,
         artifacts: artifacts,
       );
       _index = {for (var i = 0; i < _rows.length; i++) _rows[i].key: i};

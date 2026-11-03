@@ -112,13 +112,17 @@ class SessionCreatedController extends Notifier<Map<String, DateTime>> {
           at = null;
         }
         _workers--;
-        _asking.remove(id);
-        if (_key != key || !ref.mounted) return;
-        if (at == null) {
-          _failed.add(id);
-        } else {
-          state = {...state, id: at};
-          _scheduleSave();
+        if (!ref.mounted) return;
+        // A read for the host before a switch only frees its slot (the
+        // current host's queue may be waiting for it).
+        if (_key == key) {
+          _asking.remove(id);
+          if (at == null) {
+            _failed.add(id);
+          } else {
+            state = {...state, id: at};
+            _scheduleSave();
+          }
         }
         _pump();
       }());

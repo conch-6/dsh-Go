@@ -1,13 +1,18 @@
 {
   "@@locale": "zh",
   "a11yRestoreTitle": "自动恢复无障碍",
-  "searchKwA11yRestore": "无障碍,恢复,重连,自动恢复,掉线,授权,ADB,Shizuku",
+  "searchKwA11yRestore": "无障碍,恢复,重连,自动恢复,掉线,授权,ADB,Shizuku,Sui,root",
   "a11yRestoreNeedsGrant": "需要授权",
   "a11yRestoreNotice": "开启后，在系统设置里关掉无障碍会被自动打开；要关闭手机操控，请在 DSH Go 里关。",
   "a11yRestoreForceStop": "被强制停止后，重新打开 DSH Go 才能恢复。",
   "a11yRestoreGrant": "授权并开启",
+  "a11yRestoreGrantShizuku": "通过 Shizuku 授予",
+  "a11yRestoreGrantShizukuPermission": "先授权 Shizuku，再授予权限",
+  "a11yRestoreGrantAdb": "通过自连 ADB 授予",
+  "a11yRestoreRootNote": "通过已授权的 root 连接，只授予这一项权限。",
   "a11yRestoreSetup": "配置 Shizuku 或无线调试",
   "a11yRestoreWaiting": "请在 Shizuku 中允许授权",
+  "a11yRestoreWaitingSui": "请在 Sui 中允许授权",
   "a11yRestoreComputer": "也可以连接电脑，执行一次：",
   "a11yRestoreCopy": "复制授权命令",
   "a11yRestoreCopied": "授权命令已复制",
@@ -2018,12 +2023,19 @@
   },
   "catalogToolsSection": "工具",
   "catalogAllSettings": "全部设置",
+  "diagnosticsForAi": "让 AI 看诊断",
+  "diagnosticsForAiHint": "把环境快照写进引擎，AI 自己读",
+  "diagnosticsForAiDone": "已写入诊断，问 AI「看下诊断」就行",
+  "diagnosticsForAiFailed": "写不进去：本机运行时还没装好",
   "chatBackgroundTaskNotice": "后台任务通知",
   "chatBackgroundTaskMessage": "后台任务消息",
   "chatDeclineQuestion": "不回答",
   "chatChats": "对话列表",
   "chatViewChatDetails": "查看对话详情",
   "chatUnsent": "未发送",
+  "chatFailedSubmission": "未送达 · 已保留",
+  "chatEditFailedSubmission": "编辑后重发",
+  "chatErrReasoningEffortUnsupported": "当前模型不支持此推理档位，请调整档位或换模型",
   "chatSteerNextStep": "插话 · 下一步生效",
   "chatQueuedAfterTurn": "排队中 · 本轮结束后发送",
   "chatSteering": "插话中",
@@ -2168,6 +2180,18 @@
   },
   "chatCollapseTodos": "收起清单",
   "chatExpandTodos": "展开清单",
+  "chatDockFolded": "{count} 条状态已叠起",
+  "@chatDockFolded": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "chatDockSpread": "展开",
+  "chatDockFold": "收起状态条",
+  "chatDockNext": "下一张",
+  "chatDockPrevious": "上一张",
   "chatTodoNotStarted": "未开始",
   "chatFile": "文件",
   "chatFolder": "文件夹",
@@ -2828,6 +2852,18 @@
       }
     }
   },
+  "engineNewChatDefaultsLast": "新对话默认（上次选择）",
+  "engineNewChatDefaultsFixed": "新对话默认（固定）",
+  "engineNewChatUseLast": "沿用上次",
+  "engineNewChatUseFixed": "固定默认",
+  "engineNewChatDefaultsHint": "保存在当前主机，只影响新对话的模型和思考深度。权限仍用独立默认，不继承临时会话授权。",
+  "engineNewChatDefaultsLegacy": "此引擎仅支持沿用上次选择；不支持固定默认，也无法确认切换时默认值是否保存成功。",
+  "engineNewChatDefaultsUnsupported": "此主机没有可编辑的默认模型设置",
+  "engineNewChatDefaultsSelectionUnavailable": "此模型或思考深度已不可用，请重新选择。",
+  "engineNewChatDefaultsInheritedEffort": "主机基础配置指定了思考深度，不能在这里为无思考模型清除。请先调整主机配置。",
+  "engineNewChatDefaultsSaving": "正在保存并确认默认值…",
+  "engineNewChatDefaultsUnconfirmed": "没能确认完整默认值，请刷新后检查模型和思考深度。主机基础配置或其他客户端可能已改变它们。",
+  "engineModelDefaultSaveFailed": "当前对话的模型已切换，但新对话默认未保存。请到设置 › 模型检查并重试。",
   "engineAccountSignedIn": "已登录 DeepSeek 账号",
   "engineAccountSignOutTitle": "退出 DeepSeek 账号？",
   "engineAccountSignOutBusy": "有任务正在使用账号模型，退出会立即中断它们。对话和文件都会保留。",
@@ -4754,6 +4790,11 @@
   "hubPermissionPhoneConfirm": "手机操控确认",
   "hubHardwareEnterSends": "外接键盘按 Enter 发送",
   "hubHardwareEnterSendsHint": "开启后，Shift+Enter 换行。屏幕键盘仍换行；Ctrl/⌘+Enter 始终可发送。",
+  "hubQuickPanel": "左滑快捷入口",
+  "hubQuickPanelSwipe": "左滑打开",
+  "hubQuickPanelSwipeHint": "在对话里从右向左滑。代码块、表格这些能横向滚动的内容不受影响。",
+  "hubQuickPanelItems": "显示的入口",
+  "hubQuickPanelItemsNone": "没有选择，左滑不会打开",
   "launchScreenTitle": "启动画面",
   "launchDefault": "默认",
   "launchCustom": "自定义",
@@ -4799,6 +4840,37 @@
   "iconShortcutFailed": "没能添加，稍后再试",
   "searchKwLaunchScreen": "开屏,启动动画,闪屏,开机画面,欢迎画面",
   "searchKwIconShortcut": "快捷方式,自定义图标,桌面图片,换图标",
+  "liveThinking": "正在思考",
+  "liveWorking": "正在干活",
+  "liveJuggling": "子代理在帮忙",
+  "liveSweeping": "正在整理上下文",
+  "liveRunsCount": "{count} 个对话在跑",
+  "@liveRunsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "liveChipThinking": "思考中",
+  "liveChipWorking": "干活中",
+  "liveChipJuggling": "协作中",
+  "liveChipSweeping": "整理中",
+  "liveChipApproval": "待确认",
+  "liveChipQuestion": "待回答",
+  "liveChipDone": "完成",
+  "liveChipFailed": "出错",
+  "livePublicRunning": "DSH 正在干活",
+  "livePublicWaiting": "DSH 在等你处理",
+  "livePublicDone": "DSH 做完了",
+  "livePublicFailed": "DSH 出错了",
+  "liveSettingsTitle": "实时活动",
+  "liveSettingsSwitch": "显示实时活动",
+  "liveSettingsSubtitle": "干活、等你处理、操作手机时，显示在状态栏胶囊和锁屏上；支持的手机会放进灵动岛",
+  "liveSettingsFooter": "Android 16 的实时活动（Live Updates）：小米 HyperOS 3.1+、OPPO / 一加 ColorOS 16、荣耀 MagicOS 10 和 Pixel 会显示；vivo 原子岛和三星 Now Bar 目前只对厂商合作的应用开放。",
+  "liveUnsupported": "这台手机的系统还不支持实时活动",
+  "liveBlockedTitle": "系统没有允许实时活动",
+  "liveBlockedText": "在系统设置里为 DSH Go 打开「实时活动」（有的手机叫「在流体云中显示」）",
   "localeTitle": "语言",
   "localeSystem": "跟随系统",
   "localeZh": "简体中文",
@@ -5149,6 +5221,81 @@
   "mediaUnavailableAction": "管理插件",
   "mediaSettingsTitle": "图像与视频",
   "searchKwMediaGeneration": "生图,画图,文生图,视频生成,AI 绘画,生成图片,生成视频",
+  "mediaSettingsDefaults": "默认",
+  "mediaSettingsLegacyDefault": "旧版通用默认",
+  "mediaSettingsLegacyDefaultHint": "0.2.x 的设置；图片和视频没有单独默认时使用",
+  "mediaSettingsLegacyDefaultStale": "指向的服务已不可用；清除它可避免生成时报错",
+  "mediaSettingsLegacyDefaultClear": "清除旧版通用默认",
+  "mediaSettingsDefaultModel": "默认模型",
+  "mediaSettingsDefaultFooterLegacy": "旧版插件只有一个默认模型；更新插件后可以分别设置图片和视频。",
+  "mediaSettingsDefaultsFooter": "图片和视频分别选择默认模型；留空自动使用第一个可用的。",
+  "mediaSettingsNoVideoModels": "这台主机的目录里还没有视频模型",
+  "mediaSettingsServices": "服务",
+  "mediaSettingsAddService": "添加服务",
+  "mediaSettingsAddServiceHint": "从服务商预设开始，地址、协议和模型都会自动带好",
+  "mediaSettingsServiceLimit": "最多 {count} 个服务",
+  "@mediaSettingsServiceLimit": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "mediaSettingsNoServices": "还没有服务。添加一个服务商就能开始生成图片或视频。",
+  "mediaSettingsNoModels": "未选模型",
+  "mediaSettingsKeyMissing": "未配置 API Key",
+  "mediaSettingsCatalogMissing": "这个主机的插件没有提供模型目录；已有服务仍可编辑，但暂时不能新增服务或选择默认模型。",
+  "mediaSettingsCatalogBroken": "模型目录读不了（可能版本不兼容）；已有服务仍可编辑，但暂时不能新增服务或选择默认模型。",
+  "mediaSettingsCatalogEmpty": "模型目录里还没有模型；已有服务仍可编辑，但暂时不能新增服务或选择默认模型。",
+  "mediaSettingsNoPresets": "目录里还没有可添加的服务。",
+  "mediaSettingsLimits": "请求上限",
+  "mediaSettingsLimitsHint": "限制单次请求的图片张数和字节数；默认是插件硬上限",
+  "mediaSettingsMaxImages": "单次图片张数",
+  "mediaSettingsMaxImageBytes": "单张原件字节上限",
+  "mediaSettingsMaxResponseBytes": "服务响应字节上限",
+  "mediaSettingsMaxTotalImageBytes": "单次图片总字节上限",
+  "mediaSettingsMaxVideoBytes": "视频原件字节上限",
+  "mediaSettingsBudget": "费用保护",
+  "mediaSettingsDailyBudget": "每日预算（元）",
+  "mediaSettingsDailyBudgetHint": "按上海日期重置；用完即暂停生成",
+  "mediaSettingsUnknownPriceHold": "无可靠价格时每次预留（元）",
+  "mediaSettingsUnknownPriceHoldHint": "逐次确认的预留金额，不是供应商的收费上限",
+  "mediaSettingsApiKey": "API Key",
+  "mediaSettingsReuseKey": "复用密钥",
+  "mediaSettingsReuseKeyHint": "同一服务商的图片和视频共用一个 API Key，不用再填一次。",
+  "mediaSettingsReuseKeyNone": "同一服务商还没有其它服务。",
+  "mediaSettingsReuseKeyShared": "已复用",
+  "mediaSettingsModels": "模型",
+  "mediaSettingsModelsEmpty": "目录里没有这个协议的模型",
+  "mediaSettingsModelKeepOne": "至少保留一个模型",
+  "mediaSettingsModelMissing": "目录中不存在",
+  "mediaSettingsAdvanced": "高级",
+  "mediaSettingsBaseUrl": "API 根地址",
+  "mediaSettingsBaseUrlInvalid": "地址要以 https:// 开头",
+  "mediaSettingsProvider": "服务商标识",
+  "mediaSettingsKeyRef": "凭据名",
+  "mediaSettingsKeyRefInvalid": "凭据名只能包含字母、数字和下划线",
+  "mediaSettingsResponseFormat": "返回格式",
+  "mediaSettingsResponseFormatAuto": "按协议",
+  "mediaSettingsServiceId": "服务 ID",
+  "mediaSettingsServiceGone": "这个服务已经不在了",
+  "mediaSettingsServiceGoneBody": "它可能已在别处被删掉。返回上一页可以重新添加。",
+  "mediaSettingsDelete": "删除服务",
+  "mediaSettingsDeleteTitle": "删除「{name}」？",
+  "@mediaSettingsDeleteTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaSettingsDeleteBody": "只会从这台主机的设置里删掉这个服务，API Key 会保留；指向它的默认模型会一并清空。",
+  "mediaSettingsNoImageModels": "目录里还没有图像模型",
+  "mediaSettingsNoAvailableService": "还没有可用的服务（先添加并填好 Key）",
+  "mediaSettingsNoImageService": "还没有可用的图像服务（先添加并填好 Key）",
+  "mediaSettingsNoVideoService": "还没有可用的视频服务（先添加并填好 Key）",
+  "mediaSettingsKeyExternal": "由其它设置管理，这里只引用",
+  "mediaSettingsEnabledHint": "关闭后不再用这个服务生成",
   "nearbyThisChat": "本对话",
   "nearbyPermissionTitle": "本对话的权限",
   "nearbyNewChatDefault": "新对话默认：{name}",
@@ -5185,6 +5332,11 @@
   "performanceSystemMotion": "同时遵循系统的移除动画设置",
   "performanceFollowMode": "效果跟随性能模式",
   "performanceRemoteHint": "推荐连接电脑或服务器，减少本机负担",
+  "performanceRefresh": "刷新率",
+  "performanceRefreshMax": "最高",
+  "performanceRefreshSystem": "系统",
+  "performanceRefreshHint": "自动：动时用最高刷新率，停下交回系统；系统：完全由系统决定。",
+  "searchKwRefreshRate": "刷新率 高刷 120Hz 90Hz 流畅",
   "petActionSending": "正在发送…",
   "petActionTargetChanged": "主机已变化，重新打开「问一句」；文字已保留",
   "petActionSendFailed": "没能发出，文字已保留，请重试",
@@ -5304,9 +5456,7 @@
   "phoneAppRulesPackageHint": "在「设置 → 应用 → 应用信息」里能找到",
   "phoneDndRequiresAndroid": "需要 Android 14 及以上",
   "phoneDndHiddenScreen": "在看不见的屏幕上操作",
-  "phoneDndShizukuReady": "Shizuku · 可以用了",
   "phoneNotReadyYet": "还没准备好",
-  "phoneDndAdbReady": "自连 ADB · 可以用了",
   "phoneActionFailedLater": "没有成功，稍后再试",
   "phoneDndDisabled": "不打扰模式已关闭",
   "phoneDndEnabled": "不打扰模式已启用",
@@ -5318,12 +5468,35 @@
   "phoneDndRequirements": "使用条件",
   "phoneDndKeepUnlocked": "保持亮屏、解锁。",
   "phoneDndReactivate": "重启手机后重新激活。",
-  "phoneDndKeepDebugging": "连接 Wi-Fi，并保持开发者选项和无线调试开启。",
-  "phoneDndUsingShizuku": "正在使用：Shizuku",
-  "phoneDndUsingAdb": "正在使用：自连 ADB",
+  "phoneDndKeepDebugging": "用 Shizuku 或自连 ADB 时，连接 Wi‑Fi 并保持无线调试开启。",
   "phoneReady": "可以用了",
-  "phoneDndUseShizuku": "用 Shizuku",
   "phoneDndDirectAdb": "自连 ADB",
+  "phoneDndChannels": "通道",
+  "phoneDndShizukuFor": "装了 Shizuku App 的手机",
+  "phoneDndSuiFor": "Magisk 或 KernelSU 装了 Sui 模块",
+  "phoneDndRootFor": "已 root 的手机",
+  "phoneDndAdbFor": "不装别的 App，用无线调试",
+  "phoneDndStateInUse": "使用中",
+  "phoneDndStateNotReady": "未就绪",
+  "phoneDndStateUsable": "可以用",
+  "phoneDndStateNeedsGrant": "待授权",
+  "phoneDndStateNotRunning": "未运行",
+  "phoneDndStateNotInstalled": "未安装",
+  "phoneDndStateNotFound": "未检测到",
+  "phoneDndStateViaSui": "由 Sui 提供",
+  "phoneDndStateWaiting": "等待授权",
+  "phoneDndStateDisconnected": "未连接",
+  "phoneDndStateNotPaired": "未配对",
+  "phoneDndShizukuViaSui": "这台手机的 Shizuku 接口由 Sui 提供，请改用 Sui。",
+  "phoneDndSuiMissing": "没有检测到 Sui。在 Magisk 或 KernelSU 里装好 Sui 模块并重启手机，再回到这里。",
+  "phoneDndSuiRunning": "Sui 接口可用",
+  "phoneDndSuiStopped": "Sui 接口当前不可用。确认 Sui 模块已启用，重启手机后再试。",
+  "phoneDndSuiAllSet": "Sui 这边准备好了。",
+  "phoneDndSuiPermissionFailed": "没能请求 Sui 授权。确认 Sui 模块已启用后再试。",
+  "phoneDndRootWaiting": "正在等待 root 授权，请在 root 管理器的弹窗里选择。",
+  "phoneDndRootConnected": "root 已连接。断开后要回到这里再选一次；打开上面的「保持 root 通道」，DSH Go 才会自己再去申请。",
+  "phoneDndRootConnectedKept": "root 已连接。断开后 DSH Go 会自己向 root 管理器再次申请。",
+  "phoneDndRootRetry": "重新申请 root 授权",
   "phoneDndInstallShizuku": "先装 Shizuku（免费、开源）。已经在用冰箱、黑阈这类工具的话，多半已经装了。",
   "phoneDndOpenShizukuSite": "打开 Shizuku 官网",
   "phoneDndStartShizuku": "打开 Shizuku，按里面「通过无线调试启动」的说明做一遍（要连 Wi‑Fi）。回到这里会自动刷新。",
@@ -5337,7 +5510,6 @@
   "phoneDndWirelessDebuggingOn": "无线调试已打开",
   "phoneDndPaired": "已配对",
   "phoneDndConnected": "已连接",
-  "phoneDndPairOnce": "配对一次（不用装别的 App）",
   "phoneDndDeveloperOptionsStep": "打开开发者选项：在「关于手机」里连点「版本号」7 次。小米在「我的设备 → 全部参数与信息」里点「OS 版本」，vivo 点「软件版本号」。",
   "phoneDndWirelessDebuggingStep": "在开发者选项里打开「无线调试」，要连着 Wi‑Fi。开发者选项一般在「系统」或「其他设置」里。",
   "phoneDndStartPairingStep": "回到这里点「开始配对」，DSH 会发一条通知。",
@@ -5349,7 +5521,6 @@
   "phoneDndConnect": "连接",
   "phoneDndManualEntryHint": "通知里没有输入框时，用「手动填写」",
   "phoneDndXiaomiUsbHint": "打开「USB 调试（安全设置）」需插入 SIM 卡并登录小米账号。",
-  "phoneDndEnable": "启用不打扰模式",
   "phoneDndEnterCodeTitle": "填写配对码",
   "phoneDndCodeLabel": "6 位配对码",
   "phoneDndPortLabel": "端口（可不填）",
@@ -5599,26 +5770,53 @@
       }
     }
   },
-  "phoneDndShizukuStatus": "Shizuku · {reason}",
-  "@phoneDndShizukuStatus": {
-    "placeholders": {
-      "reason": {
-        "type": "String"
-      }
-    }
-  },
-  "phoneDndAdbStatus": "自连 ADB · {reason}",
-  "@phoneDndAdbStatus": {
-    "placeholders": {
-      "reason": {
-        "type": "String"
-      }
-    }
-  },
   "phoneDndBrowserFailed": "打不开浏览器。网址：{url}",
   "@phoneDndBrowserFailed": {
     "placeholders": {
       "url": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneDndChannelReady": "{channel} · 可以用了",
+  "@phoneDndChannelReady": {
+    "placeholders": {
+      "channel": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneDndChannelStatus": "{channel} · {reason}",
+  "@phoneDndChannelStatus": {
+    "placeholders": {
+      "channel": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneDndUsing": "正在使用：{channel}",
+  "@phoneDndUsing": {
+    "placeholders": {
+      "channel": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneDndEnableWith": "{mode, select, shizuku{用 Shizuku 开启} sui{用 Sui 开启} root{用 Root 开启} adb{用自连 ADB 开启} other{启用不打扰模式}}",
+  "@phoneDndEnableWith": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneDndSwitchTo": "{mode, select, shizuku{改用 Shizuku} sui{改用 Sui} root{改用 Root} adb{改用自连 ADB} other{改用这个通道}}",
+  "@phoneDndSwitchTo": {
+    "placeholders": {
+      "mode": {
         "type": "String"
       }
     }
@@ -5808,7 +6006,7 @@
       }
     }
   },
-  "phoneDndManualConnect": "手动连接",
+  "phoneDndManualConnect": "按端口连接",
   "phoneDndConnectPortLabel": "连接端口",
   "phoneDndConnectPortHint": "在系统「无线调试」首页查看「IP 地址和端口」，填写冒号后的端口。请不要使用配对码页面的端口。",
   "phoneTaskResultReady": "任务完成 · 查看结果",
@@ -5821,6 +6019,37 @@
   "phoneBackgroundGotIt": "知道了",
   "phoneBackgroundOpenSettings": "打开系统设置",
   "phoneBackgroundNotificationBlocked": "请允许手机操控通知的弹出提醒",
+  "phonePrivilegedUpgrade": "此版本尚不支持该特权通道，请更新 DSH Go 后使用。",
+  "phonePrivilegedSui": "Sui",
+  "phonePrivilegedRoot": "Root",
+  "phonePrivilegedSuiDescription": "使用 Sui 模块提供的接口，仅在主动点击时申请授权。",
+  "phonePrivilegedRootDescription": "适用于 Magisk、KernelSU 或 APatch；只有主动选择后才首次执行 root 命令。",
+  "phonePrivilegedRootPrepare": "申请 root 授权",
+  "phonePrivilegedRootUnchecked": "尚未检查",
+  "phonePrivilegedGrantRoot": "通过 root 授予",
+  "phonePrivilegedGrantSui": "通过 Sui 授予",
+  "phonePrivilegedGrantSuiPermission": "先授权 Sui，再授予权限",
+  "phonePrivilegedSuggested": "建议",
+  "phonePrivilegedRootRiskTitle": "给 DSH Go root 权限？",
+  "phonePrivilegedRootRiskBody": "root 管理器（Magisk、KernelSU 或 APatch）会弹窗问你。允许后，DSH Go 以 root 运行自己的后台服务；只有打开「保持 root 通道」，断开或重启后才会自己再去申请。",
+  "phoneKeepTitle": "{mode, select, shizuku{保持 Shizuku 通道} sui{保持 Sui 通道} root{保持 root 通道} adb{保持自连 ADB 通道} other{保持这个通道}}",
+  "@phoneKeepTitle": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneKeepRootDescription": "断开、重开 App 或重启手机后，DSH Go 会自己再向 root 管理器申请；给不给仍由管理器决定。",
+  "phoneKeepSharedDescription": "断开、重开 App 或重启手机后，DSH Go 用已有的授权自己连回去，不会替你申请授权。",
+  "phoneKeepAdbDescription": "断开、重开 App 或重启手机后，DSH Go 用已有的配对在 Wi‑Fi 下自己连回去；有「自动恢复无障碍」的权限时，还会试着打开一次无线调试。",
+  "phoneKeepRestoring": "正在重新连接",
+  "phoneKeepWaiting": "等通道可用后再连",
+  "phoneKeepWaitingService": "等所选服务运行后再连",
+  "phoneKeepWaitingPermission": "还没有授权；授权后会自己连上",
+  "phoneKeepWaitingNetwork": "等连上 Wi‑Fi 后再连",
+  "phoneKeepNotPaired": "还没有配对，请先完成无线调试配对",
+  "phoneKeepFailed": "没连上；下次打开 App 或开始操控时再试",
   "phoneModeTitle": "选择确认方式",
   "phoneModeMessage": "随时可在设置里更改",
   "phoneModeAsk": "关键步骤先问我",
@@ -8403,7 +8632,7 @@
   "searchKwSharedLinks": "分享链接,链接,公开链接,分享",
   "searchKwPhone": "无障碍,操作手机,自动点击,代操作,点按",
   "searchKwAppRules": "名单,黑名单,白名单,禁止,应用",
-  "searchKwDnd": "免打扰,Shizuku,ADB,后台操作",
+  "searchKwDnd": "免打扰,Shizuku,Sui,root,ADB,后台操作",
   "searchKwEngine": "引擎,运行环境,启动,停止,重启,DSH",
   "searchKwBackground": "后台保活,保活,后台,电池优化,自启动,被杀,杀后台,省电",
   "searchKwSystemAccess": "权限一览,授权,悬浮窗,无障碍,后台弹出界面,麦克风,文件访问,通知权限,受限制的设置,补开权限",
@@ -8456,6 +8685,7 @@
   "searchKwNotifyFailed": "出错提醒,失败",
   "searchKwNotifyApproval": "审批提醒,确认提醒",
   "searchKwNotifyQuestion": "提问提醒",
+  "searchKwNotifyLive": "灵动岛,实时活动,流体云,超级岛,原子岛,胶囊,状态栏进度,锁屏进度",
   "searchKwNotifySystem": "声音,横幅,锁屏,系统通知",
   "searchKwPhoneConfirm": "别问我,免确认,每次都询问,始终免确认,确认",
   "searchKwPhoneAutoCollapse": "悬浮条,收起,悬浮球",
@@ -8502,6 +8732,7 @@
   "searchKwWebBusySend": "发送,排队,插话,AI 工作时",
   "searchKwPluginsMarket": "插件市场,安装插件,市场,获取插件",
   "searchKwUsageStats": "统计,使用统计,匿名,隐私,数据,改进,遥测,分析",
+  "searchKwQuickPanel": "左滑,快捷入口,手势,滑动,目录,自定义目录,快捷,常用入口",
   "shellDeletePermanently": "永久删除",
   "shellDeleteNoUndo": "无法撤销，与归档不同",
   "shellDeleteChecking": "正在检查此主机是否支持永久删除…",
@@ -9168,6 +9399,15 @@
       }
     }
   },
+  "shellQuickPanel": "快捷入口",
+  "shellQuickPanelHint": "在「{path}」里调整",
+  "@shellQuickPanelHint": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
   "starPromptTitle": "{hours, plural, =0{本鱼已经在 DSH Go 里陪你半个小时啦⁠~} =1{本鱼已经在 DSH Go 里陪你一个小时啦⁠~} other{本鱼已经在 DSH Go 里陪你 {hours} 个小时啦⁠~}}",
   "@starPromptTitle": {
     "description": "The star prompt's first line. hours is the whole hours of use so far, rounded down; 0 is half an hour (the first ask comes after 30 minutes). The word joiner keeps the ~ on the line of the word before it.",
@@ -9297,9 +9537,9 @@
   "stateCommandMissing": "没有这个指令",
   "stateCommandFailed": "指令没有执行",
   "stateChatStopSteered": "没能停下本轮，已作为插话发送",
-  "stateChatTextOnlyModel": "当前模型只能读文字，图片已作为文件发给 AI。想让 AI 直接看图，请换成 V4.1 Flash",
+  "stateChatTextOnlyModel": "当前模型未声明支持图片，已按文件发送。可换模型，或把自定义模型的输入类型设为「文本和图片」",
   "stateAttachmentUploadFailed": "附件上传失败",
-  "stateChatImageModelRequired": "当前模型看不了图片，换成 V4.1 Flash 再发",
+  "stateChatImageModelRequired": "当前模型未声明支持图片。请换模型，或把自定义模型的输入类型设为「文本和图片」再发",
   "stateSendFailed": "发送失败",
   "stateChatStopFailed": "没能停下，再试一次",
   "stateChatTurnEnded": "这一轮已经结束，消息会作为新一轮发送",
@@ -9636,7 +9876,7 @@
       }
     }
   },
-  "stateAttachmentFileLimit": "文件「{name}」超过 30 MB",
+  "stateAttachmentFileLimit": "文件「{name}」超过 200 MB",
   "@stateAttachmentFileLimit": {
     "placeholders": {
       "name": {
@@ -9644,6 +9884,7 @@
       }
     }
   },
+  "stateAttachmentTotalLimit": "附件总大小超过 400 MB",
   "stateBotFinished": "{name} 完成了工作",
   "@stateBotFinished": {
     "placeholders": {
@@ -10022,6 +10263,8 @@
   "updateSettingsOpenFailedMessage": "到「设置 → 应用 → DSH Go」里允许「安装未知应用」，再回来安装。",
   "updateInstallCancelled": "已取消安装",
   "updateInstallCancelledMessage": "安装包还在，随时可以再装。",
+  "updateInstallUnconfirmed": "尚未确认安装结果",
+  "updateInstallUnconfirmedMessage": "安装包已保留。可先检查系统提示，再重试或用系统安装器打开。",
   "updateSignatureMismatch": "签名不一致，不能直接覆盖",
   "updateSignatureMismatchMessage": "手机上的 DSH Go 签名不同（多半是测试包），需要先卸载旧版再装新版。卸载会清空对话、Linux 环境和设置。",
   "updateWrongPackage": "不是 DSH 的安装包",
@@ -10729,6 +10972,23 @@
   },
   "viewUiReplyCancel": "取消：{value}",
   "@viewUiReplyCancel": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "viewUiReplyOther": "其他：{value}",
+  "@viewUiReplyOther": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "viewUiFreeTextHint": "其他（自己填）",
+  "viewUiChosenOther": "已填写：{value}",
+  "@viewUiChosenOther": {
     "placeholders": {
       "value": {
         "type": "String"

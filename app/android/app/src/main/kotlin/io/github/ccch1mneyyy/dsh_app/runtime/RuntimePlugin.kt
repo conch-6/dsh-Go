@@ -72,6 +72,10 @@ class RuntimePlugin :
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "getStatus" -> result.success(controller.status())
+            "publishDiagnostics" -> {
+                val markdown = call.argument<String>("markdown")
+                result.success(if (markdown == null || markdown.length > 256 * 1024) null else controller.publishDiagnostics(markdown))
+            }
             "installManagedSkill" -> {
                 val owner = managedSkillOwner
                 if (owner == null) result.success(mapOf("result" to null, "current" to false, "reason" to "stale"))
@@ -115,6 +119,7 @@ class RuntimePlugin :
                 result.success(null)
             }
             "getLogs" -> result.success(controller.recentLogs(call.argument<Int>("lines") ?: 500))
+            "getLogSnapshot" -> result.success(controller.logSnapshot((call.argument<Int>("lines") ?: 300).coerceIn(0, 2000)))
             "reset" -> controller.reset(ResetKeep.fromWire(call.argument<List<String>>("keep").orEmpty())) { error ->
                 if (error == null) result.success(null) else result.error("reset_failed", error.message, null)
             }

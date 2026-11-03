@@ -8,7 +8,9 @@
 //   {panel: 'cordis'}         the Cordis plugin panel (sidebar footer badge)
 //   {settings: 'general'|'models'|'plugins'|'agent-presets'|'account'}
 //   {pluginItem: [labels]}    a card on the Plugins page (built-in config or
-//                             experimental bundle), matched by its title
+//                             experimental bundle), matched by the package
+//                             name or item id the page marks it with, else
+//                             by its title
 //   {rightbar: 'files'|'terminal'}  needs a session on screen
 //   {sidebar: true}           the sessions / workspaces sidebar
 //   {newSession: true}        a new conversation (the sidebar's 新会话)
@@ -19,8 +21,16 @@
 //
 // Only clicks the official controls and writes the official stored selection
 // (`dsh.sessions.current`); never restyles, adds or removes official nodes.
-// Controls are found by their accessible names (zh and en), never by hashed
-// class names alone. The outcome goes to the app's `DshAppOpen` channel.
+// Controls are found by their accessible names (zh and en) or the official
+// data attributes, never by hashed class names alone. The outcome goes to
+// the app's `DshAppOpen` channel.
+//
+// An open never outstays its welcome: only the latest one acts (a newer open
+// stops the one before), it gives up STEPS_MS after the page booted whatever
+// step it is on, and it stops where it is once the person touches or types
+// in the page. A stopped open presses nothing more and reports nothing; one
+// that ran out of time or found nothing says which step, and the page stays
+// where it got to (the Plugins page for a card it couldn't find).
 (function () {
   if (window.__dshAppOpen) return;
 
@@ -28,6 +38,16 @@
   var STORE = 'dsh.sessions.current';
   // A hop's one-off query (see hop); gone from the address once it landed.
   var HOP_PARAM = 'dsh-go-hop';
+  // How long an open may keep looking once the page has booted.
+  var STEPS_MS = 15000;
+  // Where the Plugins page marks a card: a bundle's package name, an
+  // official item's id.
+  var CARD_MARKS = ['data-plugin-package', 'data-plugin-item'];
+  // A card's way into its page ("查看 …").
+  var CARD_OPEN = 'button[aria-label^="查看 "], button[aria-label^="View "]';
+  // The crumb back at the top of a page inside the Plugins panel (a
+  // plugin's, one of its parts', the experimental list).
+  var PLUGINS_CRUMB = '[data-plugin-panel] button[class*="_crumb"]';
   // Accessible names of the official controls, in both languages the page
   // can be in (they are matched, never shown).
   var LABELS = {
@@ -65,11 +85,24 @@
     return new Promise(function (r) { setTimeout(r, ms); });
   }
 
-  // Polls [find] until it returns an element (or gives up after [ms]).
-  function waitFor(find, ms) {
+  // The open in progress: {booted, stopped, until}. Each step takes it
+  // along; once it is stopped or past [until] its waits end empty and
+  // [press] refuses, so it can't act under a newer open or the person.
+  var current = null;
+
+  // [r] may still act (no open at all: a compose's own waits).
+  function live(r) {
+    return !r || (!r.stopped && Date.now() <= r.until);
+  }
+
+  // Polls [find] until it returns an element; gives up after [ms], or once
+  // the open [r] it is for has stopped or run out of time.
+  function waitFor(find, ms, r) {
     var until = Date.now() + (ms || 8000);
+    if (r && r.until < until) until = r.until;
     return new Promise(function (resolve) {
       (function tick() {
+        if (r && r.stopped) return resolve(null);
         var el = null;
         try { el = find(); } catch (e) {}
         if (el) return resolve(el);
@@ -78,6 +111,23 @@
       })();
     });
   }
+
+  // Clicks [el] for the open [r], while it may still act.
+  function press(r, el) {
+    if (!el || !live(r)) return false;
+    el.click();
+    return true;
+  }
+
+  // The person is using the page: the open on its way stops where it is,
+  // so nothing gets pressed under their hands. Real input only (the
+  // bridges' own clicks and events are untrusted), and only once the page
+  // has booted (a tap on a page still loading changes nothing yet).
+  function takeOver(e) {
+    if (current && current.booted && e && e.isTrusted) current.stopped = true;
+  }
+  document.addEventListener('pointerdown', takeOver, true);
+  document.addEventListener('keydown', takeOver, true);
 
   function text(el) {
     return (el.textContent || '').replace(/\s+/g, ' ').trim();
@@ -118,91 +168,105 @@
     }
   }
 
-  async function openPanel(key) {
+  async function openPanel(r, key) {
     var labels = LABELS.panel[key];
-    var row = await waitFor(function () { return byName(sidebar(), 'button', labels); });
-    if (!row) return false;
-    row.click();
-    return true;
+    return press(r, await waitFor(function () { return byName(sidebar(), 'button', labels); }, 8000, r));
   }
 
   // The Cordis badge sits in the sidebar's footer and only renders while the
   // Host has a dynamic plugin. On a phone the sidebar is a closed drawer: open
   // it (after the phone layout's collapse-on-arrival) and let it finish
   // sliding, since the panel takes its place from the badge when it opens.
-  async function openCordis() {
+  async function openCordis(r) {
     var find = function () {
       return document.querySelector('[data-cordis-badge]') || byName(document, 'button', LABELS.cordis);
     };
-    if (!(await waitFor(find, 8000))) return false;
+    if (!(await waitFor(find, 8000, r))) return false;
     await sleep(400);
+    if (!live(r)) return false;
     if (window.__dshApp && window.__dshApp.sidebarOpen && !window.__dshApp.sidebarOpen()) {
       window.__dshApp.toggleSidebar();
       await sleep(400);
     }
     var badge = find();
-    if (!badge) return false;
-    if (badge.getAttribute('aria-expanded') !== 'true') badge.click();
-    return !!(await waitFor(function () { return document.querySelector('[data-cordis-panel]'); }, 3000));
+    if (!badge || !live(r)) return false;
+    if (badge.getAttribute('aria-expanded') !== 'true') press(r, badge);
+    return !!(await waitFor(function () { return document.querySelector('[data-cordis-panel]'); }, 3000, r));
   }
 
-  async function openSettings(key) {
+  async function openSettings(r, key) {
     var direct = byName(sidebar(), 'button', LABELS.settingsButton);
     if (direct) {
-      direct.click();
+      if (!press(r, direct)) return false;
     } else {
-      var menu = await waitFor(function () { return byName(document, 'button', LABELS.accountMenu); });
-      if (!menu) return false;
-      menu.click();
+      var menu = await waitFor(function () { return byName(document, 'button', LABELS.accountMenu); }, 8000, r);
+      if (!press(r, menu)) return false;
       var item = await waitFor(function () {
         return byName(document, '[role="menuitem"]', LABELS.settingsButton);
-      }, 3000);
-      if (!item) return false;
-      item.click();
+      }, 3000, r);
+      if (!press(r, item)) return false;
     }
     var dialog = await waitFor(function () {
       return document.querySelector('[data-shortcut-modal="settings"]');
-    }, 4000);
+    }, 4000, r);
     if (!dialog) return false;
     if (!key || key === 'general') return true;
-    var nav = await waitFor(function () { return byName(dialog, 'button', LABELS.settings[key] || []); }, 3000);
-    if (!nav) return false;
-    nav.click();
-    return true;
+    return press(r, await waitFor(function () { return byName(dialog, 'button', LABELS.settings[key] || []); }, 3000, r));
   }
 
-  async function openPluginItem(labels) {
-    if (!(await openPanel('plugins'))) return false;
+  // The card [labels] name on the Plugins page: the one marked with one of
+  // them (a package name or an item id: exact, whatever the page's
+  // language), else one titled with one of them ([names]).
+  function pluginCard(root, labels, names) {
+    if (!root) return null;
+    var marked = root.querySelectorAll('[data-plugin-package], [data-plugin-item]');
+    for (var i = 0; i < labels.length; i++) {
+      for (var m = 0; m < marked.length; m++) {
+        for (var a = 0; a < CARD_MARKS.length; a++) {
+          if (marked[m].getAttribute(CARD_MARKS[a]) !== labels[i]) continue;
+          var open = marked[m].querySelector(CARD_OPEN);
+          if (open) return open;
+        }
+      }
+    }
+    return byName(root, 'button', names);
+  }
+
+  async function openPluginItem(r, labels) {
+    if (!(await openPanel(r, 'plugins'))) return false;
     var main = function () { return document.querySelector('[data-slot="main"]'); };
     var names = [];
     labels.forEach(function (l) { names.push(l, '查看 ' + l, 'View ' + l); });
-    // Wait for the page's cards ("查看 …" buttons), then look for ours. The
-    // panel remembers an open detail page: go back to the list first.
+    // Wait for the page's cards, then look for ours. The panel remembers a
+    // page opened earlier (a plugin's, one of its parts', the experimental
+    // list): back to the list first, by its crumb, a press at a time and a
+    // few at most.
+    var backs = 0;
+    var pressedAt = 0;
     var rendered = await waitFor(function () {
       var root = main();
       if (!root) return null;
-      var cards = root.querySelector('button[aria-label^="查看 "], button[aria-label^="View "]');
+      var cards = root.querySelector(CARD_OPEN);
       if (cards) return cards;
-      var back = byName(root, 'button', LABELS.pluginsBack);
-      if (back) back.click();
-      return null;
-    }, 6000);
-    if (!rendered) return false;
-    var card = byName(main(), 'button', names);
-    if (!card) {
-      // Experimental bundles past the first few sit behind the group's "更多".
-      var more = byName(main(), 'button', LABELS.more);
-      if (more) {
-        more.click();
-        card = await waitFor(function () { return byName(main(), 'button', names); }, 2000);
+      if (backs < 3 && Date.now() - pressedAt > 600) {
+        var back = byName(root, 'button', LABELS.pluginsBack) || root.querySelector(PLUGINS_CRUMB);
+        if (press(r, back)) {
+          backs++;
+          pressedAt = Date.now();
+        }
       }
+      return null;
+    }, 6000, r);
+    if (!rendered) return false;
+    var card = pluginCard(main(), labels, names);
+    // Experimental bundles past the first few sit behind the group's "更多".
+    if (!card && press(r, byName(main(), 'button', LABELS.more))) {
+      card = await waitFor(function () { return pluginCard(main(), labels, names); }, 2000, r);
     }
-    if (!card) return false;
-    card.click();
-    return true;
+    return press(r, card);
   }
 
-  async function openRightbar(kind) {
+  async function openRightbar(r, kind) {
     var rightbar = function () { return document.querySelector('[data-slot="rightbar"]'); };
     var entryOf = function () { return byName(rightbar(), 'button', LABELS[kind] || []); };
     // Collapsed: the session header's expand button. Open (remembered per
@@ -210,23 +274,19 @@
     var first = await waitFor(function () {
       return entryOf() || byName(document, 'button', LABELS.openRightbar) ||
         byName(rightbar(), 'button', LABELS.newTab);
-    }, 8000);
+    }, 8000, r);
     if (!first) return false;
-    if (first !== entryOf()) first.click();
-    var entry = await waitFor(entryOf, 4000);
-    if (!entry) return false;
-    entry.click();
-    return true;
+    if (first !== entryOf() && !press(r, first)) return false;
+    return press(r, await waitFor(entryOf, 4000, r));
   }
 
-  async function startNewSession() {
+  async function startNewSession(r) {
     var button = await waitFor(function () {
       var side = sidebar();
       if (!side) return null;
       return side.querySelector('button[class*="_newSession"]') || byName(side, 'button', LABELS.newSession);
-    });
-    if (!button) return false;
-    button.click();
+    }, 8000, r);
+    if (!press(r, button)) return false;
     // Let the new conversation's composer replace the old one.
     await sleep(500);
     return true;
@@ -306,55 +366,92 @@
     }
   }
 
-  async function run(target) {
-    if (!(await waitFor(sidebar, 15000))) return report(false, 'boot');
+  // The names of a card, as the page could show them: trimmed, none empty
+  // (an empty one would match any icon in the page).
+  function labelsOf(list) {
+    var labels = [];
+    (Array.isArray(list) ? list : []).forEach(function (l) {
+      var label = typeof l === 'string' ? l.replace(/\s+/g, ' ').trim() : '';
+      if (label && labels.indexOf(label) < 0) labels.push(label);
+    });
+    return labels;
+  }
+
+  // How the open [r] went, unless it was stopped (a newer open, the person
+  // taking over): then it says nothing.
+  function finish(r, ok, step) {
+    if (current === r) current = null;
+    if (!r.stopped) report(ok, ok ? null : step);
+  }
+
+  // [target] as the one open that acts from now on.
+  function start(target) {
+    if (current) current.stopped = true;
+    var r = (current = { booted: false, stopped: false, until: Infinity });
+    return run(r, target);
+  }
+
+  async function run(r, target) {
+    if (!(await waitFor(sidebar, 15000, r))) return finish(r, false, 'boot');
+    r.booted = true;
+    r.until = Date.now() + STEPS_MS;
     if (target.session) {
-      if (storedSession() !== target.session) return report(false, 'session');
+      if (storedSession() !== target.session) return finish(r, false, 'session');
       // Selected but not on screen (a global panel is): boot shows it.
       var shown = await waitFor(function () {
         return document.querySelector('[data-slot="conversation.session"]');
-      }, 3000);
-      if (!shown) return target.hopped ? report(false, 'session') : hop(target);
+      }, 3000, r);
+      if (!shown) {
+        if (target.hopped || !live(r)) return finish(r, false, 'session');
+        if (current === r) current = null;
+        return hop(target);
+      }
     }
     var ok = true;
     var step = null;
+    var labels = labelsOf(target.pluginItem);
     if (target.panel === 'cordis') {
       step = 'cordis';
-      ok = await openCordis();
+      ok = await openCordis(r);
     } else if (target.panel) {
       step = 'panel';
-      ok = await openPanel(target.panel);
+      ok = await openPanel(r, target.panel);
     } else if (target.settings) {
       step = 'settings';
-      ok = await openSettings(target.settings);
+      ok = await openSettings(r, target.settings);
     } else if (target.pluginItem && target.pluginItem.length) {
       step = 'pluginItem';
-      ok = await openPluginItem(target.pluginItem);
+      ok = labels.length > 0 && (await openPluginItem(r, labels));
     } else if (target.rightbar) {
       step = 'rightbar';
-      ok = await openRightbar(target.rightbar);
+      ok = await openRightbar(r, target.rightbar);
     } else if (target.newSession) {
       step = 'newSession';
-      ok = await startNewSession();
+      ok = await startNewSession(r);
     } else if (target.sidebar) {
       step = 'sidebar';
       await sleep(400); // after the phone layout's collapse-on-arrival
-      if (window.__dshApp && window.__dshApp.sidebarOpen) {
+      if (!live(r)) {
+        ok = false;
+      } else if (window.__dshApp && window.__dshApp.sidebarOpen) {
         if (!window.__dshApp.sidebarOpen()) window.__dshApp.toggleSidebar();
       } else {
-        var open = byName(sidebar(), 'button', LABELS.openSidebar);
-        if (open) open.click();
+        press(r, byName(sidebar(), 'button', LABELS.openSidebar));
       }
     }
-    report(ok, ok ? null : step);
+    finish(r, ok, step);
   }
 
   window.__dshAppOpen = function (target) {
     if (!target) return;
     // A session is picked by the stored selection the client restores at
     // boot (there are no session URLs): store it, load once more, go on there.
-    if (target.session && storedSession() !== target.session) return hop(target);
-    window.__dshAppOpening = run(target);
+    if (target.session && storedSession() !== target.session) {
+      if (current) current.stopped = true;
+      current = null;
+      return hop(target);
+    }
+    window.__dshAppOpening = start(target);
   };
 
   // Second half of a session hop: this load came from the hop above. Its
@@ -371,5 +468,5 @@
     pending = JSON.parse(sessionStorage.getItem(PENDING) || 'null');
     sessionStorage.removeItem(PENDING);
   } catch (e) {}
-  if (pending) window.__dshAppOpening = run(pending);
+  if (pending) window.__dshAppOpening = start(pending);
 })();

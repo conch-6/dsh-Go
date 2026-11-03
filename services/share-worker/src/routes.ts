@@ -2,12 +2,15 @@
 // first (docs/design/share-links.md §14「下载线路」):
 //
 //   cn      the Hong Kong bucket (CN_BASE_URL), fast from mainland China
-//   global  R2 through this Worker (Cloudflare), fast everywhere else
+//   global  Cloudflare, fast everywhere else: the public bucket at DL_BASE_URL
+//           (dl.dshtui.com/download/<version>/<file>) when the release is
+//           there, else R2 through this Worker
 //   github  the release on GitHub (github.com/<repo>/releases/download/v<version>/<file>)
 //
 // A route is offered only when the release went up there (the manifest's
 // `routes`, written by scripts/publish-release.sh after it downloaded the
-// files back) and, for cn, when CN_BASE_URL is set. global is always there.
+// files back) and, for cn, when CN_BASE_URL is set. global is always there;
+// `dl` in `routes` says its files are on the public bucket too.
 
 import type { Env } from './env';
 
@@ -24,9 +27,9 @@ export interface Route {
 /** The public repository the GitHub route points at (docs/release.md). */
 export const GITHUB_REPO = 'ccch1mneyyy/dsh-go';
 
-/** `<base>/` for the China route, or null when it isn't configured. */
-export function cnBase(env: Env): string | null {
-  const raw = env.CN_BASE_URL?.trim();
+/** `<base>/` of a bucket's public URL, or null when it isn't configured (or isn't https). */
+function baseUrl(value: string | undefined): string | null {
+  const raw = value?.trim();
   if (!raw) return null;
   let url: URL;
   try {
@@ -37,6 +40,11 @@ export function cnBase(env: Env): string | null {
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost'))) return null;
   if (url.search || url.hash || url.username || url.password) return null;
   return url.toString().replace(/\/*$/, '/');
+}
+
+/** `<base>/` for the China route, or null when it isn't configured. */
+export function cnBase(env: Env): string | null {
+  return baseUrl(env.CN_BASE_URL);
 }
 
 /** The routes in a manifest's `routes`; anything else is dropped. global is implied. */
@@ -51,7 +59,13 @@ export function githubUrl(version: string, name: string): string {
   return `https://github.com/${GITHUB_REPO}/releases/download/v${path(version, name)}`;
 }
 
-/** The routes to offer for [name] of [version]; [global] is this Worker's own URL for it. */
+/** The file on the public download bucket, when the release went up there and DL_BASE_URL is set. */
+export function dlUrl(env: Env, build: { version: string; name: string; onDl: boolean }): string | null {
+  const base = build.onDl ? baseUrl(env.DL_BASE_URL) : null;
+  return base && `${base}download/${path(build.version, build.name)}`;
+}
+
+/** The routes to offer for [name] of [version]; [global] is the Global route's URL for it (src/download.ts). */
 export function routesFor(env: Env, build: { version: string; name: string; routeIds: readonly RouteId[] }, global: string): Route[] {
   const routes: Route[] = [];
   for (const id of ROUTE_IDS) {

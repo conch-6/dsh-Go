@@ -14,15 +14,7 @@ import android.os.Looper
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import rikka.shizuku.Shizuku
-
-/** installed / running / granted plus a readiness verdict for the status Map. */
-data class ShizukuStatus(
-    val installed: Boolean,
-    val running: Boolean,
-    val granted: Boolean,
-) {
-    fun map(): Map<String, Any?> = mapOf("installed" to installed, "running" to running, "granted" to granted)
-}
+import rikka.sui.Sui
 
 class ShizukuStarter(private val context: Context, private val onChanged: () -> Unit) {
     companion object {
@@ -35,15 +27,25 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
 
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var channel: ShizukuChannel? = null
-    @Volatile private var connection: ServiceConnection? = null
-    @Volatile private var args: Shizuku.UserServiceArgs? = null
+    private val guard = Any()
+    private class Binding(val mayStart: () -> Boolean, val args: Shizuku.UserServiceArgs) {
+        val latch = CountDownLatch(1)
+        var worker: Thread? = Thread.currentThread()
+        var valid = true
+        var bound = false // main-thread bind was issued, even if the remote call failed
+        var cleaning = false
+        var whenAvailable: (() -> Unit)? = null
+        var binder: IBinder? = null
+        lateinit var listener: ServiceConnection
+    }
+    private var binding: Binding? = null
     @Volatile private var listenersAdded = false
 
     private val args0: Shizuku.UserServiceArgs
         get() = Shizuku.UserServiceArgs(ComponentName(context, PrivilegedDisplayService::class.java))
             .tag("dsh.vdisplay").processNameSuffix("vdisplay").version(1).daemon(false)
 
-    fun installed(): Boolean =
+    private fun appInstalled(): Boolean =
         runCatching { context.packageManager.getApplicationInfo(PACKAGE, 0); true }.getOrDefault(false)
 
     fun running(): Boolean = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
@@ -52,19 +54,21 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
         running() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
     }.getOrDefault(false)
 
-    fun status(): ShizukuStatus = ShizukuStatus(installed(), running(), granted())
+    // ShizukuProvider has already run Sui.init() before the Activity; isSui() only reads its result.
+    fun status(): ShizukuStatus = ShizukuStatus.fromFacts(appInstalled(), Sui.isSui(), running(), granted())
 
     fun uid(): Int = runCatching { Shizuku.getUid() }.getOrDefault(-1)
 
     /** A one-line reason when not ready, else null. */
     fun reason(): String? {
         val status = status()
+        val sui = status.provider == ShizukuStatus.SUI
         return when {
-            // Sui supplies the same Binder API without a Shizuku manager APK.
-            // Installation is guidance only while no service is available.
-            !status.running -> AppStrings.get(context, if (status.installed)
-                R.string.background_shizuku_stopped else R.string.background_shizuku_missing)
-            !status.granted -> AppStrings.get(context, R.string.background_shizuku_permission)
+            !status.installed -> AppStrings.get(context, R.string.background_shizuku_missing)
+            !status.running -> AppStrings.get(context,
+                if (sui) R.string.background_sui_stopped else R.string.background_shizuku_stopped)
+            !status.granted -> AppStrings.get(context,
+                if (sui) R.string.background_sui_permission else R.string.background_shizuku_permission)
             else -> null
         }
     }
@@ -74,7 +78,7 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
         listenersAdded = true
         runCatching {
             Shizuku.addBinderReceivedListenerSticky { onChanged() }
-            Shizuku.addBinderDeadListener { channel = null; onChanged() }
+            Shizuku.addBinderDeadListener { disconnect(); onChanged() }
             Shizuku.addRequestPermissionResultListener { _, _ -> onChanged() }
         }
     }
@@ -105,46 +109,113 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
         }
     }
 
-    /** Binds the UserService (blocking, 15 s). Returns a live channel, or null with [reason]. */
-    fun connect(): PrivilegedChannel? {
-        channel?.takeIf { it.alive() }?.let { return it }
+    /** The 15 s bind wait does not impose a deadline on Binder PROBE or remote teardown. */
+    fun connect(whenAvailable: (() -> Unit)? = null, mayStart: () -> Boolean = { true }): PrivilegedChannel? {
         if (!granted()) return null
-        val latch = CountDownLatch(1)
-        val holder = arrayOfNulls<IBinder>(1)
-        val serviceArgs = args0
-        val listener = object : ServiceConnection {
+        val owner = synchronized(guard) {
+            if (!mayStart()) return null
+            channel?.takeIf { it.alive() }?.let { return it }
+            // An old service/cleanup still owns this fixed tag. Never replace it underneath unbind.
+            binding?.let {
+                if (whenAvailable != null) it.whenAvailable = whenAvailable
+                if (it.worker == null) retire(it)
+                return null
+            }
+            Binding(mayStart, args0).also { binding = it }
+        }
+        owner.listener = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-                if (connection !== this) return
-                holder[0] = binder
-                latch.countDown()
+                synchronized(guard) {
+                    if (binding !== owner || !owner.valid) return
+                    owner.binder = binder
+                    owner.latch.countDown()
+                }
             }
             override fun onServiceDisconnected(name: ComponentName?) {
-                if (connection !== this) return
-                channel = null
+                synchronized(guard) { if (binding === owner) retire(owner) }
                 onChanged()
             }
         }
-        connection = listener
-        args = serviceArgs
-        main.post { runCatching { Shizuku.bindUserService(serviceArgs, listener) } }
-        if (!latch.await(15, TimeUnit.SECONDS)) { disconnect(); return null }
-        val remote = IPrivilegedDisplay.Stub.asInterface(holder[0]) ?: run { disconnect(); return null }
-        // Probe to confirm identity and revision before use.
-        val probe = runCatching { remote.execute(android.os.Bundle().apply { putString(Proto.OP, Proto.OP_PROBE) }) }.getOrNull()
-        if (probe?.getBoolean(Proto.OK) != true || probe.getString("revision") != Proto.REVISION) { disconnect(); return null }
-        val value = ShizukuChannel(remote)
-        channel = value
-        return value
+        main.post {
+            val bind = synchronized(guard) {
+                if (!owner.valid || !owner.mayStart()) false else { owner.bound = true; true }
+            }
+            if (bind) runCatching { Shizuku.bindUserService(owner.args, owner.listener) }
+                .onFailure { owner.latch.countDown() }
+            else owner.latch.countDown()
+        }
+        try {
+            if (!owner.latch.await(15, TimeUnit.SECONDS)) return null
+            val binder = synchronized(guard) {
+                if (!owner.valid || !owner.mayStart()) return null
+                owner.binder
+            }
+            val remote = IPrivilegedDisplay.Stub.asInterface(binder) ?: return null
+            val probe = remote.execute(android.os.Bundle().apply { putString(Proto.OP, Proto.OP_PROBE) })
+            if (!probe.getBoolean(Proto.OK) || probe.getString("revision") != Proto.REVISION) return null
+            return synchronized(guard) {
+                if (!owner.valid || !owner.mayStart()) return null
+                ShizukuChannel(remote).also { channel = it }
+            }
+        } catch (e: Exception) {
+            if (e is InterruptedException) Thread.currentThread().interrupt()
+            return null
+        } finally {
+            val available = synchronized(guard) {
+                owner.worker = null
+                if (!owner.valid || channel == null) { retire(owner); null }
+                else owner.whenAvailable.also { owner.whenAvailable = null }
+            }
+            available?.invoke()
+            onChanged()
+        }
+    }
+
+    fun cancelUnwantedPending() {
+        synchronized(guard) {
+            val owner = binding ?: return
+            if (channel == null && !owner.mayStart()) retire(owner)
+        }
+    }
+
+    fun disconnectIfCurrent(expected: PrivilegedChannel?) {
+        if (expected == null) return
+        synchronized(guard) {
+            if (channel === expected) binding?.let { retire(it) }
+        }
     }
 
     fun disconnect() {
+        synchronized(guard) { binding?.let { retire(it) } }
+    }
+
+    // Caller holds guard. A pending Binder operation must finish before its tag may be reused.
+    private fun retire(owner: Binding) {
+        owner.valid = false
         channel = null
-        val conn = connection ?: return
-        val serviceArgs = args
-        connection = null
-        args = null
-        if (serviceArgs != null) {
-            main.post { runCatching { Shizuku.unbindUserService(serviceArgs, conn, true) } }
+        owner.latch.countDown()
+        owner.worker?.interrupt()
+        if (owner.worker != null || owner.cleaning) return
+        owner.cleaning = true
+        main.post {
+            var detached = true
+            if (owner.bound) {
+                // API 13.1.5 remove=true kills the service but leaves its local callback cache until
+                // a later death callback. Detach that cache first, before reusing this fixed tag.
+                detached = runCatching { Shizuku.unbindUserService(owner.args, owner.listener, false) }.isSuccess
+                runCatching { Shizuku.unbindUserService(owner.args, owner.listener, true) }
+            }
+            val available = synchronized(guard) {
+                if (detached) {
+                    binding = null
+                    owner.whenAvailable.also { owner.whenAvailable = null }
+                } else {
+                    owner.cleaning = false // retry teardown before any new same-tag bind
+                    null
+                }
+            }
+            available?.invoke()
+            onChanged()
         }
     }
 }

@@ -5,7 +5,9 @@ import io.github.ccch1mneyyy.dsh_app.R
 import android.content.Context
 import android.content.res.AssetManager
 import java.io.File
+import java.nio.channels.FileChannel
 import java.nio.file.Files
+import java.nio.file.StandardOpenOption
 import java.security.DigestInputStream
 import java.security.MessageDigest
 
@@ -24,7 +26,12 @@ import java.security.MessageDigest
  *
  * Upgrading keeps the user's /root (DSH_HOME, workspaces) from the previous rootfs.
  */
-class RuntimeInstaller(private val context: Context, private val manifest: RuntimeManifest) {
+class RuntimeInstaller(
+    private val context: Context,
+    private val manifest: RuntimeManifest,
+    private val onLog: (String) -> Unit,
+    private val sync: () -> Unit = ::syncFilesystems,
+) {
     val baseDir = File(context.filesDir, "runtime")
     val rootfs = File(baseDir, "rootfs")
     private val versionFile = File(baseDir, "rootfs.version")
@@ -51,27 +58,57 @@ class RuntimeInstaller(private val context: Context, private val manifest: Runti
         staging.mkdirs()
 
         val assetPath = "${RuntimeManifest.ASSET_DIR}/${manifest.rootfsAsset}"
-        val total = assetLength(assetPath).takeIf { it > 0 } ?: manifest.rootfsBytes
+        val assetBytes = assetLength(assetPath)
+        val total = assetBytes.takeIf { it > 0 } ?: manifest.rootfsBytes
         var lastReported = 0L
-        val digest = MessageDigest.getInstance("SHA-256")
-        context.assets.open(assetPath, AssetManager.ACCESS_STREAMING).use { raw ->
-            val input = DigestInputStream(raw, digest)
-            TarExtractor(staging) { read ->
-                if (read - lastReported >= 512 * 1024 || read == total) {
-                    lastReported = read
-                    onProgress(read, total)
-                }
-            }.extract(input, manifest.rootfsAsset)
+        val progress: (Long) -> Unit = { read ->
+            if (read - lastReported >= 512 * 1024 || read == total) {
+                lastReported = read
+                onProgress(read, total)
+            }
         }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        val expected = manifest.rootfsSha256
-        if (expected != null && !expected.equals(actual, ignoreCase = true)) {
-            staging.deleteRecursivelySafely()
-            throw IllegalStateException(AppStrings.get(context, R.string.service_package_checksum_failed))
+        timed("verify") {
+            // Parallel readers revisit compressed bytes; hash the asset once, in order.
+            val digest = MessageDigest.getInstance("SHA-256")
+            DigestInputStream(context.assets.open(assetPath, AssetManager.ACCESS_STREAMING), digest).use { input ->
+                val buffer = ByteArray(1 shl 16)
+                while (input.read(buffer) >= 0) {}
+            }
+            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            val expected = manifest.rootfsSha256
+            if (expected != null && !expected.equals(actual, ignoreCase = true)) {
+                staging.deleteRecursivelySafely()
+                throw IllegalStateException(AppStrings.get(context, R.string.service_package_checksum_failed))
+            }
+        }
+        timed("extract") {
+            val extractor = TarExtractor(staging, progress)
+            if (manifest.rootfsAsset.endsWith(".xz") && assetBytes > 0) {
+                val decoded = ParallelXZInputStream.open(
+                    { AssetSeekableInputStream(context.assets.openFd(assetPath)) }, progress,
+                )
+                extractor.extractDecoded(decoded)
+            } else {
+                context.assets.open(assetPath, AssetManager.ACCESS_STREAMING).use { raw ->
+                    extractor.extract(raw, manifest.rootfsAsset)
+                }
+            }
         }
         onProgress(total, total)
 
-        activateRootfs(baseDir, manifest.runtimeVersion, keepDir, dropKept)
+        timed("activate") {
+            activateRootfs(baseDir, manifest.runtimeVersion, keepDir, dropKept,
+                sync = { timed("sync") { sync() } })
+        }
+    }
+
+    private inline fun <T> timed(phase: String, block: () -> T): T {
+        val started = System.nanoTime()
+        try {
+            return block()
+        } finally {
+            onLog("[dsh-app] install $phase: ${(System.nanoTime() - started) / 1_000_000} ms")
+        }
     }
 
     private fun checkFreeSpace() {
@@ -124,12 +161,22 @@ private fun File.present(): Boolean = exists() || isSymlink()
  * never in `staging` (which every install wipes first), so an upgrade killed at any step loses
  * nothing: the next install picks up from what is on disk.
  */
-internal fun activateRootfs(base: File, version: String, keep: File? = null, dropKept: Boolean = false) {
+internal fun activateRootfs(
+    base: File,
+    version: String,
+    keep: File? = null,
+    dropKept: Boolean = false,
+    sync: () -> Unit,
+    syncDirectory: (File) -> Unit = ::syncDirectory,
+) {
     val rootfs = File(base, "rootfs")
     val staging = File(base, "staging")
     val retired = File(base, "rootfs.old")
     val carry = File(base, "home.carry")
     val home = File(rootfs, "root")
+    val versionFile = File(base, "rootfs.version")
+    // A retry may install the same version. Retire its ready marker before replacing any tree.
+    if (Files.deleteIfExists(versionFile.toPath())) syncDirectory(base)
     // /opt is replaced below. Remember old direct use with the carried home so
     // saved physical cwd paths remain readable after upgrading in PRoot mode.
     DirectLaunch.preservePhysicalAlias(rootfs, if (carry.exists()) carry else home, retired)
@@ -147,8 +194,15 @@ internal fun activateRootfs(base: File, version: String, keep: File? = null, dro
     File(rootfs, "tmp").setWritable(true, false)
     // Before the version: until everything kept is back, the runtime reads as not installed.
     if (keep != null) restoreKept(keep, rootfs, dropKept)
-    File(base, "rootfs.version").writeText(version)
+    // Everything the marker vouches for is on disk before it says ready. A marker torn by a
+    // power cut doesn't match the version, so the next start just installs again.
+    sync()
+    versionFile.writeText(version)
     retired.deleteRecursivelySafely()
+}
+
+internal fun syncDirectory(directory: File) {
+    FileChannel.open(directory.toPath(), StandardOpenOption.READ).use { it.force(true) }
 }
 
 /** What 「重置运行环境」 can keep of the user's /root (paths under the rootfs). */

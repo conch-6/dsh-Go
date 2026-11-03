@@ -28,6 +28,10 @@ String apkAssetName(AppVersion version, ApkFlavor flavor) => 'dsh-go-${version.n
 
 final _apkAssetPattern = RegExp(r'^dsh-go-(.+)-(arm64|x64)\.apk$');
 
+/// What a manifest may name a file: it becomes a path in the download
+/// directory, so nothing that climbs out of it.
+final _fileName = RegExp(r'^[0-9A-Za-z][0-9A-Za-z._+-]*$');
+
 /// One downloadable APK.
 class ReleaseAsset {
   const ReleaseAsset({required this.name, required this.url, this.size, this.sha256});
@@ -44,6 +48,55 @@ class ReleaseAsset {
   ReleaseAsset withSha256(String sha256) => ReleaseAsset(name: name, url: url, size: size, sha256: sha256);
 }
 
+/// A `DSHDLT01` patch (lib/update/delta.dart) that builds a release's APK from
+/// one installed APK. It sits next to that APK: same release, same mirrors.
+class ReleasePatch {
+  const ReleasePatch({
+    required this.from,
+    required this.name,
+    required this.size,
+    required this.sha256,
+    this.fromVersion,
+  });
+
+  /// SHA-256 of the APK it applies to (the installed `base.apk`).
+  final String from;
+
+  /// What version that APK is; nothing depends on it.
+  final String? fromVersion;
+  final String name;
+
+  /// Bytes of the patch file, and its SHA-256.
+  final int size;
+  final String sha256;
+
+  Map<String, Object?> toJson() => {
+    'from': from,
+    'fromVersion': ?fromVersion,
+    'name': name,
+    'size': size,
+    'sha256': sha256,
+  };
+
+  /// An entry of `update.json`'s `patches`; null when it is incomplete.
+  static ReleasePatch? tryParse(Object? json) {
+    if (json is! Map) return null;
+    final from = normalizeSha256(json['from']);
+    final sha256 = normalizeSha256(json['sha256']);
+    final name = json['name'];
+    final size = json['size'];
+    if (from == null || sha256 == null || name is! String || !_fileName.hasMatch(name) || size is! int) return null;
+    final version = json['fromVersion'];
+    return ReleasePatch(
+      from: from,
+      name: name,
+      size: size,
+      sha256: sha256,
+      fromVersion: version is String ? version : null,
+    );
+  }
+}
+
 /// The latest release as one source described it.
 class ReleaseInfo {
   const ReleaseInfo({
@@ -56,6 +109,7 @@ class ReleaseInfo {
     this.publishedAt,
     this.pageUrl,
     this.checksumsUrl,
+    this.patches = const {},
   });
 
   final AppVersion version;
@@ -75,7 +129,14 @@ class ReleaseInfo {
   /// `SHA256SUMS` of this release, used when an asset carries no digest.
   final Uri? checksumsUrl;
 
+  /// Deltas to each flavor's APK, by the installed APK they start from.
+  final Map<ApkFlavor, List<ReleasePatch>> patches;
+
   ReleaseAsset? apkFor(ApkFlavor? flavor) => flavor == null ? null : apks[flavor];
+
+  /// [flavor]'s patch from the installed APK hashing to [installed].
+  ReleasePatch? patchFor(ApkFlavor? flavor, String? installed) =>
+      installed == null ? null : patches[flavor]?.where((p) => p.from == installed).firstOrNull;
 
   /// This release with [flavor]'s APK under [sha256] (one taken from
   /// `SHA256SUMS`, or kept from an earlier answer). Unchanged without that APK.
@@ -92,6 +153,7 @@ class ReleaseInfo {
       publishedAt: publishedAt,
       pageUrl: pageUrl,
       checksumsUrl: checksumsUrl,
+      patches: patches,
     );
   }
 
@@ -110,6 +172,11 @@ class ReleaseInfo {
       for (final MapEntry(key: flavor, value: asset) in apks.entries)
         flavor.name: {'name': asset.name, 'url': asset.url.toString(), 'size': ?asset.size, 'sha256': ?asset.sha256},
     },
+    if (patches.isNotEmpty)
+      'patches': {
+        for (final MapEntry(key: flavor, value: list) in patches.entries)
+          flavor.name: [for (final p in list) p.toJson()],
+      },
   };
 }
 
@@ -166,7 +233,8 @@ ReleaseInfo parseGithubRelease(Object? json) {
 
 /// Parses an `update.json` manifest ([ReleaseInfo.toManifestJson]). Relative
 /// asset URLs resolve against [base] (the manifest's own URL); a missing URL
-/// means the GitHub release asset for the tag.
+/// means the GitHub release asset for the tag. Files named anything but a
+/// plain file name, and incomplete patch entries, are left out.
 ReleaseInfo parseUpdateManifest(Object? json, {Uri? base}) {
   if (json is! Map) throw const FormatException('manifest is not an object');
   final schema = json['schema'];
@@ -183,7 +251,7 @@ ReleaseInfo parseUpdateManifest(Object? json, {Uri? base}) {
       final name = value['name'] as String? ?? apkAssetName(version, flavor);
       final raw = value['url'] as String?;
       final url = raw == null ? githubReleaseAsset(tag, name) : (base?.resolve(raw) ?? Uri.tryParse(raw));
-      if (url == null || !url.hasScheme) continue;
+      if (url == null || !url.hasScheme || !_fileName.hasMatch(name)) continue;
       apks[flavor] = ReleaseAsset(
         name: name,
         url: url,
@@ -206,6 +274,12 @@ ReleaseInfo parseUpdateManifest(Object? json, {Uri? base}) {
     title: json['title'] as String?,
     publishedAt: DateTime.tryParse(json['publishedAt'] as String? ?? ''),
     pageUrl: page == null ? null : Uri.tryParse(page),
+    patches: {
+      if (json['patches'] case final Map byFlavor)
+        for (final MapEntry(:key, :value) in byFlavor.entries)
+          if (ApkFlavor.fromName(key as String?) case final flavor? when value is List)
+            flavor: [for (final entry in value) ?ReleasePatch.tryParse(entry)],
+    },
   );
 }
 

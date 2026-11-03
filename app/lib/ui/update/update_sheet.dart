@@ -59,6 +59,7 @@ String formatUpdateSize(int bytes) => '${(bytes / 1024 / 1024).toStringAsFixed(1
   ),
   UpdateProblem.permissionUnavailable => (appL10n.updateSettingsOpenFailed, appL10n.updateSettingsOpenFailedMessage),
   UpdateProblem.installCancelled => (appL10n.updateInstallCancelled, appL10n.updateInstallCancelledMessage),
+  UpdateProblem.installUnconfirmed => (appL10n.updateInstallUnconfirmed, appL10n.updateInstallUnconfirmedMessage),
   UpdateProblem.signature => (appL10n.updateSignatureMismatch, appL10n.updateSignatureMismatchMessage),
   UpdateProblem.notDsh => (appL10n.updateWrongPackage, appL10n.updateWrongPackageMessage),
   UpdateProblem.downgrade => (appL10n.updateDowngradeBlocked, appL10n.updateDowngradeBlockedMessage),
@@ -78,6 +79,9 @@ const _browserOnly = {
 
 /// Install failures the system's own installer may get past (the package is still here).
 const _systemInstallerHelps = {UpdateProblem.installFailed, UpdateProblem.blocked};
+
+/// An install that was cancelled, or whose result never came back: the package is ready again.
+const _installUnfinished = {UpdateProblem.installCancelled, UpdateProblem.installUnconfirmed};
 
 String _date(DateTime t) {
   final local = t.toLocal();
@@ -120,8 +124,8 @@ class UpdateSheet extends ConsumerWidget {
         ),
       );
     }
-    final asset = update.asset;
-    final size = asset?.size;
+    // The patch's size when one applies: what the download really is.
+    final size = update.downloadSize;
     final facts = [
       l10n.updateCurrentVersion(update.current.name),
       ?(size == null ? null : formatUpdateSize(size)),
@@ -236,13 +240,16 @@ class UpdateSheet extends ConsumerWidget {
       case UpdateTaskPhase.installing:
         return _Progress(title: l10n.updateInstalling, note: l10n.updateConfirmInstallNote);
       case UpdateTaskPhase.ready:
-        final cancelled = update.problem == UpdateProblem.installCancelled;
+        final unfinished = _installUnfinished.contains(update.problem);
+        final (title, text) = unfinished
+            ? describeUpdateProblem(update.problem!)
+            : (l10n.updatePackageDownloaded, l10n.updateReadyToInstall);
         return _Notice(
-          icon: cancelled ? AppIcons.info : AppIcons.completed,
-          background: cancelled ? scheme.surfaceContainerHighest : colors.successContainer,
-          foreground: cancelled ? scheme.onSurfaceVariant : colors.onSuccessContainer,
-          title: cancelled ? l10n.updateInstallCancelled : l10n.updatePackageDownloaded,
-          text: cancelled ? l10n.updateInstallCancelledMessage : l10n.updateReadyToInstall,
+          icon: unfinished ? AppIcons.info : AppIcons.completed,
+          background: unfinished ? scheme.surfaceContainerHighest : colors.successContainer,
+          foreground: unfinished ? scheme.onSurfaceVariant : colors.onSuccessContainer,
+          title: title,
+          text: text,
         );
       case UpdateTaskPhase.needsPermission:
         final unavailable = update.problem == UpdateProblem.permissionUnavailable;
@@ -389,7 +396,7 @@ class UpdateSheet extends ConsumerWidget {
         return busy(l10n.updateInstallingBusy);
       case UpdateTaskPhase.ready:
         final install = pair(l10n.commonLater, close, l10n.commonInstall, () => unawaited(controller.install()));
-        return update.problem == UpdateProblem.installCancelled ? withSystemInstaller(install) : install;
+        return _installUnfinished.contains(update.problem) ? withSystemInstaller(install) : install;
       case UpdateTaskPhase.needsPermission:
         return pair(
           l10n.commonLater,

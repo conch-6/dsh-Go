@@ -233,12 +233,12 @@ class SafetyGate(
         if (kind == WriteKind.SCROLL) return Verdict.Allow
         if (SafetyRules.isSystemPackage(pkg) && !lifted.systemPages) {
             // l10n:keep agent safety result
-            return Verdict.Refuse("这是系统设置、权限、安装或系统界面（「$app」），DSH 只能看不能操作。请调用 handoff 让用户自己完成这一步。", "system-page")
+            return Verdict.Refuse("系统设置 / 权限 / 安装页（「$app」）只看不动。请 handoff 让用户自己完成。", "system-page")
         }
         val secret = SafetyRules.isSecretTarget(target)
         if (secret && !lifted.secretFields) {
             // l10n:keep agent safety result
-            return Verdict.Refuse("这是密码 / 验证码 / 支付密码一类的输入框，DSH 不代填，也不替用户点它。请调用 handoff 让用户自己输入。", "secret-field")
+            return Verdict.Refuse("密码 / 验证码 / 支付框不代填也不代点。请 handoff 让用户输入。", "secret-field")
         }
         // Everything above is a hard rule (or one the person lifted); everything below only asks.
         if (waived(p)) return Verdict.Allow
@@ -330,7 +330,7 @@ class SafetyGate(
             s.packageName == ownPackage && !p.unlocks.ownApp -> OWN_APP
             s.packageName != null && s.packageName in p.denyPackages -> denied(labelOf(s.packageName, s.appLabel))
             // l10n:keep agent safety result
-            s.secure -> "当前窗口是安全窗口（禁止截屏 / 读取，常见于支付、银行、密码页），不读取内容。需要用户操作的话请调用 handoff。"
+            s.secure -> "安全窗口（禁止截屏 / 读取）。要操作请 handoff。"
             // l10n:keep agent safety result
             s.image != null && ("«银行卡" in s.text || "«身份证" in s.text) ->
                 // l10n:keep agent safety result
@@ -359,6 +359,6 @@ class SafetyGate(
         const val OWN_APP = "这是 DSH 自己的界面，不读取也不操作。"
         fun denied(app: String) =
             // l10n:keep agent safety result
-            "「$app」在默认不碰名单里（银行、券商、支付类），DSH 不读也不操作。需要的话请用户自己来，或在 DSH 设置 → 手机操控 → 应用名单 里修改。"
+            "「$app」默认不碰（银行、券商、支付类）。要用就 handoff 给用户，或让用户在 设置 → 手机操控 → 应用名单 里解除。"
     }
 }

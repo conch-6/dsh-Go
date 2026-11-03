@@ -335,7 +335,7 @@ Future<void> showRuntimeLogSheet(BuildContext context, {String? title}) {
     heightFactor: 0.72,
     builder: (context) => Consumer(
       builder: (context, ref, _) {
-        final logs = ref.watch(localRuntimeProvider.select((s) => s.logs));
+        final logs = ref.watch(localRuntimeLogsProvider);
         return Column(
           children: [
             SheetHeader(

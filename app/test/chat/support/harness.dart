@@ -142,6 +142,20 @@ class FakeChatController extends ChatController {
   }
 
   @override
+  Future<bool> retryFailed(PendingPrompt prompt, String text) async {
+    final ok = await send(text, attachments: prompt.attachments);
+    if (ok) {
+      state = state.copyWith(
+        pending: [
+          for (final p in state.pending)
+            if (p.requestId != prompt.requestId) p,
+        ],
+      );
+    }
+    return ok;
+  }
+
+  @override
   Future<bool> steerQueued(PendingPrompt prompt) async {
     steered.add(prompt.requestId);
     return true;
@@ -464,7 +478,7 @@ class FakePicker implements AttachmentPicker {
   }
 
   @override
-  Future<PickedAttachments> pickFiles({int limit = maxAttachments}) async {
+  Future<PickedAttachments> pickFiles({int limit = maxAttachments, int heldBytes = 0}) async {
     calls.add('files');
     return PickedAttachments(files);
   }

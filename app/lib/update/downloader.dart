@@ -4,6 +4,7 @@ import 'dart:isolate';
 
 import 'package:crypto/crypto.dart';
 
+import 'delta.dart';
 import 'release.dart';
 import 'update_config.dart';
 import 'update_http.dart';
@@ -163,6 +164,55 @@ class ApkDownloader {
     return DownloadFailed(failure);
   }
 
+  /// [fileName] built from [base] (the installed APK) and [patch], which is
+  /// downloaded from [urls] like any file (resume, fallbacks, its SHA-256).
+  /// The result lands where [download] would leave [fileName], only once it
+  /// is [expectedSize] bytes hashing to [sha256]; the patch is deleted after.
+  /// Failed when anything goes wrong: the caller downloads the whole file.
+  Future<DownloadOutcome> downloadPatched({
+    required ReleasePatch patch,
+    required File base,
+    required String fileName,
+    required String sha256,
+    required List<DownloadUrl> urls,
+    int? expectedSize,
+    void Function(DownloadProgress progress)? onProgress,
+    void Function()? onVerifying,
+    CancelToken? cancel,
+  }) async {
+    final got = await download(
+      fileName: patch.name,
+      sha256: patch.sha256,
+      urls: urls,
+      expectedSize: patch.size,
+      onProgress: onProgress,
+      onVerifying: onVerifying,
+      cancel: cancel,
+    );
+    if (got is! DownloadDone) return got;
+    final target = File('${directory.path}/$fileName');
+    // Built in the full download's `.part`: a build cut short leaves the start
+    // of the APK, which that download resumes (and still checks).
+    final part = File('${target.path}.part');
+    try {
+      await applyDeltaPatch(
+        base: base,
+        patch: got.file,
+        out: part,
+        baseSha256: patch.from,
+        targetSha256: sha256,
+        targetSize: expectedSize,
+      );
+      await part.rename(target.path);
+      return DownloadDone(target, got.from);
+    } on Object {
+      // Another base, a broken patch, or no room to build it.
+      return const DownloadFailed(DownloadFailure.checksum);
+    } finally {
+      await _deleteQuietly(got.file);
+    }
+  }
+
   Future<_Step> _fetch(
     DownloadUrl url,
     File part,
@@ -303,13 +353,13 @@ class ApkDownloader {
     }
   }
 
-  /// Deletes every file in [directory] except [keep] (and its `.part`).
-  Future<void> clean({String? keep}) async {
+  /// Deletes every file in [directory] except those in [keep] (and their `.part`).
+  Future<void> clean({Iterable<String> keep = const []}) async {
     try {
       if (!await directory.exists()) return;
       await for (final entity in directory.list()) {
         final name = entity.uri.pathSegments.lastWhere((s) => s.isNotEmpty, orElse: () => '');
-        if (keep != null && (name == keep || name == '$keep.part')) continue;
+        if (keep.any((k) => name == k || name == '$k.part')) continue;
         await entity.delete(recursive: true);
       }
     } on FileSystemException {

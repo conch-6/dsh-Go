@@ -13,7 +13,8 @@ class L10nEn extends L10n {
   String get a11yRestoreTitle => 'Restore accessibility automatically';
 
   @override
-  String get searchKwA11yRestore => 'accessibility,restore,reconnect,automatic recovery,permission,ADB,Shizuku';
+  String get searchKwA11yRestore =>
+      'accessibility,restore,reconnect,automatic recovery,permission,ADB,Shizuku,Sui,root';
 
   @override
   String get a11yRestoreNeedsGrant => 'Authorization required';
@@ -29,10 +30,25 @@ class L10nEn extends L10n {
   String get a11yRestoreGrant => 'Authorize and enable';
 
   @override
+  String get a11yRestoreGrantShizuku => 'Grant with Shizuku';
+
+  @override
+  String get a11yRestoreGrantShizukuPermission => 'Authorize Shizuku, then grant';
+
+  @override
+  String get a11yRestoreGrantAdb => 'Grant with Direct ADB';
+
+  @override
+  String get a11yRestoreRootNote => 'Uses the authorized root connection to grant only this permission.';
+
+  @override
   String get a11yRestoreSetup => 'Set up Shizuku or wireless debugging';
 
   @override
   String get a11yRestoreWaiting => 'Allow the request in Shizuku';
+
+  @override
+  String get a11yRestoreWaitingSui => 'Allow the request in Sui';
 
   @override
   String get a11yRestoreComputer => 'Or connect to a computer and run once:';
@@ -3347,6 +3363,18 @@ class L10nEn extends L10n {
   String get catalogAllSettings => 'All settings';
 
   @override
+  String get diagnosticsForAi => 'Let the AI read diagnostics';
+
+  @override
+  String get diagnosticsForAiHint => 'Write the snapshot where the engine can read it';
+
+  @override
+  String get diagnosticsForAiDone => 'Written — ask the AI to \"check the diagnostics\"';
+
+  @override
+  String get diagnosticsForAiFailed => 'Not written: the local runtime is not installed';
+
+  @override
   String get chatBackgroundTaskNotice => 'Background task notice';
 
   @override
@@ -3363,6 +3391,16 @@ class L10nEn extends L10n {
 
   @override
   String get chatUnsent => 'Not sent';
+
+  @override
+  String get chatFailedSubmission => 'Failed · Input kept';
+
+  @override
+  String get chatEditFailedSubmission => 'Edit and resend';
+
+  @override
+  String get chatErrReasoningEffortUnsupported =>
+      'This model does not support the selected reasoning effort. Change the effort or model.';
 
   @override
   String get chatSteerNextStep => 'Steer · Next step';
@@ -3621,6 +3659,29 @@ class L10nEn extends L10n {
 
   @override
   String get chatExpandTodos => 'Expand list';
+
+  @override
+  String chatDockFolded(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count status bars stacked',
+      one: '1 status bar stacked',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get chatDockSpread => 'Expand';
+
+  @override
+  String get chatDockFold => 'Fold the status bars';
+
+  @override
+  String get chatDockNext => 'Next card';
+
+  @override
+  String get chatDockPrevious => 'Previous card';
 
   @override
   String get chatTodoNotStarted => 'Not started';
@@ -4689,6 +4750,48 @@ class L10nEn extends L10n {
     });
     return '$_temp0 $day';
   }
+
+  @override
+  String get engineNewChatDefaultsLast => 'New chat defaults (last choice)';
+
+  @override
+  String get engineNewChatDefaultsFixed => 'New chat defaults (fixed)';
+
+  @override
+  String get engineNewChatUseLast => 'Last choice';
+
+  @override
+  String get engineNewChatUseFixed => 'Fixed default';
+
+  @override
+  String get engineNewChatDefaultsHint =>
+      'Saved on the current host; affects only the model and thinking effort of new chats. Permissions keep their separate default and never inherit temporary session grants.';
+
+  @override
+  String get engineNewChatDefaultsLegacy =>
+      'This engine only supports remembering the last choice, not fixed defaults. It cannot confirm whether defaults were saved when switching models.';
+
+  @override
+  String get engineNewChatDefaultsUnsupported => 'This host has no editable default model settings';
+
+  @override
+  String get engineNewChatDefaultsSelectionUnavailable =>
+      'This model or thinking effort is no longer available. Choose again.';
+
+  @override
+  String get engineNewChatDefaultsInheritedEffort =>
+      'Host base settings specify a thinking effort that cannot be cleared here for a non-thinking model. Update the host configuration first.';
+
+  @override
+  String get engineNewChatDefaultsSaving => 'Saving and confirming defaults…';
+
+  @override
+  String get engineNewChatDefaultsUnconfirmed =>
+      'Could not confirm the complete defaults. Refresh and check the model and thinking effort; host base settings or another client may have changed them.';
+
+  @override
+  String get engineModelDefaultSaveFailed =>
+      'The model changed for this chat, but new chat defaults were not saved. Check Settings › Models and retry.';
 
   @override
   String get engineAccountSignedIn => 'Signed in to DeepSeek';
@@ -7730,6 +7833,22 @@ class L10nEn extends L10n {
       'When on, Shift+Enter inserts a new line. The on-screen keyboard keeps newlines; Ctrl/⌘+Enter always sends.';
 
   @override
+  String get hubQuickPanel => 'Swipe-left shortcuts';
+
+  @override
+  String get hubQuickPanelSwipe => 'Open with a left swipe';
+
+  @override
+  String get hubQuickPanelSwipeHint =>
+      'Swipe right to left over the chat. Code blocks, tables and other content that scrolls sideways aren’t affected.';
+
+  @override
+  String get hubQuickPanelItems => 'What it lists';
+
+  @override
+  String get hubQuickPanelItemsNone => 'Nothing chosen: a left swipe won\'t open it';
+
+  @override
   String get launchScreenTitle => 'Launch screen';
 
   @override
@@ -7846,6 +7965,89 @@ class L10nEn extends L10n {
 
   @override
   String get searchKwIconShortcut => 'shortcut,custom icon,home screen picture';
+
+  @override
+  String get liveThinking => 'Thinking';
+
+  @override
+  String get liveWorking => 'Working';
+
+  @override
+  String get liveJuggling => 'Subagents at work';
+
+  @override
+  String get liveSweeping => 'Compacting the context';
+
+  @override
+  String liveRunsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count chats running',
+      one: '1 chat running',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get liveChipThinking => 'Thinking';
+
+  @override
+  String get liveChipWorking => 'Working';
+
+  @override
+  String get liveChipJuggling => 'Helpers';
+
+  @override
+  String get liveChipSweeping => 'Tidying';
+
+  @override
+  String get liveChipApproval => 'Approve';
+
+  @override
+  String get liveChipQuestion => 'Reply';
+
+  @override
+  String get liveChipDone => 'Done';
+
+  @override
+  String get liveChipFailed => 'Failed';
+
+  @override
+  String get livePublicRunning => 'DSH is working';
+
+  @override
+  String get livePublicWaiting => 'DSH is waiting for you';
+
+  @override
+  String get livePublicDone => 'DSH is done';
+
+  @override
+  String get livePublicFailed => 'DSH ran into an error';
+
+  @override
+  String get liveSettingsTitle => 'Live activity';
+
+  @override
+  String get liveSettingsSwitch => 'Show live activity';
+
+  @override
+  String get liveSettingsSubtitle =>
+      'While DSH works, waits on you or controls the phone: in the status bar chip and on the lock screen, and in the island on phones that have one';
+
+  @override
+  String get liveSettingsFooter =>
+      'Android 16 Live Updates. Shown on Xiaomi HyperOS 3.1+, OPPO / OnePlus ColorOS 16, Honor MagicOS 10 and Pixel; vivo\'s Atomic Island and Samsung\'s Now Bar are open only to apps the maker partners with.';
+
+  @override
+  String get liveUnsupported => 'This phone\'s system doesn\'t support live activities yet';
+
+  @override
+  String get liveBlockedTitle => 'Live activities are off for DSH Go';
+
+  @override
+  String get liveBlockedText =>
+      'Turn on live activities for DSH Go in system settings (some phones call it “Show on Live Alerts”)';
 
   @override
   String get localeTitle => 'Language';
@@ -8375,6 +8577,201 @@ class L10nEn extends L10n {
       'image generation,text to image,video generation,AI art,generate images,generate video';
 
   @override
+  String get mediaSettingsDefaults => 'Defaults';
+
+  @override
+  String get mediaSettingsLegacyDefault => 'Older general default';
+
+  @override
+  String get mediaSettingsLegacyDefaultHint => 'The 0.2.x setting; used when a kind has no default of its own';
+
+  @override
+  String get mediaSettingsLegacyDefaultStale => 'Its service is unavailable; clear it so generation does not fail';
+
+  @override
+  String get mediaSettingsLegacyDefaultClear => 'Clear the older general default';
+
+  @override
+  String get mediaSettingsDefaultModel => 'Default model';
+
+  @override
+  String get mediaSettingsDefaultFooterLegacy =>
+      'An older plugin has one default model; update it to set images and video separately.';
+
+  @override
+  String get mediaSettingsDefaultsFooter =>
+      'Choose a default model for images and for video; leave it on Auto to use the first available one.';
+
+  @override
+  String get mediaSettingsNoVideoModels => 'This host\'s catalogue has no video models yet';
+
+  @override
+  String get mediaSettingsServices => 'Services';
+
+  @override
+  String get mediaSettingsAddService => 'Add service';
+
+  @override
+  String get mediaSettingsAddServiceHint =>
+      'Start from a provider preset; endpoint, protocol and models come filled in';
+
+  @override
+  String mediaSettingsServiceLimit(int count) {
+    return 'Up to $count services';
+  }
+
+  @override
+  String get mediaSettingsNoServices => 'No services yet. Add a provider to start making images or video.';
+
+  @override
+  String get mediaSettingsNoModels => 'No models selected';
+
+  @override
+  String get mediaSettingsKeyMissing => 'No API key';
+
+  @override
+  String get mediaSettingsCatalogMissing =>
+      'The plugin on this host offers no model catalogue. Existing services can still be edited, but nothing can be added and no default chosen yet.';
+
+  @override
+  String get mediaSettingsCatalogBroken =>
+      'The model catalogue can\'t be read (it may be an incompatible version). Existing services can still be edited, but nothing can be added and no default chosen yet.';
+
+  @override
+  String get mediaSettingsCatalogEmpty =>
+      'The model catalogue has no models yet. Existing services can still be edited, but nothing can be added and no default chosen yet.';
+
+  @override
+  String get mediaSettingsNoPresets => 'There are no services to add from this catalogue yet.';
+
+  @override
+  String get mediaSettingsLimits => 'Request limits';
+
+  @override
+  String get mediaSettingsLimitsHint => 'Caps images and bytes per request; defaults are the plugin hard limits';
+
+  @override
+  String get mediaSettingsMaxImages => 'Images per request';
+
+  @override
+  String get mediaSettingsMaxImageBytes => 'Max bytes per original';
+
+  @override
+  String get mediaSettingsMaxResponseBytes => 'Max provider response bytes';
+
+  @override
+  String get mediaSettingsMaxTotalImageBytes => 'Max image bytes per request';
+
+  @override
+  String get mediaSettingsMaxVideoBytes => 'Max video bytes';
+
+  @override
+  String get mediaSettingsBudget => 'Cost protection';
+
+  @override
+  String get mediaSettingsDailyBudget => 'Daily budget (CNY)';
+
+  @override
+  String get mediaSettingsDailyBudgetHint => 'Resets on the Shanghai date; generation pauses once it\'s used up';
+
+  @override
+  String get mediaSettingsUnknownPriceHold => 'Hold per request when the price is unknown (CNY)';
+
+  @override
+  String get mediaSettingsUnknownPriceHoldHint => 'Reserved per request; not a cap the provider charges by';
+
+  @override
+  String get mediaSettingsApiKey => 'API key';
+
+  @override
+  String get mediaSettingsReuseKey => 'Reuse key';
+
+  @override
+  String get mediaSettingsReuseKeyHint =>
+      'Images and video from one provider can share one API key; no need to enter it again.';
+
+  @override
+  String get mediaSettingsReuseKeyNone => 'No other service from this provider yet.';
+
+  @override
+  String get mediaSettingsReuseKeyShared => 'Shared';
+
+  @override
+  String get mediaSettingsModels => 'Models';
+
+  @override
+  String get mediaSettingsModelsEmpty => 'The catalogue has no models for this protocol';
+
+  @override
+  String get mediaSettingsModelKeepOne => 'Keep at least one model';
+
+  @override
+  String get mediaSettingsModelMissing => 'Not in the catalogue';
+
+  @override
+  String get mediaSettingsAdvanced => 'Advanced';
+
+  @override
+  String get mediaSettingsBaseUrl => 'API base URL';
+
+  @override
+  String get mediaSettingsBaseUrlInvalid => 'The address must start with https://';
+
+  @override
+  String get mediaSettingsProvider => 'Provider id';
+
+  @override
+  String get mediaSettingsKeyRef => 'Credential name';
+
+  @override
+  String get mediaSettingsKeyRefInvalid => 'Use letters, digits and underscores only';
+
+  @override
+  String get mediaSettingsResponseFormat => 'Response format';
+
+  @override
+  String get mediaSettingsResponseFormatAuto => 'By protocol';
+
+  @override
+  String get mediaSettingsServiceId => 'Service ID';
+
+  @override
+  String get mediaSettingsServiceGone => 'This service is gone';
+
+  @override
+  String get mediaSettingsServiceGoneBody => 'It may have been removed elsewhere. Go back to add it again.';
+
+  @override
+  String get mediaSettingsDelete => 'Delete service';
+
+  @override
+  String mediaSettingsDeleteTitle(String name) {
+    return 'Delete “$name”?';
+  }
+
+  @override
+  String get mediaSettingsDeleteBody =>
+      'Only this host\'s service entry is removed; the API key is kept. Defaults pointing at it are cleared too.';
+
+  @override
+  String get mediaSettingsNoImageModels => 'The catalogue has no image models yet';
+
+  @override
+  String get mediaSettingsNoAvailableService => 'No service is ready yet (add one and enter its key)';
+
+  @override
+  String get mediaSettingsNoImageService => 'No image service is ready yet (add one and enter its key)';
+
+  @override
+  String get mediaSettingsNoVideoService => 'No video service is ready yet (add one and enter its key)';
+
+  @override
+  String get mediaSettingsKeyExternal => 'Managed by another setting; only referenced here';
+
+  @override
+  String get mediaSettingsEnabledHint => 'Turns this service off for generation';
+
+  @override
   String get nearbyThisChat => 'This chat';
 
   @override
@@ -8443,6 +8840,22 @@ class L10nEn extends L10n {
 
   @override
   String get performanceRemoteHint => 'Connect to a computer or server to reduce work on this phone';
+
+  @override
+  String get performanceRefresh => 'Refresh rate';
+
+  @override
+  String get performanceRefreshMax => 'Max';
+
+  @override
+  String get performanceRefreshSystem => 'System';
+
+  @override
+  String get performanceRefreshHint =>
+      'Auto: fastest while drawing, handed back when still; System: the system decides.';
+
+  @override
+  String get searchKwRefreshRate => 'refresh rate high refresh 120Hz 90Hz smooth';
 
   @override
   String get petActionSending => 'Sending…';
@@ -8803,13 +9216,7 @@ class L10nEn extends L10n {
   String get phoneDndHiddenScreen => 'Works on a hidden screen';
 
   @override
-  String get phoneDndShizukuReady => 'Shizuku · Ready';
-
-  @override
   String get phoneNotReadyYet => 'Not ready yet';
-
-  @override
-  String get phoneDndAdbReady => 'Direct ADB · Ready';
 
   @override
   String get phoneActionFailedLater => 'Couldn’t complete. Try again later.';
@@ -8846,22 +9253,96 @@ class L10nEn extends L10n {
   String get phoneDndReactivate => 'Reactivate after restarting your phone.';
 
   @override
-  String get phoneDndKeepDebugging => 'Stay on Wi-Fi with Developer options and Wireless debugging on.';
-
-  @override
-  String get phoneDndUsingShizuku => 'Using Shizuku';
-
-  @override
-  String get phoneDndUsingAdb => 'Using Direct ADB';
+  String get phoneDndKeepDebugging => 'With Shizuku or Direct ADB, stay on Wi-Fi with Wireless debugging on.';
 
   @override
   String get phoneReady => 'Ready';
 
   @override
-  String get phoneDndUseShizuku => 'Use Shizuku';
+  String get phoneDndDirectAdb => 'Direct ADB';
 
   @override
-  String get phoneDndDirectAdb => 'Direct ADB';
+  String get phoneDndChannels => 'Channel';
+
+  @override
+  String get phoneDndShizukuFor => 'Phones with the Shizuku app';
+
+  @override
+  String get phoneDndSuiFor => 'Sui module on Magisk or KernelSU';
+
+  @override
+  String get phoneDndRootFor => 'Rooted phones';
+
+  @override
+  String get phoneDndAdbFor => 'No extra app, uses wireless debugging';
+
+  @override
+  String get phoneDndStateInUse => 'In use';
+
+  @override
+  String get phoneDndStateNotReady => 'Not ready';
+
+  @override
+  String get phoneDndStateUsable => 'Ready';
+
+  @override
+  String get phoneDndStateNeedsGrant => 'Needs permission';
+
+  @override
+  String get phoneDndStateNotRunning => 'Not running';
+
+  @override
+  String get phoneDndStateNotInstalled => 'Not installed';
+
+  @override
+  String get phoneDndStateNotFound => 'Not found';
+
+  @override
+  String get phoneDndStateViaSui => 'Via Sui';
+
+  @override
+  String get phoneDndStateWaiting => 'Waiting';
+
+  @override
+  String get phoneDndStateDisconnected => 'Not connected';
+
+  @override
+  String get phoneDndStateNotPaired => 'Not paired';
+
+  @override
+  String get phoneDndShizukuViaSui => 'On this phone the Shizuku interface comes from Sui. Use Sui instead.';
+
+  @override
+  String get phoneDndSuiMissing =>
+      'Sui wasn’t found. Install the Sui module in Magisk or KernelSU, restart the phone, then come back.';
+
+  @override
+  String get phoneDndSuiRunning => 'Sui interface available';
+
+  @override
+  String get phoneDndSuiStopped =>
+      'The Sui interface isn’t available. Check that the Sui module is enabled, restart the phone and try again.';
+
+  @override
+  String get phoneDndSuiAllSet => 'Sui is ready.';
+
+  @override
+  String get phoneDndSuiPermissionFailed =>
+      'Couldn’t ask Sui for permission. Check that the Sui module is enabled and try again.';
+
+  @override
+  String get phoneDndRootWaiting => 'Waiting for root. Answer your root manager’s prompt.';
+
+  @override
+  String get phoneDndRootConnected =>
+      'Root is connected. If it drops, choose it here again; DSH Go asks for root on its own only with “Keep root channel” on above.';
+
+  @override
+  String get phoneDndRootConnectedKept =>
+      'Root is connected. If it drops, DSH Go asks your root manager again on its own.';
+
+  @override
+  String get phoneDndRootRetry => 'Ask for root again';
 
   @override
   String get phoneDndInstallShizuku =>
@@ -8906,9 +9387,6 @@ class L10nEn extends L10n {
   String get phoneDndConnected => 'Connected';
 
   @override
-  String get phoneDndPairOnce => 'Pair once (no extra app)';
-
-  @override
   String get phoneDndDeveloperOptionsStep =>
       'Turn on Developer options: tap “Build number” 7 times in “About phone”. On Xiaomi, tap “OS version” in “My device → Detailed info and specs”; on vivo, tap “Software version”.';
 
@@ -8945,9 +9423,6 @@ class L10nEn extends L10n {
   @override
   String get phoneDndXiaomiUsbHint =>
       'Turning on “USB debugging (Security settings)” requires a SIM card and a Xiaomi account.';
-
-  @override
-  String get phoneDndEnable => 'Enable non-disruptive mode';
 
   @override
   String get phoneDndEnterCodeTitle => 'Enter pairing code';
@@ -9587,18 +10062,47 @@ class L10nEn extends L10n {
   }
 
   @override
-  String phoneDndShizukuStatus(String reason) {
-    return 'Shizuku · $reason';
-  }
-
-  @override
-  String phoneDndAdbStatus(String reason) {
-    return 'Direct ADB · $reason';
-  }
-
-  @override
   String phoneDndBrowserFailed(String url) {
     return 'Can’t open the browser. URL: $url';
+  }
+
+  @override
+  String phoneDndChannelReady(String channel) {
+    return '$channel · Ready';
+  }
+
+  @override
+  String phoneDndChannelStatus(String channel, String reason) {
+    return '$channel · $reason';
+  }
+
+  @override
+  String phoneDndUsing(String channel) {
+    return 'Using $channel';
+  }
+
+  @override
+  String phoneDndEnableWith(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'shizuku': 'Turn on with Shizuku',
+      'sui': 'Turn on with Sui',
+      'root': 'Turn on with Root',
+      'adb': 'Turn on with Direct ADB',
+      'other': 'Turn on',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String phoneDndSwitchTo(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'shizuku': 'Switch to Shizuku',
+      'sui': 'Switch to Sui',
+      'root': 'Switch to Root',
+      'adb': 'Switch to Direct ADB',
+      'other': 'Switch to this channel',
+    });
+    return '$_temp0';
   }
 
   @override
@@ -9837,7 +10341,7 @@ class L10nEn extends L10n {
   }
 
   @override
-  String get phoneDndManualConnect => 'Connect manually';
+  String get phoneDndManualConnect => 'Connect by port';
 
   @override
   String get phoneDndConnectPortLabel => 'Connection port';
@@ -9878,6 +10382,94 @@ class L10nEn extends L10n {
 
   @override
   String get phoneBackgroundNotificationBlocked => 'Allow pop-up alerts for phone-control notifications';
+
+  @override
+  String get phonePrivilegedUpgrade =>
+      'This app build does not support that privileged channel. Update DSH Go to use it.';
+
+  @override
+  String get phonePrivilegedSui => 'Sui';
+
+  @override
+  String get phonePrivilegedRoot => 'Root';
+
+  @override
+  String get phonePrivilegedSuiDescription =>
+      'Use the Sui module interface. Authorization is requested only when you tap.';
+
+  @override
+  String get phonePrivilegedRootDescription =>
+      'For Magisk, KernelSU or APatch. The first root command runs only after you choose this channel.';
+
+  @override
+  String get phonePrivilegedRootPrepare => 'Authorize root';
+
+  @override
+  String get phonePrivilegedRootUnchecked => 'Not checked';
+
+  @override
+  String get phonePrivilegedGrantRoot => 'Grant with root';
+
+  @override
+  String get phonePrivilegedGrantSui => 'Grant with Sui';
+
+  @override
+  String get phonePrivilegedGrantSuiPermission => 'Authorize Sui, then grant';
+
+  @override
+  String get phonePrivilegedSuggested => 'Suggested';
+
+  @override
+  String get phonePrivilegedRootRiskTitle => 'Give DSH Go root access?';
+
+  @override
+  String get phonePrivilegedRootRiskBody =>
+      'Your root manager (Magisk, KernelSU or APatch) will ask you. If you allow it, DSH Go runs its own background service as root. It asks again on its own after a disconnect or restart only with “Keep root channel” on.';
+
+  @override
+  String phoneKeepTitle(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'shizuku': 'Keep Shizuku channel',
+      'sui': 'Keep Sui channel',
+      'root': 'Keep root channel',
+      'adb': 'Keep Direct ADB channel',
+      'other': 'Keep this channel',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get phoneKeepRootDescription =>
+      'After a drop, an app restart or a reboot, DSH Go asks your root manager again by itself. The manager still decides.';
+
+  @override
+  String get phoneKeepSharedDescription =>
+      'After a drop, an app restart or a reboot, DSH Go reconnects with the permission it already has. It never asks for permission.';
+
+  @override
+  String get phoneKeepAdbDescription =>
+      'After a drop, an app restart or a reboot, DSH Go reconnects over Wi‑Fi with the existing pairing. With the permission from “Restore accessibility automatically”, it also tries once to turn on wireless debugging.';
+
+  @override
+  String get phoneKeepRestoring => 'Reconnecting';
+
+  @override
+  String get phoneKeepWaiting => 'Waiting for the channel';
+
+  @override
+  String get phoneKeepWaitingService => 'Waiting for the service to run';
+
+  @override
+  String get phoneKeepWaitingPermission => 'Not authorized. Reconnects once you grant it.';
+
+  @override
+  String get phoneKeepWaitingNetwork => 'Waiting for Wi‑Fi';
+
+  @override
+  String get phoneKeepNotPaired => 'Not paired. Pair wireless debugging first.';
+
+  @override
+  String get phoneKeepFailed => 'Couldn’t reconnect. Tries again when you open the app or start a task.';
 
   @override
   String get phoneModeTitle => 'How DSH confirms';
@@ -13082,7 +13674,7 @@ class L10nEn extends L10n {
   String get remoteStartCommand => 'Start command';
 
   @override
-  String get remoteStartCommandHelp => 'If installed with nvm, you can enter the full path. tmux works too: include -s <name> (required), e.g. tmux new-session -d -s dsh \'dsh web --port 3081 --no-open\'';
+  String get remoteStartCommandHelp => 'If installed with nvm, you can enter the full path';
 
   @override
   String get remoteWorkingDirectory => 'Working directory (optional)';
@@ -13725,7 +14317,7 @@ class L10nEn extends L10n {
   String get searchKwAppRules => 'apps,blocklist,allowlist,deny,app list';
 
   @override
-  String get searchKwDnd => 'dnd,shizuku,adb,background';
+  String get searchKwDnd => 'dnd,shizuku,sui,root,adb,background';
 
   @override
   String get searchKwEngine => 'engine,runtime,start,stop,restart,DSH';
@@ -13885,6 +14477,10 @@ class L10nEn extends L10n {
   String get searchKwNotifyQuestion => 'question,asks you';
 
   @override
+  String get searchKwNotifyLive =>
+      'dynamic island,live update,live activity,status bar chip,now bar,live alerts,lock screen progress';
+
+  @override
   String get searchKwNotifySystem => 'sound,banner,lock screen,system';
 
   @override
@@ -14003,6 +14599,9 @@ class L10nEn extends L10n {
 
   @override
   String get searchKwUsageStats => 'statistics,stats,usage data,analytics,telemetry,anonymous,privacy,data';
+
+  @override
+  String get searchKwQuickPanel => 'swipe,left swipe,shortcuts,gesture,quick panel,quick access';
 
   @override
   String get shellDeletePermanently => 'Delete permanently';
@@ -15098,6 +15697,14 @@ class L10nEn extends L10n {
   }
 
   @override
+  String get shellQuickPanel => 'Shortcuts';
+
+  @override
+  String shellQuickPanelHint(String path) {
+    return 'Change these in $path';
+  }
+
+  @override
   String starPromptTitle(int hours) {
     String _temp0 = intl.Intl.pluralLogic(
       hours,
@@ -15472,13 +16079,14 @@ class L10nEn extends L10n {
 
   @override
   String get stateChatTextOnlyModel =>
-      'This model reads text only. Images were sent as files. Switch to V4.1 Flash to let AI view them.';
+      'Sent as files: this model doesn’t list image input. Switch models or set its Input to Text + image.';
 
   @override
   String get stateAttachmentUploadFailed => 'Couldn’t upload attachment';
 
   @override
-  String get stateChatImageModelRequired => 'This model can’t view images. Switch to V4.1 Flash and send again.';
+  String get stateChatImageModelRequired =>
+      'This model doesn’t list image input. Switch models or set its Input to Text + image and resend.';
 
   @override
   String get stateSendFailed => 'Couldn’t send';
@@ -16187,8 +16795,11 @@ class L10nEn extends L10n {
 
   @override
   String stateAttachmentFileLimit(String name) {
-    return 'File “$name” exceeds 30 MB';
+    return 'File “$name” exceeds 200 MB';
   }
+
+  @override
+  String get stateAttachmentTotalLimit => 'Attachments exceed 400 MB in total';
 
   @override
   String stateBotFinished(String name) {
@@ -16508,6 +17119,13 @@ class L10nEn extends L10n {
 
   @override
   String get updateInstallCancelledMessage => 'The package is saved. You can install it anytime.';
+
+  @override
+  String get updateInstallUnconfirmed => 'Installation result not confirmed';
+
+  @override
+  String get updateInstallUnconfirmedMessage =>
+      'The package is saved. Check any system prompts, then retry or open it with the system installer.';
 
   @override
   String get updateSignatureMismatch => 'App signatures don’t match';
@@ -17268,6 +17886,19 @@ class L10nEn extends L10n {
   @override
   String viewUiReplyCancel(String value) {
     return 'Cancel: $value';
+  }
+
+  @override
+  String viewUiReplyOther(String value) {
+    return 'Other: $value';
+  }
+
+  @override
+  String get viewUiFreeTextHint => 'Other (type your own)';
+
+  @override
+  String viewUiChosenOther(String value) {
+    return 'Wrote: $value';
   }
 
   @override

@@ -172,5 +172,10 @@
   "hubPermissionPhone": "Phone",
   "hubPermissionPhoneConfirm": "Phone control confirmation",
   "hubHardwareEnterSends": "Send with hardware Enter",
-  "hubHardwareEnterSendsHint": "When on, Shift+Enter inserts a new line. The on-screen keyboard keeps newlines; Ctrl/⌘+Enter always sends."
+  "hubHardwareEnterSendsHint": "When on, Shift+Enter inserts a new line. The on-screen keyboard keeps newlines; Ctrl/⌘+Enter always sends.",
+  "hubQuickPanel": "Swipe-left shortcuts",
+  "hubQuickPanelSwipe": "Open with a left swipe",
+  "hubQuickPanelSwipeHint": "Swipe right to left over the chat. Code blocks, tables and other content that scrolls sideways aren’t affected.",
+  "hubQuickPanelItems": "What it lists",
+  "hubQuickPanelItemsNone": "Nothing chosen: a left swipe won't open it"
 }

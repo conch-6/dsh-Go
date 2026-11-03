@@ -125,8 +125,9 @@ void main() {
             ] else ...[
               localConnectionProvider.overrideWith(FakeConnection.new),
               localRuntimeProvider.overrideWith(
-                () => FakeRuntime(const LocalRuntimeState(loaded: true, status: runningStatus, logs: sampleLogs)),
+                () => FakeRuntime(const LocalRuntimeState(loaded: true, status: runningStatus)),
               ),
+              localRuntimeLogsProvider.overrideWithBuild((ref, notifier) => sampleLogs),
               settingsProvider.overrideWith(
                 () => FakeSettings(const AppSettings(loaded: true, apiKey: 'sk-4c1f0e7b9a2d4e6f8a1b3c5d7e9fa3f9')),
               ),

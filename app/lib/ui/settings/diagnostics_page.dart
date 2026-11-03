@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../diagnostics/diagnostics_publish.dart';
 import '../../diagnostics/redact.dart';
 import '../../runtime/runtime_state.dart';
 import '../../runtime/runtime_bridge.dart';
@@ -32,6 +33,7 @@ class DiagnosticsPage extends ConsumerWidget {
     required LocalRuntimeState runtime,
     required AppSettings settings,
     required String connection,
+    required int logLines,
   }) {
     final s = runtime.status;
     return {
@@ -46,7 +48,7 @@ class DiagnosticsPage extends ConsumerWidget {
         'baseUrl': s.baseUrl,
         'token': s.token == null ? null : '<redacted>',
         'error': s.error,
-        'logLines': runtime.logs.length,
+        'logLines': logLines,
         ...s.launchDiagnostics,
       },
       'connection': connection,
@@ -72,12 +74,29 @@ class DiagnosticsPage extends ConsumerWidget {
       _ => l10n.pluginsConnecting,
     };
     Future<void> copyReport() async {
-      final json = const JsonEncoder.withIndent('  ')
-          .convert(redactJson(report(runtime: runtime, settings: settings, connection: connection)));
+      final json = const JsonEncoder.withIndent('  ').convert(
+        redactJson(
+          report(
+            runtime: runtime,
+            settings: settings,
+            connection: connection,
+            logLines: ref.read(localRuntimeLogsProvider).length,
+          ),
+        ),
+      );
       await Clipboard.setData(ClipboardData(text: json));
       if (context.mounted) {
         showBriefNotice(context, l10n.pluginsDiagnosticsCopied);
       }
+    }
+
+    Future<void> publishForAi() async {
+      final published = await ref.read(diagnosticsPublisherProvider).publish();
+      if (!context.mounted) return;
+      showBriefNotice(
+        context,
+        published == null ? l10n.diagnosticsForAiFailed : l10n.diagnosticsForAiDone,
+      );
     }
 
     return AppPage.list(
@@ -117,6 +136,12 @@ class DiagnosticsPage extends ConsumerWidget {
               title: l10n.pluginsCopyDiagnostics,
               subtitle: l10n.pluginsDiagnosticsContents,
               onTap: copyReport,
+            ),
+            ListPageRow(
+              icon: AppIcons.bot,
+              title: l10n.diagnosticsForAi,
+              subtitle: l10n.diagnosticsForAiHint,
+              onTap: publishForAi,
             ),
           ],
         ),

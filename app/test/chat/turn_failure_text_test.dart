@@ -17,6 +17,7 @@ void main() {
     // DSH 0.2.1-rc.4's listed-catalog refusals (llm-deepseek refuseListedModel).
     'CLIENT_UPGRADE_REQUIRED': '这个模型需要新版引擎',
     'MODEL_UNSUPPORTED': '当前模型不可用',
+    'UNSUPPORTED_REASONING_EFFORT': '当前模型不支持此推理档位，请调整档位或换模型',
     null: '本轮出错了',
     'unknown: raw exception': '本轮出错了',
   };

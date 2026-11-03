@@ -213,7 +213,14 @@ class _HostRuns {
 
   List<PetRun> get runs => [
     for (final MapEntry(:key, :value) in _running.entries)
-      PetRun(host, key, subagent: _info[key]?.isSubagent ?? false, root: _root(key), since: value),
+      PetRun(
+        host,
+        key,
+        subagent: _info[key]?.isSubagent ?? false,
+        root: _root(key),
+        since: value,
+        title: _info[_root(key)]?.title,
+      ),
   ];
 
   void _onEvent(HostEvent event) {

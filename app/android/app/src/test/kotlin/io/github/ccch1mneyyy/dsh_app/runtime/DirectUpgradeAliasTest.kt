@@ -28,7 +28,7 @@ class DirectUpgradeAliasTest {
         File(base, "staging/root").mkdirs()
         File(base, "staging/etc").mkdirs()
         File(base, "staging/etc/version").writeText(version)
-        activateRootfs(base, version)
+        activateRootfs(base, version, sync = {})
         assertEquals("user bytes\n", File(root, "root/workspace/keep.txt").readText())
         assertFalse(File(root, "opt/dsh-app/direct/config.json").exists())
     }

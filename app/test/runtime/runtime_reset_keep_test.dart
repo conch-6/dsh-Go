@@ -14,7 +14,7 @@ class _Bridge extends RuntimeBridge {
   @override
   Future<RuntimeStatus> status() async => const RuntimeStatus(phase: RuntimePhase.notInstalled);
   @override
-  Future<List<String>> logs({int lines = 500}) async => const [];
+  Future<RuntimeLogSnapshot> logSnapshot({int lines = 300}) async => const RuntimeLogSnapshot([], 0);
   @override
   Future<void> reset({ResetKeep keep = const ResetKeep()}) async => resets.add(keep);
 }

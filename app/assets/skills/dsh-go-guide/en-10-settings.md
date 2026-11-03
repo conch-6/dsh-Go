@@ -30,7 +30,7 @@ Shows your DeepSeek account or API key and balance; tap it to open your account.
 - **Phone control**: see [Phone control](04-phone-control.md).
 - **Web search**: the current host's web search: fill in an API key, or switch to the **New search API**.
 - **Plugins**: see [Plugins](08-plugins.md). Some plugins add their own rows below.
-- **Images and video**: the current host's generation services, API keys and default models, from the image and video plugin; without the plugin you can **Install on this host**. How to use it: see [Chat](01-chat.md).
+- **Images and video**: the current host's generation services, API keys and default models, from the image and video plugin. Pick a provider to add a service, then enter its API key once; a provider's image and video services share that key. Without the plugin you can **Install on this host**. How to use it: see [Chat](01-chat.md).
 
 ## Appearance
 
@@ -42,7 +42,7 @@ Shows your DeepSeek account or API key and balance; tap it to open your account.
 - **Language**: **System**, **简体中文** or **English**.
 - **Notifications**: turn on **Allow notifications**, then choose **Turn complete**, **Error or stopped**, **Needs approval** and **Questions for you**. Alerts from remote hosts need the app running and the connection online. Sound, banners and the lock screen are set in system settings.
 - **Voice input**: which recognition turns speech into text.
-- **Performance**: **Auto**, **Full** or **Light**, plus glass blur and interface motion.
+- **Performance**: **Auto**, **Full** or **Light**, plus glass blur, interface motion and **Refresh rate** (Auto / Max / System).
 - **Background running**: see [FAQ](11-faq.md). Until it's set up, the row says so on the right.
 - **Privacy and sharing**:
   - **My shared links**: see [Sharing and replay](07-sharing.md).
@@ -62,7 +62,7 @@ Shows your DeepSeek account or API key and balance; tap it to open your account.
 - **Diagnostics**: see [FAQ](11-faq.md).
 - **About DSH Go**:
   - **Version**: the app version, such as 0.9.2 (10251234), with the build number in parentheses. When there's a new version, this row on the Settings page says **Update available**.
-  - **Check for updates**: when there's a new version, the update window opens. Read **What’s new**, tap **Update now**, and once the download is verified, tap **Install** and confirm in the system prompt. DSH Go closes to install; your chats and settings stay. To pass on a version, tap **Skip this version**. The first time, you'll need to allow DSH Go to install apps. If the installed app has a different signature (usually a test build), it can't be updated in place: uninstall it first, which erases your chats, Linux environment and settings.
+  - **Check for updates**: when there's a new version, the update window opens. Read **What’s new**, tap **Update now**, and once the download is verified, tap **Install** and confirm in the system prompt. DSH Go closes to install; your chats and settings stay. If the version changes the runtime, only `/root` stays in the Linux environment: software installed with `apt`, and files in `/usr/local`, `/opt` and similar places, need installing again. To pass on a version, tap **Skip this version**. The first time, you'll need to allow DSH Go to install apps. If the installed app has a different signature (usually a test build), it can't be updated in place: uninstall it first, which erases your chats, Linux environment and settings.
   - **Check automatically**: on by default; checks when the app opens, at most once a day. A new version opens the update window, unless you're on another page or typing, in which case **Check for updates** shows it. Skipped versions aren't offered again, and nothing downloads or installs on its own.
   - **Open-source licenses**.
 

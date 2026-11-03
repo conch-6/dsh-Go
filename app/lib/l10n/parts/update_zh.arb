@@ -57,6 +57,8 @@
   "updateSettingsOpenFailedMessage": "到「设置 → 应用 → DSH Go」里允许「安装未知应用」，再回来安装。",
   "updateInstallCancelled": "已取消安装",
   "updateInstallCancelledMessage": "安装包还在，随时可以再装。",
+  "updateInstallUnconfirmed": "尚未确认安装结果",
+  "updateInstallUnconfirmedMessage": "安装包已保留。可先检查系统提示，再重试或用系统安装器打开。",
   "updateSignatureMismatch": "签名不一致，不能直接覆盖",
   "updateSignatureMismatchMessage": "手机上的 DSH Go 签名不同（多半是测试包），需要先卸载旧版再装新版。卸载会清空对话、Linux 环境和设置。",
   "updateWrongPackage": "不是 DSH 的安装包",

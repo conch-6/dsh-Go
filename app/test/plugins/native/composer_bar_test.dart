@@ -37,6 +37,7 @@ Widget bar(
   String? sessionId = 's1',
   bool visible = true,
   DateTime Function()? clock,
+  Widget? leading,
 }) {
   final host = composer ?? FakeComposer(sessionId: sessionId);
   return testApp(
@@ -52,7 +53,7 @@ Widget bar(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                NativeComposerBar(sessionId: sessionId, visible: visible),
+                NativeComposerBar(sessionId: sessionId, visible: visible, leading: leading),
                 const SizedBox(key: ValueKey('composer'), height: 56),
               ],
             ),
@@ -263,6 +264,35 @@ void main() {
     expect(find.text('没完成'), findsOneWidget);
     expect(composer.inserted, ['Hello']);
     await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('the chat\'s pills lead the capsules in one row, pinned while they scroll', (tester) async {
+    usePhoneView(tester);
+    const pill = SizedBox(key: ValueKey('pill'), width: 120, height: CapsuleMetrics.height);
+    final many = [for (var i = 0; i < 8; i++) UiQuickAction(label: '长长的模板$i', action: UiSendAction('t$i'))];
+    await tester.pumpWidget(bar(FakeBridge(), quick: many, leading: pill));
+    await pumpFrames(tester);
+    final row = tester.getRect(find.byType(ComposerCapsuleRow));
+    final lead = tester.getRect(find.byKey(const ValueKey('pill')));
+    final first = tester.getRect(find.byType(ComposerCapsule).first);
+    final composer = tester.getRect(find.byKey(const ValueKey('composer')));
+    expect(row.height, CapsuleMetrics.height + CapsuleMetrics.below);
+    expect(lead.left, composer.left);
+    expect(lead.top, first.top);
+    expect(first.left - lead.right, CapsuleMetrics.gap);
+    expect(composer.top - lead.bottom, CapsuleMetrics.below);
+
+    // Scrolled to the end, the pill stays where it was.
+    await tester.drag(find.byType(SingleChildScrollView), const Offset(-2000, 0));
+    await pumpFrames(tester);
+    expect(tester.getRect(find.byKey(const ValueKey('pill'))), lead);
+    expect(tester.getRect(find.byType(ComposerCapsule).first).left, lessThan(lead.right));
+
+    // No capsules at all: the pill still has its row.
+    await tester.pumpWidget(bar(FakeBridge(), quick: const [], leading: pill));
+    await pumpFrames(tester);
+    expect(tester.getSize(find.byType(NativeComposerBar)).height, CapsuleMetrics.height + CapsuleMetrics.below);
+    expect(find.byKey(const ValueKey('pill')), findsOneWidget);
   });
 
   testWidgets('a reply generating: the bar steps aside', (tester) async {

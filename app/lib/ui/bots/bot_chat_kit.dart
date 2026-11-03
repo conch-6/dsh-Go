@@ -520,7 +520,7 @@ class BotReplyText extends StatelessWidget {
   @override
   Widget build(BuildContext context) => GestureDetector(
     onLongPress: streaming ? null : () => _menu(context),
-    child: MarkdownBody(text: text, streaming: streaming, selectable: false),
+    child: MarkdownBody(text: text, streaming: streaming, selectable: false, repairBareViews: true),
   );
 }
 

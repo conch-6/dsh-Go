@@ -1,9 +1,26 @@
 package io.github.ccch1mneyyy.dsh_app.pet
 
 import io.github.ccch1mneyyy.dsh_app.phone.Json
+import kotlin.math.roundToInt
 
 /** One frame: which cell of the sheet, and for how long. */
 data class PetFrame(val cell: Int, val ms: Int)
+
+/** The three sizes in 宠物设置, by body height (dp) — the app's PetSize (`pet_state.dart` §2.10). */
+enum class PetSize(val dp: Float) {
+    SMALL(22f),
+    MEDIUM(30f),
+    LARGE(40f);
+
+    companion object {
+        /** The channel's name (`small` / `medium` / `large`); anything else reads as medium. */
+        fun fromName(name: String?): PetSize = when (name) {
+            "small" -> SMALL
+            "large" -> LARGE
+            else -> MEDIUM
+        }
+    }
+}
 
 /** A rectangle in logical pixels (the pack's canvas). */
 data class PetBox(val x: Float, val y: Float, val w: Float, val h: Float) {
@@ -74,7 +91,17 @@ class PetPack(
     val idlePool: List<PetIdleItem>,
     /** `bonus`; null when the pack has no such key (format v1: a state's extra animations). */
     val bonus: Map<String, PetBonus>?,
+    /** `hitBoxes.default`. */
+    private val defaultHitBox: PetBox? = null,
+    /** By animation: `hitBoxes.byAnim`, else `sleeping` for `sleepingAnims`, `wide` for `wideAnims`. */
+    private val hitBoxByAnim: Map<String, PetBox> = emptyMap(),
 ) {
+    /**
+     * Where [anim]'s body is (logical px), the touch target: as the chat page's hitBoxFor
+     * (`pet_pack.dart`), measured on the body, so a thought cloud, Zzz or notes are not in it.
+     */
+    fun hitBoxFor(anim: PetAnimation): PetBox = hitBoxByAnim[anim.name] ?: defaultHitBox ?: contentBox
+
     /** The animation [state] plays: the first tier reached, else the state's primary. Unknown → idle's. */
     fun primary(state: String, tier: Int): PetAnimation {
         tiers[state]?.let { list ->
@@ -120,8 +147,8 @@ class PetPack(
     /**
      * The out-of-app window at rest, on the canvas: `hitBoxes.wide` with the idle picture's cell (the
      * hit box, measured on the body, leaves out the idle art's bottom row: 鲸娘's outline, Deepy's
-     * shadow), else every state animation's box (roam aside). Held, the window adds the drag pose
-     * ([PetFrames]).
+     * shadow), else every state animation's box (roam aside). Held, the window adds the drag pose;
+     * showing an animation that reaches past it, that animation's cell ([PetFrames]).
      */
     fun windowBox(): PetBox = wideBox?.union(primary(IDLE, 0).box) ?: unionBox(usedAnimations(skipStates = setOf("roam")))
 
@@ -129,23 +156,34 @@ class PetPack(
     val crisp: Boolean get() = pixelArt && scale == 1
 
     /**
-     * Physical pixels per logical (art) pixel for a body [bodyDp] tall:
-     * a whole number for crisp packs, exact for hi-res ones.
+     * Physical pixels per logical (art) pixel for [size] at [density] — the app's rule
+     * (`pet_sprite.dart`'s petScale / petDevicePixels), so the out-of-app pet is as big as the one
+     * on the chat page (docs/design/pets.md §2.10). Pixel art snaps [k] to a whole number of
+     * physical pixels and keeps the three sizes apart ([devicePixels]); hi-res art draws at the
+     * target body height.
      */
-    fun screenScale(bodyDp: Float, density: Float): Float {
-        val raw = bodyDp * density / contentBox.h
-        return if (crisp) maxOf(1, Math.round(raw)).toFloat() else raw
+    fun screenScale(size: PetSize, density: Float): Float =
+        if (pixelArt) devicePixels(size, density).toFloat() else size.dp * density / contentBox.h
+
+    /**
+     * Whole physical pixels per art pixel for [size]: `round(dp × density ÷ body)`, then small /
+     * medium / large at least one apart — on a 2.75× phone 22/30/40 dp over a 49 px body round to
+     * 1/2/2, and two of the three sizes would otherwise draw alike.
+     */
+    fun devicePixels(size: PetSize, density: Float): Int {
+        fun at(s: PetSize): Int = (s.dp.toDouble() * density / contentBox.h).roundToInt().coerceAtLeast(1)
+        val small = at(PetSize.SMALL)
+        val medium = maxOf(small + 1, at(PetSize.MEDIUM))
+        val large = maxOf(medium + 1, at(PetSize.LARGE))
+        return when (size) {
+            PetSize.SMALL -> small
+            PetSize.MEDIUM -> medium
+            PetSize.LARGE -> large
+        }
     }
 
     companion object {
         const val IDLE = "idle"
-
-        /** Body heights of the three sizes (dp): small, medium, large. */
-        fun bodyDp(size: String?): Float = when (size) {
-            "small" -> 22f
-            "large" -> 40f
-            else -> 30f
-        }
 
         /** Clawd on Desk state names the overlay understands (anything else plays as idle). */
         val STATES = setOf(
@@ -206,7 +244,14 @@ class PetPack(
                 val ms = num(v)?.toLong()
                 if (k is String && ms != null && ms > 0) playMs[k] = ms
             }
-            val wideBox = box((root["hitBoxes"] as? Map<*, *>)?.get("wide"))
+            val hits = root["hitBoxes"] as? Map<*, *>
+            val wideBox = box(hits?.get("wide"))
+            val sleepingBox = box(hits?.get("sleeping"))
+            // As pet_pack.dart: wideAnims, then sleepingAnims, then byAnim, each over the one before.
+            val hitBoxByAnim = LinkedHashMap<String, PetBox>()
+            if (wideBox != null) (hits?.get("wideAnims") as? List<*>).orEmpty().filterIsInstance<String>().forEach { hitBoxByAnim[it] = wideBox }
+            if (sleepingBox != null) (hits?.get("sleepingAnims") as? List<*>).orEmpty().filterIsInstance<String>().forEach { hitBoxByAnim[it] = sleepingBox }
+            (hits?.get("byAnim") as? Map<*, *>)?.forEach { (k, v) -> box(v)?.let { b -> if (k is String) hitBoxByAnim[k] = b } }
             // `idlePool: {everyMs, anims: [...]}`; a bare list is read too.
             val poolRaw = root["idlePool"].let { (it as? Map<*, *>)?.get("anims") ?: it } as? List<*>
             val idlePool = poolRaw?.map { item ->
@@ -244,6 +289,8 @@ class PetPack(
                 wideBox = wideBox,
                 idlePool = idlePool,
                 bonus = bonus,
+                defaultHitBox = box(hits?.get("default")),
+                hitBoxByAnim = hitBoxByAnim,
             )
         }
 

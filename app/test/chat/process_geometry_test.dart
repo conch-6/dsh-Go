@@ -48,22 +48,55 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(tester.state(find.byType(CircularProgressIndicator)), same(state));
   });
-  testWidgets('finished thinking moves the preview left without overshooting right', (tester) async {
+  testWidgets('streaming thinking is a calm three-line window that folds away when done', (tester) async {
     Widget pill(bool active) => testApp(
       Scaffold(
-        body: ThinkingPill(reasoning: '预览\n细节', active: active),
+        body: ThinkingPill(reasoning: '第一段\n第二段\n第三段\n正在写的这一段更长一些', active: active),
       ),
     );
     await tester.pumpWidget(pill(true));
-    var x = tester.getTopLeft(find.text('预览')).dx;
+    await pumpFrames(tester, 4);
+    final ticker = find.byType(ThinkingTicker);
+    expect(ticker, findsOneWidget);
+    // 超过三行:窗口钉在三行高(13 号 × 1.3 行高 × 3),不跟着内容长。
+    expect(tester.getSize(ticker).height, closeTo(13 * 1.3 * 3, 0.5));
+    // 一整块连续的文字,最新的字还在;不再拆行、也没有省略号。
+    expect(find.descendant(of: ticker, matching: find.textContaining('正在写的这一段更长一些')), findsOneWidget);
+    expect(find.textContaining('…'), findsNothing, reason: 'no ellipsis on the ticker');
+    // 点开:实时窗口让位给全文,两块不会同时在树上。
+    await tester.tap(find.text('思考中'));
+    await pumpFrames(tester, 6);
+    expect(find.byType(ThinkingTicker), findsNothing);
+    expect(find.textContaining('正在写的这一段更长一些'), findsOneWidget);
+    // 再点:回到三行窗口。
+    await tester.tap(find.text('思考中'));
+    await pumpFrames(tester, 6);
+    expect(find.byType(ThinkingTicker), findsOneWidget);
+    // 恒高三行:内容只有一行时窗口也不缩,流式期间列表不跟着跳。
+    await tester.pumpWidget(testApp(const Scaffold(body: ThinkingPill(reasoning: '短', active: true))));
+    await pumpFrames(tester, 4);
+    expect(tester.getSize(find.byType(ThinkingTicker)).height, closeTo(13 * 1.3 * 3, 0.5));
+    // 思考结束:窗口收回,行内预览出现。
     await tester.pumpWidget(pill(false));
-    for (var i = 0; i < 25; i++) {
-      await tester.pump(const Duration(milliseconds: 16));
-      final next = tester.getTopLeft(find.text('预览')).dx;
-      expect(next, lessThanOrEqualTo(x + 0.5));
-      x = next;
-    }
+    await pumpFrames(tester, 6);
+    expect(find.byType(ThinkingTicker), findsNothing);
+    expect(find.text('第一段'), findsOneWidget);
   });
+  testWidgets('streaming thinking resizes in one frame so nothing fights the glide', (tester) async {
+    Widget pill(String reasoning) =>
+        testApp(Scaffold(body: ThinkingPill(reasoning: reasoning, active: true, streaming: true)));
+    await tester.pumpWidget(pill('第一行'));
+    // 流式期间块高按行瞬长:高度动画会和文字上滑、列表追底叠在一起,看起来在抖。
+    expect(find.byType(AnimatedSize), findsNothing);
+    await tester.pumpWidget(pill('第一行\n第二行'));
+    expect(find.byType(AnimatedSize), findsNothing);
+    expect(tester.getSize(find.byType(ThinkingTicker)).height, greaterThan(13 * 1.3));
+    // 点开全文时高度动画回来(单槽切换才需要过渡)。
+    await tester.tap(find.text('思考中'));
+    await tester.pump();
+    expect(find.byType(AnimatedSize), findsOneWidget);
+  });
+
   testWidgets('dense code and ANSI output align with section titles and use 18px lines', (tester) async {
     usePhoneView(tester);
     final cases = [

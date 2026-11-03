@@ -10,6 +10,7 @@ import 'dart:async';
 
 import 'schema_collapsed_groups.dart';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -75,6 +76,10 @@ abstract class SchemaFormSource {
 
   EngineSettings? watch(WidgetRef ref);
 
+  /// What [selector] picks from the settings, drawing again only when that
+  /// changes (by `==`): a row of a long form leaves the others alone.
+  T select<T>(WidgetRef ref, T Function(EngineSettings? settings) selector) => selector(watch(ref));
+
   SettingsEditor editor(WidgetRef ref, EngineSettings snapshot);
 
   /// What a secret that holds a value reads.
@@ -90,6 +95,10 @@ class EngineSettingsSource extends SchemaFormSource {
 
   @override
   EngineSettings? watch(WidgetRef ref) => ref.watch(engineSettingsProvider).value;
+
+  @override
+  T select<T>(WidgetRef ref, T Function(EngineSettings? settings) selector) =>
+      ref.watch(engineSettingsProvider.select((async) => selector(async.value)));
 
   @override
   SettingsEditor editor(WidgetRef ref, EngineSettings snapshot) =>
@@ -113,7 +122,8 @@ class SchemaFormScope extends InheritedWidget {
 String get lockedHint => appL10n.engineFieldLocked;
 
 /// The rows of one field, driven by its schema; nothing when the namespace
-/// or the field is not served.
+/// or the field is not served. They draw again when what they show of the
+/// settings changes ([SchemaFieldWatch]), not on every edit of the form.
 class SchemaFieldTile extends ConsumerWidget {
   const SchemaFieldTile(this.spec, {super.key});
 
@@ -121,11 +131,71 @@ class SchemaFieldTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final settings = SchemaFormScope.of(context).watch(ref);
+    final settings = SchemaFormScope.of(context).select(ref, (settings) => SchemaFieldWatch(settings, spec)).settings;
     final node = spec.fallbackNode ?? settings?.nodeOf(spec.ref);
     if (settings == null || node == null) return const SizedBox.shrink();
     return SchemaFieldView(spec: spec, node: node, settings: settings);
   }
+}
+
+/// What one field's rows ([SchemaFieldView], [SecretFieldTile]) read from the
+/// settings, so they draw again when it changes and not when another field
+/// does: the field's value and layers, its error and edit state, and what
+/// the namespace says as a whole (its schema, whether it can be written or
+/// is locked); for a secret, what its row says of it (the credential it is
+/// read from, set, writable, bound). A row that comes to read more of the
+/// settings adds it here.
+@immutable
+class SchemaFieldWatch {
+  factory SchemaFieldWatch(EngineSettings? settings, SchemaFieldSpec spec) {
+    final view = settings?[spec.ns];
+    if (settings == null || view == null) return SchemaFieldWatch._(settings, [settings == null], const []);
+    final field = spec.ref;
+    final key = field.key;
+    final node = spec.fallbackNode ?? schemaAt(view.schema, spec.path);
+    final secret = (node?.isSecret ?? false) || (node?.effective.isSecret ?? false);
+    final (inValue, value) = lookupPath(view.value, spec.path);
+    final (inBase, base) = lookupPath(view.base, spec.path);
+    final (inUser, user) = lookupPath(view.user, spec.path);
+    return SchemaFieldWatch._(
+      settings,
+      [
+        view.schema,
+        settings.writable,
+        view.writable,
+        settings.isLocked(spec.ns),
+        settings.local,
+        settings.errors[key],
+        settings.staged.contains(key),
+        settings.saving.contains(key),
+        if (secret) ...[
+          settings.credentialRefOf(field),
+          settings.secretConfigured(field),
+          settings.secretWritable(field),
+          settings.secretUnbound(field),
+        ],
+      ],
+      [inValue, value, inBase, base, inUser, user],
+    );
+  }
+
+  const SchemaFieldWatch._(this.settings, this._same, this._values);
+
+  /// The settings the rows draw from (not compared).
+  final EngineSettings? settings;
+
+  /// Compared with `==`.
+  final List<Object?> _same;
+
+  /// Compared by content.
+  final List<Object?> _values;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SchemaFieldWatch && listEquals(_same, other._same) && jsonEquals(_values, other._values);
+
+  @override
+  int get hashCode => Object.hashAll(_same);
 }
 
 /// [SchemaFieldTile] with its inputs resolved (also used by pages that read
@@ -165,7 +235,9 @@ class SchemaFieldView extends ConsumerWidget {
     final modified = layer == FieldLayer.user;
     final value = settings.valueOf(field);
     final inherited = settings.inheritedOf(field, fallback: copy.fallback);
-    final meta = textInputNodeOf(node).meta;
+    // Bounds and patterns of what the control edits (an optional value's member).
+    final edited = valueNodeOf(node);
+    final meta = edited.meta;
 
     Future<void> set(Object? next) async {
       controller.clearError(field);
@@ -216,7 +288,7 @@ class SchemaFieldView extends ConsumerWidget {
           subtitle: subtitle,
           subtitleColor: subtitleColor,
           badge: badge,
-          value: valueLabel(current, copy),
+          value: valueLabel(current, copy, node: node),
           enabled: enabled,
           onTap: () => unawaited(
             showChoiceSheet(
@@ -295,13 +367,13 @@ class SchemaFieldView extends ConsumerWidget {
           subtitle: subtitle,
           subtitleColor: subtitleColor,
           badge: badge,
-          value: bitsetSummary(node.effective.bits, selected),
+          value: bitsetSummary(edited.bits, selected),
           enabled: enabled,
           onTap: () => unawaited(
             showBitsetFieldSheet(
               context,
               title: title,
-              bits: node.effective.bits,
+              bits: edited.bits,
               current: selected,
               modified: modified,
               onSubmit: (next) async {
@@ -347,7 +419,7 @@ class SchemaFieldView extends ConsumerWidget {
 
       case FieldKind.list:
         final items = value is List ? value : const [];
-        final item = node.effective.inner!;
+        final item = edited.inner!;
         return EngineFieldRow(
           icon: spec.icon,
           title: title,
@@ -388,7 +460,7 @@ class SchemaFieldView extends ConsumerWidget {
             showObjectListSheet(
               context,
               title: title,
-              item: node.effective.inner!,
+              item: edited.inner!,
               read: (ref) => switch (source.watch(ref)?.valueOf(field)) {
                 final List<Object?> list => list,
                 _ => const [],
@@ -412,7 +484,7 @@ class SchemaFieldView extends ConsumerWidget {
             showDictSheet(
               context,
               title: title,
-              value: node.effective.inner!,
+              value: edited.inner!,
               read: (ref) => asJsonMap(source.watch(ref)?.valueOf(field)),
               onChange: (next) => controller.set(field, next, fallback: copy.fallback),
             ),
@@ -582,8 +654,9 @@ List<SchemaFormSection> schemaSections(
   }
 
   void walk(SchemaNode source, List<String> prefix, String? heading, Set<SchemaNode> ancestors) {
-    final node = source.effective;
-    if (source.meta.hidden || node.meta.hidden || hiddenPath(prefix)) return;
+    // An optional object (`union([object, const(undefined)])`) is its fields.
+    final node = schemaValueOf(source);
+    if (source.meta.hidden || source.effective.meta.hidden || node.meta.hidden || hiddenPath(prefix)) return;
     if (ancestors.contains(node) || ancestors.length >= 32) {
       fallback(source, prefix, heading);
       return;
@@ -611,7 +684,8 @@ List<SchemaFormSection> schemaSections(
       final path = [...prefix, key];
       final dotted = path.join('.');
       if (value.meta.hidden || value.effective.meta.hidden || hiddenPath(path)) continue;
-      if (value.effective.type == 'object' || value.effective.type == 'intersect') {
+      final held = schemaValueOf(value).type;
+      if (held == 'object' || held == 'intersect') {
         groups.add((key, value, labelFor(key, value, copy[dotted] ?? const FieldCopy())));
       } else if (kindOf(value) != FieldKind.hidden) {
         leaves.add(SchemaFieldSpec(view.ns, path, copy: copy[dotted] ?? const FieldCopy()));

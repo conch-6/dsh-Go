@@ -7,6 +7,8 @@
 // A search over titles, descriptions, keys and choices shows every match,
 // folded or not.
 
+import 'dart:ui' show Locale;
+
 import '../../../l10n/l10n.dart';
 import '../../../state/engine_settings_state.dart';
 import '../../../state/plugin_config/plugin_config_api.dart';
@@ -187,6 +189,29 @@ PluginConfigLayout pluginConfigLayout(
     ],
   );
 }
+
+/// [pluginConfigLayout], worked out once per schema: the page asks on every
+/// build and every keystroke of its search, the lists that offer the page
+/// ([hasPluginConfig]) on each of theirs. A layout reads only the form's
+/// schema, namespace and liveness, [copy], [query] and the language, so a
+/// form that is the same schema with other values (a live write, a refresh
+/// that brought the same schema) keeps it. One search is kept beside the
+/// unfiltered layout.
+PluginConfigLayout cachedPluginConfigLayout(
+  PluginConfigForm form, {
+  Map<String, FieldCopy> copy = const {},
+  String query = '',
+}) {
+  final layouts = _layouts[form.view.schema] ??= {};
+  final key = (form.ns, form.allLive, copy, query.trim().toLowerCase(), AppLocale.current);
+  if (layouts[key] case final layout?) return layout;
+  if (key.$4.isNotEmpty) layouts.removeWhere((k, _) => k.$4.isNotEmpty);
+  return layouts[key] = pluginConfigLayout(form, copy: copy, query: query);
+}
+
+final _layouts = Expando<Map<(String, bool, Map<String, FieldCopy>, String, Locale), PluginConfigLayout>>(
+  'pluginConfigLayout',
+);
 
 /// The title of the folded group.
 String get advancedGroupTitle => appL10n.pluginConfigAdvanced;

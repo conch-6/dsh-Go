@@ -327,5 +327,10 @@
   "hubPermissionPhone": "手机",
   "hubPermissionPhoneConfirm": "手机操控确认",
   "hubHardwareEnterSends": "外接键盘按 Enter 发送",
-  "hubHardwareEnterSendsHint": "开启后，Shift+Enter 换行。屏幕键盘仍换行；Ctrl/⌘+Enter 始终可发送。"
+  "hubHardwareEnterSendsHint": "开启后，Shift+Enter 换行。屏幕键盘仍换行；Ctrl/⌘+Enter 始终可发送。",
+  "hubQuickPanel": "左滑快捷入口",
+  "hubQuickPanelSwipe": "左滑打开",
+  "hubQuickPanelSwipeHint": "在对话里从右向左滑。代码块、表格这些能横向滚动的内容不受影响。",
+  "hubQuickPanelItems": "显示的入口",
+  "hubQuickPanelItemsNone": "没有选择，左滑不会打开"
 }

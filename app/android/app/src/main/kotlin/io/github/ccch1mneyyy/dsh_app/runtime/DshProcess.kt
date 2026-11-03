@@ -87,6 +87,11 @@ class DshProcess(
         check(!java.nio.file.Files.exists(pidFile.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) { "cannot remove stale runtime pid file" }
         port = pickPort()
         val tmp = File(context.cacheDir, "proot-tmp").apply { mkdirs() }
+        if (cleanup.canPruneTemp) {
+            val reclaimed = ProotTempFiles.prune(tmp) { pid -> processReader.uid(pid) == null }
+            if (reclaimed.removed > 0) listener.onLog("[dsh-app] reclaimed ${reclaimed.removed} stale proot temporary directories", "system")
+            if (reclaimed.incomplete) listener.onLog("[dsh-app] proot temporary cleanup incomplete; retained entries for a later start", "system")
+        }
         val vars = mapOf(
             "{NATIVE_LIB_DIR}" to context.applicationInfo.nativeLibraryDir,
             "{ROOTFS}" to rootfs.canonicalPath,
@@ -100,7 +105,9 @@ class DshProcess(
         val sameBind = DirectLaunch.samePathBind(rootfs)
         val launchArgv = DirectLaunch.prootArguments(rootfs, manifest.launchArgv, direct)
         val allBinds = binds.filterNot { expand(it) == sameBind }.distinct()
-        val effectiveGuestEnv = guestEnv + ("DSH_GO_RUNTIME_ROOT" to rootfs.canonicalPath)
+        // PRoot's Node resolves through glibc, which fails A with a refused AAAA (#152): add Direct's resolver.
+        val effectiveGuestEnv = guestEnv + ("DSH_GO_RUNTIME_ROOT" to rootfs.canonicalPath) +
+            listOfNotNull(if (direct) null else "NODE_OPTIONS" to DirectLaunch.prootNodeOptions(guestEnv["NODE_OPTIONS"]))
         var guestEnvPlaced = false
         check(manifest.launchArgv.isNotEmpty()) { "runtime manifest has no launch.argv" }
         var bindsPlaced = false
@@ -221,18 +228,13 @@ class DshProcess(
         return DirectLaunch.Selection(reason == null, reason)
     }
 
-    /** One sync(2): the copies are on disk before any of them replaces a name. */
-    private fun syncFilesystems() {
-        val sync = ProcessBuilder("/system/bin/sync").redirectErrorStream(true).start()
-        sync.inputStream.use { it.readBytes() }
-        val code = sync.waitFor()
-        if (code != 0) throw IOException("sync exited with $code")
-    }
-
     /** Waits for cleanup and exit reporting; zero waits until completion. */
-    fun awaitExit(millis: Long = 0) {
-        // Startup can fail after spawning but before allocating the waiter.
-        (waiter ?: stopper)?.join(millis)
+    fun awaitExit(millis: Long = 0): Boolean {
+        // The waiter joins the stopper before reporting exit. Startup can fail
+        // after spawning but before allocating it, so await the stopper then.
+        val ending = waiter ?: stopper
+        ending?.join(millis)
+        return ending?.isAlive != true
     }
 
     /** Preserve a startup failure through cleanup and the service's later STOP. */
@@ -263,9 +265,11 @@ class DshProcess(
             } finally {
                 try {
                     if (p.isAlive) p.destroyForcibly()
-                    p.waitFor()
                 } finally {
+                    // Reap tracees before waiting: an OEM Process.waitFor may not
+                    // return until they exit. The waiter still retains this owner.
                     killStrays()
+                    p.waitFor()
                 }
             }
         }
@@ -369,7 +373,7 @@ class DshProcess(
     /** Reap a captured process tree before releasing #17 ownership to another launch. */
     @Synchronized fun killStrays(): Boolean = reapStrays().complete
 
-    private data class CleanupResult(val complete: Boolean, val ownedRemaining: Boolean)
+    private data class CleanupResult(val complete: Boolean, val ownedRemaining: Boolean, val canPruneTemp: Boolean = false)
 
     /** Unknown ambient processes are not proof of ownership. The default-mode
      * startup policy may continue after reaping every captured identity, while
@@ -390,7 +394,12 @@ class DshProcess(
             val owned = RuntimeProcessOwnership.owned(snapshot.records, roots, myPid, cleanupKnown)
             owned.forEach { cleanupKnown[it.pid] = it.started }
             val ownedRemaining = owned.isNotEmpty() || cleanupKnown.isNotEmpty()
-            if (!ownedRemaining && snapshot.observed) return CleanupResult(true, false)
+            if (!ownedRemaining && snapshot.observed) {
+                // This cache is shared across rootfs instances. Another engine may still use its glue.
+                val temp = File(context.cacheDir, "proot-tmp").absolutePath
+                val idle = snapshot.records.none { it.proot || it.marker != null || RuntimeProcessOwnership.within(it.cwd, temp) }
+                return CleanupResult(true, false, canPruneTemp = idle)
+            }
             owned.filter { it.proot }.forEach { signalOwned(it, if (first) OsConstants.SIGQUIT else OsConstants.SIGKILL) }
             owned.filterNot { it.proot }.forEach { signalOwned(it, OsConstants.SIGKILL) }
             first = false
@@ -435,4 +444,12 @@ class DshProcess(
             return ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
         }
     }
+}
+
+/** One sync(2): finished copies and renames are on disk before anything depends on them. */
+internal fun syncFilesystems() {
+    val sync = ProcessBuilder("/system/bin/sync").redirectErrorStream(true).start()
+    sync.inputStream.use { it.readBytes() }
+    val code = sync.waitFor()
+    if (code != 0) throw IOException("sync exited with $code")
 }

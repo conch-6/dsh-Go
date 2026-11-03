@@ -201,8 +201,22 @@ class _PetStageState extends ConsumerState<PetStage> {
   }
 }
 
+/// What the page's conversation is doing, for [_FocusReporter] (null: a new chat).
+final _pageFocusProvider = Provider.autoDispose.family<PetFocus?, String?>((ref, id) {
+  if (id == null) return null;
+  final host = ref.watch(activeHostProvider);
+  final compacting = ref.watch(petCompactingProvider(id));
+  return ref.watch(chatProvider(id).select((s) => petFocusOf(host, id, s, compacting: compacting)));
+});
+
 /// Tells the pet what the conversation on screen is doing (its activity,
 /// compaction, an open card), from the page's own chat state.
+///
+/// Through a subscription, not this widget's builds: with the app in the
+/// background there are no frames, and the pet out there still has to see the
+/// turn end. A frozen 「running」 would keep it working and swallow the turn's
+/// 做完了 (a new round, as far as it could tell), while the notification stays
+/// silent for the pet to say it (`ResultSilence`).
 class _FocusReporter extends ConsumerStatefulWidget {
   const _FocusReporter({required this.sessionId, required this.child});
 
@@ -214,26 +228,37 @@ class _FocusReporter extends ConsumerStatefulWidget {
 }
 
 class _FocusReporterState extends ConsumerState<_FocusReporter> {
-  PetFocus? _reported;
   late final PetFocusController _focus;
+  ProviderSubscription<PetFocus?>? _sub;
 
   @override
   void initState() {
     super.initState();
     _focus = ref.read(petFocusProvider.notifier);
+    _follow();
+  }
+
+  @override
+  void didUpdateWidget(_FocusReporter old) {
+    super.didUpdateWidget(old);
+    if (old.sessionId != widget.sessionId) _follow();
+  }
+
+  void _follow() {
+    _sub?.close();
+    _sub = ref.listenManual(_pageFocusProvider(widget.sessionId), (_, next) => _report(next), fireImmediately: true);
   }
 
   void _report(PetFocus? focus) {
-    if (focus == _reported) return;
-    _reported = focus;
-    // Not while building: after this frame.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focus.report(_reported);
+    // Not while building (the first report comes from initState): right after.
+    scheduleMicrotask(() {
+      if (mounted) _focus.report(focus);
     });
   }
 
   @override
   void dispose() {
+    _sub?.close();
     final focus = _focus;
     // The page is gone: nothing on screen.
     scheduleMicrotask(() => focus.report(null));
@@ -241,17 +266,7 @@ class _FocusReporterState extends ConsumerState<_FocusReporter> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final id = widget.sessionId;
-    final host = ref.watch(activeHostProvider);
-    if (id == null) {
-      _report(null);
-    } else {
-      final compacting = ref.watch(petCompactingProvider(id));
-      _report(ref.watch(chatProvider(id).select((s) => petFocusOf(host, id, s, compacting: compacting))));
-    }
-    return widget.child;
-  }
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// The pet itself, over the whole stage. Hit tests only on its body and its

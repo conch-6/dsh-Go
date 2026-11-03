@@ -1,5 +1,6 @@
-// The sub-pages: restricted-settings guide, 不打扰模式 (Shizuku / 自连 ADB),
-// 应用名单 with its risk notes.
+// The sub-pages: restricted-settings guide, 不打扰模式 (the Shizuku and 自连 ADB
+// set-ups; the channel picker itself is dnd_channels_test.dart), 应用名单 with
+// its risk notes.
 
 import 'package:dsh_app/state/phone_state.dart';
 import 'package:dsh_app/ui/common/app_sheet.dart';
@@ -93,6 +94,8 @@ void main() {
             status: phoneStatus(device: {'manufacturer': 'Google', 'sdkInt': sdk, 'sideloaded': true}),
           ),
         );
+        await tester.tap(find.text('Shizuku'));
+        await tester.pumpAndSettle();
         expect(find.textContaining('官方版 Shizuku'), sdk >= 37 ? findsOneWidget : findsNothing);
       });
     }
@@ -108,14 +111,18 @@ void main() {
       expect(find.text('这台手机用不了：需要 Android 14 及以上。'), findsOneWidget);
       expect(find.textContaining('保持亮屏、解锁'), findsOneWidget);
       expect(find.textContaining('重启手机后重新激活'), findsOneWidget);
-      expect(find.textContaining('保持开发者选项和无线调试开启'), findsOneWidget);
-      expect(button(tester, '启用不打扰模式').onPressed, isNull);
+      expect(find.textContaining('保持无线调试开启'), findsOneWidget);
+      await tester.tap(find.text('Shizuku'));
+      await tester.pumpAndSettle();
+      expect(button(tester, '用 Shizuku 开启').onPressed, isNull);
     });
 
     testWidgets('Shizuku: install link, grant, enable, turn off', (tester) async {
       final h = await pumpPhone(tester, const PhoneDndPage());
+      await tester.tap(find.text('Shizuku'));
+      await tester.pumpAndSettle();
       expect(find.text('打开 Shizuku 官网'), findsOneWidget);
-      expect(button(tester, '启用不打扰模式').onPressed, isNull);
+      expect(find.text('用 Shizuku 开启'), findsNothing);
 
       h.native!.push(phoneStatus(shizukuInstalled: true));
       await settlePhone(tester);
@@ -130,11 +137,11 @@ void main() {
       h.native!.push(phoneStatus(shizukuInstalled: true, shizukuRunning: true, shizukuGranted: true));
       await settlePhone(tester);
       expect(find.text('Shizuku 这边准备好了。'), findsOneWidget);
-      await tester.tap(find.text('启用不打扰模式'));
+      await tester.tap(find.text('用 Shizuku 开启'));
       await tester.pumpAndSettle();
       expect(h.native!.callsOf('setBackgroundMode').single.arguments, {'mode': 'shizuku'});
       expect(find.text('正在使用：Shizuku'), findsOneWidget);
-      expect(find.text('启用不打扰模式'), findsNothing);
+      expect(find.text('用 Shizuku 开启'), findsNothing);
 
       await tester.tap(find.widgetWithText(TextButton, '关闭'));
       await tester.pumpAndSettle();
@@ -146,33 +153,37 @@ void main() {
       final h = await pumpPhone(
         tester,
         const PhoneDndPage(),
-        native: FakePhoneNative(status: phoneStatus(shizukuRunning: true)),
+        native: FakePhoneNative(status: privilegedStatus(provider: 'sui', running: true)),
       );
-      expect(find.text('打开 Shizuku 官网'), findsNothing);
-      expect(button(tester, '启用不打扰模式').onPressed, isNull);
-      await tester.tap(find.text('授权给 DSH Go'));
-      await tester.pump();
-      expect(h.native!.callsOf('requestShizukuPermission'), hasLength(1));
-
-      h.native!.push(phoneStatus(shizukuRunning: true, shizukuGranted: true));
-      await settlePhone(tester);
-      expect(find.text('Shizuku 这边准备好了。'), findsOneWidget);
-      await tester.tap(find.text('启用不打扰模式'));
+      await tester.tap(find.text('Sui'));
       await tester.pumpAndSettle();
-      expect(h.native!.callsOf('setBackgroundMode').single.arguments, {'mode': 'shizuku'});
+      expect(find.text('打开 Shizuku 官网'), findsNothing);
+      expect(find.text('用 Sui 开启'), findsNothing);
+      await tester.tap(find.text('授权给 DSH Go'));
+      await tester.pumpAndSettle();
+      expect(h.native!.callsOf('requestShizukuPermission').single.arguments, {'provider': 'sui'});
+
+      h.native!.push(privilegedStatus(provider: 'sui', running: true, granted: true));
+      await settlePhone(tester);
+      expect(find.text('Sui 这边准备好了。'), findsOneWidget);
+      await tester.tap(find.text('用 Sui 开启'));
+      await tester.pumpAndSettle();
+      expect(h.native!.callsOf('setBackgroundMode').single.arguments, {'mode': 'sui'});
     });
 
     testWidgets('Sui binder death disables enabling despite a stale grant', (tester) async {
       final h = await pumpPhone(
         tester,
         const PhoneDndPage(),
-        native: FakePhoneNative(status: phoneStatus(shizukuRunning: true, shizukuGranted: true)),
+        native: FakePhoneNative(status: privilegedStatus(provider: 'sui', running: true, granted: true)),
       );
-      expect(button(tester, '启用不打扰模式').onPressed, isNotNull);
-      h.native!.push(phoneStatus(shizukuGranted: true));
+      await tester.tap(find.text('Sui'));
+      await tester.pumpAndSettle();
+      expect(find.text('用 Sui 开启'), findsOneWidget);
+      h.native!.push(privilegedStatus(provider: 'sui', granted: true));
       await settlePhone(tester);
-      expect(button(tester, '启用不打扰模式').onPressed, isNull);
-      expect(find.text('打开 Shizuku 官网'), findsOneWidget);
+      expect(find.text('用 Sui 开启'), findsNothing);
+      expect(find.text('Sui 接口当前不可用。确认 Sui 模块已启用，重启手机后再试。'), findsOneWidget);
     });
 
     testWidgets('a refused mode shows the native reason', (tester) async {
@@ -181,7 +192,9 @@ void main() {
       );
       native.results['setBackgroundMode'] = {'ok': false, 'reason': '这台手机建不了受信的虚拟屏'};
       await pumpPhone(tester, const PhoneDndPage(), native: native);
-      await tester.tap(find.text('启用不打扰模式'));
+      await tester.tap(find.text('Shizuku'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('用 Shizuku 开启'));
       await tester.pumpAndSettle();
       expect(find.text('这台手机建不了受信的虚拟屏'), findsOneWidget);
     });
@@ -227,7 +240,7 @@ void main() {
 
       h.native!.push(phoneStatus(wirelessDebugging: true, paired: true, adbConnected: true));
       await settlePhone(tester);
-      await tester.tap(find.text('启用不打扰模式'));
+      await tester.tap(find.text('用自连 ADB 开启'));
       await tester.pumpAndSettle();
       expect(h.native!.callsOf('setBackgroundMode').single.arguments, {'mode': 'adb'});
     });
@@ -240,7 +253,7 @@ void main() {
       );
       await tester.tap(find.text('自连 ADB'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('手动连接'));
+      await tester.tap(find.text('按端口连接'));
       await tester.pumpAndSettle();
       final connect = find.descendant(of: find.byType(AlertDialog), matching: find.widgetWithText(FilledButton, '连接'));
       expect(tester.widget<FilledButton>(connect).onPressed, isNull);

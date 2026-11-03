@@ -29,6 +29,8 @@
   "updateSettingsOpenFailedMessage": "Allow “Install unknown apps” in Settings → Apps → DSH Go, then return to install.",
   "updateInstallCancelled": "Installation cancelled",
   "updateInstallCancelledMessage": "The package is saved. You can install it anytime.",
+  "updateInstallUnconfirmed": "Installation result not confirmed",
+  "updateInstallUnconfirmedMessage": "The package is saved. Check any system prompts, then retry or open it with the system installer.",
   "updateSignatureMismatch": "App signatures don’t match",
   "updateSignatureMismatchMessage": "The DSH Go on your phone has a different signature (usually a test build). Uninstall it before installing this version. Uninstalling erases your chats, Linux environment, and settings.",
   "updateWrongPackage": "This isn’t a DSH package",

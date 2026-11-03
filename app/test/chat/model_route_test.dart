@@ -57,7 +57,11 @@ void main() {
             ),
           ),
         ),
-        overrides: [modelCatalogProvider.overrideWith((ref) async => customOnly)],
+        overrides: [
+          modelCatalogProvider.overrideWith((ref) async => customOnly),
+          // This route-only component fixture has no live host lifecycle.
+          modelSelectionScopeProvider.overrideWithValue(Object()),
+        ],
       ),
     );
     await tester.tap(find.text('Open'));

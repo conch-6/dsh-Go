@@ -685,8 +685,12 @@ class _WebViewPageState extends State<WebViewPage> {
   bool _targetSent = false;
 
   /// Runs on every load: a session hop reloads the page and the bridge
-  /// picks the rest of the target up from there.
+  /// picks the rest of the target up from there. A load that failed
+  /// finished on the WebView's own error page: the target and the
+  /// [DshWebLink] calls wait for the load that works (重试), rather than
+  /// being spent on a page with no DSH Web in it.
   Future<void> _injectOpenBridge() async {
+    if (_error != null) return;
     try {
       await _controller.runJavaScript(await _openBridge());
       if (_pendingScripts.isNotEmpty) {

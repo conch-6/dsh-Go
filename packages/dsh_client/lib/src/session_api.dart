@@ -16,6 +16,7 @@ import 'json.dart';
 import 'models.dart';
 import 'mux.dart';
 import 'rpc.dart';
+import 'rpc_envelope.dart';
 
 /// `queue` waits for the next turn; `steer` injects into the running turn's
 /// next step.
@@ -450,8 +451,33 @@ class DshClient {
     });
   }
 
-  /// Stages a file for a later prompt (`fileUploads/upload`, base64 body).
+  /// Largest file the inline fallback accepts. `fileUploads/upload` carries
+  /// the bytes as base64 inside one RPC frame, so peak memory runs several
+  /// times the file; the Host's streamed route has no comparable bound.
+  static const _maxInlineUploadBytes = 30 * 1024 * 1024;
+
+  /// The Host's raw-byte upload route (streamed to disk, not buffered).
+  static const _fileUploadBinaryPath = '/api/session/uploadFileBinary';
+
+  /// Set once this Host answers 404 for [_fileUploadBinaryPath]: its release
+  /// predates the route, so later uploads skip a request whose whole body the
+  /// Host would buffer only to answer 404.
+  bool _streamedUploadMissing = false;
+
+  /// Stages a file for a later prompt.
+  ///
+  /// Prefers the Host's raw-byte route (`POST /api/session/uploadFileBinary`),
+  /// which streams the body to disk without a base64 copy. Hosts older than
+  /// the route and carriers without HTTP fall back to `fileUploads/upload`,
+  /// whose single base64 frame is bounded by [_maxInlineUploadBytes].
   Future<FileReceipt> uploadFile(String sessionId, List<int> bytes, {String? name}) async {
+    final streamed = await _uploadFileBinary(sessionId, bytes, name: name);
+    if (streamed != null) return streamed;
+    if (bytes.length > _maxInlineUploadBytes) {
+      throw const DshProtocolException(
+        'Host has no streaming file upload route; a file this large cannot be staged inline',
+      );
+    }
     final value = asMapOrEmpty(
       await rpc.call('fileUploads/upload', {
         'agentId': sessionId,
@@ -459,6 +485,44 @@ class DshClient {
       }),
     );
     return FileReceipt(asString(value['receiptId']) ?? '', FileAttachment.fromJson(value['file']));
+  }
+
+  /// The streamed route's receipt, or null when this carrier or Host lacks it.
+  Future<FileReceipt?> _uploadFileBinary(String sessionId, List<int> bytes, {String? name}) async {
+    if (_streamedUploadMissing) return null;
+    final carrier = this.carrier;
+    if (carrier is! DshHttpCarrier) return null;
+    final response = await carrier.connection.postBytes(
+      _fileUploadBinaryPath,
+      bytes,
+      query: {'sessionId': sessionId, 'name': ?name},
+      followRedirects: false,
+      maxResponseBytes: 64 * 1024,
+      // Uploading competes with the turn's own traffic, and a remote tunnel
+      // can be slow; do not cut a large file off at the 2 min request default.
+      timeout: const Duration(minutes: 10),
+    );
+    // A Host from before the route answers 404: use the inline fallback.
+    if (response.statusCode == 404) {
+      _streamedUploadMissing = true;
+      return null;
+    }
+    if (response.statusCode != 200) {
+      throw DshHttpException(
+        response.statusCode,
+        httpRpcStatusMessage(response.statusCode, 'session/uploadFileBinary'),
+        body: response.text,
+      );
+    }
+    final decoded = asMap(tryDecodeJson(response.text));
+    if (decoded == null) throw const DshProtocolException('session/uploadFileBinary: invalid response');
+    if (decoded['ok'] != true) throw DshRemoteException.fromJson(decoded['error']);
+    final value = asMapOrEmpty(decoded['value']);
+    final receiptId = asString(value['receiptId']);
+    if (receiptId == null || receiptId.isEmpty) {
+      throw const DshProtocolException('session/uploadFileBinary: no receipt');
+    }
+    return FileReceipt(receiptId, FileAttachment.fromJson(value['file']));
   }
 
   /// `session/attachment`: bytes of an image referenced by the session log.
@@ -619,10 +683,19 @@ class DshClient {
     return ModelCatalog.fromJson(await rpc.call('session/modelCatalog'));
   }
 
-  /// `session/selectModel`; the pair must be in the catalog
-  /// (`session/model-unavailable` otherwise). Also saved as the default for
-  /// new sessions in the background.
+  /// Switch this session's model, retaining the selection-only API.
   Future<ModelSelection> setModel(
+    String sessionId, {
+    required String provider,
+    required String model,
+    String? reasoningEffort,
+  }) async =>
+      (await setModelResult(sessionId, provider: provider, model: model, reasoningEffort: reasoningEffort)).selected;
+
+  /// `session/selectModel`; unavailable routes fail the request. A failure to
+  /// save the next-session default does not undo an accepted session selection.
+  /// Older hosts omit [ModelSelectionResult.defaultSave].
+  Future<ModelSelectionResult> setModelResult(
     String sessionId, {
     required String provider,
     required String model,
@@ -633,8 +706,12 @@ class DshClient {
         'request': {'sessionId': sessionId, 'provider': provider, 'model': model, 'reasoningEffort': ?reasoningEffort},
       }),
     );
-    return ModelSelection.fromJson(value['selected']) ??
-        ModelSelection(provider: provider, model: model, reasoningEffort: reasoningEffort);
+    return ModelSelectionResult(
+      selected:
+          ModelSelection.fromJson(value['selected']) ??
+          ModelSelection(provider: provider, model: model, reasoningEffort: reasoningEffort),
+      defaultSave: ModelDefaultSave.fromJson(value['defaultSave']),
+    );
   }
 
   /// `llm/listProviders`: registered provider routes.

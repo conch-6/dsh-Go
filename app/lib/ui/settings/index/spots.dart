@@ -780,6 +780,12 @@ abstract final class Spots {
     title: (l) => l.hubHardwareEnterSends,
     keywords: (l) => l.hubHardwareEnterSendsHint,
   );
+  static final quickPanel = SettingSpot(
+    'quick-panel',
+    page: SettingsPageId.interface,
+    title: (l) => l.hubQuickPanel,
+    keywords: (l) => l.searchKwQuickPanel,
+  );
   static final tableTint = SettingSpot(
     'table-tint',
     page: SettingsPageId.interface,
@@ -832,6 +838,12 @@ abstract final class Spots {
   );
 
   // 性能.
+  static final refreshRate = SettingSpot(
+    'refresh-rate',
+    page: SettingsPageId.performance,
+    title: (l) => l.performanceRefresh,
+    keywords: (l) => l.searchKwRefreshRate,
+  );
   static final blur = SettingSpot(
     'blur',
     page: SettingsPageId.performance,
@@ -875,6 +887,12 @@ abstract final class Spots {
     page: SettingsPageId.notifications,
     title: (l) => l.pluginsQuestions,
     keywords: (l) => l.searchKwNotifyQuestion,
+  );
+  static final notifyLive = SettingSpot(
+    'notify-live',
+    page: SettingsPageId.notifications,
+    title: (l) => l.liveSettingsSwitch,
+    keywords: (l) => l.searchKwNotifyLive,
   );
   static final notifySystem = SettingSpot(
     'notify-system',
@@ -1044,6 +1062,7 @@ final _rows = <SettingSpot>[
   Spots.petDisplayWhen,
   Spots.uiMode,
   Spots.hardwareEnterSends,
+  Spots.quickPanel,
   Spots.tableTint,
   Spots.webApp,
   Spots.openWeb,
@@ -1051,6 +1070,7 @@ final _rows = <SettingSpot>[
   Spots.webCodingView,
   Spots.webCollapse,
   Spots.webBusySend,
+  Spots.refreshRate,
   Spots.blur,
   Spots.animations,
   Spots.notifyEnabled,
@@ -1058,6 +1078,7 @@ final _rows = <SettingSpot>[
   Spots.notifyFailed,
   Spots.notifyApproval,
   Spots.notifyQuestion,
+  Spots.notifyLive,
   Spots.notifySystem,
   Spots.shareConfig,
   Spots.usageStats,

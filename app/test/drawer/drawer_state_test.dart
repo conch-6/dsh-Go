@@ -400,6 +400,79 @@ void main() {
   });
 
   group('creation times', () {
+    for (final oldFails in [false, true]) {
+      test('host switch drains queued creation times after old ${oldFails ? 'failure' : 'success'}', () async {
+        final old = [Completer<DateTime?>(), Completer<DateTime?>()];
+        final calls = <String>[];
+        final newTimes = {'new-a': _now, 'new-b': _now.subtract(const Duration(days: 1))};
+        final c = ProviderContainer(
+          overrides: [
+            sessionCreatedFetcherProvider.overrideWithValue((id) {
+              calls.add(id);
+              if (id == 'old-a') return old[0].future;
+              if (id == 'old-b') return old[1].future;
+              return Future.value(newTimes[id]);
+            }),
+          ],
+        );
+        addTearDown(c.dispose);
+        c.listen(sessionCreatedProvider, (_, _) {});
+        await _settle();
+        c.read(sessionCreatedProvider.notifier).ensure(['old-a', 'old-b']);
+        expect(calls, ['old-a', 'old-b']);
+
+        final nextHost = HostRef.ssh('next-host');
+        c.read(activeHostProvider.notifier).select(nextHost);
+        await _settle();
+        c.read(sessionCreatedProvider.notifier).ensure(newTimes.keys);
+        expect(calls, ['old-a', 'old-b']);
+        for (final pending in old) {
+          if (oldFails) {
+            pending.completeError(const DshClosedException('old host closed'));
+          } else {
+            pending.complete(_now.subtract(const Duration(days: 30)));
+          }
+        }
+        await _settle();
+        expect(calls, ['old-a', 'old-b', 'new-a', 'new-b']);
+        expect(c.read(sessionCreatedProvider), newTimes);
+      });
+    }
+
+    test('old host completion leaves the new host same-id request marked in flight', () async {
+      final oldShared = Completer<DateTime?>();
+      final oldOther = Completer<DateTime?>();
+      final newShared = Completer<DateTime?>();
+      var sharedCalls = 0;
+      final c = ProviderContainer(
+        overrides: [
+          sessionCreatedFetcherProvider.overrideWithValue((id) {
+            if (id == 'other') return oldOther.future;
+            sharedCalls++;
+            return sharedCalls == 1 ? oldShared.future : newShared.future;
+          }),
+        ],
+      );
+      addTearDown(c.dispose);
+      c.listen(sessionCreatedProvider, (_, _) {});
+      await _settle();
+      c.read(sessionCreatedProvider.notifier).ensure(['shared', 'other']);
+      c.read(activeHostProvider.notifier).select(HostRef.ssh('next-host'));
+      await _settle();
+      c.read(sessionCreatedProvider.notifier).ensure(['shared']);
+      oldOther.complete(null);
+      await _settle();
+      expect(sharedCalls, 2);
+      oldShared.complete(_now.subtract(const Duration(days: 30)));
+      await _settle();
+      expect(c.read(sessionCreatedProvider), isEmpty);
+      c.read(sessionCreatedProvider.notifier).ensure(['shared']);
+      expect(sharedCalls, 2);
+      newShared.complete(_now);
+      await _settle();
+      expect(c.read(sessionCreatedProvider), {'shared': _now});
+    });
+
     test('fetched once each, two at a time, kept per host', () async {
       final asked = <String>[];
       var inFlight = 0;

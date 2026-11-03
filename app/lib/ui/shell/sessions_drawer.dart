@@ -45,6 +45,7 @@ import '../workspace/workspaces_page.dart';
 import 'adaptive/adaptive_layout.dart' show WindowClass;
 import 'brand_mark.dart';
 import 'drawer/drawer_actions.dart';
+import 'drawer/drawer_destination.dart';
 import 'drawer/archive_notice.dart';
 import 'drawer/drawer_filter_bar.dart';
 import 'drawer/drawer_list.dart';
@@ -53,11 +54,8 @@ import 'drawer/session_deletion.dart';
 import 'session_search_page.dart';
 
 export '../../state/drawer_view_state.dart' show SessionDay, sessionDayOf;
+export 'drawer/drawer_destination.dart';
 export 'drawer/session_tile.dart' show SessionTile;
-
-/// Secondary destinations the drawer (or something inside it) can open.
-/// Pages the drawer opens; [settingsSearch] is ⚙ held down.
-enum DrawerDestination { web, remote, plugins, engine, settings, settingsSearch, features }
 
 /// Display title for a session: DSH's generated title (a generation
 /// request's header left out), else a neutral fallback.
@@ -78,7 +76,14 @@ Color sessionSelectionColor(BuildContext context) {
 /// bottom (the host, 网页版, 设置). In multi-select the brand row and the
 /// identity bar give way to the selection header and its action bar.
 class SessionsDrawer extends ConsumerWidget {
-  const SessionsDrawer({super.key, required this.onClose, required this.onOpen, this.now, this.identityBarHeight});
+  const SessionsDrawer({
+    super.key,
+    required this.onClose,
+    required this.onOpen,
+    this.now,
+    this.identityBarHeight,
+    this.drawerMotion,
+  });
 
   final VoidCallback onClose;
   final ValueChanged<DrawerDestination> onOpen;
@@ -90,6 +95,12 @@ class SessionsDrawer extends ConsumerWidget {
   /// multi-select) once it is laid out: the pulled-over drawer's notices
   /// stand above it.
   final ValueNotifier<double>? identityBarHeight;
+
+  /// The pulled-over drawer's 0 → 1 animation (null for the persistent
+  /// sidebar). While it moves, the panel drops its backdrop blur: a moving
+  /// glass surface re-samples the whole chat behind it every frame, which is
+  /// the expensive part on mid-range GPUs.
+  final Animation<double>? drawerMotion;
 
   /// Where the content sits in from either edge: the search bar, the rows'
   /// highlights and the identity bar's keys.
@@ -187,13 +198,11 @@ class SessionsDrawer extends ConsumerWidget {
       child: _SessionList(onClose: onClose, now: now),
     );
 
-    return GlassSurface(
-      tier: GlassTier.sheet,
-      borderRadius: const BorderRadius.only(
-        topRight: Radius.circular(AppShape.xl),
-        bottomRight: Radius.circular(AppShape.xl),
-      ),
-      child: Material(
+    const radius = BorderRadius.only(
+      topRight: Radius.circular(AppShape.xl),
+      bottomRight: Radius.circular(AppShape.xl),
+    );
+    final content = Material(
         type: MaterialType.transparency,
         child: SafeArea(
           right: false,
@@ -275,7 +284,26 @@ class SessionsDrawer extends ConsumerWidget {
             ],
           ),
         ),
-      ),
+      );
+
+    final motion = drawerMotion;
+    if (motion == null) {
+      return GlassSurface(tier: GlassTier.sheet, borderRadius: radius, child: content);
+    }
+    return AnimatedBuilder(
+      animation: motion,
+      child: content,
+      builder: (context, child) {
+        // 滑动中的面板不做背景模糊:玻璃每帧重新采样它背后的聊天内容,中低端
+        // 机上就是掉帧的主因。停稳(0 / 1)时再恢复玻璃。
+        final moving = motion.value > 0.0 && motion.value < 1.0;
+        return GlassSurface(
+          tier: GlassTier.sheet,
+          borderRadius: radius,
+          blur: moving ? false : null,
+          child: child,
+        );
+      },
     );
   }
 }

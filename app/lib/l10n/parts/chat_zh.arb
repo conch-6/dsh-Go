@@ -5,6 +5,9 @@
   "chatChats": "对话列表",
   "chatViewChatDetails": "查看对话详情",
   "chatUnsent": "未发送",
+  "chatFailedSubmission": "未送达 · 已保留",
+  "chatEditFailedSubmission": "编辑后重发",
+  "chatErrReasoningEffortUnsupported": "当前模型不支持此推理档位，请调整档位或换模型",
   "chatSteerNextStep": "插话 · 下一步生效",
   "chatQueuedAfterTurn": "排队中 · 本轮结束后发送",
   "chatSteering": "插话中",
@@ -149,6 +152,18 @@
   },
   "chatCollapseTodos": "收起清单",
   "chatExpandTodos": "展开清单",
+  "chatDockFolded": "{count} 条状态已叠起",
+  "@chatDockFolded": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "chatDockSpread": "展开",
+  "chatDockFold": "收起状态条",
+  "chatDockNext": "下一张",
+  "chatDockPrevious": "上一张",
   "chatTodoNotStarted": "未开始",
   "chatFile": "文件",
   "chatFolder": "文件夹",

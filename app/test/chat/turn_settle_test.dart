@@ -188,37 +188,28 @@ void main() {
       expect(find.byType(ToolRow), findsNothing);
     });
   }
-  testWidgets('reading an earlier tool keeps its position until the next prompt', (tester) async {
+  testWidgets('a turn folds as soon as it ends, even while the list is scrolled up', (tester) async {
     final harness = await mount(tester);
     await tester.drag(find.byType(CustomScrollView), const Offset(0, 450));
     await pumpFrames(tester, 5);
-    final row = find.byType(ToolRow).first;
-    final key = (tester.widget<ToolRow>(row)).item.callId;
-    final y = tester.getTopLeft(row).dy;
+    expect(find.byType(ToolRow), findsWidgets);
     harness.controllers['s1']!.emit(state(running: false));
-    await tester.pump();
-    final same = find.byWidgetPredicate((w) => w is ToolRow && w.item.callId == key);
-    expect(find.byType(TurnProcess), findsNothing);
-    expect(tester.getTopLeft(same).dy, closeTo(y, 0.5));
-    harness.controllers['s1']!.emit(
-      state(
-        running: false,
-        pending: [PendingPrompt(requestId: 'next', text: '下一条', time: _time)],
-      ),
-    );
-    await pumpFrames(tester, 6);
+    await pumpFrames(tester, 10);
+    position(tester).jumpTo(position(tester).maxScrollExtent);
+    await pumpFrames(tester, 5);
     expect(find.byType(TurnProcess), findsOneWidget);
+    expect(find.byType(ToolRow), findsNothing);
   });
-  testWidgets('a detail opened during the turn remains mounted at completion', (tester) async {
+  testWidgets('a tool detail opened during the turn closes when the turn folds', (tester) async {
     final harness = await mount(tester);
     final last = find.byWidgetPredicate((w) => w is ToolRow && w.item.callId == 't14');
     await tester.tap(find.descendant(of: last, matching: find.text('运行')));
     await pumpFrames(tester, 5);
     expect(find.byType(ToolDetail), findsOneWidget);
     harness.controllers['s1']!.emit(state(running: false));
-    await tester.pump();
-    expect(find.byType(TurnProcess), findsNothing);
-    expect(find.byType(ToolDetail), findsOneWidget);
+    await pumpFrames(tester, 25);
+    expect(find.byType(TurnProcess), findsOneWidget);
+    expect(find.byType(ToolDetail), findsNothing);
   });
   testWidgets('reduced motion settles immediately without a residual animation', (tester) async {
     final harness = await mount(tester, reduced: true);

@@ -107,5 +107,20 @@ class CollectedItems {
         return true
     }
 
+    internal data class PageRead(val added: Int, val found: Boolean, val stopReason: String?)
+
+    /** Keep the readable prefix even when this capture cannot justify another scroll. */
+    internal fun readPage(texts: List<String>, until: String?, incomplete: Boolean): PageRead {
+        var added = 0
+        var found = false
+        for (text in texts) if (add(text)) {
+            added++
+            if (until != null && text.contains(until, ignoreCase = true)) found = true
+        }
+        // l10n:keep agent screen result
+        val stop = if (incomplete) "页面只读了一部分，无法确认列表是否到底" else null
+        return PageRead(added, found, stop)
+    }
+
     fun list(): List<String> = items.toList()
 }

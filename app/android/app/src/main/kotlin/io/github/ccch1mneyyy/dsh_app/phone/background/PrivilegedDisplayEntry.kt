@@ -40,10 +40,10 @@ object PrivilegedDisplayMain {
     @JvmStatic
     @SuppressLint("PrivateApi")
     fun main(args: Array<String>) {
+        // ActivityThread.systemMain() constructs Handlers, so prepare before systemContext().
+        if (Looper.myLooper() == null) Looper.prepareMainLooper()
         val context = systemContext()
         val core = PrivilegedDisplayCore(context)
-        // A looper for framework callbacks (PendingIntent, UiAutomation handler thread parent).
-        if (Looper.myLooper() == null) runCatching { Looper.prepareMainLooper() }
         System.err.println("DSH_VDISPLAY_READY uid=${Process.myUid()} rev=${Proto.REVISION}")
         System.err.flush()
         val worker = Thread({ serve(core) }, "dsh-vdisplay")

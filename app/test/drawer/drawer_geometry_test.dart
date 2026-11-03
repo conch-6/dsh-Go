@@ -39,10 +39,11 @@ Matcher _near(double v) => closeTo(v, _eps);
 Future<ProviderContainer> _pump(
   WidgetTester tester, {
   List<SessionSummary>? sessions,
+  DrawerView view = sampleFolders,
   Map<String, PendingKind> pending = const {},
   double textScale = 1,
 }) async {
-  SharedPreferences.setMockInitialValues(storedView(sampleFolders));
+  SharedPreferences.setMockInitialValues(storedView(view));
   usePhoneSurface(tester);
   tester.platformDispatcher.textScaleFactorTestValue = textScale;
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
@@ -200,7 +201,7 @@ void main() {
       expect(memberTitle.left - drawer.left, _near(20 + SessionTile.folderIndent + SessionTile.checkSlot));
     });
 
-    testWidgets('the action bar is as tall as the identity bar; three equal keys on the 10 lines', (tester) async {
+    testWidgets('the action bar is as tall as the identity bar; four equal keys on the 10 lines', (tester) async {
       final container = await _pump(tester);
       final drawer = _rect(tester, find.byType(SessionsDrawer));
       final identity = _rect(tester, find.byType(IdentityBar));
@@ -211,15 +212,15 @@ void main() {
       expect(bar.height, _near(identity.height));
       expect(bar.bottom, _near(identity.bottom));
       final keys = [
-        for (final label in ['移到文件夹', '置顶', '归档'])
+        for (final label in ['移到文件夹', '置顶', '归档', '删除'])
           _rect(tester, find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first),
       ];
-      expect(keys[0].left - drawer.left, _near(10));
-      expect(drawer.right - keys[2].right, _near(10));
-      expect(keys[1].width, _near(keys[0].width));
-      expect(keys[2].width, _near(keys[0].width));
-      expect(keys[1].left - keys[0].right, _near(8));
-      expect(keys[2].left - keys[1].right, _near(8));
+      expect(keys.first.left - drawer.left, _near(10));
+      expect(drawer.right - keys.last.right, _near(10));
+      for (var i = 1; i < keys.length; i++) {
+        expect(keys[i].width, _near(keys[0].width));
+        expect(keys[i].left - keys[i - 1].right, _near(8));
+      }
     });
   });
 
@@ -248,8 +249,10 @@ void main() {
   });
 
   group('empty', () {
+    // No folders either: since #230 a folder keeps the list (its long press
+    // starts a chat in it) even with no conversations.
     testWidgets('no conversations: no filters, the empty view centred in the drawer', (tester) async {
-      await _pump(tester, sessions: const []);
+      await _pump(tester, sessions: const [], view: const DrawerView(loaded: true));
       final drawer = _rect(tester, find.byType(SessionsDrawer));
       expect(find.byType(CapsuleChoiceChip), findsNothing);
       final empty = _rect(tester, find.byType(EmptyView));

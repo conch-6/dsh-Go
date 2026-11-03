@@ -15,6 +15,7 @@ import java.io.File
 import java.io.InputStream
 import java.util.concurrent.Executor
 import kotlin.math.ceil
+import kotlin.math.floor
 
 /** A decoded sheet: [perLogical] bitmap pixels per logical pixel (cells are box × perLogical). */
 internal class PetSheet(val bitmap: Bitmap, val perLogical: Int)
@@ -41,7 +42,7 @@ internal class PetSprites(
         private val source: (String) -> InputStream?,
         private val worker: Executor,
     ) {
-        /** The window at rest and while held, in physical pixels. */
+        /** The window at rest, while held and around each animation, in physical pixels. */
         val frames = PetFrames.of(pack, window, screenScale)
 
         private val main = Handler(Looper.getMainLooper())
@@ -139,6 +140,80 @@ internal class PetSprites(
             null
         } ?: return null
         return Loaded(pack, pack.windowBox(), scaleFor(pack), source, worker)
+    }
+
+    /**
+     * The first frame [state] plays, trimmed to the drawn pixels and centred in a [px] square:
+     * the live activity's picture. Decodes one cell, not the sheet. Null when the pack or the
+     * frame is missing. Any thread.
+     */
+    @Suppress("DEPRECATION")
+    fun portrait(id: String, state: String, px: Int): Bitmap? {
+        val source = sourceFor(id) ?: return null
+        return try {
+            val pack = source("pack.json")?.use { it.readBytes().toString(Charsets.UTF_8) }?.let(PetPack::parse) ?: return null
+            val anim = pack.primary(state, 0)
+            val cell = anim.frames.firstOrNull()?.cell ?: 0
+            val col = cell % anim.cols
+            val row = cell / anim.cols
+            val opts = options().apply {
+                inSampleSize = 1
+                while (maxOf(anim.frameW, anim.frameH) / (inSampleSize * 2) >= 2 * px) inSampleSize *= 2
+            }
+            val frame = source(anim.sheet)?.use { input ->
+                val decoder = BitmapRegionDecoder.newInstance(input, false) ?: return null
+                try {
+                    decoder.decodeRegion(Rect(col * anim.frameW, row * anim.frameH, (col + 1) * anim.frameW, (row + 1) * anim.frameH), opts)
+                } finally {
+                    decoder.recycle()
+                }
+            } ?: return null
+            val drawn = opaqueBounds(frame) ?: run {
+                frame.recycle()
+                return null
+            }
+            val fit = px.toFloat() / maxOf(drawn.width(), drawn.height())
+            // Pixel art stays crisp: a whole number of pixels per art pixel when it can.
+            val k = if (pack.pixelArt && fit >= 1f) floor(fit) else fit
+            val w = drawn.width() * k
+            val h = drawn.height() * k
+            val out = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+            val left = Math.round((px - w) / 2)
+            val top = Math.round((px - h) / 2)
+            Canvas(out).drawBitmap(
+                frame,
+                drawn,
+                Rect(left, top, left + Math.round(w), top + Math.round(h)),
+                Paint().apply { isFilterBitmap = !pack.pixelArt },
+            )
+            frame.recycle()
+            out
+        } catch (e: Throwable) {
+            Log.w(TAG, "portrait $id/$state failed", e)
+            null
+        }
+    }
+
+    /** The smallest rectangle holding every pixel that isn't fully transparent; null for an empty frame. */
+    private fun opaqueBounds(b: Bitmap): Rect? {
+        val w = b.width
+        val h = b.height
+        val row = IntArray(w)
+        var l = w
+        var t = h
+        var r = -1
+        var bottom = -1
+        for (y in 0 until h) {
+            b.getPixels(row, 0, w, 0, y, w, 1)
+            for (x in 0 until w) {
+                if (row[x] ushr 24 == 0) continue
+                if (x < l) l = x
+                if (x > r) r = x
+                if (y < t) t = y
+                bottom = y
+            }
+        }
+        return if (r < 0) null else Rect(l, t, r + 1, bottom + 1)
     }
 
     private fun sourceFor(id: String): ((String) -> InputStream?)? {

@@ -110,7 +110,12 @@ class ProcessLaunchGuardTest {
     )
     private val cLanguages = setOf("c", "cc", "cpp", "cxx", "h", "hpp")
     private val nativeLanguages = cLanguages + setOf("kt", "java")
-    private val allowedNative = "app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/runtime/DshProcess.kt"
+    private val allowedNative = setOf(
+        "app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/runtime/DshProcess.kt",
+        // The explicit root channel's `su -c <fixed command>` (argv from RootCommands): also a
+        // Java ProcessBuilder child, which closes inherited fds like DshProcess's launches.
+        "app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/phone/background/RootProcess.kt",
+    )
     private val localHelper = "app/lib/remote/ssh/remote_shell.dart"
 
     private fun nativeCalls(source: String, language: String): List<Token> {
@@ -213,15 +218,19 @@ class ProcessLaunchGuardTest {
 
     @Test fun nativeLaunchesOnlyUseTheReviewedJavaOwner() {
         val root = repository()
-        val sourceFiles = files(File(root, "app/android")).filter { it.extension in nativeLanguages }
+        // JVM tests start host tools (java, sh, mkfifo) on the build machine; they never ship.
+        val jvmTests = File(root, "app/android/app/src/test").toPath()
+        val sourceFiles = files(File(root, "app/android")).filter {
+            it.extension in nativeLanguages && !it.toPath().startsWith(jvmTests)
+        }
         assertTrue("The Android source tree must be present", sourceFiles.isNotEmpty())
-        assertTrue("The reviewed launcher must be present", File(root, allowedNative).isFile)
+        for (allowed in allowedNative) assertTrue("The reviewed launcher must be present: $allowed", File(root, allowed).isFile)
         val violations = sourceFiles.flatMap { file ->
             val path = file.relativeTo(root).invariantSeparatorsPath
             val source = file.readText()
-            nativeCalls(source, file.extension).filter { path != allowedNative }.map { location(path, source, it) }
+            nativeCalls(source, file.extension).filter { path !in allowedNative }.map { location(path, source, it) }
         }
-        assertEquals("New launch sites may inherit API 26 configuration fds; route through DshProcess.\n" +
+        assertEquals("New launch sites may inherit API 26 configuration fds; use a reviewed Java owner.\n" +
             violations.joinToString("\n"), emptyList<String>(), violations)
     }
 

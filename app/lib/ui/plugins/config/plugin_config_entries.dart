@@ -42,7 +42,7 @@ import 'plugin_config_layout.dart';
 bool hasPluginConfig(PluginConfigState? state, String ns) {
   if (state == null || !state.isPlugin(ns) || curatedNamespaces.contains(ns)) return false;
   if (state[ns] case final form?) {
-    return pluginConfigLayout(form, copy: namespaceCopy[ns] ?? const {}).fieldCount > 0;
+    return cachedPluginConfigLayout(form, copy: namespaceCopy[ns] ?? const {}).fieldCount > 0;
   }
   return state.lazy && (state.entries[ns]?.configurable ?? false);
 }

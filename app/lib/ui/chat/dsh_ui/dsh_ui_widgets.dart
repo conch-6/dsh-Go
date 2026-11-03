@@ -873,6 +873,13 @@ class _OptionsView extends StatefulWidget {
 
 class _OptionsViewState extends State<_OptionsView> {
   final _picked = <String>{};
+  final _free = TextEditingController();
+
+  @override
+  void dispose() {
+    _free.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -881,14 +888,29 @@ class _OptionsViewState extends State<_OptionsView> {
     final answering = card?.answering ?? const _Answering(_Mode.readOnly);
     final node = widget.node;
     final title = card?.view.title;
-    final answered = answering.answer?.nodePath == node.path ? answering.answer!.selected.toSet() : const <String>{};
-    final sending = answering.sending?.kind == DshUiReplyKind.choice
-        ? answering.sending!.selectedIn(node.labels).toSet()
-        : const <String>{};
+    final answer = answering.answer?.nodePath == node.path ? answering.answer : null;
+    final answered = answer?.selected.toSet() ?? const <String>{};
+    final answeredFree = answer?.freetext;
+    final sendingReply = answering.sending?.kind == DshUiReplyKind.choice ? answering.sending : null;
+    final sending = sendingReply?.selectedIn(node.labels).toSet() ?? const <String>{};
     final enabled = answering.enabled;
     final dsh = DshColors.of(context);
+    final free = node.freetext;
 
-    void send(List<String> labels) => answering.onSend?.call(DshUiReply.choice(labels, title: title));
+    void send(List<String> labels, {String? freetext}) =>
+        answering.onSend?.call(DshUiReply.choice(labels, title: title, freetext: freetext));
+
+    List<String> chosen() => [
+      for (final o in node.options)
+        if (_picked.contains(o.label)) o.label,
+    ];
+    String typed() => _free.text.trim();
+    // 点了选项或填了字才能发；单选 + 自己填也走这个按钮。
+    final canSend = enabled && (_picked.isNotEmpty || typed().isNotEmpty);
+    final showSend = (node.multi || free) &&
+        answering.mode != _Mode.answered &&
+        answering.mode != _Mode.expired &&
+        answering.mode != _Mode.readOnly;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -905,7 +927,7 @@ class _OptionsViewState extends State<_OptionsView> {
             multi: node.multi,
             selected:
                 answered.contains(node.options[i].label) ||
-                (node.multi && _picked.contains(node.options[i].label)) ||
+                ((node.multi || free) && _picked.contains(node.options[i].label)) ||
                 sending.contains(node.options[i].label),
             answered: answered.contains(node.options[i].label),
             settled: answering.mode == _Mode.answered,
@@ -913,34 +935,93 @@ class _OptionsViewState extends State<_OptionsView> {
             enabled: enabled,
             onTap: () {
               final label = node.options[i].label;
-              if (!node.multi) {
+              // 单选且不能自己填：点了就是答案。
+              if (!node.multi && !free) {
                 send([label]);
                 return;
               }
-              setState(() => _picked.contains(label) ? _picked.remove(label) : _picked.add(label));
+              setState(() {
+                if (node.multi) {
+                  _picked.contains(label) ? _picked.remove(label) : _picked.add(label);
+                  return;
+                }
+                // 单选 + 自己填：点一下选中，再点一下取消。
+                if (_picked.contains(label)) {
+                  _picked.clear();
+                } else {
+                  _picked
+                    ..clear()
+                    ..add(label);
+                }
+              });
             },
           ),
         ],
-        if (node.multi &&
-            answering.mode != _Mode.answered &&
-            answering.mode != _Mode.expired &&
-            answering.mode != _Mode.readOnly) ...[
+        if (free && answering.mode != _Mode.answered) ...[
+          const SizedBox(height: 8),
+          _FreeTextField(
+            controller: _free,
+            enabled: enabled,
+            hint: node.freetextHint ?? l10n.viewUiFreeTextHint,
+            onChanged: () => setState(() {}),
+            onSubmitted: canSend ? () => send(chosen(), freetext: typed()) : null,
+          ),
+        ],
+        // 已答：自己填的那句跟在选项下面，和用户气泡上的标签对得上。
+        if (answering.mode == _Mode.answered && answeredFree != null && answeredFree.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          DshUiNote(l10n.viewUiReplyOther(answeredFree)),
+        ],
+        if (showSend) ...[
           const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerRight,
             child: _SendButton(
               busy: answering.mode == _Mode.sending,
-              onPressed: enabled && _picked.isNotEmpty
-                  ? () => send([
-                      for (final o in node.options)
-                        if (_picked.contains(o.label)) o.label,
-                    ])
-                  : null,
+              onPressed: canSend ? () => send(chosen(), freetext: typed()) : null,
             ),
           ),
         ],
         if (answering.caption case final caption?) ...[const SizedBox(height: 8), DshUiNote(caption)],
       ],
+    );
+  }
+}
+
+/// options 的「其他（自己填）」：和选项同一套圆角、留白和底色。
+class _FreeTextField extends StatelessWidget {
+  const _FreeTextField({
+    required this.controller,
+    required this.enabled,
+    required this.hint,
+    required this.onChanged,
+    required this.onSubmitted,
+  });
+
+  final TextEditingController controller;
+  final bool enabled;
+  final String hint;
+  final VoidCallback onChanged;
+  final VoidCallback? onSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    // 用 App 自己的输入框样式（圆角描边、聚焦换主色），和别的输入框一致。
+    return TextField(
+      key: const ValueKey('dsh-ui-freetext'),
+      controller: controller,
+      enabled: enabled,
+      readOnly: !enabled,
+      minLines: 1,
+      maxLines: 3,
+      textInputAction: TextInputAction.send,
+      onChanged: (_) => onChanged(),
+      onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
+      style: theme.textTheme.bodyMedium?.copyWith(color: colors.onSurface),
+      cursorColor: colors.primary,
+      decoration: InputDecoration(hintText: hint),
     );
   }
 }

@@ -138,7 +138,8 @@ SheetGrid parseDelimited(String text, {String delimiter = ',', int maxRows = 500
 // ── XLSX ────────────────────────────────────────────────────────────────────
 
 /// Reads an XLSX workbook's visible sheets (saved values, not recalculated).
-/// [maxCells] bounds the whole workbook, [maxRows] each sheet.
+/// [maxCells] bounds the returned rectangles, including empty cells, across
+/// the whole workbook; [maxRows] bounds each sheet.
 List<SheetGrid> parseXlsx(Uint8List bytes, {int maxCells = 250000, int maxRows = 5000}) {
   final zip = _Zip(bytes);
   String? part(String name) {
@@ -288,13 +289,22 @@ SheetGrid _sheet(
   if (cells.isEmpty) return SheetGrid(name: name, rows: const [], truncated: truncated);
   final lastRow = cells.keys.reduce((a, b) => a > b ? a : b);
   var lastCol = 0;
-  for (final r in cells.values) {
-    for (final c in r.keys) {
-      if (c > lastCol) lastCol = c;
+  var rowCount = 0;
+  for (var r = 0; r <= lastRow; r++) {
+    var widest = lastCol;
+    for (final c in cells[r]?.keys ?? const <int>[]) {
+      if (c > widest) widest = c;
     }
+    // A row that would overflow the budget ends the sheet without widening it.
+    if ((r + 1) * (widest + 1) > maxCells) {
+      truncated = true;
+      break;
+    }
+    lastCol = widest;
+    rowCount = r + 1;
   }
   final rows = [
-    for (var r = 0; r <= lastRow; r++) [for (var c = 0; c <= lastCol; c++) cells[r]?[c] ?? ''],
+    for (var r = 0; r < rowCount; r++) [for (var c = 0; c <= lastCol; c++) cells[r]?[c] ?? ''],
   ];
   return SheetGrid(name: name, rows: rows, truncated: truncated);
 }

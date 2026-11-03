@@ -449,6 +449,37 @@ class ModelSelection {
   String toString() => '$provider/$model${reasoningEffort == null ? '' : ' ($reasoningEffort)'}';
 }
 
+/// Saving the next-session default is separate from switching this session.
+enum ModelDefaultSaveStatus { saved, skipped, failed, unknown }
+
+class ModelDefaultSave {
+  const ModelDefaultSave({required this.status, this.code});
+
+  static ModelDefaultSave? fromJson(Object? json) {
+    final map = asMap(json);
+    if (map == null) return null;
+    final status = switch (asString(map['status'])) {
+      'saved' => ModelDefaultSaveStatus.saved,
+      'skipped' => ModelDefaultSaveStatus.skipped,
+      'failed' => ModelDefaultSaveStatus.failed,
+      _ => ModelDefaultSaveStatus.unknown,
+    };
+    return ModelDefaultSave(status: status, code: asString(map['code']));
+  }
+
+  final ModelDefaultSaveStatus status;
+  final String? code;
+}
+
+class ModelSelectionResult {
+  const ModelSelectionResult({required this.selected, this.defaultSave});
+
+  final ModelSelection selected;
+
+  /// Null for older hosts that do not acknowledge default persistence.
+  final ModelDefaultSave? defaultSave;
+}
+
 class TodoItem {
   const TodoItem(this.content, this.status);
 

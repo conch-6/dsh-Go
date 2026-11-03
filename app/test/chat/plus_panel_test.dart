@@ -272,7 +272,7 @@ void main() {
     });
 
     for (final scale in [1.0, 1.3]) {
-      testWidgets('完全权限: on the composer\'s edge, 32 high, equal end insets (×$scale)', (tester) async {
+      testWidgets('完全权限: on the composer\'s edge, 34 high, equal end insets (×$scale)', (tester) async {
         await pumpChat(tester, const SessionModes(preset: 'danger-full-access'), scale: scale);
         final pill = tester.getRect(find.byType(PermissionPill));
         final composer = tester.getRect(find.byType(Composer));

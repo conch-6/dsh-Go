@@ -7,8 +7,15 @@ writes SHA256SUMS and update.json next to them. The default release contains
 arm64 only; explicit flavor inputs remain available for local testing. Build
 with `tooling/build-apk.sh` first. Explicit multiple inputs must share a build number.
 
+It also makes delta patches (tooling/apk_delta.py, docs/design/delta-update.md)
+from the arm64 APKs of the last --delta-from releases on GitHub (fetched with
+`gh`, kept in ~/.cache/dshgo-release/apk/, checked against their SHA256SUMS),
+and keeps those under 60 % of the new APK: in dist/, SHA256SUMS and update.json's
+`patches`.
+
     python3 tooling/release_assets.py --notes notes.md
     python3 tooling/release_assets.py --notes notes.md --base-url https://cdn.example.com/dsh/1.2.0/
+    python3 tooling/release_assets.py --delta-from 0        no patches, no network
 
 --base-url makes update.json point at your own host (self-hosted feed); without
 it the app derives GitHub download URLs from the tag and asset names.
@@ -24,18 +31,31 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 
+import apk_delta
 from build_number import MAX_VERSION_CODE, decode
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FLAVORS = ("arm64", "x64")
+FLAVOR_ABI = {"arm64": "arm64-v8a", "x64": "x86_64"}
 REPO = "ccch1mneyyy/dsh-go"
 VERSION_RE = re.compile(r"^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+(\d+))?$")
 BADGING_RE = re.compile(r"^package: .*?\bversionCode='(\d*)' versionName='([^']*)'", re.MULTILINE)
+CACHE = pathlib.Path.home() / ".cache" / "dshgo-release" / "apk"
+# A patch this big saves too little to be worth a second download path.
+PATCH_LIMIT = 0.6
 
 
 class ReleaseError(Exception):
     pass
+
+
+def check_abis(flavor: str, entries: list[str]) -> None:
+    """A flavor's APK holds native libraries for its own ABI and no other."""
+    abis = {name.split("/")[1] for name in entries if name.startswith("lib/") and name.endswith(".so")}
+    if abis != {FLAVOR_ABI[flavor]}:
+        raise ReleaseError(f"{flavor} APK has native libraries for {sorted(abis)}, expected only {FLAVOR_ABI[flavor]}")
 
 
 def pubspec_version() -> str:
@@ -102,6 +122,57 @@ def sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def gh(*args: str) -> str:
+    run = subprocess.run(["gh", *args, "--repo", REPO], capture_output=True, text=True)
+    if run.returncode:
+        raise ReleaseError(f"gh {' '.join(args[:2])} failed: {run.stderr.strip()} (--delta-from 0 makes no patches)")
+    return run.stdout
+
+
+def previous_releases(tag: str, count: int) -> list[str]:
+    """The tags of the [count] newest published releases other than [tag]."""
+    releases = json.loads(gh("release", "list", "--exclude-drafts", "--limit", "50", "--json", "tagName,publishedAt"))
+    releases.sort(key=lambda r: r["publishedAt"], reverse=True)
+    return [r["tagName"] for r in releases if r["tagName"] != tag][:count]
+
+
+def listed(sums: pathlib.Path, name: str) -> str | None:
+    """The SHA-256 that the SHA256SUMS file [sums] gives [name]."""
+    if sums.is_file():
+        for line in sums.read_text(encoding="utf-8").splitlines():
+            digest, _, file = line.partition(" ")
+            if file.lstrip(" *") == name:
+                return digest.lower()
+    return None
+
+
+def published_apk(tag: str, cache: pathlib.Path) -> pathlib.Path:
+    """[tag]'s arm64 APK from its GitHub release, kept in [cache], as the
+    release's SHA256SUMS says it is."""
+    name = f"dsh-go-{tag.removeprefix('v')}-arm64.apk"
+    apk, sums = cache / tag / name, cache / tag / "SHA256SUMS"
+    if not (apk.is_file() and listed(sums, name) == sha256(apk)):
+        gh("release", "download", tag, "--pattern", name, "--pattern", "SHA256SUMS", "--dir", str(cache / tag), "--clobber")
+        if listed(sums, name) != sha256(apk):
+            raise ReleaseError(f"{tag}: {name} doesn't match the release's SHA256SUMS")
+    return apk
+
+
+def patch_from(old: pathlib.Path, old_version: str, new: pathlib.Path, name: str, out: pathlib.Path) -> dict | None:
+    """The patch from [old] (version X.Y.Z+N) to the arm64 APK [new] of
+    version [name], written to [out]; None, and nothing written, unless it's
+    under PATCH_LIMIT of [new]."""
+    patch = out / f"dsh-go-{name}-from-{old_version.partition('+')[0]}-arm64.dshdelta"
+    apk_delta.make(old, new, patch)
+    size = patch.stat().st_size
+    share = size / new.stat().st_size
+    print(f"patch from {old_version}: {size} bytes, {share:.0%} of the APK{'' if share < PATCH_LIMIT else ', left out'}")
+    if share >= PATCH_LIMIT:
+        patch.unlink()
+        return None
+    return {"from": sha256(old), "fromVersion": old_version, "name": patch.name, "size": size, "sha256": sha256(patch)}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -112,6 +183,13 @@ def main() -> None:
     parser.add_argument("--notes", type=pathlib.Path, help="Markdown release notes (shown in the app)")
     parser.add_argument("--out", type=pathlib.Path, default=ROOT / "dist")
     parser.add_argument("--base-url", help="absolute or relative URL prefix for the APKs in update.json")
+    parser.add_argument(
+        "--delta-from",
+        type=int,
+        default=3,
+        metavar="N",
+        help="patches from the arm64 APKs of the N newest releases on GitHub (default 3; 0: none)",
+    )
     parser.add_argument(
         "apks",
         nargs="*",
@@ -145,6 +223,9 @@ def main() -> None:
         sys.exit("aapt2 not found (Android SDK build-tools): it reads versionName and versionCode from the APKs")
     try:
         build = release_build(name, expected, {flavor: apk_version(aapt2, path) for flavor, path in sources.items()})
+        for flavor, path in sources.items():
+            with zipfile.ZipFile(path) as apk:
+                check_abis(flavor, apk.namelist())
     except ReleaseError as e:
         sys.exit(str(e))
 
@@ -161,9 +242,24 @@ def main() -> None:
         if args.base_url:
             entry["url"] = args.base_url.rstrip("/") + "/" + asset
         assets[flavor] = entry
-    (args.out / "SHA256SUMS").write_text("\n".join(sums) + "\n", encoding="utf-8")
 
     tag = f"v{name}"
+    for stale in args.out.glob("*.dshdelta"):
+        stale.unlink()
+    patches = []
+    if args.delta_from and "arm64" in assets:
+        try:
+            for old_tag in previous_releases(tag, args.delta_from):
+                old = published_apk(old_tag, CACHE)
+                old_name, old_code = apk_version(aapt2, old)
+                patch = patch_from(old, f"{old_name}+{old_code}", args.out / assets["arm64"]["name"], name, args.out)
+                if patch:
+                    patches.append(patch)
+        except (ReleaseError, apk_delta.DeltaError) as e:
+            sys.exit(str(e))
+    sums += [f"{patch['sha256']}  {patch['name']}" for patch in patches]
+    (args.out / "SHA256SUMS").write_text("\n".join(sums) + "\n", encoding="utf-8")
+
     manifest = {
         "schema": 1,
         "version": f"{name}+{build}",
@@ -174,6 +270,8 @@ def main() -> None:
         "page": f"https://github.com/{REPO}/releases/tag/{tag}",
         "assets": assets,
     }
+    if patches:
+        manifest["patches"] = {"arm64": patches}
     (args.out / "update.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     try:

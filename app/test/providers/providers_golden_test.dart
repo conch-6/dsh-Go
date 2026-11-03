@@ -8,17 +8,85 @@ import 'package:dsh_app/ui/providers/provider_form_page.dart';
 import 'package:dsh_app/ui/providers/providers_page.dart';
 import 'package:dsh_app/ui/providers/subscription_page.dart';
 import 'package:dsh_app/ui/providers/subscription_sheet.dart';
-import 'package:dsh_client/dsh_client.dart' show ModelCatalog, ModelInfo, ProviderGroup;
+import 'package:dsh_client/dsh_client.dart' show DshClient, ModelCatalog, ModelInfo, ProviderGroup;
+import 'package:dsh_app/state/connection_state.dart';
+import 'package:dsh_app/state/read_list_identity.dart';
 import 'package:dsh_app/state/account_state.dart' show accountBrowserProvider;
 import 'package:dsh_app/state/models_state.dart';
 import 'package:dsh_app/state/providers_state.dart';
 import 'package:dsh_app/state/subscriptions_state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 
 import '../account/support.dart' show FakeBrowser;
+import '../engine_settings/support.dart' as engine;
 import '../shell/golden_harness.dart';
 import 'support.dart';
+
+// Only the two overview goldens use this modern Host. Other provider pages
+// retain their existing backend fixtures and network behavior.
+List<Override> _withNewChatDefaults(List<Override> overrides) {
+  final host =
+      engine.FakeSettingsHost(
+          describe: {
+            'namespaces': [
+              {
+                'ns': defaultModelSettingsNs,
+                'schema': {
+                  'type': 'object',
+                  'dict': {
+                    'provider': {'type': 'string'},
+                    'model': {'type': 'string'},
+                    'reasoningEffort': {'type': 'string'},
+                    'rememberLastSelection': {'type': 'boolean'},
+                  },
+                },
+                'base': {
+                  'provider': 'deepseek-official',
+                  'model': 'deepseek-v4-pro',
+                  'reasoningEffort': 'high',
+                  'rememberLastSelection': true,
+                },
+                'revision': 2,
+              },
+            ],
+          },
+        )
+        ..modelCatalog = {
+          'default': {'provider': 'deepseek-official', 'model': 'deepseek-v4-pro', 'reasoningEffort': 'high'},
+          'routableProviders': ['deepseek-official'],
+          'groups': [
+            {
+              'id': 'deepseek-official',
+              'name': 'DeepSeek',
+              'models': [
+                {
+                  'id': 'deepseek-v4-pro',
+                  'name': 'DeepSeek-V4-Pro',
+                  'reasoning': {
+                    'defaultEffort': 'high',
+                    'efforts': [
+                      {'id': 'off', 'name': 'Off'},
+                      {'id': 'high', 'name': 'High'},
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+          'failures': <Object?>[],
+        };
+  final client = DshClient.withCarrier(host);
+  addTearDown(client.close);
+  return [
+    for (final override in overrides)
+      if (override.origin != activeConnectionProvider) override,
+    activeConnectionProvider.overrideWithValue(AsyncData(engine.fakeConnection(client))),
+    readListIdentityProvider.overrideWithValue(null),
+  ];
+}
 
 void main() {
   // Everything at once: DeepSeek, both subscriptions (one signed in), three
@@ -27,22 +95,26 @@ void main() {
     'providers_list',
     height: 1080,
     () => const ProvidersPage(),
-    overrides: () => providerOverrides(
-      sampleBackend(),
-      account: signedInAccount,
-      subscriptions: FakeSubscriptionBackend(
-        statuses: const [
-          SubscriptionStatus(subscription: Subscription.chatgpt, signedIn: true, account: 'me@example.com'),
-          SubscriptionStatus(subscription: Subscription.claude, signedIn: false),
-        ],
+    overrides: () => _withNewChatDefaults(
+      providerOverrides(
+        sampleBackend(),
+        account: signedInAccount,
+        subscriptions: FakeSubscriptionBackend(
+          statuses: const [
+            SubscriptionStatus(subscription: Subscription.chatgpt, signedIn: true, account: 'me@example.com'),
+            SubscriptionStatus(subscription: Subscription.claude, signedIn: false),
+          ],
+        ),
       ),
     ),
+    before: engine.flush,
   );
 
   goldenBoth(
     'providers_list_empty',
     () => const ProvidersPage(),
-    overrides: () => providerOverrides(FakeProviderBackend()),
+    overrides: () => _withNewChatDefaults(providerOverrides(FakeProviderBackend())),
+    before: engine.flush,
   );
 
   goldenTall(

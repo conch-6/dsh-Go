@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'support/ready_mux.dart';
 import 'support/wait.dart';
 
 class _Runtime extends LocalRuntimeController {
@@ -30,6 +31,9 @@ class _Settings extends SettingsController {
 
 class _Client extends DshClient {
   _Client() : super(DshConnection(Uri.parse('http://127.0.0.1:9')));
+  final _readyMux = ReadyMux();
+  @override
+  DshMux get mux => _readyMux;
   bool closed = false;
 
   @override

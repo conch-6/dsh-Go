@@ -148,17 +148,6 @@ void main() {
       expect(shape(_tool(3, 'w', meta: {'path': 'a.txt'})), before);
     });
 
-    test('a turn kept open is not folded: the card stays in its row', () {
-      final rows = deriveRows(
-        items: turn(middle: _carded(3, 'w')),
-        turns: [_trace(0, 6)],
-        foldTurns: true,
-        openTurns: {0},
-      );
-      expect(rows.whereType<TurnProcessRow>(), isEmpty);
-      expect(rows.whereType<ToolCallRow>().map((r) => r.card), everyElement(ToolCardPlacement.inline));
-    });
-
     test('a failed turn stays open, card and all', () {
       final rows = deriveRows(
         items: turn(middle: _carded(3, 'w')),

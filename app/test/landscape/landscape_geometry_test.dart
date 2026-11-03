@@ -15,7 +15,7 @@ import 'package:dsh_app/state/settings_state.dart';
 import 'package:dsh_app/ui/bots/bot_sheets.dart' show confirmDelete;
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:dsh_app/ui/chat/composer.dart';
-import 'package:dsh_app/ui/chat/dock/chat_dock.dart';
+import 'package:dsh_app/ui/chat/dock/dock_stack.dart';
 import 'package:dsh_app/ui/chat/model_sheet.dart' show ModelChip;
 import 'package:dsh_app/ui/chat/widgets/approval_card.dart';
 import 'package:dsh_app/ui/chat/widgets/whale_tail.dart' show WhaleSprites;
@@ -120,7 +120,7 @@ void main() {
 
       testWidgets('keyboard up: header and dock step aside, the latest message stays in sight', (tester) async {
         await _home(tester, win);
-        expect(find.byType(ChatDock), findsOneWidget);
+        expect(find.byType(DockStack), findsOneWidget);
         await tester.showKeyboard(find.byType(EditableText).first);
         setKeyboard(tester, win, 200);
         await pumpFrames(tester, 8);
@@ -129,13 +129,13 @@ void main() {
         // 8 above the keyboard plus the composer's own 8.
         expect(composer.bottom, _near(win.size.height - 200 - 16));
         // Folded to nothing toward the composer (still mounted, unseen).
-        final fold = tester.widget<Align>(find.ancestor(of: find.byType(ChatDock), matching: find.byType(Align)).first);
+        final fold = tester.widget<Align>(find.ancestor(of: find.byType(DockStack), matching: find.byType(Align)).first);
         expect(fold.heightFactor, 0);
         final fade = tester.widget<Opacity>(
-          find.ancestor(of: find.byType(ChatDock), matching: find.byType(Opacity)).first,
+          find.ancestor(of: find.byType(DockStack), matching: find.byType(Opacity)).first,
         );
         expect(fade.opacity, 0);
-        expect(find.byType(ChatDock).hitTestable(), findsNothing);
+        expect(find.byType(DockStack).hitTestable(), findsNothing);
         expect(find.byKey(const ValueKey('chat-title-pill')).hitTestable(), findsNothing);
         // The last row of the run, whole, between the status bar and the
         // composer.
@@ -148,7 +148,7 @@ void main() {
 
         setKeyboard(tester, win, 0);
         await pumpFrames(tester, 8);
-        expect(find.byType(ChatDock).hitTestable(), findsWidgets);
+        expect(find.byType(DockStack).hitTestable(), findsWidgets);
         expect(find.byKey(const ValueKey('chat-title-pill')).hitTestable(), findsOneWidget);
       });
 

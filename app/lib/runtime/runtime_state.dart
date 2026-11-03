@@ -24,14 +24,12 @@ class LocalRuntimeState {
   const LocalRuntimeState({
     this.status = const RuntimeStatus.unknown(),
     this.progress,
-    this.logs = const [],
     this.loaded = false,
     this.notice,
   });
 
   final RuntimeStatus status;
   final RuntimeProgressEvent? progress;
-  final List<String> logs;
 
   /// False until the first status arrives from the native side.
   final bool loaded;
@@ -43,27 +41,25 @@ class LocalRuntimeState {
     RuntimeStatus? status,
     RuntimeProgressEvent? progress,
     bool clearProgress = false,
-    List<String>? logs,
     bool? loaded,
     RuntimeNotice? notice,
   }) => LocalRuntimeState(
     status: status ?? this.status,
     progress: clearProgress ? null : (progress ?? this.progress),
-    logs: logs ?? this.logs,
     loaded: loaded ?? this.loaded,
     notice: notice ?? this.notice,
   );
 }
 
 class LocalRuntimeController extends Notifier<LocalRuntimeState> {
-  static const _maxLogs = 1000;
-  final _logs = ListQueue<String>();
   StreamSubscription<RuntimeEvent>? _sub;
 
   RuntimeBridge get _bridge => ref.read(runtimeBridgeProvider);
 
   @override
   LocalRuntimeState build() {
+    // Keep collecting before the log screen opens, without watching its updates.
+    ref.read(localRuntimeLogsProvider);
     _sub = _bridge.events.listen(_onEvent, onError: (_) {});
     ref.onDispose(() => _sub?.cancel());
     unawaited(_refresh());
@@ -75,14 +71,7 @@ class LocalRuntimeController extends Notifier<LocalRuntimeState> {
     try {
       final status = await _bridge.status();
       if (!r.mounted) return;
-      // Apply it before the slower log read: a status event meanwhile is newer than this.
       state = state.copyWith(status: status, loaded: true, clearProgress: status.phase != RuntimePhase.installing);
-      final logs = await _bridge.logs(lines: 300);
-      if (!r.mounted) return;
-      _logs
-        ..clear()
-        ..addAll(logs);
-      state = state.copyWith(logs: List.unmodifiable(_logs));
     } catch (_) {
       if (r.mounted) state = state.copyWith(loaded: true);
     }
@@ -94,12 +83,8 @@ class LocalRuntimeController extends Notifier<LocalRuntimeState> {
         state = state.copyWith(status: status, loaded: true, clearProgress: status.phase != RuntimePhase.installing);
       case RuntimeProgressEvent():
         state = state.copyWith(progress: event);
-      case RuntimeLogEvent(:final line):
-        _logs.addLast(line);
-        while (_logs.length > _maxLogs) {
-          _logs.removeFirst();
-        }
-        state = state.copyWith(logs: List.unmodifiable(_logs));
+      case RuntimeLogsEvent():
+        break;
       case RuntimeNoticeEvent(:final text):
         state = state.copyWith(notice: RuntimeNotice((state.notice?.seq ?? 0) + 1, text));
     }
@@ -144,3 +129,68 @@ class LocalRuntimeController extends Notifier<LocalRuntimeState> {
 }
 
 final localRuntimeProvider = NotifierProvider<LocalRuntimeController, LocalRuntimeState>(LocalRuntimeController.new);
+
+/// The last 1000 engine log lines. The native snapshot and the live batches share
+/// one sequence, so batches that arrive while the snapshot is read are neither lost
+/// nor shown twice.
+class LocalRuntimeLogsController extends Notifier<List<String>> {
+  static const _maxLogs = 1000;
+
+  @override
+  List<String> build() {
+    final r = ref;
+    final bridge = r.read(runtimeBridgeProvider);
+    final lines = ListQueue<String>();
+    final pending = ListQueue<RuntimeLogEntry>();
+    var loading = true;
+    var throughSeq = 0;
+
+    bool append(Iterable<RuntimeLogEntry> entries) {
+      var changed = false;
+      for (final entry in entries) {
+        if (entry.seq <= throughSeq) continue;
+        lines.addLast(entry.line);
+        if (lines.length > _maxLogs) lines.removeFirst();
+        throughSeq = entry.seq;
+        changed = true;
+      }
+      return changed;
+    }
+
+    final sub = bridge.events.listen((event) {
+      if (event is! RuntimeLogsEvent) return;
+      if (loading) {
+        pending.addAll(event.entries);
+        while (pending.length > _maxLogs) {
+          pending.removeFirst();
+        }
+      } else if (append(event.entries)) {
+        state = List.unmodifiable(lines);
+      }
+    }, onError: (_) {});
+    r.onDispose(sub.cancel);
+
+    Future<void> bootstrap() async {
+      try {
+        final snapshot = await bridge.logSnapshot();
+        if (!r.mounted) return;
+        append(snapshot.entries);
+        throughSeq = snapshot.throughSeq;
+      } catch (_) {
+        // Live batches still give a useful tail.
+        if (!r.mounted) return;
+      }
+      append(pending);
+      pending.clear();
+      loading = false;
+      state = List.unmodifiable(lines);
+    }
+
+    unawaited(bootstrap());
+    return const [];
+  }
+}
+
+final localRuntimeLogsProvider = NotifierProvider<LocalRuntimeLogsController, List<String>>(
+  LocalRuntimeLogsController.new,
+);

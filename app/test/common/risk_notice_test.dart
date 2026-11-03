@@ -273,10 +273,12 @@ void main() {
       }
       expect(RiskNotices.autoReview.ask, isNull);
       expect(RiskNotices.petOverlay.ask, isNull);
+      expect(RiskNotices.rootChannel.ask, isNull);
       // High where a whole class of checks goes; medium where it is bounded.
       expect(
         {
-          for (final n in [...notices, RiskNotices.autoReview, RiskNotices.petOverlay]) n.id: n.level,
+          for (final n in [...notices, RiskNotices.autoReview, RiskNotices.petOverlay, RiskNotices.rootChannel])
+            n.id: n.level,
         },
         {
           'phone.confirm-always': RiskLevel.high,
@@ -287,6 +289,8 @@ void main() {
           'chat.allow-for-chat': RiskLevel.medium,
           'permission.auto-review': RiskLevel.medium,
           'pets.overlay-permission': RiskLevel.medium,
+          // Only the root manager's own prompt comes next: said once.
+          'phone.root': RiskLevel.medium,
         },
       );
     });

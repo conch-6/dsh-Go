@@ -1,7 +1,8 @@
 // Ported from PiPilot (https://github.com/CikeSeven/pi_pilot), MIT, Copyright (c) 2026 CikeSeven. See THIRD_PARTY_NOTICES.md.
 //
-// There is no PageView behind the chat here, so a leftward swipe while closed
-// is simply rejected and left to whatever else wants it.
+// There is no PageView behind the chat here, so a leftward swipe while the
+// drawer is closed is simply rejected and left to whatever else wants it: a
+// code block's scroll, or the 快捷入口 panel's [QuickPanelDragRecognizer].
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
@@ -71,6 +72,18 @@ class DrawerDragRecognizer extends OneSequenceGestureRecognizer {
   /// 确保「想滚列表」不会被误判成开抽屉。
   static const double _verticalSlop = kTouchSlop;
 
+  /// 手指朝哪边滑算「拉开」:抽屉在左,向右。
+  @protected
+  double get openingSign => 1;
+
+  /// 关着时,朝拉开方向滑了 [distance] 是否够表态(已过 [_slop])。
+  @protected
+  bool opensAfter(double distance, PointerDeviceKind kind) => true;
+
+  /// 手势结束([PointerUpEvent] 或 [PointerCancelEvent])时交给 [onEnd] 的速度。
+  @protected
+  double endVelocity(PointerEvent event) => _velocity?.getVelocity().pixelsPerSecond.dx ?? 0;
+
   Offset _accum = Offset.zero;
   bool _accepted = false;
   VelocityTracker? _velocity;
@@ -108,7 +121,10 @@ class DrawerDragRecognizer extends OneSequenceGestureRecognizer {
       if (_accum.dx.abs() < _slop) return;
       // 横向意图成立。抽屉已开时左右都归抽屉(右继续拉开、左推回),
       // 关着时只认向右 —— 向左那是翻页,让给 PageView。
-      if (isOpen() || _accum.dx > 0) {
+      final open = isOpen();
+      final towards = _accum.dx * openingSign;
+      if (open || towards > 0) {
+        if (!open && !opensAfter(towards, event.kind)) return;
         _accepted = true;
         onStart();
         resolve(GestureDisposition.accepted);
@@ -123,8 +139,7 @@ class DrawerDragRecognizer extends OneSequenceGestureRecognizer {
 
     if (event is PointerUpEvent || event is PointerCancelEvent) {
       if (_accepted) {
-        final velocity = _velocity?.getVelocity().pixelsPerSecond.dx ?? 0;
-        onEnd(velocity);
+        onEnd(endVelocity(event));
       }
       stopTrackingPointer(event.pointer);
       _accepted = false;
@@ -151,4 +166,38 @@ class DrawerDragRecognizer extends OneSequenceGestureRecognizer {
 
   @override
   void didStopTrackingLastPointer(int pointer) {}
+}
+
+/// 右侧快捷入口面板的拖动:镜像抽屉,**向左**拉开、向右推回,同一根手指全程
+/// 归它,竖向让位和「绝不在 pointer down 表态」都一样。
+///
+/// 只有一处不同:关着时向左要滑过设备的 touch slop(严格大于)才表态。横向
+/// 滚动的代码块、表格,图表和卡片堆的横滑用的是同一个阈值和同一个比较,而
+/// 事件先发给更靠里的识别器,所以手指下只要有这样的内容,一定是它先赢:向左
+/// 滑一直是它们的,不能被面板抢走。识别器不用知道手指下是什么。Android 的
+/// slop 约 8dp,和抽屉的判定距离相同;[gestureSettings] 要和 `Scrollable`
+/// 一样取自 MediaQuery,否则两边阈值不一致。
+///
+/// 系统把手指收走时(边缘返回手势)没有「甩」这回事:只看拉到了哪儿,否则向左
+/// 的速度会把面板甩开。
+class QuickPanelDragRecognizer extends DrawerDragRecognizer {
+  QuickPanelDragRecognizer({
+    required super.isOpen,
+    required super.onStart,
+    required super.onDelta,
+    required super.onEnd,
+    super.debugOwner,
+  });
+
+  @override
+  double get openingSign => -1;
+
+  @override
+  bool opensAfter(double distance, PointerDeviceKind kind) => distance > computeHitSlop(kind, gestureSettings);
+
+  @override
+  double endVelocity(PointerEvent event) => event is PointerCancelEvent ? 0 : super.endVelocity(event);
+
+  @override
+  String get debugDescription => 'quick panel drag';
 }

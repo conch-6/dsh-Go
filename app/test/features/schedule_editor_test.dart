@@ -4,11 +4,14 @@
 // (light + dark). Regenerate the goldens with
 // `flutter test --update-goldens test/features/schedule_editor_test.dart`.
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dsh_app/ui/common/app_sheet.dart';
+import 'package:dsh_app/ui/chat/widgets/question_card.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/connection_state.dart';
+import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/models_state.dart';
 import 'package:dsh_app/state/schedule_editor_state.dart';
 import 'package:dsh_app/state/sessions_state.dart';
@@ -28,6 +31,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../chat/support/harness.dart';
 import '../plugins/support/fake_plugin_host.dart';
+import '../notify/schedule_authorization_checks.dart';
 
 /// Saturday 2026-10-24 15:20 in Shanghai.
 final _now = DateTime.utc(2026, 10, 24, 7, 20);
@@ -56,6 +60,13 @@ class _Sessions extends SessionsController {
 
   @override
   Future<void> refresh() async {}
+}
+
+class _ActiveHost extends ActiveHostController {
+  @override
+  HostRef build() => HostRef.local;
+
+  void switchHost() => state = const HostRef.ssh('next-host');
 }
 
 class _Settings extends SettingsController {
@@ -94,6 +105,7 @@ void main() {
 
   List<Override> overrides() => [
     activeConnectionProvider.overrideWithValue(AsyncData(fakeHost(client))),
+    activeHostProvider.overrideWith(_ActiveHost.new),
     sessionsProvider.overrideWith(() => sessions),
     settingsProvider.overrideWith(_Settings.new),
     localRuntimeProvider.overrideWith(StaticRuntime.new),
@@ -118,6 +130,135 @@ void main() {
     await Scrollable.ensureVisible(tester.element(finder), alignment: 0.4);
     await pumpFrames(tester);
   }
+
+  test('schedule authorization uses real mux replay and scoped human responses', runScheduleAuthorizationChecks);
+
+  group('authorization', () {
+    Future<Completer<Object?>> pendingEdit(WidgetTester tester) async {
+      final result = Completer<Object?>();
+      carrier.handlers[r'$events/result'] = (_) => null;
+      carrier.handlers['schedule/update'] = (_) {
+        carrier.link!.push(scheduleQuestionFrame('edit-question'));
+        return result.future;
+      };
+      await pump(tester, ScheduleEditorPage(task: _task(_daily), now: _now));
+      await tester.enterText(find.widgetWithText(TextField, '日报提醒'), '新名字');
+      await tester.tap(find.text('保存'));
+      await pumpFrames(tester);
+      return result;
+    }
+
+    testWidgets('fast edit request is visible in full and waits for explicit selection and submit', (tester) async {
+      final result = await pendingEdit(tester);
+      expect(find.byType(QuestionCard), findsOneWidget);
+      final card = tester.widget<QuestionCard>(find.byType(QuestionCard));
+      expect(find.text(card.request.questions.single.question), findsOneWidget);
+      expect(card.request.questions.single.question, contains('complete instruction'));
+      expect(find.text('授权 / Authorize'), findsOneWidget);
+      expect(find.text('拒绝 / Reject'), findsOneWidget);
+      expect(carrier.argsOf(r'$events/result'), isEmpty);
+      final submit = find.widgetWithText(FilledButton, '提交');
+      expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+      await tester.tap(find.text('授权 / Authorize'));
+      await tester.pump();
+      expect(carrier.argsOf(r'$events/result'), isEmpty, reason: 'selection alone is not consent');
+      await tester.ensureVisible(submit);
+      await tester.tap(submit);
+      await pumpFrames(tester);
+      final response = carrier.argsOf(r'$events/result').single;
+      expect(response['eventId'], 'edit-question');
+      expect(response['outcome'], {
+        'kind': 'result',
+        'value': {
+          'answers': [
+            {
+              'id': 'dsh-go-schedule-authorization-edit-question',
+              'selected': ['授权 / Authorize'],
+            },
+          ],
+        },
+      });
+      expect(find.byType(QuestionCard), findsNothing);
+      result.complete({'id': 'sch-1', 'updated': false, 'code': 'schedule_conflict'});
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('withdrawal removes the card and its held callback cannot answer', (tester) async {
+      final result = await pendingEdit(tester);
+      final card = tester.widget<QuestionCard>(find.byType(QuestionCard));
+      carrier.link!.push({'type': 'cancel', 'eventId': 'edit-question'});
+      await card.onAnswer(card.request, [
+        QuestionAnswer(card.request.questions.single.id, selected: ['授权 / Authorize']),
+      ]);
+      await pumpFrames(tester);
+      expect(find.byType(QuestionCard), findsNothing);
+      expect(carrier.argsOf(r'$events/result'), isEmpty);
+      result.complete({'id': 'sch-1', 'updated': false, 'code': 'schedule_conflict'});
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('leaving the editor rejects only the old pending request', (tester) async {
+      final result = await pendingEdit(tester);
+      final card = tester.widget<QuestionCard>(find.byType(QuestionCard));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await pumpFrames(tester);
+      await card.onAnswer(card.request, [
+        QuestionAnswer(card.request.questions.single.id, selected: ['授权 / Authorize']),
+      ]);
+      expect(carrier.argsOf(r'$events/result').single['outcome'], {
+        'kind': 'rejected',
+        'error': {'name': 'UserQuestionError', 'message': 'declined'},
+      });
+      result.complete({'id': 'sch-1', 'updated': false, 'code': 'authorization_required'});
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Host selection retires the old card before the replacement connection resolves', (tester) async {
+      final result = await pendingEdit(tester);
+      final card = tester.widget<QuestionCard>(find.byType(QuestionCard));
+      final container = ProviderScope.containerOf(tester.element(find.byType(ScheduleEditorPage)));
+      (container.read(activeHostProvider.notifier) as _ActiveHost).switchHost();
+      await pumpFrames(tester);
+      expect(find.byType(QuestionCard), findsNothing);
+      expect((carrier.argsOf(r'$events/result').single['outcome']! as Map)['kind'], 'rejected');
+      await card.onAnswer(card.request, [
+        QuestionAnswer(card.request.questions.single.id, selected: ['授权 / Authorize']),
+      ]);
+      expect(carrier.argsOf(r'$events/result'), hasLength(1));
+      result.complete({'id': 'sch-1', 'updated': true, 'record': _daily});
+      await tester.pumpAndSettle();
+      expect(
+        find.byType(ScheduleEditorPage),
+        findsOneWidget,
+        reason: 'old RPC completion cannot pop the new Host page',
+      );
+    });
+
+    testWidgets('creation observes its new session before the prompt can emit a question', (tester) async {
+      carrier.handlers['schedule/catalog'] = (_) => <Object?>[];
+      carrier.handlers[r'$events/result'] = (_) => null;
+      carrier.handlers['session/prompt'] = (_) {
+        carrier.link!.push(scheduleQuestionFrame('create-question', session: 'new-1'));
+        return {'accepted': true};
+      };
+      await pump(tester, ScheduleEditorPage(now: _now));
+      await tester.enterText(find.widgetWithText(TextField, '比如：每日站会提醒'), '日报');
+      await tester.enterText(find.byType(TextField).at(1), '写日报');
+      await tester.tap(find.text('创建'));
+      await pumpFrames(tester);
+      expect(find.byType(QuestionCard), findsOneWidget);
+      expect(tester.widget<QuestionCard>(find.byType(QuestionCard)).request.sessionId, 'new-1');
+      expect(carrier.argsOf(r'$events/result'), isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await pumpFrames(tester);
+      expect((carrier.argsOf(r'$events/result').single['outcome']! as Map)['kind'], 'rejected');
+      // Let the existing creation wait release its timers after leaving.
+      await tester.pump(const Duration(minutes: 2, seconds: 1));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+  });
 
   group('edit', () {
     testWidgets('switching to 工作日 sends a weekly change with the new name', (tester) async {

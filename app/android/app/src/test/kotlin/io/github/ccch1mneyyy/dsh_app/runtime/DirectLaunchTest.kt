@@ -25,6 +25,13 @@ class DirectLaunchTest {
         assertThrows(IllegalArgumentException::class.java) { DirectLaunch.quote("line\nbreak") }
     }
 
+    @Test fun prootNodeKeepsItsFlagsAndImportsTheDnsResolver() {
+        assertEquals("--dns-result-order=ipv4first --max-old-space-size=1536 --import=/opt/dsh-go/direct/proot-dns.mjs",
+            DirectLaunch.prootNodeOptions("--dns-result-order=ipv4first --max-old-space-size=1536"))
+        assertEquals("--import=/opt/dsh-go/direct/proot-dns.mjs", DirectLaunch.prootNodeOptions(""))
+        assertEquals("--import=/opt/dsh-go/direct/proot-dns.mjs", DirectLaunch.prootNodeOptions(null))
+    }
+
     @Test fun bothAbisUseRootfsLoaders() {
         assertEquals("usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", DirectLaunch.loaderPath("x86_64"))
         assertEquals("usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1", DirectLaunch.loaderPath("arm64-v8a"))

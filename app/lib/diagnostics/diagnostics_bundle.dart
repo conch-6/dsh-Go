@@ -173,6 +173,7 @@ abstract final class DiagnosticsBundle {
 /// source is optional: a part that can't be read is left out.
 Future<DiagnosticsSnapshot> collectDiagnostics(Ref ref, DateTime at) async {
   final runtime = ref.read(localRuntimeProvider);
+  final logs = ref.read(localRuntimeLogsProvider);
   final settings = ref.read(settingsProvider);
   final bridge = ref.read(runtimeBridgeProvider);
   final channel = ref.read(diagnosticsChannelProvider);
@@ -191,9 +192,9 @@ Future<DiagnosticsSnapshot> collectDiagnostics(Ref ref, DateTime at) async {
   // fallback (and what tests see).
   var engineLog = await attempt(channel.engineLog, const <String>[]);
   if (engineLog.isEmpty) {
-    engineLog = await attempt(() => bridge.logs(lines: diagnosticsLogLines), runtime.logs);
+    engineLog = await attempt(() => bridge.logs(lines: diagnosticsLogLines), logs);
   }
-  if (engineLog.isEmpty) engineLog = runtime.logs;
+  if (engineLog.isEmpty) engineLog = logs;
   final status = runtime.status;
   final failureLog = status.failure != null || status.mainFailure != null
       ? await attempt(bridge.failureLog, const <String>[])

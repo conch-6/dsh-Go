@@ -6,6 +6,7 @@
 import 'package:dsh_app/state/chat_state.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:dsh_app/ui/chat/dsh_ui/dsh_ui.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -68,5 +69,46 @@ void main() {
     expect(copied.single, isNot(contains('"type"')));
     // Let the "已复制" feedback run out.
     await tester.pump(const Duration(seconds: 4));
+  });
+
+  // The model sometimes copies the AGENTS.md example's old shape: the JSON
+  // without a fence. The reply must still draw as a card, not a wall of JSON.
+  testWidgets('a bare view JSON draws as a card', (tester) async {
+    const bare = '''两个方案的月供差不多，主要差在总利息。
+
+{"type":"stack","title":"选一个方案","children":[
+ {"type":"options","id":"plan","options":[{"label":"方案 A"},{"label":"方案 B"}]}]}''';
+    await _pump(
+      tester,
+      ChatState(loading: false, items: [user(1, '帮我比较一下两个贷款方案'), assistant(2, bare)]),
+    );
+    expect(find.byType(DshUiBlock), findsOneWidget);
+    expect(find.textContaining('"type"'), findsNothing);
+    expect(find.text('方案 B'), findsOneWidget);
+  });
+
+  // An options card may allow an answer beyond its presets: the input sits
+  // under the rows and what the person types comes back on its own line.
+  testWidgets('options freetext sends the typed answer with the choice', (tester) async {
+    const reply = '''两个方案的月供差不多，主要差在总利息。
+
+```dsh-ui
+{"type":"stack","title":"选一个方案","children":[
+ {"type":"options","id":"plan","freetext":true,"options":[{"label":"方案 A"},{"label":"方案 B"}]}]}
+```''';
+    final harness = await _pump(
+      tester,
+      ChatState(loading: false, items: [user(1, '帮我比较一下两个贷款方案'), assistant(2, reply)]),
+    );
+    final field = find.descendant(of: find.byType(DshUiCard), matching: find.byType(TextField));
+    expect(field, findsOneWidget);
+    // 只填字、不选预设也能发。
+    await tester.enterText(field, '先算一次总利息');
+    await pumpFrames(tester, 2);
+    await tester.tap(find.descendant(of: find.byType(DshUiCard), matching: find.text('发送')));
+    await pumpFrames(tester, 4);
+    final sent = harness.controllers['s1']!.sent.single;
+    expect(sent, contains('[dsh-ui reply] 选一个方案'));
+    expect(sent, contains('其他：先算一次总利息'));
   });
 }

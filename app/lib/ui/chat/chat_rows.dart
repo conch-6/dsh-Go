@@ -189,8 +189,8 @@ const toolGroupThreshold = 3;
 ///   回复时单独一行 [TurnFootnoteRow];
 /// - [foldTurns] 时,正常结束的一轮每一片把过程收进一行 [TurnProcessRow]:
 ///   最后一片留最终回答,插话之前的片留它最后说的那句话(回答自己的思考也
-///   收进去);用户消息不会被收进去;[openTurns] 里的轮整轮不收;带原生
-///   卡片的调用,工具行收进去、卡片本身留在外面(接在过程行后面);
+///   收进去);用户消息不会被收进去;带原生卡片的调用,工具行收进去、卡片
+///   本身留在外面(接在过程行后面);
 /// - 斜杠指令按 seq 插进它执行时的位置,本机还没落盘的接在末尾;
 /// - 被中断的助手正文后面那条"已停止"提示省掉(正文末尾已有标记);
 /// - 游离的审批、提问卡、未回显的乐观消息依次接在末尾(等待中由输入条上的
@@ -206,7 +206,6 @@ List<ChatRow> deriveRows({
   List<CommandNotice> commands = const [],
   List<TurnTrace> turns = const [],
   bool foldTurns = false,
-  Set<int> openTurns = const {},
   List<TurnArtifacts> artifacts = const [],
 }) {
   final rows = <ChatRow>[];
@@ -355,7 +354,6 @@ List<ChatRow> deriveRows({
     if (foldTurns &&
         done != null &&
         pieceStart != null &&
-        !openTurns.contains(done.startSeq) &&
         (done.endReason?.isCompleted ?? false)) {
       index = fold(done, index, cut: cut);
     }

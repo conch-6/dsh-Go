@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:dsh_client/dsh_client.dart' show PluginBundle;
+
 import '../../l10n/l10n.dart';
 
 /// A page of the official DSH Web client the app can land on.
@@ -29,9 +31,17 @@ class DshWebTarget {
   /// A section of the settings dialog.
   final DshWebSettings? settings;
 
-  /// Titles of a card on the Plugins page (zh and en), e.g. a built-in
-  /// config page ("Agent 循环") or an experimental bundle ("语音输入").
+  /// Names of a card on the Plugins page: its titles (zh and en), e.g. a
+  /// built-in config page ("Agent 循环") or an experimental bundle ("语音输入"),
+  /// and a bundle's package name (the page marks its card with it).
   final List<String> pluginItem;
+
+  /// [pluginItem] as the page can match it: trimmed, none empty (an empty
+  /// name would match any icon on the page), each once.
+  List<String> get _pluginLabels => {
+    for (final label in pluginItem)
+      if (label.replaceAll(RegExp(r'\s+'), ' ').trim() case final clean when clean.isNotEmpty) clean,
+  }.toList();
 
   /// A start-page entry of the right sidebar; needs [sessionId].
   final DshWebRightbar? rightbar;
@@ -47,7 +57,7 @@ class DshWebTarget {
       sessionId == null &&
       panel == null &&
       settings == null &&
-      pluginItem.isEmpty &&
+      _pluginLabels.isEmpty &&
       rightbar == null &&
       !sidebar &&
       !newSession;
@@ -57,7 +67,7 @@ class DshWebTarget {
     'session': ?sessionId,
     'panel': ?panel?.key,
     'settings': ?settings?.key,
-    if (pluginItem.isNotEmpty) 'pluginItem': pluginItem,
+    if (_pluginLabels case final labels when labels.isNotEmpty) 'pluginItem': labels,
     'rightbar': ?rightbar?.key,
     if (sidebar) 'sidebar': true,
     if (newSession) 'newSession': true,
@@ -67,7 +77,27 @@ class DshWebTarget {
   String get openScript => 'window.__dshAppOpen && window.__dshAppOpen(${jsonEncode(toJson())});';
 
   /// A copy aimed at [sessionId] (keeps the destination).
-  DshWebTarget inSession(String? sessionId) => DshWebTarget(
+  DshWebTarget inSession(String? sessionId) => _copy(sessionId: sessionId, pluginItem: pluginItem);
+
+  /// A copy whose [pluginItem] also names the bundle behind each name that is
+  /// one of its rows (an entry id, `speech-to-text-sensevoice`): its titles
+  /// and its package name, which is what the Plugins page shows and marks a
+  /// card with. An entry id alone matches no card there.
+  DshWebTarget withPluginNames(Iterable<PluginBundle>? bundles) {
+    if (bundles == null || pluginItem.isEmpty) return this;
+    final names = [..._pluginLabels];
+    for (final label in _pluginLabels) {
+      for (final bundle in bundles) {
+        if (bundle.name == label || !bundle.rows.any((row) => row.rowId == label)) continue;
+        for (final name in [...?bundle.meta?.title?.all, bundle.name]) {
+          if (!names.contains(name)) names.add(name);
+        }
+      }
+    }
+    return names.length == _pluginLabels.length ? this : _copy(sessionId: sessionId, pluginItem: names);
+  }
+
+  DshWebTarget _copy({required String? sessionId, required List<String> pluginItem}) => DshWebTarget(
     sessionId: sessionId,
     panel: panel,
     settings: settings,

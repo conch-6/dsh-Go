@@ -83,6 +83,8 @@ export interface Build {
   notes: { zh: string; en: string };
   /** Routes the files are on (src/routes.ts); always includes global. */
   routeIds: RouteId[];
+  /** On the public download bucket too (`dl` in `routes`). */
+  onDl: boolean;
 }
 
 let latestMemo: { at: number; build: Build | null } | null = null;
@@ -125,6 +127,7 @@ function toBuild(m: Manifest): Build | null {
     publishedAt: typeof m.publishedAt === 'string' ? m.publishedAt : null,
     notes: { zh: text(m.notesByLocale?.zh) || all, en: text(m.notesByLocale?.en) || all },
     routeIds: parseRoutes(m.routes),
+    onDl: Array.isArray(m.routes) && m.routes.includes('dl'),
   };
 }
 

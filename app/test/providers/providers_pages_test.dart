@@ -45,7 +45,7 @@ void main() {
   });
 
   group('list', () {
-    testWidgets('DeepSeek first, then each provider with its state, then 添加渠道', (tester) async {
+    testWidgets('defaults first, then DeepSeek and each provider with its state, then 添加渠道', (tester) async {
       await _pump(tester, const ProvidersPage(), providerOverrides(sampleBackend(), account: signedInAccount));
       expect(find.text('4 个渠道 · 2 个可用'), findsOneWidget);
       expect(find.textContaining('新渠道的模型'), findsNothing);
@@ -59,7 +59,7 @@ void main() {
         for (final row in tester.widgetList<ListPageRow>(find.byType(ListPageRow)))
           row.title ?? row.spot?.title(appL10n),
       ];
-      expect(titles, ['DeepSeek', 'My Gateway', 'Claude 中转', '家里的 vLLM', '添加渠道']);
+      expect(titles, [appL10n.viewModelSelect, 'DeepSeek', 'My Gateway', 'Claude 中转', '家里的 vLLM', '添加渠道']);
 
       await tester.tap(find.text('Claude 中转'));
       await settle(tester);
@@ -121,6 +121,12 @@ void main() {
       for (final row in rows) {
         final rect = tester.getRect(find.byWidget(row));
         final two = row.subtitle != null && row.subtitle!.isNotEmpty;
+        if (row.subtitleMaxLines > 1) {
+          // The new-defaults row explains disabled states on multiple lines;
+          // provider rows below keep their existing 52/64dp anatomy.
+          expect(rect.height, greaterThanOrEqualTo(64));
+          continue;
+        }
         expect(rect.height, moreOrLessEquals(two ? 64 : 52, epsilon: 0.6), reason: row.title);
       }
       final dots = [for (final e in find.byType(AnimatedStatusDot).evaluate()) tester.getRect(find.byWidget(e.widget))];

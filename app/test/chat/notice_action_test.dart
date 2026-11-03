@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dsh_app/state/attachments.dart';
 import 'package:dsh_app/state/chat_state.dart';
 import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/models_state.dart';
@@ -29,6 +30,9 @@ NoticeChatItem notice({String kind = 'error', String code = 'TIMEOUT', String me
       failure: LlmFailure(code: code, message: message),
     );
 
+TurnTrace turn() =>
+    TurnTrace(turn: 1, startSeq: 0, start: DateTime(2026), endSeq: 10, end: DateTime(2026), spans: const []);
+
 Future<ChatHarness> mount(WidgetTester tester, ChatState state) async {
   usePhoneView(tester);
   final harness = ChatHarness(session: 's1', states: {'s1': state});
@@ -40,7 +44,7 @@ Future<ChatHarness> mount(WidgetTester tester, ChatState state) async {
 void main() {
   setUpAll(loadTestFonts);
   testWidgets('a text-only failed turn retries the original prompt', (tester) async {
-    final harness = await mount(tester, ChatState(loading: false, items: [user(1, '原文'), notice()]));
+    final harness = await mount(tester, ChatState(loading: false, items: [user(1, '原文'), notice()], turns: [turn()]));
     expect(find.text('重试'), findsOneWidget);
     expect(find.textContaining('raw English'), findsNothing);
     final button = find.widgetWithText(TextButton, '重试');
@@ -54,6 +58,79 @@ void main() {
     await tester.pump();
     expect(harness.controllers['s1']!.sent, ['原文']);
   });
+  testWidgets('missing turn history never infers retry from an arbitrary earlier user', (tester) async {
+    final harness = await mount(tester, ChatState(loading: false, items: [user(1, 'old input'), notice()]));
+    expect(find.widgetWithText(TextButton, '重试'), findsNothing);
+    expect(find.widgetWithText(TextButton, '继续'), findsNothing);
+    expect(harness.controllers['s1']!.sent, isEmpty);
+  });
+  for (final olderPrompt in [false, true]) {
+    testWidgets('an unechoed failed turn never retries an older prompt: $olderPrompt', (tester) async {
+      final harness = await mount(
+        tester,
+        ChatState(
+          loading: false,
+          items: [if (olderPrompt) user(1, 'previous turn'), notice()],
+          turns: [
+            TurnTrace(turn: 2, startSeq: 8, start: DateTime(2026), endSeq: 10, end: DateTime(2026), spans: const []),
+          ],
+        ),
+      );
+      expect(find.widgetWithText(TextButton, '重试'), findsNothing);
+      expect(find.widgetWithText(TextButton, '继续'), findsNothing);
+      expect(harness.controllers['s1']!.sent, isEmpty);
+    });
+  }
+  testWidgets('a failed submission stays editable with attachments without overwriting a newer draft', (tester) async {
+    final image = DraftAttachment.sniff('saved.png', tinyPng);
+    final failed = PendingPrompt(
+      requestId: 'failed-request',
+      text: 'retained original',
+      time: DateTime(2026),
+      attachments: [image],
+      failureSeq: 10,
+    );
+    final harness = await mount(tester, ChatState(loading: false, items: [notice()], pending: [failed]));
+    await tester.enterText(find.byType(TextField), 'newer draft');
+    await tester.pump();
+    expect(find.text('未送达 · 已保留'), findsOneWidget);
+    expect(find.text('发送中'), findsNothing);
+    await tester.tap(find.text('编辑后重发'));
+    await pumpFrames(tester, 4);
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.enterText(find.byType(TextFormField), 'edited original');
+    await tester.tap(find.widgetWithText(TextButton, '取消'));
+    await pumpFrames(tester, 4);
+    expect(find.text('retained original'), findsOneWidget);
+    expect(harness.controllers['s1']!.sent, isEmpty);
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'newer draft');
+    await tester.tap(find.text('编辑后重发'));
+    await pumpFrames(tester, 4);
+    await tester.enterText(find.byType(TextFormField), 'edited original');
+    await tester.tap(find.widgetWithText(TextButton, '发送'));
+    await pumpFrames(tester, 4);
+    expect(harness.controllers['s1']!.sent, ['edited original']);
+    expect(harness.controllers['s1']!.sentAttachments.single, [image]);
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'newer draft');
+  });
+  testWidgets('unsupported effort offers a user-controlled model/effort picker even with failed input', (tester) async {
+    final harness = await mount(
+      tester,
+      ChatState(
+        loading: false,
+        items: [notice(code: 'UNSUPPORTED_REASONING_EFFORT')],
+        pending: [PendingPrompt(requestId: 'failed', text: 'retained', time: DateTime(2026), failureSeq: 10)],
+      ),
+    );
+    expect(find.text('当前模型不支持此推理档位，请调整档位或换模型'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, '重试'), findsNothing);
+    expect(harness.controllers['s1']!.models, isEmpty);
+    await tester.tap(find.widgetWithText(TextButton, '换模型'));
+    await pumpFrames(tester, 4);
+    expect(find.text('选择模型'), findsOneWidget);
+    expect(harness.controllers['s1']!.models, isEmpty, reason: 'Opening the picker must not change the selection.');
+    expect(harness.controllers['s1']!.sent, isEmpty);
+  });
   for (final kind in ['interrupted', 'max-tokens']) {
     testWidgets('$kind can continue', (tester) async {
       final harness = await mount(
@@ -64,6 +141,7 @@ void main() {
             user(1, '原文'),
             notice(kind: kind),
           ],
+          turns: [turn()],
         ),
       );
       await tester.tap(find.text('继续'));
@@ -79,7 +157,7 @@ void main() {
       images: const [ImageAttachment(attachmentId: 'img', mediaType: 'image/png')],
       files: const [],
     );
-    final harness = await mount(tester, ChatState(loading: false, items: [prompt, notice()]));
+    final harness = await mount(tester, ChatState(loading: false, items: [prompt, notice()], turns: [turn()]));
     await tester.tap(find.text('继续'));
     await tester.pump();
     expect(harness.controllers['s1']!.sent, ['继续']);
@@ -105,6 +183,7 @@ void main() {
             notice(code: variant),
             if (variant == 'older') user(20, '下一轮'),
           ],
+          turns: [turn()],
           pending: variant != 'pending' ? const [] : [PendingPrompt(requestId: 'p', text: '等待', time: DateTime(2026))],
         ),
       );
@@ -113,11 +192,17 @@ void main() {
     });
   }
   group('the engine refuses the model (DSH 0.2.1-rc.4 listed catalog)', () {
-    const unsupported = 'DeepSeek model "deepseek-x" is not supported by DeepSeek Harness; current version is 0.2.1-rc.4';
+    const unsupported =
+        'DeepSeek model "deepseek-x" is not supported by DeepSeek Harness; current version is 0.2.1-rc.4';
     const upgrade =
         'DeepSeek model "deepseek-v5" requires DeepSeek Harness 0.3.0 or later; current version is 0.2.1-rc.4';
 
-    Future<ChatHarness> refused(WidgetTester tester, String code, String message, {List<Override> extra = const []}) async {
+    Future<ChatHarness> refused(
+      WidgetTester tester,
+      String code,
+      String message, {
+      List<Override> extra = const [],
+    }) async {
       usePhoneView(tester);
       final harness = ChatHarness(
         session: 's1',
@@ -193,12 +278,7 @@ void main() {
 
     testWidgets('a model that needs a newer engine on this phone offers 检查更新', (tester) async {
       final update = _UpToDate();
-      await refused(
-        tester,
-        'CLIENT_UPGRADE_REQUIRED',
-        upgrade,
-        extra: [appUpdateProvider.overrideWith(() => update)],
-      );
+      await refused(tester, 'CLIENT_UPGRADE_REQUIRED', upgrade, extra: [appUpdateProvider.overrideWith(() => update)]);
       expect(find.text('这个模型需要新版引擎'), findsOneWidget);
       expect(find.widgetWithText(TextButton, '换模型'), findsNothing);
       await tester.tap(find.widgetWithText(TextButton, '检查更新'));

@@ -67,7 +67,8 @@ class NativeDiagnostics {
   final Map<String, Object?> app;
 
   /// `manufacturer`, `brand`, `model`, `android`, `sdkInt`, `abis`,
-  /// `memoryMb`, `freeStorageMb`.
+  /// `memoryMb`, `freeStorageMb`, and `display` (`widthPx`, `heightPx`,
+  /// `density`, `densityDpi`, `fontScale`).
   final Map<String, Object?> device;
 
   /// Summary of `assets/runtime/manifest.json`: versions, sizes, file count.

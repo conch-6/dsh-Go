@@ -50,6 +50,7 @@ MethodChannel `dsh/runtime`：
 | `start` | `{env: Map<String,String>}`（如 `DEEPSEEK_API_KEY`） | `null`；启动前台服务与进程 |
 | `stop` | — | `null` |
 | `getLogs` | `{lines: int}` | `List<String>` |
+| `getLogSnapshot` | `{lines: int}`（默认 300，最多 2000） | `{entries: [LogEntry], throughSeq: int}`：内存里最后几行，`throughSeq` 是同一时刻已接收的最大序号 |
 | `reset` | — | `null`；删除已解压运行时（保留 `/root` 用户数据需另行确认） |
 
 `RuntimeStatus`：
@@ -68,11 +69,11 @@ MethodChannel `dsh/runtime`：
 EventChannel `dsh/runtime/events`，事件 map：
 - `{type: "progress", step: "extract"|"verify"|"configure", done: int, total: int}`
 - `{type: "status", status: RuntimeStatus}`
-- `{type: "log", line: String, stream: "stdout"|"stderr"}`
+- `{type: "logs", entries: [LogEntry]}`：日志约每 100 ms 一批；`LogEntry` 为 `{seq: int, line: String, stream: "stdout"|"stderr"|"system"}`，`line` 已脱敏，`seq` 在进程内递增、重启引擎或重置都不归零。App 先订阅再取快照，只接 `seq > throughSeq` 的批次，批次与快照不重叠也不漏行。
 
 ## 打包
 
-- Gradle 产品风味 `abi`：`arm64`（真机）、`x64`（模拟器测试）。各风味只带自己的 `runtime/out/<abi>/` 资产与 jniLibs，并设置对应 `abiFilters`。
+- Gradle 产品风味 `abi`：`arm64`（真机）、`x64`（模拟器测试）。各风味只带自己的 `runtime/out/<abi>/` 资产与 jniLibs，并设置对应 `abiFilters`；Flutter 插件默认的全架构过滤由 `gradle.properties` 的 `disable-abi-filtering` 关掉，`tooling/release_assets.py` 拒收带其他架构的包。
 - 构建：`tooling/build-apk.sh`（默认 release arm64，`-f x64` / `-f all`）。脚本按构建时间生成 versionCode，见 `docs/release.md`「构建号」。
 - proot 等可执行文件以 `lib*.so` 形式放 jniLibs，`useLegacyPackaging = true` 使其解压到 `nativeLibraryDir`（可执行）。
 - `targetSdk = 28`（与 Termux 相同），避开 Android 10+ 对应用私有目录 `exec` 的限制；上架前再评估提升。

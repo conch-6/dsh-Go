@@ -585,6 +585,23 @@
       }
     }
   },
+  "viewUiReplyOther": "其他：{value}",
+  "@viewUiReplyOther": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "viewUiFreeTextHint": "其他（自己填）",
+  "viewUiChosenOther": "已填写：{value}",
+  "@viewUiChosenOther": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
   "viewUiChosen": "已选择：{value}",
   "@viewUiChosen": {
     "placeholders": {

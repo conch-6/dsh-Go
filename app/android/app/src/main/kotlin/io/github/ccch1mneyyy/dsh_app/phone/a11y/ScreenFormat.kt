@@ -27,7 +27,7 @@ class ScreenInput(
     val packageName: String?,
     val screenWidth: Int,
     val screenHeight: Int,
-    val keyboardShown: Boolean,
+    val keyboardShown: Boolean?,
     /** Top-most first; the last one is the main window, the others render as 弹窗. */
     val windows: List<UiWindow>,
     val detail: Boolean = false,
@@ -35,6 +35,8 @@ class ScreenInput(
     val previousKeys: Set<String>? = null,
     /** Extra lines under the header (protected page, secure window …). */
     val notes: List<String> = emptyList(),
+    /** The front window gave us no content at all (probably filtered): not the same as a poor tree. */
+    val unreadable: Boolean = false,
     val charBudget: Int = 3000,
 )
 
@@ -73,6 +75,8 @@ class ScreenElement(
     val fingerprint: String,
     /** What `+` compares with the previous snapshot. */
     val key: String,
+    /** Masked content and state, not just the stable action-target identity. */
+    internal val observationKey: String = fingerprint,
 )
 
 class FormattedScreen(
@@ -110,7 +114,7 @@ object ScreenFormat {
     private const val NEW_RATIO_LIMIT = 0.6
 
     // l10n:keep model screen format
-    const val POOR_TREE_NOTE = "提示：本页文字信息不足（游戏、自绘界面、部分小程序常见）。能看图的模型可以 screen 加 image 看标号截图；否则请用户协助。"
+    const val POOR_TREE_NOTE = "提示：本页文字很少（游戏、自绘界面常见）。能看图的模型可以 screen 加 image；否则请用户协助。"
 
     fun format(input: ScreenInput): FormattedScreen {
         val textNodes = input.windows.sumOf { w -> w.root?.let(::countText) ?: 0 }
@@ -131,7 +135,9 @@ object ScreenFormat {
         val header = StringBuilder()
         val notes = input.notes.toMutableList()
         val poor = textNodes < POOR_TREE && windows.isNotEmpty()
-        if (poor) notes += POOR_TREE_NOTE
+        // 读不到内容(大概率被敏感视图策略挡了)不能说成"游戏、自绘界面",那会把模型带到
+        // 另一个方向;这时 publish() 已经给了一条更准确的说明。
+        if (poor && !input.unreadable) notes += POOR_TREE_NOTE
 
         // Page budget: keep the 底部 zone (navigation) and cut the middle with a hint.
         val headerLen = 40 + (input.appLabel?.length ?: 0) + notes.sumOf { it.length + 1 }
@@ -170,7 +176,12 @@ object ScreenFormat {
         // l10n:keep model screen format
         val orientation = if (input.screenWidth > input.screenHeight) "横屏" else "竖屏"
         // l10n:keep model screen format
-        val keyboard = if (input.keyboardShown) "键盘弹出" else "键盘收起"
+        val keyboard = when (input.keyboardShown) {
+            true -> "键盘弹出"
+            false -> "键盘收起"
+            // l10n:keep model screen format
+            null -> "键盘状态未知"
+        }
         // l10n:keep model screen format
         val app = clean(input.appLabel) ?: input.packageName ?: "未知应用"
         // l10n:keep model screen format
@@ -203,6 +214,16 @@ object ScreenFormat {
                 )
                 walk(item.subs)
             }
+        }
+        for (window in windows) window.root?.let { walk(flatten(it, window, null)) }
+        return out
+    }
+
+    /** Masked content/state for observation comparison, including elements outside the text budget. */
+    internal fun observationKeys(windows: List<UiWindow>): List<String> {
+        val out = mutableListOf<String>()
+        fun walk(items: List<Item>) {
+            for (item in items) { out += item.observationKey(); walk(item.subs) }
         }
         for (window in windows) window.root?.let { walk(flatten(it, window, null)) }
         return out
@@ -258,6 +279,8 @@ object ScreenFormat {
             return "w${window.id}|${node.bounds}|$role|$identity" + (checkedState?.let { "|c=$it" } ?: "")
         }
 
+        fun observationKey() = "${fingerprint()}|${content.orEmpty().length}:${content.orEmpty()}|${states.joinToString("|")}"
+
         fun key() = "$role|${clip(label, LABEL_CAP)}"
 
         fun fullText(): String {
@@ -279,6 +302,7 @@ object ScreenFormat {
             password = node.password, secret = secret, checkable = node.checkable, scroll = node.scroll,
             horizontal = horizontal, viewId = node.viewId, sensitiveWord = sensitive, listId = listId, parentId = parentId,
             fingerprint = fingerprint(), key = key,
+            observationKey = observationKey(),
         )
     }
 

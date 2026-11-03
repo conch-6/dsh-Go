@@ -16,7 +16,9 @@ import 'package:dsh_app/ui/chat/empty_actions.dart';
 import 'package:dsh_app/ui/chat/empty_state.dart';
 import 'package:dsh_app/ui/chat/widgets/activity_strip.dart';
 import 'package:dsh_app/ui/chat/widgets/attachments.dart';
+import 'package:dsh_app/ui/chat/dock/dock_stack.dart' show DockStackMetrics;
 import 'package:dsh_app/ui/chat/widgets/auto_approve_pill.dart';
+import 'package:dsh_app/ui/chat/widgets/permission_pill.dart' show StripRiskChip;
 import 'package:dsh_app/ui/theme/app_icons.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
@@ -347,19 +349,39 @@ void main() {
     expect(find.byKey(const ValueKey('chat-new-chat')), findsNothing);
   });
 
-  testWidgets('auto-approve, activity and composer share the left edge and tap semantics', (tester) async {
+  testWidgets('while a reply generates, auto-approve sits beside the activity strip, not on a row of its own', (
+    tester,
+  ) async {
     final semantics = tester.ensureSemantics();
-    await pumpScreen(
-      tester,
-      ChatHarness(session: 's1', states: {'s1': const ChatState(running: true, autoApprove: true, loading: false)}),
+    final harness = ChatHarness(
+      session: 's1',
+      states: {'s1': const ChatState(running: true, autoApprove: true, loading: false)},
     );
-    for (final type in [AutoApprovePill, ActivityStrip, Composer]) {
-      expect(tester.getTopLeft(find.byType(type)).dx, 12);
-    }
+    await pumpScreen(tester, harness);
+    expect(find.byType(AutoApprovePill), findsNothing);
+    final strip = tester.getRect(find.byType(ActivityStrip));
+    final chip = tester.getRect(find.byType(StripRiskChip));
+    final composer = tester.getRect(find.byType(Composer));
+    expect(strip.left, 12);
+    expect(composer.left, 12);
+    // One row: the chip is as high as the strip, on its line, flush with the composer's right edge.
+    expect(chip.top, strip.top);
+    expect(chip.height, strip.height);
+    expect(chip.left - strip.right, DockStackMetrics.accessoryGap);
+    expect(chip.right, moreOrLessEquals(composer.right, epsilon: 0.01));
+    // Its words first, then only its icons; read out whole all along.
+    expect(find.text('自动允许中'), findsOneWidget);
+    await tester.pump(StripRiskChip.wordsFor);
+    await pumpFrames(tester);
+    expect(find.text('自动允许中'), findsNothing);
     final auto = tester.getSemantics(find.bySemanticsLabel('自动允许命令')).getSemanticsData();
     expect(auto.hasAction(SemanticsAction.tap), isTrue);
     final activity = tester.getSemantics(find.byType(ActivityStrip)).getSemanticsData();
     expect(activity.hasAction(SemanticsAction.tap), isTrue);
+    // One tap turns it off.
+    await tester.tap(find.byType(StripRiskChip));
+    await pumpFrames(tester, 4);
+    expect(harness.controllers['s1']!.autoApproveToggles, [false]);
     semantics.dispose();
   });
 

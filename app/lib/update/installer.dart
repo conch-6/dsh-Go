@@ -2,7 +2,15 @@ import 'package:flutter/services.dart';
 
 /// What the native side knows about the installed app.
 class InstalledApp {
-  const InstalledApp({this.versionName, this.versionCode, this.abi, this.canRequestInstalls = true, this.freeBytes});
+  const InstalledApp({
+    this.versionName,
+    this.versionCode,
+    this.abi,
+    this.canRequestInstalls = true,
+    this.freeBytes,
+    this.apkPath,
+    this.lastUpdateTime,
+  });
 
   factory InstalledApp.fromMap(Map<Object?, Object?> map) => InstalledApp(
     versionName: map['versionName'] as String?,
@@ -10,6 +18,8 @@ class InstalledApp {
     abi: map['abi'] as String?,
     canRequestInstalls: map['canRequestInstalls'] != false,
     freeBytes: (map['freeBytes'] as num?)?.toInt(),
+    apkPath: map['apkPath'] as String?,
+    lastUpdateTime: (map['lastUpdateTime'] as num?)?.toInt(),
   );
 
   final String? versionName;
@@ -32,6 +42,14 @@ class InstalledApp {
 
   /// Free space where downloads go.
   final int? freeBytes;
+
+  /// The installed APK (`applicationInfo.sourceDir`), which delta patches
+  /// start from.
+  final String? apkPath;
+
+  /// When this build was installed (ms since the epoch). With [versionCode]
+  /// it tells one installed build from another.
+  final int? lastUpdateTime;
 }
 
 /// What an APK file is, compared with the installed app.

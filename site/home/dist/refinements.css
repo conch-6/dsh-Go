@@ -209,5 +209,12 @@ dialog h2{overflow-wrap:anywhere}
 @media(max-width:370px){.actions{gap:9px}.star-callout{width:180px;font-size:10px}.contributor-rows{margin-left:-19px;margin-right:-19px}.section-heading h2{font-size:27px}.gallery-navigation button{width:32px;height:32px}dialog{padding:28px}}
 @media(max-width:340px){.actions{flex-wrap:wrap}.star-callout{width:212px}.section-heading{flex-wrap:wrap}.gallery-navigation{margin-left:auto}}
 @media(prefers-reduced-motion:reduce){.feature-card{transform:none!important;filter:none!important;opacity:1!important}.contributor-track{animation:none}.contributor-group[aria-hidden=true]{display:none}}
+/* Footer friend links: the author's other project, DSH-TUI. */
+.closing>p a{color:#526bd2;transition:color .2s}.closing>p a:hover{color:#425bc2}
+.friend-links{margin-top:64px}.friend-links h2{font-size:14px;font-weight:500;letter-spacing:1.5px;color:#6f7b90;margin:0 0 16px}
+.friend-links-row{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
+.friend-link{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:216px;max-width:100%;padding:12px 18px;border-radius:14px;background:#edf0f7;color:#56637b;transition:background .2s,color .2s}
+.friend-link:hover{background:#e3e9f6;color:#425dc7}.friend-link strong{font-size:13px;font-weight:600}.friend-link span{font-size:11px;color:#8490a4;transition:color .2s}.friend-link:hover span{color:#69779f}
+@media(max-width:700px){.friend-links{margin-top:46px}.friend-links-row{flex-direction:column;align-items:center}.friend-link{min-width:0;width:100%;max-width:300px;align-items:center;text-align:center}}
 /* go.dshtui.com: the star bubble links to the repository and shows its star count; a second download link. */
 .star-callout[href]{pointer-events:auto;cursor:pointer}.star-callout[href]:hover .callout-shape{stroke:#a9b7de}.star-callout:focus-visible{outline-offset:-4px;border-radius:48px}.callout-count{margin-left:3px;font-weight:650;color:#3d4a70;font-variant-numeric:tabular-nums}#download-alt-link{display:block;margin-top:14px;font-size:13px;color:#536dd1;text-decoration:underline;text-underline-offset:3px}#download-alt-link:hover{color:#425bc2}#download-alt-link[hidden]{display:none}

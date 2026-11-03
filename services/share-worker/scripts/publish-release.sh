@@ -1,23 +1,30 @@
 #!/usr/bin/env bash
 # Publishes a build (docs/release.md「发版到三条线路」). From <dist> (tooling/release_assets.py),
-# the APKs and SHA256SUMS go to every route the download page offers:
+# every file SHA256SUMS lists (the APKs, the delta patches) and SHA256SUMS itself
+# go to every route:
 #
-#   R2       beta/<version>/ in the dshgo-share bucket (the Global route; the app's channel)
+#   R2       beta/<version>/ in the dshgo-share bucket (the app's channel)
+#   dl       download/<version>/ in the public dshgo-dl bucket at DL_BASE_URL
+#            (wrangler.jsonc; https://dl.dshtui.com/): the page's Global route, and
+#            update.json at its root for the app (releases only, not prereleases).
+#            --no-dl to leave it out
 #   China    <version>/ in the Hong Kong bucket, with ossutil or coscli; on when
 #            CN_BASE_URL (wrangler.jsonc) is set, --no-cn to leave it out
 #   GitHub   a release v<version> on ccch1mneyyy/dsh-go, with update.json, notes from
 #            docs/changelog.md; only with --github. Made as a draft, published at the end
 #
 # Then every file is downloaded back from every route (the channel token for R2,
-# the public URL for China, the GitHub API for the draft) and checked for size
-# and SHA-256. Only when all of them match does the release go live: the GitHub
-# draft is published, beta/<version>/update.json and finally beta/update.json —
-# what the page and the app read, with `routes` saying where the files are — go
-# up. Afterwards the live page is checked to offer the new build on each route.
+# the public URLs for dl and China, the GitHub API for the draft) and checked for
+# size and SHA-256. Only when all of them match does the release go live: the
+# GitHub draft is published, dl's update.json is replaced, and
+# beta/<version>/update.json and finally beta/update.json — what the page and the
+# app read, with `routes` saying where the files are — go up. Afterwards the live
+# page is checked to offer the new build on each route.
 #
 #   CF_TOKEN_FILE=<file> scripts/publish-release.sh ../../dist --dry-run         print every step, touch nothing
 #   CF_TOKEN_FILE=<file> CN_…=… scripts/publish-release.sh ../../dist --github   the real thing
 #   … --no-latest     upload and check, but leave the page and the app on the current version
+#   … --no-dl         skip the public download bucket
 #   … --no-cn         skip the Hong Kong bucket even when it's configured
 #   … --skip-verify   don't download anything back (needs --no-latest: nothing unchecked goes live)
 #
@@ -25,7 +32,10 @@
 # wrangler dev and fake ossutil / coscli / gh, with made-up keys.
 #
 # Settings (environment):
-#   CF_TOKEN_FILE              Cloudflare API token (R2 writes)
+#   CF_TOKEN_FILE              Cloudflare API token (R2 writes, both buckets)
+#   CF_ACCOUNT_ID              the account R2 lives in; else CF_ACCOUNT_ID_FILE (default
+#                              ~/keys/dshgo-cloudflare-account-id), else wrangler.jsonc's, which the
+#                              public tree only has as a placeholder (tooling/oss-redact.txt)
 #   BETA_TOKEN_FILE            channel token, default ~/keys/dshgo-beta-channel.token (reads R2 back)
 #   BETA_KEY_FILE              a live access key; checks /beta afterwards while DOWNLOAD_ACCESS=key
 #   CN_PROVIDER                oss (Aliyun OSS, ossutil 2.x) or cos (Tencent COS, coscli)
@@ -34,23 +44,27 @@
 #   CN_ACCESS_KEY_ID_FILE      the AccessKey that may only write this bucket: id …
 #   CN_ACCESS_KEY_SECRET_FILE  … and secret, each in its own file
 #   CN_BASE_URL                default: wrangler.jsonc's; the bucket's public URL
+#   DL_BUCKET                  default dshgo-dl: the public download bucket, on the same account
+#   DL_BASE_URL                default: wrangler.jsonc's; its public URL. Either empty: dl is off
 #   GH_TOKEN_FILE              optional; otherwise gh's own login
 #   CHANGELOG                  default ../../docs/changelog.md
 #   BETA_ORIGIN                default https://go.dshtui.com
 #   R2_LOCAL_PERSIST           local testing: write R2 into this `wrangler dev --persist-to` dir
+#   DL_LOCAL_ROOT              local testing: the dl bucket is this directory (served at DL_BASE_URL)
 #   GITHUB_DOWNLOAD_BASE       local testing: where the release's public files are
 #
 # Secrets are only read from files, into a config file under a private temp
 # dir (shredded on exit) or one command's environment; never printed, never on
-# a command line. Writes only under beta/ in our bucket, <version>/ in the Hong
-# Kong bucket and the release v<version>. A version already up with a different
-# APK is refused: APKs are cached at the edge and in browsers, so a fix needs a
-# new version name. Needs jq, curl, python3; rclone for resumable R2 uploads
-# (else wrangler); ossutil / coscli; gh.
+# a command line. Writes only under beta/ in our bucket, download/<version>/ and
+# update.json in dshgo-dl, <version>/ in the Hong Kong bucket and the release
+# v<version>. A version already up with a different file is refused: they are
+# cached at the edge and in browsers, so a fix needs a new version name. Needs
+# jq, curl, python3; rclone for resumable R2 uploads (else wrangler); ossutil /
+# coscli; gh.
 set -euo pipefail
 
 usage() {
-  echo "usage: CF_TOKEN_FILE=<file> $0 <dist dir> [--dry-run] [--github] [--no-cn] [--no-latest] [--skip-verify]" >&2
+  echo "usage: CF_TOKEN_FILE=<file> $0 <dist dir> [--dry-run] [--github] [--no-dl] [--no-cn] [--no-latest] [--skip-verify]" >&2
   exit 2
 }
 [[ $# -ge 1 ]] || usage
@@ -58,6 +72,7 @@ DIST=$(cd "$1" && pwd) || usage
 shift
 DRY=0
 GITHUB=0
+DL_ON=1
 CN_ON=1
 LATEST=1
 VERIFY=1
@@ -65,6 +80,7 @@ for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY=1 ;;
     --github) GITHUB=1 ;;
+    --no-dl) DL_ON=0 ;;
     --no-cn) CN_ON=0 ;;
     --no-latest) LATEST=0 ;;
     --skip-verify) VERIFY=0 ;;
@@ -83,16 +99,9 @@ plan() { printf '  [dry-run] %s\n' "$*"; }
 
 [[ $VERIFY == 1 || $LATEST == 0 ]] || die "--skip-verify needs --no-latest: nothing goes live without being downloaded back"
 
-# The Worker's own settings, so the script and the page agree on the China route.
-wrangler_var() {
-  python3 - "$1" <<'PY'
-import json, re, sys
-text = open("wrangler.jsonc", encoding="utf-8").read()
-text = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/', lambda m: m.group(0) if m.group(0).startswith('"') else "", text, flags=re.S)
-text = re.sub(r",(\s*[}\]])", r"\1", text)
-print(json.loads(text).get("vars", {}).get(sys.argv[1], ""))
-PY
-}
+source scripts/cloudflare.sh
+# The Worker's own settings, so the script and the page agree on the routes.
+wrangler_var() { wrangler_json | jq -r --arg k "$1" '.vars[$k] // ""'; }
 
 ORIGIN=${BETA_ORIGIN:-https://go.dshtui.com}
 BUCKET=dshgo-share
@@ -100,16 +109,30 @@ REPO=ccch1mneyyy/dsh-go
 GITHUB_DOWNLOAD_BASE=${GITHUB_DOWNLOAD_BASE:-https://github.com/$REPO/releases/download}
 TOKEN_FILE=${BETA_TOKEN_FILE:-$HOME/keys/dshgo-beta-channel.token}
 CHANGELOG=${CHANGELOG:-../../docs/changelog.md}
+IMMUTABLE='public, max-age=31536000, immutable'
 CN_BASE_URL=${CN_BASE_URL-$(wrangler_var CN_BASE_URL)}
 [[ -z "$CN_BASE_URL" ]] || CN_BASE_URL="${CN_BASE_URL%/}/"
 [[ -n "$CN_BASE_URL" ]] || CN_ON=0
+DL_BUCKET=${DL_BUCKET-dshgo-dl}
+DL_BASE_URL=${DL_BASE_URL-$(wrangler_var DL_BASE_URL)}
+[[ -z "$DL_BASE_URL" ]] || DL_BASE_URL="${DL_BASE_URL%/}/"
+[[ -n "$DL_BUCKET" && -n "$DL_BASE_URL" ]] || DL_ON=0
 
 # ── Preflight: every missing setting at once ─────────────────────────────
 problems=()
 readable() { [[ -r "${2:-}" && -s "${2:-}" ]] || problems+=("$1 must name a readable, non-empty file"); }
-if [[ -z "${R2_LOCAL_PERSIST:-}" ]]; then readable CF_TOKEN_FILE "${CF_TOKEN_FILE:-}"; fi
+public_url() { [[ "$2" =~ ^https://[^/?#]+/([^?#]*)$ || "$2" =~ ^http://127\.0\.0\.1[:/] ]] || problems+=("$1 must be https://…/ ($2)"); }
+if [[ -z "${R2_LOCAL_PERSIST:-}" ]]; then
+  readable CF_TOKEN_FILE "${CF_TOKEN_FILE:-}"
+  real_id "$ACCOUNT" ||
+    problems+=("no Cloudflare account id: set CF_ACCOUNT_ID or write it to $ACCOUNT_FILE (wrangler.jsonc has only a placeholder in the public tree)")
+fi
 if [[ $VERIFY == 1 ]]; then
   [[ -s "$TOKEN_FILE" ]] || problems+=("no channel token at $TOKEN_FILE (BETA_TOKEN_FILE; scripts/beta-keys.sh channel-add): R2 is read back with it")
+fi
+if [[ $DL_ON == 1 ]]; then
+  [[ "$DL_BUCKET" =~ ^[a-z0-9][a-z0-9-]{1,62}$ ]] || problems+=("DL_BUCKET is odd ($DL_BUCKET)")
+  public_url DL_BASE_URL "$DL_BASE_URL"
 fi
 if [[ $CN_ON == 1 ]]; then
   case "${CN_PROVIDER:-}" in
@@ -121,7 +144,7 @@ if [[ $CN_ON == 1 ]]; then
   [[ "${CN_REGION:-}" =~ ^[a-z]{2}-[a-z]+$ ]] || problems+=("CN_REGION is missing (cn-hongkong for OSS, ap-hongkong for COS)")
   readable CN_ACCESS_KEY_ID_FILE "${CN_ACCESS_KEY_ID_FILE:-}"
   readable CN_ACCESS_KEY_SECRET_FILE "${CN_ACCESS_KEY_SECRET_FILE:-}"
-  [[ "$CN_BASE_URL" =~ ^https://[^/?#]+/([^?#]*)$ || "$CN_BASE_URL" =~ ^http://127\.0\.0\.1[:/] ]] || problems+=("CN_BASE_URL must be https://…/ ($CN_BASE_URL)")
+  public_url CN_BASE_URL "$CN_BASE_URL"
   if [[ $DRY == 0 && -n "${CN_CLI:-}" ]] && ! command -v "$CN_CLI" >/dev/null; then problems+=("$CN_CLI is not on PATH"); fi
 fi
 if [[ $GITHUB == 1 ]]; then
@@ -143,35 +166,35 @@ FULL=$(jq -r '.version // empty' "$MANIFEST")
 VERSION=${FULL%%+*}
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "unexpected version '$FULL'"
 TAG="v$VERSION"
-mapfile -t FLAVORS < <(jq -r '.assets | keys[]' "$MANIFEST")
-[[ " ${FLAVORS[*]} " == *" arm64 "* ]] || die "update.json has no arm64 APK (the page offers arm64)"
+ARM64=$(jq -r '.assets.arm64.name // empty' "$MANIFEST")
+[[ -n "$ARM64" ]] || die "update.json has no arm64 APK (the page offers arm64)"
 
-# Every APK: present, the size and SHA-256 update.json and SHA256SUMS say.
+# Every file SHA256SUMS lists (the APKs, the patches): there, with that SHA-256 …
 declare -A SHA SIZE TYPE CACHE
-APKS=()
-for flavor in "${FLAVORS[@]}"; do
-  name=$(jq -r --arg f "$flavor" '.assets[$f].name' "$MANIFEST")
-  [[ "$name" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*\.apk$ ]] || die "odd asset name '$name'"
-  file="$DIST/$name"
-  [[ -f "$file" ]] || die "$name is listed but missing"
-  want=$(jq -r --arg f "$flavor" '.assets[$f].sha256' "$MANIFEST")
-  size=$(stat -c %s "$file")
-  [[ "$size" == "$(jq -r --arg f "$flavor" '.assets[$f].size' "$MANIFEST")" ]] || die "$name: size differs from update.json"
-  have=$(sha256sum "$file" | cut -d' ' -f1)
-  [[ "$have" == "$want" ]] || die "$name: SHA-256 differs from update.json"
-  grep -qE "^$have [ *]$name\$" "$SUMS" || die "$name: not in SHA256SUMS with that hash"
-  SHA[$name]=$have
-  SIZE[$name]=$size
-  TYPE[$name]=application/vnd.android.package-archive
-  CACHE[$name]='public, max-age=31536000, immutable'
-  APKS+=("$name")
-done
+FILES=()
+while read -r hash name; do
+  name=${name#\*}
+  [[ "$name" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ && "$name" != SHA256SUMS ]] || die "odd file name '$name' in SHA256SUMS"
+  [[ -f "$DIST/$name" ]] || die "$name is in SHA256SUMS but missing"
+  SHA[$name]=$(sha256sum "$DIST/$name" | cut -d' ' -f1)
+  [[ "${SHA[$name]}" == "$hash" ]] || die "$name: SHA-256 differs from SHA256SUMS"
+  SIZE[$name]=$(stat -c %s "$DIST/$name")
+  TYPE[$name]=$([[ "$name" == *.apk ]] && echo application/vnd.android.package-archive || echo application/octet-stream)
+  CACHE[$name]=$IMMUTABLE
+  FILES+=("$name")
+done <"$SUMS"
+# … and every APK and patch update.json lists is one of them, as it says.
+while read -r name size hash; do
+  [[ "${SHA[$name]:-}" == "$hash" && "${SIZE[$name]}" == "$size" ]] || die "$name: not in SHA256SUMS with the size and SHA-256 update.json has"
+done < <(jq -r '(.assets[], .patches[]?[]) | "\(.name) \(.size) \(.sha256)"' "$MANIFEST")
 SHA[SHA256SUMS]=$(sha256sum "$SUMS" | cut -d' ' -f1)
 SIZE[SHA256SUMS]=$(stat -c %s "$SUMS")
 TYPE[SHA256SUMS]='text/plain; charset=utf-8'
 CACHE[SHA256SUMS]='public, max-age=3600'
-FILES=("${APKS[@]}" SHA256SUMS)
-ARM64=$(jq -r '.assets.arm64.name' "$MANIFEST")
+FILES+=(SHA256SUMS)
+PATCHES=$(jq '[.patches[]?[]] | length' "$MANIFEST")
+# dl's root update.json is what every app reading it gets: releases only.
+DL_LATEST=$([[ $DL_ON == 1 && $LATEST == 1 && "$VERSION" != *-* ]] && echo 1 || echo 0)
 # GitHub's release page offers arm64 only: two APKs side by side made most people
 # stop and pick. The x86_64 one is linked under "Other builds" in its notes.
 X64=$(jq -r '.assets.x64.name // empty' "$MANIFEST")
@@ -179,10 +202,11 @@ GH_FILES=()
 for name in "${FILES[@]}"; do [[ "$name" == "$X64" ]] || GH_FILES+=("$name"); done
 
 ROUTES=(global)
+[[ $DL_ON == 1 ]] && ROUTES+=(dl)
 [[ $CN_ON == 1 ]] && ROUTES+=(cn)
 [[ $GITHUB == 1 ]] && ROUTES+=(github)
-echo "DSH Go $VERSION ($FULL): ${APKS[*]}"
-echo "routes: ${ROUTES[*]}$([[ $CN_ON == 1 ]] && echo " (China: $CN_PROVIDER $CN_BUCKET, $CN_BASE_URL)")"
+echo "DSH Go $VERSION ($FULL): ${FILES[*]}"
+echo "routes: ${ROUTES[*]}$([[ $DL_ON == 1 ]] && echo " (dl: $DL_BUCKET, $DL_BASE_URL)")$([[ $CN_ON == 1 ]] && echo " (China: $CN_PROVIDER $CN_BUCKET, $CN_BASE_URL)")"
 [[ $DRY == 1 ]] && echo "dry run: nothing is uploaded, downloaded or changed"
 
 TMP=$(mktemp -d)
@@ -215,14 +239,19 @@ print(json.dumps({"zh": parts["zh"], "en": parts["en"],
 PY
 jq -r .all "$TMP/notes.json" >"$TMP/notes.md"
 echo "notes: ## $VERSION of $CHANGELOG, $(wc -l <"$TMP/notes.md") lines (中文 + English)"
+if [[ $PATCHES == 0 ]]; then
+  HELPERS_ZH='`update.json` 和 `SHA256SUMS`' HELPERS_EN='`update.json` and `SHA256SUMS`'
+else
+  HELPERS_ZH='`update.json`、`SHA256SUMS` 和增量包 `*.dshdelta`' HELPERS_EN='`update.json`, `SHA256SUMS` and the `*.dshdelta` patches'
+fi
 cat >"$TMP/gh-notes.md" <<NOTES
 **手机安装：只需下载 [\`$ARM64\`]($GITHUB_DOWNLOAD_BASE/$TAG/$ARM64)。**
 
-\`update.json\` 和 \`SHA256SUMS\` 供自动更新与校验使用，无需手动下载。GitHub 自动生成的 Source code 是源码包，不是安装包。
+$HELPERS_ZH 供自动更新与校验使用，无需手动下载。GitHub 自动生成的 Source code 是源码包，不是安装包。
 
 **Install on your phone: download [\`$ARM64\`]($GITHUB_DOWNLOAD_BASE/$TAG/$ARM64).**
 
-\`update.json\` and \`SHA256SUMS\` support automatic updates and verification. You do not need to download them manually. GitHub's Source code archives are not installers.
+$HELPERS_EN support automatic updates and verification. You do not need to download them manually. GitHub's Source code archives are not installers.
 
 NOTES
 cat "$TMP/notes.md" >>"$TMP/gh-notes.md"
@@ -258,39 +287,34 @@ jq --slurpfile n "$TMP/notes.json" --arg page "https://github.com/$REPO/releases
   | .page = $page
   | .notes = $n[0].all
   | .notesByLocale = {zh: $n[0].zh, en: $n[0].en}' "$MANIFEST" >"$TMP/github/update.json"
+# dl's: GitHub's, with absolute URLs on dl. Patches carry none on any route:
+# they sit next to the APK.
+mkdir "$TMP/dl"
+jq --arg base "${DL_BASE_URL}download/$VERSION/" '.assets |= with_entries(.value.url = $base + .value.name)' \
+  "$TMP/github/update.json" >"$TMP/dl/update.json"
 
-# Which page is live: /download answers once DOWNLOAD_ACCESS=public, and with
-# DOWNLOAD_REDIRECT it sends people to GitHub instead.
+# Which page is live: /download answers once DOWNLOAD_ACCESS=public.
 MODE=unknown
-REDIRECT=
 if [[ $DRY == 0 && $VERIFY == 1 && $LATEST == 1 ]]; then
-  read -r code REDIRECT < <(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' "$ORIGIN/download" || echo 000)
-  case "$code" in
+  case "$(curl -sS -o /dev/null -w '%{http_code}' "$ORIGIN/download" || echo 000)" in
     200) MODE=public ;;
-    302) MODE=redirect ;;
     404) MODE=key ;;
     *) die "can't tell whether $ORIGIN/download is up" ;;
   esac
-  echo "page: $(case $MODE in public) echo "$ORIGIN/download (public)" ;; redirect) echo "$ORIGIN/download → $REDIRECT" ;; *) echo "$ORIGIN/beta (access key)" ;; esac)"
+  echo "page: $([[ $MODE == public ]] && echo "$ORIGIN/download (public)" || echo "$ORIGIN/beta (access key)")"
   [[ $MODE != key || -s "${BETA_KEY_FILE:-}" ]] || die "the page wants a key: set BETA_KEY_FILE to a file holding a live access key"
 fi
 
-# ── 1. R2 ────────────────────────────────────────────────────────────────
-step "1/5 R2 $BUCKET/beta/$VERSION/"
-# Already up? Same size: skip it. Different: refuse.
-declare -A SKIP
-if [[ $DRY == 1 ]]; then
-  plan "HEAD $ORIGIN/beta/$VERSION/<apk> with the channel token: same size → skip, other size → stop"
-elif [[ -s "$TMP/auth" ]]; then
-  for name in "${APKS[@]}"; do
-    read -r code length < <(curl -sS --retry 3 -o /dev/null -I -H @"$TMP/auth" -w '%{http_code} %header{content-length}\n' "$ORIGIN/beta/$VERSION/$name" || echo "000 -")
-    if [[ "$code" == 200 ]]; then
-      [[ "$length" == "${SIZE[$name]}" ]] || die "beta/$VERSION/$name is already up with another size; publish a new version"
-      SKIP[$name]=1
-      note "already there: $name"
-    fi
-  done
-fi
+# ── 1. R2: dshgo-share, dshgo-dl ─────────────────────────────────────────
+step "1/5 R2 $BUCKET/beta/$VERSION/$([[ $DL_ON == 1 ]] && echo ", $DL_BUCKET/download/$VERSION/")"
+# Already up? Same size: skip it (step 4 still checks the bytes). Another size: refuse.
+up() { # URL NAME [curl args…]
+  local code length
+  read -r code length < <(curl -sS --retry 3 -o /dev/null -I "${@:3}" -w '%{http_code} %header{content-length}\n' "$1" || echo "000 -")
+  [[ "$code" == 200 ]] || return 1
+  [[ "$length" == "${SIZE[$2]}" ]] || die "$1 is already up with another size; publish a new version"
+  note "already there: $2"
+}
 
 # Uploads go through R2's S3 API with rclone when it's there: files over 8 MiB
 # in parts, every request retried on its own (one 180 MB request over a slow
@@ -299,14 +323,18 @@ fi
 # its value) and only lives in rclone's environment. Without rclone: wrangler,
 # one request per file, three tries.
 R2_ID=''
-r2_put() { # KEY FILE CONTENT-TYPE
-  if [[ -n "${R2_LOCAL_PERSIST:-}" ]]; then
-    if [[ $DRY == 1 ]]; then plan "$(quote npx wrangler r2 object put "$BUCKET/$1" --file "$2" --content-type "$3" --local --persist-to "$R2_LOCAL_PERSIST")"; return; fi
-    WRANGLER_SEND_METRICS=false npx --no-update-notifier wrangler r2 object put "$BUCKET/$1" --file "$2" --content-type "$3" \
-      --local --persist-to "$R2_LOCAL_PERSIST" >"$TMP/wrangler.log" 2>&1 || { cat "$TMP/wrangler.log" >&2; die "upload of $1 failed"; }
+r2_put() { # BUCKET KEY FILE CONTENT-TYPE [CACHE-CONTROL]
+  local headers=(--header-upload "Content-Type: $4") meta=(--content-type "$4")
+  [[ -z "${5:-}" ]] || { headers+=(--header-upload "Cache-Control: $5"); meta+=(--cache-control "$5"); }
+  if [[ $1 == "$DL_BUCKET" && -n "${DL_LOCAL_ROOT:-}" ]]; then
+    run install -D -m 644 "$3" "$DL_LOCAL_ROOT/$2"
+  elif [[ -n "${R2_LOCAL_PERSIST:-}" ]]; then
+    if [[ $DRY == 1 ]]; then plan "$(quote npx wrangler r2 object put "$1/$2" --file "$3" "${meta[@]}" --local --persist-to "$R2_LOCAL_PERSIST")"; return; fi
+    WRANGLER_SEND_METRICS=false npx --no-update-notifier wrangler r2 object put "$1/$2" --file "$3" "${meta[@]}" \
+      --local --persist-to "$R2_LOCAL_PERSIST" >"$TMP/wrangler.log" 2>&1 || { cat "$TMP/wrangler.log" >&2; die "upload of $2 failed"; }
   elif command -v rclone >/dev/null; then
     if [[ $DRY == 1 ]]; then
-      plan "$(quote rclone copyto "$2" "r2:$BUCKET/$1" --header-upload "Content-Type: $3" --s3-chunk-size 8M --retries 5) (S3 keys from CF_TOKEN_FILE)"
+      plan "$(quote rclone copyto "$3" "r2:$1/$2" "${headers[@]}" --s3-chunk-size 8M --retries 5) (S3 keys from CF_TOKEN_FILE)"
       return
     fi
     if [[ -z "$R2_ID" ]]; then
@@ -314,33 +342,42 @@ r2_put() { # KEY FILE CONTENT-TYPE
         https://api.cloudflare.com/client/v4/user/tokens/verify | jq -r '.result.id // empty')
       [[ -n "$R2_ID" ]] || die "can't derive R2 S3 credentials from the token"
     fi
-    local account
-    account=$(sed -n 's/^ *"account_id": *"\([0-9a-f]*\)".*/\1/p' wrangler.jsonc)
     RCLONE_CONFIG_R2_TYPE=s3 RCLONE_CONFIG_R2_PROVIDER=Cloudflare RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true \
-      RCLONE_CONFIG_R2_ENDPOINT="https://$account.r2.cloudflarestorage.com" \
+      RCLONE_CONFIG_R2_ENDPOINT="https://$ACCOUNT.r2.cloudflarestorage.com" \
       RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ID" \
       RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$(tr -d '[:space:]' <"$CF_TOKEN_FILE" | sha256sum | cut -d' ' -f1)" \
-      rclone copyto "$2" "r2:$BUCKET/$1" --ignore-times --header-upload "Content-Type: $3" \
+      rclone copyto "$3" "r2:$1/$2" --ignore-times "${headers[@]}" \
         --s3-chunk-size 8M --s3-upload-concurrency 4 --retries 5 --low-level-retries 30 \
-        --stats 60s --stats-one-line --stats-log-level NOTICE || die "upload of $1 failed"
+        --stats 60s --stats-one-line --stats-log-level NOTICE || die "upload of $2 failed"
   else
     if [[ $DRY == 1 ]]; then
-      plan "$(quote npx wrangler r2 object put "$BUCKET/$1" --file "$2" --content-type "$3" --remote) (token from CF_TOKEN_FILE)"
+      plan "$(quote npx wrangler r2 object put "$1/$2" --file "$3" "${meta[@]}" --remote) (token from CF_TOKEN_FILE)"
       return
     fi
     local try
     for try in 1 2 3; do
-      CLOUDFLARE_API_TOKEN="$(cat "$CF_TOKEN_FILE")" WRANGLER_SEND_METRICS=false \
-        npx wrangler r2 object put "$BUCKET/$1" --file "$2" --content-type "$3" --remote >/dev/null && break
-      [[ $try == 3 ]] && die "upload of $1 failed"
+      CLOUDFLARE_API_TOKEN="$(cat "$CF_TOKEN_FILE")" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT" WRANGLER_SEND_METRICS=false \
+        npx wrangler r2 object put "$1/$2" --file "$3" "${meta[@]}" --remote >/dev/null && break
+      [[ $try == 3 ]] && die "upload of $2 failed"
     done
   fi
-  [[ $DRY == 1 ]] || note "uploaded $1"
+  [[ $DRY == 1 ]] || note "uploaded $1/$2"
 }
 
+[[ $DRY == 0 ]] || plan "HEAD $ORIGIN/beta/$VERSION/<file> with the channel token: same size → skip, other size → stop"
 for name in "${FILES[@]}"; do
-  [[ -n "${SKIP[$name]:-}" ]] || r2_put "beta/$VERSION/$name" "$DIST/$name" "${TYPE[$name]}"
+  [[ $DRY == 0 && -s "$TMP/auth" ]] && up "$ORIGIN/beta/$VERSION/$name" "$name" -H @"$TMP/auth" && continue
+  r2_put "$BUCKET" "beta/$VERSION/$name" "$DIST/$name" "${TYPE[$name]}"
 done
+# The public bucket serves what each object says: immutable, like the files.
+# (Its HEAD carries a query of its own, so a 404 the edge kept can't meet step 4.)
+if [[ $DL_ON == 1 ]]; then
+  [[ $DRY == 0 ]] || plan "HEAD ${DL_BASE_URL}download/$VERSION/<file>: same size → skip, other size → stop"
+  for name in "${FILES[@]}"; do
+    [[ $DRY == 0 ]] && up "${DL_BASE_URL}download/$VERSION/$name?publish=$EPOCHSECONDS" "$name" && continue
+    r2_put "$DL_BUCKET" "download/$VERSION/$name" "$DIST/$name" "${TYPE[$name]}" "$IMMUTABLE"
+  done
+fi
 
 # ── 2. China: the Hong Kong bucket ───────────────────────────────────────
 step "2/5 China $([[ $CN_ON == 1 ]] && echo "${CN_PROVIDER} $CN_BUCKET/$VERSION/" || echo '(off)')"
@@ -375,18 +412,9 @@ cn_put() { # KEY FILE CONTENT-TYPE CACHE-CONTROL
   [[ $DRY == 1 ]] || note "uploaded $1"
 }
 if [[ $CN_ON == 1 ]]; then
+  [[ $DRY == 0 ]] || plan "HEAD $CN_BASE_URL$VERSION/<file>: same size → skip, other size → stop"
   for name in "${FILES[@]}"; do
-    url="$CN_BASE_URL$VERSION/$name"
-    if [[ $DRY == 1 ]]; then
-      [[ $name == SHA256SUMS ]] || plan "HEAD $url: same size → skip, other size → stop"
-    elif [[ $name != SHA256SUMS ]]; then
-      read -r code length < <(curl -sS --retry 3 -o /dev/null -I -w '%{http_code} %header{content-length}\n' "$url" || echo "000 -")
-      if [[ "$code" == 200 ]]; then
-        [[ "$length" == "${SIZE[$name]}" ]] || die "$url is already up with another size; publish a new version"
-        note "already there: $name"
-        continue
-      fi
-    fi
+    [[ $DRY == 0 ]] && up "$CN_BASE_URL$VERSION/$name" "$name" && continue
     cn_put "$VERSION/$name" "$DIST/$name" "${TYPE[$name]}" "${CACHE[$name]}"
   done
 else
@@ -457,6 +485,9 @@ if [[ $VERIFY == 0 ]]; then
   note "skipped (--skip-verify)"
 else
   for name in "${FILES[@]}"; do check R2 "$name" -H @"$TMP/auth" "$ORIGIN/beta/$VERSION/$name"; done
+  if [[ $DL_ON == 1 ]]; then
+    for name in "${FILES[@]}"; do check dl "$name" "${DL_BASE_URL}download/$VERSION/$name"; done
+  fi
   if [[ $CN_ON == 1 ]]; then
     for name in "${FILES[@]}"; do check China "$name" "$CN_BASE_URL$VERSION/$name"; done
   fi
@@ -474,7 +505,7 @@ else
 fi
 
 # ── 5. Go live ───────────────────────────────────────────────────────────
-step "5/5 go live: $([[ $LATEST == 1 ]] && echo "GitHub release, beta/$VERSION/update.json, beta/update.json" || echo "beta/$VERSION/update.json only (--no-latest)")"
+step "5/5 go live: $([[ $LATEST == 1 ]] && echo "GitHub release, update.json on dl, beta/$VERSION/update.json, beta/update.json" || echo "the version's update.json only (--no-latest)")"
 if [[ $GITHUB == 1 && $LATEST == 1 && $GH_DRAFT == 1 ]]; then
   run_gh release edit "$TAG" --repo "$REPO" --draft=false || die "publishing the GitHub release failed"
 fi
@@ -493,15 +524,23 @@ if [[ $GITHUB == 1 && $LATEST == 1 ]]; then
     echo "ok - GitHub public download: ${SIZE[$ARM64]} bytes"
   fi
 fi
-r2_put "beta/$VERSION/update.json" "$TMP/update.json" 'application/json; charset=utf-8'
+if [[ $DL_ON == 1 ]]; then
+  r2_put "$DL_BUCKET" "download/$VERSION/update.json" "$TMP/dl/update.json" 'application/json; charset=utf-8' "$IMMUTABLE"
+  [[ $DL_LATEST == 0 ]] || r2_put "$DL_BUCKET" update.json "$TMP/dl/update.json" 'application/json; charset=utf-8' 'public, max-age=300'
+fi
+r2_put "$BUCKET" "beta/$VERSION/update.json" "$TMP/update.json" 'application/json; charset=utf-8'
 if [[ $LATEST == 1 ]]; then
-  r2_put "beta/update.json" "$TMP/update.json" 'application/json; charset=utf-8'
+  r2_put "$BUCKET" "beta/update.json" "$TMP/update.json" 'application/json; charset=utf-8'
 fi
 
 if [[ $DRY == 1 ]]; then
   echo
   echo "beta/update.json would be:"
   jq '{version, publishedAt, page, routes, assets: (.assets | map_values({name, size, url}))}' "$TMP/update.json"
+  if [[ $DL_ON == 1 ]]; then
+    echo "dl's update.json (download/$VERSION/$([[ $DL_LATEST == 1 ]] && echo ' and the root')) would be:"
+    jq '{version, page, assets: (.assets | map_values({name, size, url})), patches}' "$TMP/dl/update.json"
+  fi
   echo "dry run done: $VERSION, routes ${ROUTES[*]}"
   exit 0
 fi
@@ -511,15 +550,18 @@ fi
 got=$(curl -fsS --retry 3 --retry-all-errors -H @"$TMP/auth" "$ORIGIN/beta/update.json" | jq -r .version)
 [[ "$got" == "$FULL" ]] || die "/beta/update.json is '$got', not $FULL"
 echo "ok - /beta/update.json (channel token) is $FULL"
+if [[ $DL_LATEST == 1 ]]; then
+  got=$(curl -fsS --retry 3 --retry-all-errors "${DL_BASE_URL}update.json?publish=$EPOCHSECONDS" | jq -r .version)
+  [[ "$got" == "$FULL" ]] || die "${DL_BASE_URL}update.json is '$got', not $FULL"
+  echo "ok - ${DL_BASE_URL}update.json is $FULL"
+fi
 
 CN_URL="$CN_BASE_URL$VERSION/$ARM64"
 GH_URL="https://github.com/$REPO/releases/download/$TAG/$ARM64"
+# Global: the public bucket's file once dl has it (src/download.ts), else the Worker's.
+GLOBAL_URL=$([[ $DL_ON == 1 ]] && echo "${DL_BASE_URL}download/$VERSION/$ARM64" || echo "$ORIGIN/download/$VERSION/$ARM64")
 # The Worker remembers the latest manifest for 30 s per isolate.
-if [[ $MODE == redirect ]]; then
-  # No page to check; the x86_64 link in the GitHub notes points here.
-  echo "ok - $ORIGIN/download sends people to $REDIRECT"
-  [[ -z "$X64" ]] || check 'public link' "$X64" "$ORIGIN/download/$VERSION/$X64"
-elif [[ $MODE == public ]]; then
+if [[ $MODE == public ]]; then
   for attempt in 1 2 3 4 5 6 7 8; do
     curl -fsS "$ORIGIN/download?lang=zh" >"$TMP/page.html" || true
     grep -qF "${SHA[$ARM64]}" "$TMP/page.html" && break
@@ -530,16 +572,17 @@ elif [[ $MODE == public ]]; then
   # counted) to the file on its route.
   for r in "${ROUTES[@]}"; do
     case $r in
-      global) want="/download/$VERSION/$ARM64" ;;
+      global) want=${GLOBAL_URL#"$ORIGIN"} ;;
+      dl) continue ;;
       cn) want="$CN_URL" ;;
       github) want="$GH_URL" ;;
     esac
     grep -qF "href=\"/download/get?via=$r&amp;v=$VERSION\"" "$TMP/page.html" || die "the page has no $r button for $VERSION"
     got=$(curl -sS -o /dev/null -I -w '%header{location}' "$ORIGIN/download/get?via=$r&v=$VERSION" || true)
-    [[ "$got" == "$want" ]] || die "the $r button leads to '$got', not $want (is the Worker's CN_BASE_URL the same?)"
+    [[ "$got" == "$want" ]] || die "the $r button leads to '$got', not $want (are the Worker's CN_BASE_URL and DL_BASE_URL the same?)"
   done
   echo "ok - $ORIGIN/download offers $VERSION on ${ROUTES[*]}"
-  check 'page (Global)' "$ARM64" "$ORIGIN/download/$VERSION/$ARM64"
+  check 'page (Global)' "$ARM64" "$GLOBAL_URL"
 else
   python3 -c 'import json,sys; print(json.dumps({"key": open(sys.argv[1]).read().strip()}))' "$BETA_KEY_FILE" >"$TMP/key.json"
   for attempt in 1 2 3 4 5 6 7 8; do

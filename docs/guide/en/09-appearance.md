@@ -19,5 +19,5 @@ Adjust light and dark, colors, icons, the launch screen, the wallpaper and chat 
 In the Appearance group on the Settings page:
 
 - **Chat text size**: **Small**, **Standard**, **Large** or **Extra large**. Changes the text in chats only.
-- **Collapse steps when done**: on by default. When a reply finishes, its thinking and tool calls fold into one line; tap to expand.
+- **Collapse steps when done**: on by default. When a reply finishes, its thinking and tool calls fold into one line; tap to expand. While the model is thinking, the thinking block keeps a fixed height and shows the latest three lines; tap for the full text, tap again to fold back.
 - **Pets**: see [Pets](06-pets.md).

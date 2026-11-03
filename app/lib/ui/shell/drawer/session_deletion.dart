@@ -12,9 +12,14 @@ import '../../theme/app_icons.dart';
 import '../sessions_drawer.dart' show sessionTitle;
 
 /// A disabled destructive control always explains why it cannot be used.
+///
+/// Three distinct situations, three different answers: still finding out
+/// ("checking" / "temporarily unavailable"), the Host's own refusal, and a
+/// deletion that is fine to offer. "Not answered yet" is never reported as
+/// "this host does not support it".
 String? sessionDeletionDisabledReason(
   BuildContext context, {
-  required AsyncValue<bool> available,
+  required AsyncValue<SessionDeletionSupport> available,
   required bool busy,
   required Iterable<SessionSummary> sessions,
   required Iterable<String> ids,
@@ -23,7 +28,17 @@ String? sessionDeletionDisabledReason(
   if (busy) return l10n.shellDeletingChats;
   if (available.hasError) return l10n.shellDeleteUnavailable;
   if (available.isLoading) return l10n.shellDeleteChecking;
-  if (available.value != true) return l10n.shellDeleteUnsupported;
+  // Exhaustive on purpose: a new capability state must decide its copy here,
+  // and "not asked yet" can never quietly borrow the Host's refusal.
+  final String? capability = switch (available.value) {
+    null || SessionDeletionSupport.unknown =>
+      // No live connection or no ready mux generation: nothing was asked, so
+      // say "try again once connected", not "unsupported".
+      l10n.shellDeleteUnavailable,
+    SessionDeletionSupport.supported => null,
+    SessionDeletionSupport.unsupported => l10n.shellDeleteUnsupported,
+  };
+  if (capability != null) return capability;
   final rows = {for (final row in sessions) row.sessionId: row};
   if (ids.any((id) => rows[id] == null)) return l10n.shellDeleteInventoryChanged;
   if (ids.any((id) => rows[id]!.running)) return l10n.shellDeleteRunning;

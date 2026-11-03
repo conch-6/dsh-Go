@@ -5,6 +5,7 @@ import '../../l10n/l10n.dart';
 import '../../remote/ssh/ssh_link.dart';
 import '../../state/connection_state.dart';
 import '../../state/hosts_state.dart';
+import '../../state/plugins_state.dart' show installedPluginsProvider;
 import '../../state/settings_state.dart';
 import '../../state/ui_mode_state.dart';
 import 'local_web_screen.dart';
@@ -60,9 +61,31 @@ final dshWebAccessProvider = Provider.autoDispose<DshWebAccess>((ref) {
   }
 });
 
+/// A page that decides how it is left for DSH Web: [openDshWeb] from inside
+/// it (its rows that say 「在网页版编辑此项」) hands the target to [onOpen]
+/// instead, which lands it and goes there when the page can be left — a page
+/// whose own edits DSH Web would otherwise race (plugin_config_page.dart).
+class DshWebOpenScope extends InheritedWidget {
+  const DshWebOpenScope({super.key, required this.onOpen, required super.child});
+
+  final void Function(DshWebTarget target) onOpen;
+
+  static DshWebOpenScope? maybeOf(BuildContext context) => context.getInheritedWidgetOfExactType<DshWebOpenScope>();
+
+  @override
+  bool updateShouldNotify(DshWebOpenScope oldWidget) => false;
+}
+
 /// Opens the active host's official DSH Web, landing on [target]. In
-/// 网页模式 the home page itself goes there (no second page on top).
+/// 网页模式 the home page itself goes there (no second page on top). Inside
+/// a [DshWebOpenScope] the page around decides.
 void openDshWeb(BuildContext context, WidgetRef ref, {DshWebTarget target = const DshWebTarget()}) {
+  if (DshWebOpenScope.maybeOf(context) case final scope?) {
+    scope.onOpen(target);
+    return;
+  }
+  // A plugin's entry id is no name its card has: name its bundle.
+  if (target.pluginItem.isNotEmpty) target = target.withPluginNames(ref.read(installedPluginsProvider).value);
   if (ref.read(uiModeProvider).web) {
     ref.read(webOpenProvider.notifier).request(target);
     return;

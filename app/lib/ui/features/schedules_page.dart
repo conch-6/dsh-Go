@@ -364,7 +364,11 @@ class _ScheduleDetailPageState extends ConsumerState<ScheduleDetailPage> {
                       value: formatWhen(last, now: widget.now),
                     ),
                 if (task.timeZone case final tz?)
-                  ListPageRow(icon: AppIcons.timeZone, title: l10n.featuresTimeZone, value: zoneLabel(tz)),
+                  ListPageRow(
+                    icon: AppIcons.timeZone,
+                    title: l10n.featuresTimeZone,
+                    value: zoneLabel(tz, at: widget.now),
+                  ),
                 ListPageRow(
                   icon: AppIcons.chat,
                   title: l10n.featuresScheduleLinkedChat,

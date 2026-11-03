@@ -360,7 +360,7 @@ class SystemActions(private val app: Context) : SystemApi {
                 SysResult(true, "剪贴板是空的。")
             } else {
                 // l10n:keep agent tool result
-                SysResult(false, "读不到剪贴板：Android 只允许前台应用读取，DSH 现在不在前台。请用户切回 DSH 再说一次，或直接把内容发给你。")
+                SysResult(false, "读不到剪贴板：系统只允许前台应用读，DSH 不在前台。请用户切回 DSH 再说，或直接把内容发给你。")
             }
         }
         // l10n:keep agent tool result

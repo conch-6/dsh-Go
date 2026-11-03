@@ -34,25 +34,38 @@ class LocalizedText {
     if (map == null) return null;
     final values = <String, String>{};
     for (final MapEntry(:key, :value) in map.entries) {
-      if (value is String && value.trim().isNotEmpty) values[key.toLowerCase()] = value;
+      if (value is String && value.trim().isNotEmpty) values[_tag(key)] = value;
     }
     return values.isEmpty ? null : LocalizedText(values);
   }
+
+  /// `zh_CN` → `zh-cn`: plugins spell language ids both ways (schemastery
+  /// takes whatever keys `.i18n()` is given).
+  static String _tag(String id) => id.toLowerCase().replaceAll('_', '-');
+
+  static final _han = RegExp(r'[\u3400-\u9fff]');
 
   /// Language id (lowercase, `zh`, `zh-cn`, ...) or `''` for plain text.
   final Map<String, String> values;
 
   /// Best text for [locale]: exact id, then its language, then any variant
-  /// of that language, then English, then plain text, then the first value.
+  /// of that language, then plain text written in it, then English (`en`,
+  /// then any variant), then plain text, then the first value.
+  ///
+  /// Plain text is what `.description()` gave before `.i18n()` added
+  /// languages (schemastery keeps it under `''`): a Chinese plugin that only
+  /// translated into English must still read in Chinese for a Chinese UI.
   String resolve([String locale = 'zh']) {
-    final wanted = locale.toLowerCase().replaceAll('_', '-');
+    final tagged = {for (final MapEntry(:key, :value) in values.entries) _tag(key): value};
+    final wanted = _tag(locale);
     final language = wanted.split('-').first;
-    return values[wanted] ??
-        values[language] ??
-        values.entries.where((e) => e.key.startsWith('$language-')).map((e) => e.value).firstOrNull ??
-        values['en'] ??
-        values[''] ??
-        values.values.first;
+    String? of(String language) =>
+        tagged[language] ?? tagged.entries.where((e) => e.key.startsWith('$language-')).map((e) => e.value).firstOrNull;
+    final plain = tagged[''];
+    // Chinese is told apart by its characters; anything else counts as the
+    // other UI language.
+    final plainMatches = plain != null && _han.hasMatch(plain) == (language == 'zh');
+    return tagged[wanted] ?? of(language) ?? (plainMatches ? plain : null) ?? of('en') ?? plain ?? values.values.first;
   }
 
   /// Every variant, for search.

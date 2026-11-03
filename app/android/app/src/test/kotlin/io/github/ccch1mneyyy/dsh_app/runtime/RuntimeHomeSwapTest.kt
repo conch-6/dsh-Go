@@ -32,7 +32,7 @@ class RuntimeHomeSwapTest {
         val base = layout("rootfs/bin/old", "rootfs/root/workspace/notes")
         try {
             extract(base)
-            activateRootfs(base, "r2")
+            activateRootfs(base, "r2", sync = {})
             assertActivated(base)
         } finally {
             base.deleteRecursively()
@@ -51,7 +51,7 @@ class RuntimeHomeSwapTest {
             val base = layout(*paths)
             try {
                 extract(base)
-                activateRootfs(base, "r2")
+                activateRootfs(base, "r2", sync = {})
                 assertActivated(base)
             } finally {
                 base.deleteRecursively()

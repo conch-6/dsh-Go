@@ -2,12 +2,14 @@ import 'package:dsh_app/state/chat_state.dart';
 import 'package:dsh_app/state/goal_dock_state.dart';
 import 'package:dsh_app/ui/chat/composer.dart';
 import 'package:dsh_app/ui/chat/dock/chat_dock.dart';
+import 'package:dsh_app/ui/chat/dock/dock_stack.dart';
 import 'package:dsh_app/ui/chat/run_info.dart';
 import 'package:dsh_app/ui/chat/widgets/activity_strip.dart';
 import 'package:dsh_app/ui/chat/widgets/attachments.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/harness.dart';
@@ -60,6 +62,7 @@ class DockHarness {
     double textScale = 1,
     bool strip = false,
     bool composer = true,
+    bool deck = false,
     bool disableAnimations = false,
     Widget? above,
     Size? viewSize,
@@ -88,12 +91,34 @@ class DockHarness {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const ChatDock(sessionId: 's1'),
-                          if (strip)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: ActivityStrip(activity: dockStrip()),
-                            ),
+                          if (deck)
+                            BackdropGroup(
+                              child: DockStack(
+                                cards: [
+                                  const TodoDockSlot(sessionId: 's1'),
+                                  const GoalDockSlot(sessionId: 's1'),
+                                  if (strip)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 6),
+                                      // As the chat page: the count shows on the strip while the todo bar is folded behind it.
+                                      child: Consumer(
+                                        builder: (context, ref, _) => ActivityStrip(
+                                          activity: dockStrip(),
+                                          todoProgress: ref.watch(dockFoldedProvider),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            )
+                          else ...[
+                            const ChatDock(sessionId: 's1'),
+                            if (strip)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: ActivityStrip(activity: dockStrip()),
+                              ),
+                          ],
                           if (composer)
                             Composer(
                               controller: input,

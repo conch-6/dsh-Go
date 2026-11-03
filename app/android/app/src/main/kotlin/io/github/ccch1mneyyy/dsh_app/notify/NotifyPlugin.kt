@@ -4,6 +4,8 @@ import io.github.ccch1mneyyy.dsh_app.i18n.AppStrings
 import io.github.ccch1mneyyy.dsh_app.R
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -14,8 +16,9 @@ import io.flutter.plugin.common.PluginRegistry
 
 /**
  * Flutter bridge for chat notifications: MethodChannel `dsh/notify` (status / show / cancel /
- * openSettings / actionResult), EventChannel `dsh/notify/taps` (a notification was tapped) and
- * `dsh/notify/actions` (an approval button was tapped).
+ * openSettings / actionResult, and the live activity's live / liveStatus / openLiveSettings),
+ * EventChannel `dsh/notify/taps` (a notification was tapped) and `dsh/notify/actions` (an
+ * approval button was tapped).
  *
  * Taps reach us as MainActivity's launch intent (cold start) or through onNewIntent (the activity
  * is singleTop). A tap that arrives before Dart listens is held and delivered on listen.
@@ -41,6 +44,8 @@ class NotifyPlugin :
         instance = this
         appContext = binding.applicationContext
         notifier = ChatNotifier(appContext)
+        // A new process: nothing runs yet, so a live activity an earlier one left goes.
+        LiveActivity.refresh(appContext)
         methods = MethodChannel(binding.binaryMessenger, "dsh/notify").also { it.setMethodCallHandler(this) }
         events = EventChannel(binding.binaryMessenger, "dsh/notify/taps").also { it.setStreamHandler(this) }
         actions = EventChannel(binding.binaryMessenger, "dsh/notify/actions").also {
@@ -139,14 +144,38 @@ class NotifyPlugin :
                 result.success(null)
             }
             "openSettings" -> result.success(openSettings(call.argument<String>("channel")))
+            "live" -> {
+                LiveActivity.update(
+                    appContext,
+                    enabled = call.argument<Boolean>("enabled") != false,
+                    packId = call.argument<String>("packId"),
+                    agent = LiveContent.fromMap(call.argument<Map<*, *>>("activity")),
+                )
+                result.success(null)
+            }
+            "liveStatus" -> {
+                // HyperOS answers its focus check over a binder call into SystemUI: not on the main thread.
+                val main = Handler(Looper.getMainLooper())
+                Thread {
+                    val status = runCatching { LiveActivity.status(appContext) }.getOrNull()
+                    main.post { result.success(status) }
+                }.start()
+            }
+            "openLiveSettings" -> result.success(openLiveSettings())
             else -> result.notImplemented()
         }
     }
 
     /** Opens the system notification settings (or the app info page on ROMs without one). */
-    private fun openSettings(channel: String?): Boolean {
+    private fun openSettings(channel: String?): Boolean = start(listOf(notifier.settingsIntent(channel), notifier.detailsIntent()))
+
+    /** This app's 「实时活动」 switch where the system has one, else its notification settings. */
+    private fun openLiveSettings(): Boolean =
+        start(listOf(LiveActivity.settingsIntent(appContext), notifier.settingsIntent(null), notifier.detailsIntent()))
+
+    private fun start(intents: List<Intent>): Boolean {
         val host = activity?.activity
-        for (intent in listOf(notifier.settingsIntent(channel), notifier.detailsIntent())) {
+        for (intent in intents) {
             val started = runCatching {
                 if (host != null) host.startActivity(intent)
                 else appContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

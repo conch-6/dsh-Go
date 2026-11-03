@@ -6,6 +6,7 @@
 
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:dsh_app/ui/chat/diff_page.dart';
+import 'package:dsh_app/ui/chat/dock/dock_stack.dart' show DockFoldController;
 import 'package:dsh_app/ui/chat/empty_state.dart';
 import 'package:dsh_app/ui/chat/step_detail_page.dart';
 import 'package:dsh_app/ui/chat/trajectory_sheet.dart';
@@ -17,6 +18,7 @@ import 'package:dsh_app/ui/chat/widgets/whale_tail.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/harness.dart';
 import 'support/run_info_fixture.dart';
@@ -38,6 +40,8 @@ void main() {
   setUp(() {
     // 12.3 s into the running `flutter test` (turn 2 started 19.95 s ago).
     runClock = () => runInfoTestDispatched.add(const Duration(milliseconds: 12300));
+    // The strip and the todo bar spread, each with its own job (folded: dock_stack_test).
+    SharedPreferences.setMockInitialValues({DockFoldController.key: false});
   });
 
   tearDown(() => runClock = DateTime.now);

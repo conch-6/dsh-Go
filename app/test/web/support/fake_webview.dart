@@ -110,6 +110,9 @@ class FakeWebViewController extends PlatformWebViewController {
   @override
   Future<String?> currentUrl() async => loads.isEmpty ? null : loads.last.toString();
 
+  /// A load of the last requested page started.
+  void start() => delegate!.onPageStarted?.call(loads.last.toString());
+
   /// The page finished loading.
   void finish() => delegate!.onPageFinished?.call(loads.last.toString());
 
@@ -122,6 +125,7 @@ class FakeWebViewController extends PlatformWebViewController {
 class FakeNavigationDelegate extends PlatformNavigationDelegate {
   FakeNavigationDelegate(super.params) : super.implementation();
 
+  PageEventCallback? onPageStarted;
   PageEventCallback? onPageFinished;
   WebResourceErrorCallback? onWebResourceError;
 
@@ -129,7 +133,7 @@ class FakeNavigationDelegate extends PlatformNavigationDelegate {
   Future<void> setOnNavigationRequest(NavigationRequestCallback onNavigationRequest) async {}
 
   @override
-  Future<void> setOnPageStarted(PageEventCallback onPageStarted) async {}
+  Future<void> setOnPageStarted(PageEventCallback onPageStarted) async => this.onPageStarted = onPageStarted;
 
   @override
   Future<void> setOnPageFinished(PageEventCallback onPageFinished) async => this.onPageFinished = onPageFinished;

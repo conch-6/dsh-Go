@@ -518,6 +518,46 @@ void main() {
     });
   });
 
+  group('options free text', () {
+    DshUiOptions optionsNode(Object? freetext) {
+      final parsed = parseDshUiUncached(
+        jsonEncode({
+          'type': 'stack',
+          'children': [
+            {
+              'type': 'options',
+              'id': 'plan',
+              'freetext': ?freetext,
+              'options': [
+                {'label': 'A'},
+                {'label': 'B'},
+              ],
+            },
+          ],
+        }),
+      );
+      return (parsed as DshUiParsed).view.nodes.whereType<DshUiOptions>().single;
+    }
+
+    test('off unless asked for', () {
+      final node = optionsNode(null);
+      expect(node.freetext, isFalse);
+      expect(node.freetextHint, isNull);
+    });
+
+    test('true opens an input with the default hint', () {
+      final node = optionsNode(true);
+      expect(node.freetext, isTrue);
+      expect(node.freetextHint, isNull);
+    });
+
+    test('a string is both the switch and the hint', () {
+      final node = optionsNode('自己写一个方案');
+      expect(node.freetext, isTrue);
+      expect(node.freetextHint, '自己写一个方案');
+    });
+  });
+
   group('plain text for copy and export', () {
     test('replaces dsh-ui blocks with their summary', () {
       final block = jsonEncode({
@@ -536,6 +576,44 @@ void main() {
     test('an unclosed or broken block still becomes one line', () {
       expect(dshUiPlainText('前文\n```dsh-ui\n{"type":"te'), '前文\n[视图]（格式有误，未能显示）');
       expect(dshUiPlainText('没有视图'), '没有视图');
+    });
+
+    test('a bare view JSON is summarised too', () {
+      final block = jsonEncode({...stack([metric('月均', '¥4,180')]), 'title': '支出'});
+      expect(dshUiPlainText('结论在这里。\n\n$block\n\n后记'), '结论在这里。\n\n[视图] 支出：月均=¥4,180\n\n后记');
+    });
+  });
+
+  group('a view JSON written without its fence', () {
+    final view = jsonEncode({...stack([metric('月均', '¥4,180')]), 'title': '本机实况'});
+
+    test('gets its fence back so the block draws as a card', () {
+      expect(fenceBareDshUiViews('先说结论。\n\n$view\n\n后记'), '先说结论。\n\n```dsh-ui\n$view\n```\n\n后记');
+      expect(fenceBareDshUiViews(view), '```dsh-ui\n$view\n```');
+    });
+
+    test('pretty printed JSON across lines keeps its shape', () {
+      final pretty = const JsonEncoder.withIndent('  ').convert({...stack([text('hi')]), 'title': 'T'});
+      expect(fenceBareDshUiViews(pretty), '```dsh-ui\n$pretty\n```');
+    });
+
+    test('braces inside strings do not end the block', () {
+      final braces = jsonEncode({'type': 'text', 'text': '一个 } 和 {"x":1}'});
+      expect(fenceBareDshUiViews(braces), '```dsh-ui\n$braces\n```');
+    });
+
+    test('prose, existing fences and JSON that is not a view stay as they are', () {
+      const prose = '返回 {"type":"text","text":"hi"} 这样一个对象';
+      expect(fenceBareDshUiViews(prose), prose);
+      const fenced = '```json\n{"type":"text","text":"hi"}\n```';
+      expect(fenceBareDshUiViews(fenced), fenced);
+      expect(fenceBareDshUiViews('{"looks":"json"}'), '{"looks":"json"}');
+      expect(fenceBareDshUiViews('没有视图'), '没有视图');
+    });
+
+    test('a half-streamed object stays text, and so does trailing prose', () {
+      expect(fenceBareDshUiViews('{"type":"stack","children":['), '{"type":"stack","children":[');
+      expect(fenceBareDshUiViews('$view 以上是今天的状况。'), '$view 以上是今天的状况。');
     });
   });
 

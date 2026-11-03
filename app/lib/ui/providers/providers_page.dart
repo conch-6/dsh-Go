@@ -27,6 +27,7 @@ import '../settings/index/spots.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import 'new_chat_defaults_card.dart';
 import 'provider_detail_page.dart';
 import 'provider_form_page.dart';
 import 'provider_widgets.dart';
@@ -55,6 +56,7 @@ class ProvidersPage extends ConsumerWidget {
           ? null
           : Text(summary),
       children: [
+        const NewChatDefaultsCard(),
         const _DeepSeekCard(),
         const _SubscriptionAccounts(),
         if (view.value?.supported == false)

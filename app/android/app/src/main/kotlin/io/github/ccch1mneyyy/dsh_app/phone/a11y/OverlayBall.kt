@@ -5,73 +5,56 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.RectF
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
-import android.util.TypedValue
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewOutlineProvider
 import android.view.WindowManager
-import android.view.animation.LinearInterpolator
-import android.view.animation.PathInterpolator
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
+import io.github.ccch1mneyyy.dsh_app.R
 import io.github.ccch1mneyyy.dsh_app.pet.Dock
 import io.github.ccch1mneyyy.dsh_app.pet.EdgeSnap
 import io.github.ccch1mneyyy.dsh_app.pet.SafeArea
 import io.github.ccch1mneyyy.dsh_app.pet.Side
 import io.github.ccch1mneyyy.dsh_app.pet.WindowPos
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.roundToInt
 
 /**
- * Where the ball's window goes, in px. Pure (measured in BallGeometryTest): the ball sits [edge]
- * from the screen side like the pill's card, and folding starts on the card's end circle.
- */
-internal object BallGeometry {
-    /** The window margin [EdgeSnap] keeps from the safe area so the ball itself is [edge] in. */
-    fun margin(edge: Int, pad: Int) = edge - pad
-
-    /**
-     * The ball window over the open card's end circle on [side]: the pill window is [pillW] wide,
-     * centred on a [screenW] screen at [pillY]; its root pads the card by [padL], [padR], [padTop].
-     */
-    fun pillEnd(screenW: Int, pillW: Int, pillY: Int, padL: Int, padR: Int, padTop: Int, ball: Int, pad: Int, side: Side): WindowPos {
-        val windowX = (screenW - pillW) / 2
-        val circleLeft = if (side == Side.RIGHT) windowX + pillW - padR - ball else windowX + padL
-        return WindowPos(circleLeft - pad, pillY + padTop - pad)
-    }
-}
-
-/**
- * The folded control pill: a 44 dp ball on the side of the screen (its own
- * TYPE_ACCESSIBILITY_OVERLAY window, 6 dp of room around it for the shadow). It shows the task's
- * state only — a slowly breathing ring while DSH works, a pause mark, a stop mark — and opens the
- * pill on a tap. Dragged, it follows the finger and settles on the nearer side, where it stays
- * (side and height kept across tasks, like the pet's dock: pet/EdgeSnap.kt).
+ * The folded control: a 48 dp ball on the side of the screen (its own TYPE_ACCESSIBILITY_OVERLAY
+ * window, 10 dp of room round it for the shadow), the capsule's surface and mark as a circle. It
+ * shows the task's state only and opens the capsule on a tap. Held still for a second it stops the
+ * task ([HoldToStop]: a ring fills round it first, letting go cancels); screen readers get the
+ * same stop as an action. Dragged, it follows the finger and settles on the nearer side, where it
+ * stays (side and height kept across tasks, like the pet's dock: pet/EdgeSnap.kt). Left alone it
+ * fades, all of it alike, to the 闲置时不透明度.
  *
- * The window is added once per pill and shown or hidden (GONE windows take no touches); the
- * overlay folds and unfolds the pill around it ([ControlOverlay]).
+ * The window is added once per control and shown or hidden (GONE windows take no touches); the
+ * overlay folds and unfolds the capsule around it ([ControlOverlay]).
  */
 internal class OverlayBall(
     private val context: Context,
     private val wm: WindowManager,
     private val area: () -> SafeArea,
+    private val palette: OverlayPalette,
     private val onTap: () -> Unit,
-    /** A finger came down on the ball (tap or drag): it is not idle. */
+    /** Held for a second, or the screen reader's stop action. */
+    private val onStop: () -> Unit,
+    /** A finger came down on the ball (tap, hold or drag): it is not idle. */
     private val onTouchDown: () -> Unit = {},
 ) {
-    enum class Look { RUNNING, PAUSED, STOPPED }
-
-    class Colors(val top: Int, val bottom: Int, val stroke: Int, val accent: Int, val muted: Int)
-
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /** Where the ball rests; saved when the person drops it somewhere. */
@@ -81,15 +64,15 @@ internal class OverlayBall(
     )
         private set
 
-    /** Room around the ball for its shadow, on every side (the window is square and centred on it). */
-    val pad = dp(PAD_DP)
-    val diameter = dp(BALL_DP)
+    /** Room round the ball for its shadow, on every side (the window is square and centred on it). */
+    val pad = context.dp(PAD_DP)
+    val diameter = context.dp(BALL_DP)
 
     /** Window side. */
     val size = diameter + 2 * pad
 
-    /** The ball's gap to the screen side, as a window margin: 12 dp, like the pill and the composer. */
-    private val margin = BallGeometry.margin(dp(EDGE_DP), pad)
+    /** The ball's gap to the screen side, as a window margin: 12 dp, like the capsule. */
+    private val margin = BallGeometry.margin(context.dp(EDGE_DP), pad)
 
     private val ball = BallView(context)
     val root: FrameLayout = FrameLayout(context).apply {
@@ -111,7 +94,6 @@ internal class OverlayBall(
         if (Build.VERSION.SDK_INT >= 30) setFitInsetsTypes(0)
     }
 
-    private val glideCurve = PathInterpolator(0.32f, 0.72f, 0f, 1f)
     private var glide: ValueAnimator? = null
     private var markFade: ValueAnimator? = null
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -121,6 +103,7 @@ internal class OverlayBall(
     private var startY = 0
     private var dragging = false
     private var tracker: VelocityTracker? = null
+    private val hold = HoldToStop()
 
     init {
         ball.setOnClickListener { onTap() }
@@ -151,20 +134,22 @@ internal class OverlayBall(
         cancelGlide()
         markFade?.cancel()
         markFade = null
+        endHold()
         endDrag()
         root.animate().cancel()
         try { wm.removeView(root) } catch (_: Exception) {}
     }
 
-    fun setColors(colors: Colors) = ball.setColors(colors)
-
-    /** The surface's opacity (闲置时不透明度); the mark stays at full. */
-    fun setSurfaceAlpha(alpha: Float) = ball.setSurfaceAlpha(alpha)
-
-    fun setLook(look: Look, description: CharSequence) {
+    /** What the mark says, the screen reader's line, and whether a lifted limit badges it. */
+    fun setLook(look: MarkLook, description: CharSequence, badge: Boolean, stopLabel: CharSequence?) {
         ball.look = look
+        ball.badge = badge
         ball.contentDescription = description
+        ball.stopLabel = stopLabel
     }
+
+    /** The whole ball's opacity: the 闲置时不透明度 when idle, full otherwise. */
+    fun setIdle(alpha: Float, animated: Boolean, durationMs: Long) = OverlayMotion.fadeIdle(root, alpha, animated, durationMs)
 
     /** Where the ball rests now ([dock] on the current screen). */
     fun dockPos(): WindowPos = EdgeSnap.position(dock, size, size, area(), margin)
@@ -183,14 +168,14 @@ internal class OverlayBall(
         cancelGlide()
         val fromX = params.x
         val fromY = params.y
-        if (!animated || (fromX == to.x && fromY == to.y)) {
+        if (!animated || !OverlayMotion.on() || (fromX == to.x && fromY == to.y)) {
             move(to)
             then?.invoke()
             return
         }
         glide = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = durationMs
-            interpolator = glideCurve
+            interpolator = OverlayMotion.glide
             addUpdateListener { a ->
                 val f = a.animatedValue as Float
                 params.x = (fromX + (to.x - fromX) * f).roundToInt()
@@ -218,17 +203,17 @@ internal class OverlayBall(
         glide = null
     }
 
-    /** Fades the mark inside the ball (the surface stays): out on the way back into the pill, in after a fold. */
+    /** Fades the mark inside the ball (the surface stays): out on the way back into the capsule, in after a fold. */
     fun fadeMark(to: Float, animated: Boolean, durationMs: Long = MARK_MS) {
         markFade?.cancel()
         markFade = null
-        if (!animated || !animationsOn()) {
+        if (!animated || !OverlayMotion.on()) {
             ball.markAlpha = to
             return
         }
         markFade = ValueAnimator.ofFloat(ball.markAlpha, to).apply {
             duration = durationMs
-            interpolator = glideCurve
+            interpolator = OverlayMotion.glide
             addUpdateListener { ball.markAlpha = it.animatedValue as Float }
             start()
         }
@@ -253,13 +238,16 @@ internal class OverlayBall(
                 tracker?.recycle()
                 tracker = VelocityTracker.obtain().also { track(it, e) }
                 press(true)
+                startHold()
             }
             MotionEvent.ACTION_MOVE -> {
                 tracker?.let { track(it, e) }
                 val dx = e.rawX - downX
                 val dy = e.rawY - downY
-                if (!dragging && (abs(dx) > slop || abs(dy) > slop)) {
+                if (!dragging && hold.state != HoldToStop.State.FIRED && (abs(dx) > slop || abs(dy) > slop)) {
                     dragging = true
+                    hold.moved()
+                    endHold()
                     press(false)
                 }
                 if (dragging) {
@@ -272,16 +260,60 @@ internal class OverlayBall(
             MotionEvent.ACTION_UP -> {
                 tracker?.let { track(it, e) }
                 press(false)
-                if (dragging) settle(velocityX()) else v.performClick()
+                val release = hold.up(SystemClock.uptimeMillis())
+                endHold()
+                when (release) {
+                    HoldToStop.Release.TAP -> v.performClick()
+                    HoldToStop.Release.DRAG -> settle(velocityX())
+                    HoldToStop.Release.STOP -> fire()
+                    else -> Unit
+                }
                 endDrag()
             }
             MotionEvent.ACTION_CANCEL -> {
                 press(false)
+                hold.cancel()
+                endHold()
                 if (dragging) settle(0f)
                 endDrag()
             }
         }
         return true
+    }
+
+    /**
+     * The ring round the ball while it is held; the stop when it closes. Frame callbacks on the
+     * wall clock ([HoldToStop]), not an animator: with 移除动画 an animator would end at once and the
+     * hold would never stop anything.
+     */
+    private val holdTick = object : Runnable {
+        override fun run() {
+            val now = SystemClock.uptimeMillis()
+            if (hold.tick(now)) {
+                fire()
+                return
+            }
+            ball.hold = hold.progress(now)
+            if (hold.nextAt() != null) ball.postOnAnimation(this)
+        }
+    }
+
+    private fun fire() {
+        ball.hold = 1f
+        ball.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        press(false)
+        onStop()
+    }
+
+    private fun startHold() {
+        endHold()
+        hold.down(SystemClock.uptimeMillis())
+        ball.postOnAnimation(holdTick)
+    }
+
+    private fun endHold() {
+        ball.removeCallbacks(holdTick)
+        if (hold.state != HoldToStop.State.FIRED) ball.hold = 0f
     }
 
     /** Raw coordinates: the window moves under the finger, so view coordinates stand still. */
@@ -308,43 +340,49 @@ internal class OverlayBall(
         val a = area()
         dock = EdgeSnap.dockFor(params.x, params.y, size, size, a, margin, velocityX)
         prefs.edit().putString(K_SIDE, if (dock.side == Side.LEFT) "left" else "right").putFloat(K_Y, dock.yFraction).apply()
-        glideTo(EdgeSnap.position(dock, size, size, a, margin), animationsOn())
+        glideTo(EdgeSnap.position(dock, size, size, a, margin), OverlayMotion.on())
     }
 
     private fun press(down: Boolean) {
         val scale = if (down) PRESS_SCALE else 1f
-        if (!animationsOn()) {
+        if (!OverlayMotion.on()) {
             ball.scaleX = scale
             ball.scaleY = scale
             return
         }
-        ball.animate().scaleX(scale).scaleY(scale).setDuration(if (down) 90 else 200).setInterpolator(glideCurve).start()
+        ball.animate().scaleX(scale).scaleY(scale).setDuration(if (down) 90 else 200).setInterpolator(OverlayMotion.glide).start()
     }
 
-    private fun dp(v: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), context.resources.displayMetrics).roundToInt()
-
     /**
-     * The ball itself: the pill's surface as a circle, and one mark in the 22 dp glyph square —
-     * a thin ring with a dot (working; the ring breathes like the engine page's), two bars (paused),
-     * a rounded square (stopped). Everything centred: the marks are symmetric about both axes.
+     * The ball itself: the capsule's surface as a circle and its mark ([MarkPainter]); a small
+     * brick-rose dot on its shoulder while a limit is lifted; the hold-to-stop ring.
      */
-    private class BallView(context: Context) : View(context) {
-        private var colors: Colors? = null
-        private val surface = GradientDrawable().apply { shape = GradientDrawable.OVAL }
-        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-        private val rect = RectF()
+    private inner class BallView(context: Context) : View(context) {
+        private val painter = MarkPainter(context)
+        private val surface = SurfacePainter(context)
+        private val circle = RectF()
+        private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+        private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private var breath: ValueAnimator? = null
         private var phase = 1f
         private var shown = false
 
-        var look: Look = Look.RUNNING
+        var look: MarkLook = MarkLook.RUNNING
             set(value) {
                 if (field == value) return
                 field = value
                 syncBreath()
                 invalidate()
             }
+
+        var badge = false
+            set(value) { if (field != value) { field = value; invalidate() } }
+
+        /** 0–1: the hold-to-stop ring. */
+        var hold = 0f
+            set(value) { if (field != value) { field = value; invalidate() } }
+
+        var stopLabel: CharSequence? = null
 
         /** The mark's opacity (0–1) on top of its own; the surface is not affected. */
         var markAlpha = 1f
@@ -356,26 +394,28 @@ internal class OverlayBall(
             }
 
         init {
-            background = surface
-            elevation = dpf(3f)
             isClickable = true
             isFocusable = true
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) = outline.setOval(0, 0, view.width, view.height)
+            }
+            softShadow(palette, 5f)
         }
 
-        fun setColors(c: Colors) {
-            colors = c
-            surface.orientation = GradientDrawable.Orientation.TOP_BOTTOM
-            surface.colors = intArrayOf(c.top, c.bottom)
-            surface.setStroke(dpf(1f).roundToInt().coerceAtLeast(1), c.stroke)
-            invalidate()
+        override fun getAccessibilityClassName(): CharSequence = android.widget.Button::class.java.name
+
+        override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+            super.onInitializeAccessibilityNodeInfo(info)
+            stopLabel?.let { info.addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.overlay_action_stop, it)) }
         }
 
-        fun setSurfaceAlpha(a: Float) {
-            val v = (255 * a.coerceIn(0f, 1f)).roundToInt()
-            if (surface.alpha == v) return
-            surface.alpha = v
-            invalidate()
+        override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
+            if (action == R.id.overlay_action_stop && stopLabel != null) {
+                onStop()
+                return true
+            }
+            return super.performAccessibilityAction(action, arguments)
         }
 
         override fun onVisibilityAggregated(isVisible: Boolean) {
@@ -391,19 +431,9 @@ internal class OverlayBall(
         }
 
         private fun syncBreath() {
-            val want = shown && look == Look.RUNNING && animationsOn()
+            val want = shown && look == MarkLook.RUNNING && OverlayMotion.on()
             if (want && breath == null) {
-                breath = ValueAnimator.ofFloat(0f, 1f).apply {
-                    duration = BREATH_MS
-                    repeatCount = ValueAnimator.INFINITE
-                    interpolator = LinearInterpolator()
-                    addUpdateListener {
-                        // 1 → 0 → 1 over one period, eased at both ends (a cosine).
-                        phase = (0.5f + 0.5f * cos(2 * PI * (it.animatedValue as Float))).toFloat()
-                        invalidate()
-                    }
-                    start()
-                }
+                breath = breathing { phase = it; invalidate() }
             } else if (!want && breath != null) {
                 breath?.cancel()
                 breath = null
@@ -414,51 +444,31 @@ internal class OverlayBall(
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            val c = colors ?: return
-            if (markAlpha <= 0f) return
+            circle.set(0f, 0f, width.toFloat(), height.toFloat())
+            surface.draw(canvas, circle, width / 2f, palette)
             val cx = width / 2f
             val cy = height / 2f
-            ring.strokeWidth = dpf(2f)
-            // Ring centre line at 10 dp: with the 2 dp stroke the mark fills the 22 dp glyph square.
-            val r = dpf(10f)
-            fun alpha(a: Float) = (255 * a * markAlpha).roundToInt().coerceIn(0, 255)
-            when (look) {
-                Look.RUNNING -> {
-                    ring.color = c.accent
-                    ring.alpha = alpha(0.32f + 0.68f * phase)
-                    canvas.drawCircle(cx, cy, r, ring)
-                    fill.color = c.accent
-                    fill.alpha = alpha(1f)
-                    canvas.drawCircle(cx, cy, dpf(3.5f), fill)
-                }
-                Look.PAUSED -> {
-                    ring.color = c.muted
-                    ring.alpha = alpha(0.36f)
-                    canvas.drawCircle(cx, cy, r, ring)
-                    fill.color = c.muted
-                    fill.alpha = alpha(1f)
-                    val w = dpf(2.5f)
-                    val h = dpf(9f)
-                    val gap = dpf(3f)
-                    rect.set(cx - gap / 2 - w, cy - h / 2, cx - gap / 2, cy + h / 2)
-                    canvas.drawRoundRect(rect, w / 2, w / 2, fill)
-                    rect.set(cx + gap / 2, cy - h / 2, cx + gap / 2 + w, cy + h / 2)
-                    canvas.drawRoundRect(rect, w / 2, w / 2, fill)
-                }
-                Look.STOPPED -> {
-                    ring.color = c.muted
-                    ring.alpha = alpha(0.36f)
-                    canvas.drawCircle(cx, cy, r, ring)
-                    fill.color = c.muted
-                    fill.alpha = alpha(1f)
-                    val s = dpf(8f)
-                    rect.set(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2)
-                    canvas.drawRoundRect(rect, dpf(2f), dpf(2f), fill)
-                }
+            painter.draw(canvas, cx, cy, look, palette, phase, markAlpha)
+            if (hold > 0f) {
+                // Over the mark's ring, from twelve o'clock, in the stop colour.
+                ringPaint.color = palette.danger
+                ringPaint.strokeWidth = context.dpf(2.5f)
+                val r = context.dpf(10f)
+                canvas.drawArc(cx - r, cy - r, cx + r, cy + r, -90f, 360f * hold, false, ringPaint)
+            }
+            if (badge && markAlpha > 0f) {
+                // On the ball's shoulder (45°), ringed in the surface so it reads as on top of it.
+                val off = width / 2f * 0.7071f
+                val bx = cx + off
+                val by = cy - off
+                dotPaint.color = palette.surfaceTop
+                dotPaint.alpha = (255 * markAlpha).roundToInt()
+                canvas.drawCircle(bx, by, context.dpf(5.5f), dotPaint)
+                dotPaint.color = palette.danger
+                dotPaint.alpha = (255 * markAlpha).roundToInt()
+                canvas.drawCircle(bx, by, context.dpf(4f), dotPaint)
             }
         }
-
-        private fun dpf(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
     }
 
     companion object {
@@ -469,14 +479,11 @@ internal class OverlayBall(
 
         /** First fold: the right side, a third of the way down — clear of most apps' top bars. */
         const val DEFAULT_Y = 0.3f
-        const val BALL_DP = 44
-        const val PAD_DP = 6
-        const val EDGE_DP = 12
+        const val BALL_DP = CapsuleMetrics.HEIGHT_DP
+        const val PAD_DP = 10
+        const val EDGE_DP = CapsuleMetrics.EDGE_DP
         const val GLIDE_MS = 260L
         const val MARK_MS = 200L
-        const val BREATH_MS = 2_400L
         const val PRESS_SCALE = 0.94f
-
-        fun animationsOn() = if (Build.VERSION.SDK_INT >= 26) ValueAnimator.areAnimatorsEnabled() else true
     }
 }

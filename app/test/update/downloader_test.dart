@@ -175,7 +175,7 @@ void main() {
   test('clean keeps only the current download', () async {
     File('${dir.path}/old.apk').writeAsStringSync('x');
     File('${dir.path}/a.apk.part').writeAsStringSync('y');
-    await downloader(FakeHttp()).clean(keep: 'a.apk');
+    await downloader(FakeHttp()).clean(keep: ['a.apk']);
     expect(dir.listSync().map((e) => e.uri.pathSegments.last), ['a.apk.part']);
   });
 

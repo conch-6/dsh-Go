@@ -102,5 +102,9 @@
   "catalogCordisRemoveVersions": "{versions, plural, =1{This will stop it and delete 1 version.} other{This will stop it and delete all {versions} versions.}}",
   "catalogCordisVersionCount": "{count, plural, =1{1 version} other{{count} versions}}",
   "catalogToolsSection": "Tools",
-  "catalogAllSettings": "All settings"
+  "catalogAllSettings": "All settings",
+  "diagnosticsForAi": "Let the AI read diagnostics",
+  "diagnosticsForAiHint": "Write the snapshot where the engine can read it",
+  "diagnosticsForAiDone": "Written — ask the AI to \"check the diagnostics\"",
+  "diagnosticsForAiFailed": "Not written: the local runtime is not installed"
 }

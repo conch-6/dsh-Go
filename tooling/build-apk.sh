@@ -17,12 +17,14 @@
 #   -n, --build-number N             use N instead of the build minute (never lower than what's installed)
 #   --build-name X.Y.Z               version name instead of app/pubspec.yaml's
 #   --keep-daemon                    leave the Gradle daemon running afterwards
+#   --beta                           embed the beta channel token (internal builds only)
 #   --dry-run                        print what would run
 #
 # The version name comes from app/pubspec.yaml; its `+N` is only a placeholder.
-# Release builds carry the beta channel token (lib/update/update_config.dart)
-# when ~/keys/dshgo-beta-channel.token exists (mode 600); DSH_BETA_TOKEN_FILE
-# points elsewhere, DSH_BETA_TOKEN_FILE= leaves it out. Never printed.
+# Public release builds ask GitHub only. `--beta` embeds the beta channel token
+# (lib/update/update_config.dart) for internal builds; the token file is
+# ~/keys/dshgo-beta-channel.token (mode 600), DSH_BETA_TOKEN_FILE points
+# elsewhere. Never printed, never part of a public release.
 # This script takes no machine locks; callers add their own.
 set -euo pipefail
 
@@ -33,7 +35,7 @@ OUT="$APP/build/app/outputs/flutter-apk"
 usage() { sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 die() { echo "build-apk: $*" >&2; exit 1; }
 
-flavor=arm64 mode=release target='' code='' name='' dry=0 keep_daemon=0
+flavor=arm64 mode=release target='' code='' name='' dry=0 keep_daemon=0 want_beta=0
 extra=()
 while (($#)); do
   case "$1" in
@@ -47,6 +49,7 @@ while (($#)); do
     --build-name) name=${2:?--build-name needs a version}; shift 2 ;;
     --build-name=*) name=${1#*=}; shift ;;
     --keep-daemon) keep_daemon=1; shift ;;
+    --beta) want_beta=1; shift ;;
     --dry-run) dry=1; shift ;;
     -h | --help) usage; exit 0 ;;
     --) shift; extra=("$@"); break ;;
@@ -89,7 +92,12 @@ platform_of() { case "$1" in arm64) echo android-arm64 ;; x64) echo android-x64 
 beta_file=${DSH_BETA_TOKEN_FILE-$HOME/keys/dshgo-beta-channel.token}
 beta_json="$APP/build/.beta-channel.json"
 beta=0
-if [[ $mode == release && -n $beta_file && -s $beta_file ]]; then
+# Public builds never carry the channel token: a stale beta feed would outrank
+# the GitHub release in the update checker (that is how 1.0.4 stayed "latest").
+if ((want_beta)) && [[ ! -s $beta_file ]]; then
+  die "--beta needs a token file ($beta_file)"
+fi
+if ((want_beta)) && [[ $mode == release && -n $beta_file && -s $beta_file ]]; then
   bits=$(stat -c %a "$beta_file")
   [[ $bits == 600 || $bits == 400 ]] || die "$beta_file is mode $bits; chmod 600 it"
   beta=1

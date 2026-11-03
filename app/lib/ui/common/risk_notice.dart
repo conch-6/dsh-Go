@@ -149,6 +149,16 @@ abstract final class RiskNotices {
     ask: AskAiTopic.allowForChat,
   );
 
+  /// 不打扰模式 › Root and 自动恢复无障碍's 申请 root 授权: the root manager's
+  /// own prompt comes next.
+  static RiskNotice get rootChannel => RiskNotice(
+    id: 'phone.root',
+    level: RiskLevel.medium,
+    title: appL10n.phonePrivilegedRootRiskTitle,
+    body: appL10n.phonePrivilegedRootRiskBody,
+    action: appL10n.phonePrivilegedRootPrepare,
+  );
+
   /// 宠物 › App 外显示, before the trip to 「显示在其他应用上层」.
   static RiskNotice get petOverlay => RiskNotice(
     id: 'pets.overlay-permission',

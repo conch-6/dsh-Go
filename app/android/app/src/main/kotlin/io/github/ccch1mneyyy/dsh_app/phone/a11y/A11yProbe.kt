@@ -31,7 +31,10 @@ import java.util.concurrent.Executors
  *        fg | windows | status [text] | confirm sentence [app] [first] | handoff reason [ms] | injecttest [relax] | guard |
  *        begin (a task starts, as on a tool call) | finish [session] [host] [reopen] (what Dart's finishTask does) |
  *        overlay [opacity 0.3–1] [auto true|false] (the 悬浮条 settings, as the settings page writes them) |
- *        palette dark|light|auto (the overlay's palette against the system's, for contrast checks)
+ *        palette dark|light|auto (the overlay's palette against the system's, for contrast checks) |
+ *        form ball|capsule|card (as the person's taps would) | press key=pause|stop|steer|done |
+ *        unlocks none|system|secrets|all|real (lifted limits to show) | freeze true|false (no timer changes the form) |
+ *        app [name] (the task's app for the card) | state (what the control shows)
  */
 internal class A11yProbe(private val service: PhoneA11yService, private val driver: MainScreenDriver, private val overlay: ControlOverlay) {
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "dsh-a11y-probe") }
@@ -104,6 +107,21 @@ internal class A11yProbe(private val service: PhoneA11yService, private val driv
                         a.s("auto")?.toBooleanStrictOrNull()?.let { put("autoCollapse", it) }
                     },
                 ).toString()
+                "form" -> { overlay.debugForm(a.s("form") ?: "capsule"); "ok" }
+                "press" -> { overlay.debugKey(a.s("key") ?: "pause"); "ok" }
+                "unlocks" -> {
+                    overlay.debugUnlocks = when (a.s("set")) {
+                        "none" -> io.github.ccch1mneyyy.dsh_app.phone.PhoneUnlocks()
+                        "system" -> io.github.ccch1mneyyy.dsh_app.phone.PhoneUnlocks(systemPages = true)
+                        "secrets" -> io.github.ccch1mneyyy.dsh_app.phone.PhoneUnlocks(secretFields = true)
+                        "all" -> io.github.ccch1mneyyy.dsh_app.phone.PhoneUnlocks(systemPages = true, secretFields = true, ownApp = true)
+                        else -> null
+                    }
+                    "unlocks=${overlay.debugUnlocks}"
+                }
+                "app" -> { overlay.debugApp = a.s("name"); "app=${overlay.debugApp}" }
+                "freeze" -> { overlay.debugFreeze = a.b("on"); "freeze=${overlay.debugFreeze}" }
+                "state" -> overlay.debugState()
                 "windows" -> windows()
                 else -> "unknown cmd $cmd"
             }

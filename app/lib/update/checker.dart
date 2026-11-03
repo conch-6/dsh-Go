@@ -4,6 +4,7 @@ import 'dart:io';
 import 'release.dart';
 import 'update_config.dart';
 import 'update_http.dart';
+import 'version.dart';
 
 /// Why no endpoint could say what the latest release is. All of them read
 /// "暂时检查不了更新" to the person; the kind is for logs and tests.
@@ -56,19 +57,32 @@ class UpdateChecker {
 
   static const _timeout = Duration(seconds: 12);
 
-  Future<CheckResult> check({String? preferred, void Function(UpdateEndpoint endpoint)? onAttempt}) async {
+  Future<CheckResult> check({
+    String? preferred,
+    void Function(UpdateEndpoint endpoint)? onAttempt,
+    /// What this build is. A source that answers with something no newer than
+    /// this is not the end of the search: another source may still know a
+    /// release (a stale channel must not hide the GitHub release). Null keeps
+    /// the old behaviour of taking the first answer.
+    AppVersion? installed,
+  }) async {
     final attempts = <(String, CheckFailure)>[];
+    CheckFound? stale;
     for (final endpoint in sources.metadataEndpoints(preferred: preferred)) {
       onAttempt?.call(endpoint);
       final outcome = await _try(endpoint);
       switch (outcome) {
         case ReleaseInfo release:
-          return CheckFound(release, endpoint);
+          final found = CheckFound(release, endpoint);
+          if (installed == null || release.version.isNewerThan(installed)) return found;
+          // Answering with an older release is not proof that nothing newer
+          // exists: keep the newest answer and ask the next source.
+          if (stale == null || release.version.isNewerThan(stale.release.version)) stale = found;
         case CheckFailure failure:
           attempts.add((endpoint.id, failure));
       }
     }
-    return CheckFailed(_summarize(attempts.map((a) => a.$2)), attempts: attempts);
+    return stale ?? CheckFailed(_summarize(attempts.map((a) => a.$2)), attempts: attempts);
   }
 
   /// Rate limiting wins (it tells the person "later" for sure); 404 only

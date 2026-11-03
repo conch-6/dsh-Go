@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import '../../../l10n/l10n.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
+import 'permission_pill.dart' show PermissionPillMetrics;
 
-/// 「自动允许中 ⓧ」:浮在输入条左上方的警示色小胶囊,32 高。
+/// 「自动允许中 ⓧ」:浮在输入条左上方的警示色小胶囊,和插件胶囊一样高
+/// ([PermissionPillMetrics.height])。
 ///
 /// 自动允许意味着命令不再逐条询问,所以它必须一直看得见,而且一点就关。
 /// 两端都是图标(左 ✓✓、右 ⓧ),左右内边距相等。
@@ -35,7 +37,7 @@ class AutoApprovePill extends StatelessWidget {
         child: InkWell(
           onTap: onDisable,
           child: SizedBox(
-            height: 32,
+            height: PermissionPillMetrics.height,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Row(

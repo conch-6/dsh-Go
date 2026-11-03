@@ -15,20 +15,19 @@ const _maxReplyBytes = 8192;
 
 extension SessionDeletionApi on DshClient {
   /// A fresh capability read, not inferred from the release or bridge version.
+  ///
+  /// It uses the same authenticated GET transport as the rest of the bridge
+  /// API (inventory, plugin config); a missing route, a login page or another
+  /// plugin's JSON is *not* proof of support.
   Future<bool> supportsSessionDeletion({Duration timeout = const Duration(seconds: 8)}) async {
     final transport = carrier;
     if (transport is! DshHttpCarrier) return false;
-    final response = await transport.connection.getBounded(
-      sessionDeletionCapabilityPath,
-      maxBytes: _maxReplyBytes,
-      timeout: timeout,
-    );
+    final response = await transport.connection.get(sessionDeletionCapabilityPath, timeout: timeout);
     if (response.statusCode == 404 || response.statusCode == 405 || response.statusCode == 501) return false;
     if (response.statusCode != 200) {
       throw DshHttpException(response.statusCode, 'session deletion capability is unavailable');
     }
     final body = asMap(tryDecodeJson(response.text));
-    // A login page or an unrelated plugin response is not proof of support.
     return response.contentType == 'application/json' && body?['version'] == 1 && body?['supported'] == true;
   }
 

@@ -312,4 +312,80 @@ void main() {
     await waitSync(() => h.a.answers.length == 2, 'same client reconnected approval');
     expect(h.state.autoApprove, isTrue);
   }));
+
+  for (final operation in ['approval', 'answer', 'reject']) {
+    for (final transition in ['stay', 'same-host-reconnect', 'different-host', 'host-round-trip']) {
+      test('manual $operation failure belongs to its original host ($transition)', () => scenario((h) async {
+        h.a.host.handlers[r'$events/result'] = (args) {
+          h.a.answers.add(args);
+          return {
+            'ok': false,
+            'error': {'code': 'test/previous-host-failure', 'message': 'Controlled old-host response'},
+          };
+        };
+        h.a.host.sockets.last.event({
+          'type': 'waterfall',
+          'event': operation == 'approval' ? 'approval/request' : 'user-questions/request',
+          'eventId': 'manual-A',
+          'agentId': 'S',
+          'request': operation == 'approval'
+              ? {'toolName': 'bash', 'callId': 'A-manual', 'reason': 'controlled request'}
+              : {
+                  'questions': [{'id': 'choice', 'question': 'Choose on A', 'options': <Object?>[]}],
+                },
+        });
+        await waitSync(
+          () => operation == 'approval'
+              ? h.state.openApproval?.eventId == 'manual-A'
+              : h.state.questions.any((q) => q.eventId == 'manual-A'),
+          'original request reaches the actual controller',
+        );
+        final controller = h.chat;
+        final approval = h.state.openApproval;
+        final question = h.state.questions.firstOrNull;
+        h.a.hold.arm(r'$events/result');
+        Future<void> reply() async {
+          if (operation == 'approval') {
+            await controller.respond(approval!, ApprovalDecision.allowOnce);
+          } else if (operation == 'answer') {
+            expect(await controller.answer(question!, const [QuestionAnswer('choice', custom: 'answer A')]), isFalse);
+          } else {
+            expect(await controller.rejectQuestion(question!), isFalse);
+          }
+        }
+        final pending = reply();
+        await h.a.hold.received!.future.timeout(const Duration(seconds: 4));
+        expect(h.a.answers, hasLength(1));
+        if (transition == 'same-host-reconnect') {
+          final replacement = await _Peer.start('A-reconnected');
+          h.extras.add(replacement);
+          h.container.updateOverrides([
+            _peers.overrideWithValue({HostRef.local: replacement, _remote: h.b}),
+            _routing,
+          ]);
+          await h.container.pump();
+          await h.ready(replacement);
+        } else if (transition == 'different-host') {
+          await h.select(_remote, h.b);
+          h.b.ask('current-B');
+          await waitSync(() => h.state.openApproval?.eventId == 'current-B', 'current B approval');
+        } else if (transition == 'host-round-trip') {
+          await h.select(_remote, h.b);
+          await h.select(HostRef.local, h.a);
+          expect(h.container.read(activeHostProvider), HostRef.local);
+        }
+        expect(h.state.error, isNull);
+        h.a.hold.finish();
+        await pending;
+        await h.container.pump();
+        if (transition == 'different-host' || transition == 'host-round-trip') {
+          expect(h.state.error, isNull, reason: 'A response from retired consent must not report an error on the current conversation.');
+          if (transition == 'different-host') expect(h.state.openApproval?.eventId, 'current-B');
+          expect(h.b.answers, isEmpty);
+        } else {
+          expect(h.state.error, isNotNull, reason: 'A current failure must still be reported.');
+        }
+      }));
+    }
+  }
 }

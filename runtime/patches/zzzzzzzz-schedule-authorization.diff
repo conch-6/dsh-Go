@@ -1,0 +1,192 @@
+--- a/node_modules/@deepseek-ai/dsh-schedule/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-schedule/lib/index.js
+@@ -1,7 +1,7 @@
+ import { randomUUID } from "node:crypto";
+ import z from "@deepseek-ai/schemastery";
+ import { Service } from "@deepseek-ai/cordis";
+-import { Remote, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
++import { Remote, RemoteError, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
+ import { delegationDepthOf } from "@deepseek-ai/dsh-subagent";
+ import { createUserMessage } from "@deepseek-ai/dsh-llm";
+ import { Temporal } from "@js-temporal/polyfill";
+@@ -1985,6 +1985,7 @@
+ 		chain = Promise.resolve();
+ 		runtime;
+ 		stopping = false;
++		dshGoAuthorizationAbort = new AbortController();
+ 		/**
+ 		* @param ctx - Host services owning storage, dispatch, and Session restoration.
+ 		* @param config - Validated retention configuration for delivery history.
+@@ -2012,6 +2013,7 @@
+ 				try {
+ 					cleanup = ctx.effect(() => async () => {
+ 						this.stopping = true;
++						this.dshGoAuthorizationAbort.abort();
+ 						await this.runtime?.dispose();
+ 						await this.chain;
+ 						await domain.close();
+@@ -2082,6 +2084,7 @@
+ 		* @returns The durably stored schedule. Cancellation does not roll back an in-flight write.
+ 		*/
+ 		async create(sessionId, request, signal) {
++			request = structuredClone(request);
+ 			if (Number(request.at !== void 0) + Number(request.after_seconds !== void 0) + Number(request.every_seconds !== void 0) + Number(request.daily !== void 0) + Number(request.weekly !== void 0) + Number(request.cron !== void 0) > 1) throw new ScheduleInputError("invalid_selector", "Exactly one reminder selector is required.");
+ 			const title = scheduleTitle(request.title);
+ 			const id = ScheduleId(`schedule-${randomUUID()}`);
+@@ -2094,11 +2097,13 @@
+ 			else if (request.weekly !== void 0) record = createWeeklyScheduleRecord(id, request.prompt, request.weekly, now, title);
+ 			else if (request.cron !== void 0) record = createCronScheduleRecord(id, request.prompt, request.cron, now, title);
+ 			else throw new ScheduleInputError("invalid_selector", "Exactly one reminder selector is required.");
++			await this.dshGoAuthorize(sessionId, record, "create", signal);
+ 			return this.serialize(async () => {
+ 				const refusal = this.reminderTargetRefusal(sessionId);
+ 				if (refusal !== void 0) throw new ScheduleInputError("subagent_session", refusal.message);
+ 				const domain = await this.getDomain();
+ 				signal?.throwIfAborted();
++				this.dshGoAssertFuture(record);
+ 				this.ctx.sessionPersistence.dshGoDeletion?.assertAdmit(sessionId);
+ 				await domain.table("tasks").put(id, {
+ 					sessionId,
+@@ -2184,7 +2189,8 @@
+ 		}
+ 		/**
+ 		* Update the name, instruction, and timing of an active task within the original Session
+-		* binding without activating the Session or changing saved deliveries.
++		* binding without starting a model turn or changing saved deliveries. An idle Session
++		* may be loaded to route the mandatory user confirmation.
+ 		*
+ 		* Each supplied field replaces its stored value; an omitted field keeps it. A name or
+ 		* instruction change alone does not reset the committed target. A Session a delegated
+@@ -2197,6 +2203,26 @@
+ 		* Storage and lifecycle failures reject; cancellation after a write starts does not roll it back.
+ 		*/
+ 		async update(request, signal) {
++			request = structuredClone(request);
++			// Never hold the global mutation/deletion queue while waiting for a person.
++			const prepared = await this.serialize(async () => {
++				const refusal = this.reminderTargetRefusal(request.sessionId);
++				if (refusal !== void 0) return { result: refusal };
++				const tasks = (await this.getDomain()).table("tasks");
++				signal?.throwIfAborted();
++				const current = tasks.get(request.id);
++				if (current === void 0 || current.sessionId !== request.sessionId) return {
++					result: { id: request.id, updated: false, code: "schedule_not_found" }
++				};
++				if (current.status === "inactive") return {
++					result: { id: request.id, updated: false, code: "schedule_ended" }
++				};
++				const result = resolveScheduleUpdate(current.record, request.expected, request.change, Date.now(), request);
++				return { result, expected: structuredClone(current.record) };
++			});
++			const result = prepared.result;
++			if (!("record" in result) || !result.updated) return result;
++			await this.dshGoAuthorize(request.sessionId, result.record, "update", signal);
+ 			return this.serialize(async () => {
+ 				const refusal = this.reminderTargetRefusal(request.sessionId);
+ 				if (refusal !== void 0) return refusal;
+@@ -2204,25 +2230,73 @@
+ 				signal?.throwIfAborted();
+ 				const current = tasks.get(request.id);
+ 				if (current === void 0 || current.sessionId !== request.sessionId) return {
+-					id: request.id,
+-					updated: false,
+-					code: "schedule_not_found"
++					id: request.id, updated: false, code: "schedule_not_found"
+ 				};
+ 				if (current.status === "inactive") return {
+-					id: request.id,
+-					updated: false,
+-					code: "schedule_ended"
++					id: request.id, updated: false, code: "schedule_ended"
+ 				};
+-				const result = resolveScheduleUpdate(current.record, request.expected, request.change, Date.now(), request);
+-				if (!("record" in result) || !result.updated) return result;
+-				await tasks.put(request.id, {
+-					...current,
+-					record: result.record
+-				});
++				if (!isDeepStrictEqual(current.record, prepared.expected)) return {
++					id: request.id, updated: false, code: "schedule_conflict"
++				};
++				this.dshGoAssertFuture(result.record);
++				await tasks.put(request.id, { ...current, record: result.record });
+ 				this.emitChanged();
+ 				this.runtime?.requestDrive();
+ 				return result;
+ 			});
++		}
++		dshGoAssertFuture(record) {
++			if (this.stopping || this.dshGoAuthorizationAbort.signal.aborted) throw new RemoteError("schedule-authorization-required", "The schedule service stopped. Authorize the task again after reconnecting.");
++			if (Date.parse(record.scheduledAt) <= Date.now()) throw new RemoteError("schedule-authorization-required", "The reviewed task time has passed. Propose a future time and confirm again.");
++		}
++		async dshGoAuthorize(sessionId, record, operation, signal) {
++			const denied = () => new RemoteError("schedule-authorization-required", "This task requires a separate, explicit user authorization. Rejection, cancellation, timeout, or an unavailable confirmation interface does not authorize it.");
++			const questions = this.ctx.get("userQuestions");
++			if (this.stopping || signal?.aborted || questions === void 0) throw denied();
++			const refusal = this.reminderTargetRefusal(sessionId);
++			if (refusal !== void 0) throw denied();
++			// Loading an idle Session routes the confirmation; it does not send a model prompt.
++			const resolved = await this.ctx.sessionController.resolveAgent(sessionId);
++			if ("error" in resolved || this.stopping || signal?.aborted) throw denied();
++			const deadline = new AbortController();
++			const combined = AbortSignal.any([deadline.signal, this.dshGoAuthorizationAbort.signal, ...signal === void 0 ? [] : [signal]]);
++			if (combined.aborted) throw denied();
++			const timer = setTimeout(() => deadline.abort(), 120000);
++			let onAbort;
++			const cancelled = new Promise((_, reject) => {
++				onAbort = () => reject(denied());
++				combined.addEventListener("abort", onAbort, { once: true });
++			});
++			const id = `dsh-go-schedule-authorization-${randomUUID()}`;
++			const approve = "授权 / Authorize";
++			// Plain text, not Markdown; escape invisible formatting controls in untrusted fields.
++			const details = JSON.stringify({ operation, sessionId, task: record }, null, 2).replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
++			try {
++				// Questions have no auto-approve path, including on older clients. Do not use
++				// approval/request: full-access sessions and allow-all clients bypass that gate.
++				const answer = await Promise.race([questions.ask({
++					agent: resolved.agent,
++					signal: combined,
++					purpose: "schedule-authorization",
++					questions: [{
++						id,
++						header: "定时任务授权 / Schedule authorization",
++						question: "是否授权以下完整任务？到点会唤醒助手并按会话权限执行，不只是通知。仅本次创建或修改有效。\nAuthorize this complete task? It will wake an agent and run with the session's permissions, not just display a notification. This confirmation covers only this creation or edit.\n\n" + details,
++						options: [{ label: approve }, { label: "拒绝 / Reject" }],
++						multiSelect: false
++					}]
++				}), cancelled]);
++				const accepted = answer?.answers;
++				if (combined.aborted || this.stopping || !Array.isArray(accepted) || accepted.length !== 1 || accepted[0].id !== id || !Array.isArray(accepted[0].selected) || accepted[0].selected.length !== 1 || accepted[0].selected[0] !== approve || accepted[0].custom !== void 0) throw denied();
++				this.dshGoAssertFuture(record);
++			} catch (error) {
++				if (error instanceof RemoteError) throw error;
++				throw denied();
++			} finally {
++				clearTimeout(timer);
++				combined.removeEventListener("abort", onAbort);
++				deadline.abort();
++			}
+ 		}
+ 		/**
+ 		* Dispatch one post-commit `schedule/changed` notification, containing
+--- a/node_modules/@deepseek-ai/dsh-tool-schedule/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-tool-schedule/lib/index.js
+@@ -181,7 +181,8 @@
+ 	basicErrorSchema("time_out_of_range"),
+ 	basicErrorSchema("frequency_too_high"),
+ 	basicErrorSchema("subagent_session"),
+-	basicErrorSchema("internal_error")
++	basicErrorSchema("internal_error"),
++	basicErrorSchema("authorization_required")
+ ];
+ const CREATE_OUTPUT_SCHEMA = { oneOf: [VIEW_SCHEMA, ...ERROR_SCHEMAS] };
+ const LIST_OUTPUT_SCHEMA = { oneOf: [{
+@@ -284,6 +285,7 @@
+ }
+ /** Translate invalid input while withholding internal storage failures. */
+ function operationError(error) {
++	if (error?.code === "schedule-authorization-required") return { code: "authorization_required", message: error.message };
+ 	return error instanceof ScheduleInputError ? {
+ 		code: error.code,
+ 		message: error.message

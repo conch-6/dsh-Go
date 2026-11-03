@@ -117,6 +117,53 @@ class MediaModel {
         );
 }
 
+/// One provider template the plugin publishes in its catalogue
+/// (`meta.extra["dsh-go/media/catalog"].presets[]`, plugin 0.3.0+): the
+/// values a new service starts with, so the settings page never asks for a
+/// protocol id, an API root or a model list. Older catalogues carry none and
+/// [fallbackMediaPresets] keeps the page usable.
+class MediaPreset {
+  const MediaPreset({
+    required this.id,
+    required this.label,
+    this.labelEn = '',
+    required this.provider,
+    required this.profile,
+    required this.baseUrl,
+    this.responseFormat = '',
+    required this.models,
+    required this.kind,
+    required this.keyGroup,
+  });
+
+  final String id;
+
+  /// Chinese label as the plugin gives it.
+  final String label;
+
+  /// English label; empty uses [label].
+  final String labelEn;
+  final String provider;
+  final String profile;
+  final String baseUrl;
+
+  /// '', 'url' or 'b64_json'.
+  final String responseFormat;
+  final List<String> models;
+  final GenerateKind kind;
+
+  /// Presets of one provider share keys (image + video of Ark need one key).
+  final String keyGroup;
+
+  String title(bool english) => english && labelEn.isNotEmpty ? labelEn : label;
+
+  /// The catalogue models this preset can offer, in the plugin's order.
+  List<MediaModel> catalogModels(MediaCatalog catalog) => [
+    for (final id in models)
+      if (catalog.modelOf(id) case final model? when model.profile == profile && model.kind == kind) model,
+  ];
+}
+
 /// One configured service of the plugin (`value.services[]`).
 class MediaService {
   const MediaService({required this.id, this.label = '', this.provider});
@@ -186,9 +233,27 @@ class MediaEntry {
   String get key => '$namespace\u0000${service.id}\u0000${model.id}';
 }
 
+/// One default the plugin names (`value.defaults`): the general pair, or the
+/// image/video pair added in plugin 0.3.0.
+class MediaDefault {
+  const MediaDefault({required this.namespace, required this.service, required this.model, this.kind});
+
+  final String namespace;
+  final String service;
+  final String model;
+
+  /// Null for the legacy general default (`serviceId`/`modelId`).
+  final GenerateKind? kind;
+}
+
 /// What the current host offers.
 class MediaCatalog {
-  const MediaCatalog({this.status = MediaCatalogStatus.ready, this.entries = const [], this.defaults = const []});
+  const MediaCatalog({
+    this.status = MediaCatalogStatus.ready,
+    this.entries = const [],
+    this.models = const {},
+    this.defaults = const [],
+  });
 
   static const loading = MediaCatalog(status: MediaCatalogStatus.loading);
   static const missing = MediaCatalog(status: MediaCatalogStatus.missing);
@@ -198,8 +263,15 @@ class MediaCatalog {
   /// In the host's order: namespace, then service, then the service's list.
   final List<MediaEntry> entries;
 
+  /// Every model the catalogue declares, by id, whether or not a service
+  /// currently serves it (a disabled service or a missing key still lets the
+  /// settings page name its models).
+  final Map<String, MediaModel> models;
+
   /// Each namespace's `value.defaults`, in the host's order.
-  final List<({String namespace, String service, String model})> defaults;
+  final List<MediaDefault> defaults;
+
+  MediaModel? modelOf(String id) => models[id];
 
   /// A catalogue this app can read: generation mode is possible here.
   bool get usable => status == MediaCatalogStatus.ready;
@@ -258,18 +330,39 @@ class MediaCatalog {
     return found.length == 1 ? found.single.ref : MediaModelRef(label: label ?? id!);
   }
 
-  /// What a fresh mode of [kind] starts on: the plugin's default when it is
-  /// on offer, else the first choice.
+  /// What a fresh mode of [kind] starts on, with the same order the plugin
+  /// uses: the kind's service even when only its model went away, then the
+  /// legacy service, then the first choice. Within that service: the kind's
+  /// model, the legacy model, then the service's first model.
   MediaEntry? defaultFor(GenerateKind kind) {
     final choices = of(kind);
-    for (final d in defaults) {
-      if (d.service.isEmpty) continue;
-      final match = choices.where(
-        (e) => e.namespace == d.namespace && e.service.id == d.service && (d.model.isEmpty || e.model.id == d.model),
-      );
-      if (match.isNotEmpty) return match.first;
+    if (choices.isEmpty) return null;
+    MediaDefault? firstWhere(Iterable<MediaDefault> values, bool Function(MediaDefault) test) {
+      for (final value in values) {
+        if (test(value)) return value;
+      }
+      return null;
     }
-    return choices.firstOrNull;
+
+    final kindDefault = firstWhere(defaults, (d) => d.kind == kind && d.service.isNotEmpty);
+    final legacy = firstWhere(defaults, (d) => d.kind == null && d.service.isNotEmpty);
+    MediaEntry? serviceEntry(MediaDefault? d) =>
+        d == null ? null : choices.where((e) => e.namespace == d.namespace && e.service.id == d.service).firstOrNull;
+    final selected = serviceEntry(kindDefault) ?? serviceEntry(legacy) ?? choices.first;
+    final forService = [
+      for (final e in choices)
+        if (e.namespace == selected.namespace && e.service.id == selected.service.id) e,
+    ];
+    String? modelId;
+    if (kindDefault != null && kindDefault.namespace == selected.namespace && kindDefault.model.isNotEmpty) {
+      modelId = kindDefault.model;
+    }
+    if (modelId == null || !forService.any((e) => e.model.id == modelId)) {
+      modelId = legacy != null && legacy.namespace == selected.namespace && legacy.model.isNotEmpty
+          ? legacy.model
+          : null;
+    }
+    return forService.where((e) => e.model.id == modelId).firstOrNull ?? forService.first;
   }
 }
 
@@ -292,6 +385,177 @@ List<String> mediaNamespacesOf(Map<String, SettingsNamespaceView> namespaces) =>
   for (final view in namespaces.values)
     if (mediaCatalogMetaOf(view) != null) view.ns,
 ];
+
+/// The provider templates [view]'s catalogue publishes, validated; the
+/// app's own list when the plugin predates `presets` (0.2.x) or publishes
+/// none this app can read. The plugin's list wins wholesale: a partially
+/// readable newer list is still the host's answer.
+List<MediaPreset> mediaPresetsOf(SettingsNamespaceView view) {
+  final raw = mediaCatalogMetaOf(view);
+  final list = raw is Map ? raw['presets'] : null;
+  if (list is! List) return fallbackMediaPresets;
+  final out = <MediaPreset>[];
+  final ids = <String>{};
+  for (final row in list) {
+    final preset = _presetFrom(row);
+    if (preset != null && ids.add(preset.id)) out.add(preset);
+  }
+  // An absent list means an older catalogue (use the app's list); an empty
+  // list is the plugin saying it publishes none, and is honoured.
+  return List.unmodifiable(out);
+}
+
+/// The provider templates of a plugin that predates `presets`; their model
+/// ids are the ones the 0.2.x catalogue verified. The settings page filters
+/// them through the live catalogue, so an id a newer catalogue dropped
+/// simply doesn't appear.
+const fallbackMediaPresets = <MediaPreset>[
+  MediaPreset(
+    id: 'ark-image',
+    label: '火山方舟 · 图片',
+    labelEn: 'Volcengine Ark · Image',
+    provider: 'ark',
+    profile: 'ark-image',
+    baseUrl: 'https://ark.cn-beijing.volces.com',
+    models: ['doubao-seedream-5-0-pro-260628'],
+    kind: GenerateKind.image,
+    keyGroup: 'ark',
+  ),
+  MediaPreset(
+    id: 'ark-video',
+    label: '火山方舟 · 视频',
+    labelEn: 'Volcengine Ark · Video',
+    provider: 'ark',
+    profile: 'ark-video',
+    baseUrl: 'https://ark.cn-beijing.volces.com',
+    models: ['doubao-seedance-2-5-260628'],
+    kind: GenerateKind.video,
+    keyGroup: 'ark',
+  ),
+  MediaPreset(
+    id: 'aliyun-image',
+    label: '阿里云百炼 · 图片',
+    labelEn: 'Alibaba Model Studio · Image',
+    provider: 'aliyun',
+    profile: 'ali-wan-image',
+    baseUrl: 'https://dashscope.aliyuncs.com',
+    models: ['wan2.7-image'],
+    kind: GenerateKind.image,
+    keyGroup: 'aliyun',
+  ),
+  MediaPreset(
+    id: 'aliyun-video',
+    label: '阿里云百炼 · 视频',
+    labelEn: 'Alibaba Model Studio · Video',
+    provider: 'aliyun',
+    profile: 'ali-video',
+    baseUrl: 'https://dashscope.aliyuncs.com',
+    models: ['wan2.7-t2v-2026-06-12', 'wan2.7-i2v-2026-04-25'],
+    kind: GenerateKind.video,
+    keyGroup: 'aliyun',
+  ),
+  MediaPreset(
+    id: 'siliconflow-image',
+    label: '硅基流动 · 图片',
+    labelEn: 'SiliconFlow · Image',
+    provider: 'siliconflow',
+    profile: 'silicon-image',
+    baseUrl: 'https://api.siliconflow.cn',
+    models: ['Qwen/Qwen-Image', 'Qwen/Qwen-Image-Edit-2509'],
+    kind: GenerateKind.image,
+    keyGroup: 'siliconflow',
+  ),
+  MediaPreset(
+    id: 'siliconflow-video',
+    label: '硅基流动 · 视频',
+    labelEn: 'SiliconFlow · Video',
+    provider: 'siliconflow',
+    profile: 'silicon-video',
+    baseUrl: 'https://api.siliconflow.cn',
+    models: ['Wan-AI/Wan2.2-T2V-A14B', 'Wan-AI/Wan2.2-I2V-A14B'],
+    kind: GenerateKind.video,
+    keyGroup: 'siliconflow',
+  ),
+  MediaPreset(
+    id: 'openai-image',
+    label: 'OpenAI · 图片',
+    labelEn: 'OpenAI · Image',
+    provider: 'openai',
+    profile: 'openai-gpt-image',
+    baseUrl: 'https://api.openai.com/v1',
+    models: ['gpt-image-2', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'],
+    kind: GenerateKind.image,
+    keyGroup: 'openai',
+  ),
+  MediaPreset(
+    id: 'gemini-image',
+    label: 'Gemini · 图片',
+    labelEn: 'Gemini · Image',
+    provider: 'gemini',
+    profile: 'openai-compatible',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    responseFormat: 'b64_json',
+    models: ['gemini-2.5-flash-image'],
+    kind: GenerateKind.image,
+    keyGroup: 'gemini',
+  ),
+];
+
+final _presetId = RegExp(r'^[a-z][a-z0-9-]{0,31}$');
+final _responseFormat = RegExp(r'^(|url|b64_json)$');
+final _control = RegExp(r'[\u0000-\u001f]');
+
+MediaPreset? _presetFrom(Object? raw) {
+  if (raw is! Map) return null;
+  final id = raw['id'];
+  final label = raw['label'];
+  final labelEn = raw['labelEn'];
+  final provider = raw['provider'];
+  final profile = raw['profile'];
+  final baseUrl = raw['baseUrl'];
+  final responseFormat = raw['responseFormat'] ?? '';
+  final models = raw['models'];
+  final kind = switch (raw['kind']) {
+    'image' => GenerateKind.image,
+    'video' => GenerateKind.video,
+    _ => null,
+  };
+  if (id is! String || !_presetId.hasMatch(id) || label is! String || label.isEmpty || label.length > 80) return null;
+  if (labelEn != null && (labelEn is! String || labelEn.isEmpty || labelEn.length > 80)) return null;
+  if (provider is! String || provider.isEmpty || provider.length > 80 || _control.hasMatch(provider)) return null;
+  if (profile is! String || profile.isEmpty || profile.length > 80) return null;
+  if (baseUrl is! String) return null;
+  final url = Uri.tryParse(baseUrl);
+  if (url == null ||
+      url.scheme != 'https' ||
+      url.host.isEmpty ||
+      url.userInfo.isNotEmpty ||
+      url.hasQuery ||
+      url.hasFragment) {
+    return null;
+  }
+  if (responseFormat is! String || !_responseFormat.hasMatch(responseFormat)) return null;
+  if (models is! List || models.isEmpty || models.length > 16) return null;
+  final ids = <String>{};
+  for (final model in models) {
+    if (model is! String || model.isEmpty || model.length > 160 || !ids.add(model)) return null;
+  }
+  if (kind == null) return null;
+  final keyGroup = raw['keyGroup'];
+  final group = keyGroup is String && _presetId.hasMatch(keyGroup) ? keyGroup : id.split('-').first;
+  return MediaPreset(
+    id: id,
+    label: label,
+    labelEn: labelEn is String ? labelEn : '',
+    provider: provider,
+    profile: profile,
+    baseUrl: baseUrl,
+    responseFormat: responseFormat,
+    models: List.unmodifiable(ids),
+    kind: kind,
+    keyGroup: group,
+  );
+}
 
 /// The credential references the plugin's services name: the engine
 /// settings read them with the rest, so [mediaCatalogFrom] knows which keys
@@ -332,16 +596,24 @@ MediaCatalog mediaCatalogFrom(
   }
 
   final entries = <MediaEntry>[];
-  final defaults = <({String namespace, String service, String model})>[];
+  final models = <String, MediaModel>{};
+  final defaults = <MediaDefault>[];
   for (final (view, catalog) in read) {
     entries.addAll(catalog.entriesFor(view, credentials));
+    for (final model in catalog.models.values) {
+      models.putIfAbsent(model.id, () => model);
+    }
     final d = view.value['defaults'];
     if (d is Map) {
-      defaults.add((
-        namespace: view.ns,
-        service: d['serviceId'] is String ? d['serviceId'] as String : '',
-        model: d['modelId'] is String ? d['modelId'] as String : '',
-      ));
+      String read(Object? value) => value is String ? value : '';
+      void add(String service, String model, GenerateKind? kind) {
+        if (service.isEmpty && model.isEmpty) return;
+        defaults.add(MediaDefault(namespace: view.ns, service: service, model: model, kind: kind));
+      }
+
+      add(read(d['serviceId']), read(d['modelId']), null);
+      add(read(d['imageServiceId']), read(d['imageModelId']), GenerateKind.image);
+      add(read(d['videoServiceId']), read(d['videoModelId']), GenerateKind.video);
     }
   }
   // v1's header names no namespace: a service and model two namespaces share
@@ -356,6 +628,7 @@ MediaCatalog mediaCatalogFrom(
       for (final e in entries)
         if (seen['${e.service.id}\u0000${e.model.id}'] == 1) e,
     ]),
+    models: Map.unmodifiable(models),
     defaults: List.unmodifiable(defaults),
   );
 }

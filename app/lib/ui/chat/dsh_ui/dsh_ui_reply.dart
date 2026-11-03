@@ -28,14 +28,18 @@ enum DshUiReplyKind {
 
 /// 一条 `[dsh-ui reply]` 消息。
 final class DshUiReply {
-  const DshUiReply({required this.kind, this.title, this.value});
+  const DshUiReply({required this.kind, this.title, this.value, this.freetext});
 
-  /// 选择：[labels] 用「、」连接。
-  factory DshUiReply.choice(List<String> labels, {String? title}) => DshUiReply(
-    kind: DshUiReplyKind.choice,
-    title: _flat(title),
-    value: labels.map(_flat).whereType<String>().join(_join),
-  );
+  /// 选择：[labels] 用「、」连接；[freetext] 是「其他」里自己填的那句。
+  factory DshUiReply.choice(List<String> labels, {String? title, String? freetext}) {
+    final chosen = labels.map(_flat).whereType<String>().join(_join);
+    return DshUiReply(
+      kind: DshUiReplyKind.choice,
+      title: _flat(title),
+      value: chosen.isEmpty ? null : chosen,
+      freetext: _flat(freetext),
+    );
+  }
 
   /// 确认 / 取消。[label] 是按钮上的字；与默认的「确认」「取消」相同时不重复写。
   factory DshUiReply.confirm(bool confirmed, {String? label, String? title}) {
@@ -54,11 +58,17 @@ final class DshUiReply {
   /// other：第二行原文。
   final String? value;
 
+  /// 选择：用户在「其他」里自己填的那句（没填时 null）。
+  final String? freetext;
+
   /// 发出去的完整文字。只由用户看得到的字拼成，不带隐藏值。
   String get text {
     final head = title == null ? dshUiReplyMarker : '$dshUiReplyMarker $title';
     final body = switch (kind) {
-      DshUiReplyKind.choice => appL10n.viewUiReplyChoice(value ?? ''),
+      DshUiReplyKind.choice => [
+        if (value != null && value!.isNotEmpty) appL10n.viewUiReplyChoice(value!),
+        if (freetext != null && freetext!.isNotEmpty) appL10n.viewUiReplyOther(freetext!),
+      ].join('\n'),
       DshUiReplyKind.confirm => value == null ? appL10n.commonConfirm : appL10n.viewUiReplyConfirm(value!),
       DshUiReplyKind.cancel => value == null ? appL10n.commonCancel : appL10n.viewUiReplyCancel(value!),
       DshUiReplyKind.other => value ?? '',
@@ -68,7 +78,12 @@ final class DshUiReply {
 
   /// 用户气泡上的小标签：「已选择：方案 A」「已确认：开始」「已取消」。
   String get chipLabel => switch (kind) {
-    DshUiReplyKind.choice => appL10n.viewUiChosen(value ?? ''),
+    DshUiReplyKind.choice => switch ((value, freetext)) {
+      (final chosen?, final typed?) when chosen.isNotEmpty && typed.isNotEmpty =>
+        '${appL10n.viewUiChosen(chosen)} · ${appL10n.viewUiChosenOther(typed)}',
+      (_, final typed?) when typed.isNotEmpty => appL10n.viewUiChosenOther(typed),
+      _ => appL10n.viewUiChosen(value ?? ''),
+    },
     DshUiReplyKind.confirm => value == null ? appL10n.viewUiConfirmed : appL10n.viewUiConfirmedValue(value!),
     DshUiReplyKind.cancel => value == null ? appL10n.commonCancelled : appL10n.viewUiCancelledValue(value!),
     DshUiReplyKind.other => value == null || value!.isEmpty ? appL10n.viewUiReplied : value!,
@@ -95,16 +110,23 @@ final class DshUiReply {
 
   @override
   bool operator ==(Object other) =>
-      other is DshUiReply && other.kind == kind && other.title == title && other.value == value;
+      other is DshUiReply &&
+      other.kind == kind &&
+      other.title == title &&
+      other.value == value &&
+      other.freetext == freetext;
 
   @override
-  int get hashCode => Object.hash(kind, title, value);
+  int get hashCode => Object.hash(kind, title, value, freetext);
 
   @override
   String toString() => text;
 }
 
 const _join = '、'; // l10n:keep reply selection protocol delimiter
+
+/// 「其他」那一行：用户自己填的答案。中英文都认（发出去时按界面语言写）。
+final _otherLine = RegExp(r'^(其他|Other)\s*[：:]\s*(.*)$');
 
 /// 换行压成空格：label 和标题都要留在一行里，第二行才认得出来。
 String? _flat(String? text) {
@@ -118,20 +140,34 @@ DshUiReply? parseDshUiReply(String text) {
   final head = lines.first.trim();
   if (!head.startsWith(dshUiReplyMarker)) return null;
   final title = _flat(head.substring(dshUiReplyMarker.length));
-  final body = lines.skip(1).map((l) => l.trim()).firstWhere((l) => l.isNotEmpty, orElse: () => '');
+  final body = [
+    for (final line in lines.skip(1))
+      if (line.trim().isNotEmpty) line.trim(),
+  ];
+  if (body.isEmpty) return DshUiReply(kind: DshUiReplyKind.other, title: title);
+  final first = body.first;
+  // 只填了「其他」：仍然是一次选择，答案就是那句自己填的。
+  if (_otherLine.firstMatch(first) case final other?) {
+    return DshUiReply(kind: DshUiReplyKind.choice, title: title, freetext: _flat(other.group(2)));
+  }
   // l10n:keep legacy reply protocol parser
-  final colon = RegExp(r'^(选择|确认|取消|Select|Confirm|Cancel)\s*(?:[：:]\s*(.*))?$').firstMatch(body);
+  final colon = RegExp(r'^(选择|确认|取消|Select|Confirm|Cancel)\s*(?:[：:]\s*(.*))?$').firstMatch(first);
   if (colon == null) {
-    return DshUiReply(kind: DshUiReplyKind.other, title: title, value: body.isEmpty ? null : body);
+    return DshUiReply(kind: DshUiReplyKind.other, title: title, value: first);
   }
   final value = _flat(colon.group(2));
-  return switch (colon.group(1)) {
+  final kind = switch (colon.group(1)) {
     // l10n:keep legacy reply protocol value
-    '选择' || 'Select' => DshUiReply(kind: DshUiReplyKind.choice, title: title, value: value),
+    '选择' || 'Select' => DshUiReplyKind.choice,
     // l10n:keep legacy reply protocol value
-    '确认' || 'Confirm' => DshUiReply(kind: DshUiReplyKind.confirm, title: title, value: value),
-    _ => DshUiReply(kind: DshUiReplyKind.cancel, title: title, value: value),
+    '确认' || 'Confirm' => DshUiReplyKind.confirm,
+    _ => DshUiReplyKind.cancel,
   };
+  // 「其他：…」跟在同一行后面：只对选择有意义。
+  final freetext = kind == DshUiReplyKind.choice && body.length > 1
+      ? _flat(_otherLine.firstMatch(body[1])?.group(2))
+      : null;
+  return DshUiReply(kind: kind, title: title, value: value, freetext: freetext);
 }
 
 // ───────────────────────── 交互状态 ─────────────────────────
@@ -219,9 +255,15 @@ DshUiAnswer? dshUiAnswerFor(DshUiView view, DshUiReply reply) {
       for (final node in view.answerNodes) {
         if (node is! DshUiOptions) continue;
         final picked = reply.selectedIn(node.labels);
-        if (picked.isEmpty) continue;
+        // 自己填的那句只对开了 freetext 的选项卡有意义。
+        final typed = node.freetext ? reply.freetext : null;
+        if (picked.isEmpty && (typed == null || typed.isEmpty)) continue;
         // 单选只认一个（照 DS Bot 的选择规则）。
-        return DshUiAnswer(nodePath: node.path, selected: node.multi ? picked : picked.sublist(0, 1));
+        return DshUiAnswer(
+          nodePath: node.path,
+          selected: node.multi ? picked : picked.take(1).toList(),
+          freetext: typed,
+        );
       }
       return null;
     case DshUiReplyKind.confirm:
@@ -239,13 +281,16 @@ DshUiAnswer? dshUiAnswerFor(DshUiView view, DshUiReply reply) {
 
 /// 已答视图里要高亮的东西。
 final class DshUiAnswer {
-  const DshUiAnswer({required this.nodePath, this.selected = const [], this.confirmed});
+  const DshUiAnswer({required this.nodePath, this.selected = const [], this.freetext, this.confirmed});
 
   /// 被回答的组件（`view.children[1]`）。
   final String nodePath;
 
   /// `options` 选中的 label。
   final List<String> selected;
+
+  /// `options` 里「其他」自己填的那句（没填时 null）。
+  final String? freetext;
 
   /// `confirm`：true 确认，false 取消；不是 confirm 时为 null。
   final bool? confirmed;

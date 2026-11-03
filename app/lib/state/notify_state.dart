@@ -36,6 +36,7 @@ class NotifyPrefs {
     this.failed = true,
     this.approval = true,
     this.question = true,
+    this.live = true,
     this.loaded = false,
   });
 
@@ -52,6 +53,9 @@ class NotifyPrefs {
 
   /// 向你提问.
   final bool question;
+
+  /// 实时活动: the status bar chip / island while DSH works (lib/notify/live_activity.dart).
+  final bool live;
   final bool loaded;
 
   bool allows(AlertKind kind) =>
@@ -63,15 +67,23 @@ class NotifyPrefs {
         AlertKind.question => question,
       };
 
-  NotifyPrefs copyWith({bool? enabled, bool? done, bool? failed, bool? approval, bool? question, bool? loaded}) =>
-      NotifyPrefs(
-        enabled: enabled ?? this.enabled,
-        done: done ?? this.done,
-        failed: failed ?? this.failed,
-        approval: approval ?? this.approval,
-        question: question ?? this.question,
-        loaded: loaded ?? this.loaded,
-      );
+  NotifyPrefs copyWith({
+    bool? enabled,
+    bool? done,
+    bool? failed,
+    bool? approval,
+    bool? question,
+    bool? live,
+    bool? loaded,
+  }) => NotifyPrefs(
+    enabled: enabled ?? this.enabled,
+    done: done ?? this.done,
+    failed: failed ?? this.failed,
+    approval: approval ?? this.approval,
+    question: question ?? this.question,
+    live: live ?? this.live,
+    loaded: loaded ?? this.loaded,
+  );
 }
 
 class NotifyPrefsController extends Notifier<NotifyPrefs> {
@@ -81,6 +93,7 @@ class NotifyPrefsController extends Notifier<NotifyPrefs> {
     failed: 'notify_failed',
     approval: 'notify_approval',
     question: 'notify_question',
+    live: 'notify_live',
   );
 
   late Future<void> _loaded;
@@ -100,6 +113,7 @@ class NotifyPrefsController extends Notifier<NotifyPrefs> {
         failed: prefs.getBool(_keys.failed) ?? true,
         approval: prefs.getBool(_keys.approval) ?? true,
         question: prefs.getBool(_keys.question) ?? true,
+        live: prefs.getBool(_keys.live) ?? true,
         loaded: true,
       );
     } catch (_) {
@@ -125,6 +139,7 @@ class NotifyPrefsController extends Notifier<NotifyPrefs> {
   Future<void> setFailed(bool v) => _save(_keys.failed, v, (s) => s.copyWith(failed: v));
   Future<void> setApproval(bool v) => _save(_keys.approval, v, (s) => s.copyWith(approval: v));
   Future<void> setQuestion(bool v) => _save(_keys.question, v, (s) => s.copyWith(question: v));
+  Future<void> setLive(bool v) => _save(_keys.live, v, (s) => s.copyWith(live: v));
 }
 
 final notifyPrefsProvider = NotifierProvider<NotifyPrefsController, NotifyPrefs>(NotifyPrefsController.new);

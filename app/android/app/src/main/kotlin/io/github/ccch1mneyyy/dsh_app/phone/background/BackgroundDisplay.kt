@@ -18,7 +18,10 @@ import io.github.ccch1mneyyy.dsh_app.phone.TargetInfo
  * [io.github.ccch1mneyyy.dsh_app.phone.PhoneRegistry].backgroundDriver only while a task uses it.
  * All calls are serialised by the bridge; this class never retries a dispatched action.
  */
-class BackgroundDisplay(private val channelProvider: () -> PrivilegedChannel?) : PhoneDriver {
+class BackgroundDisplay(
+    private val channelProvider: () -> PrivilegedChannel?,
+    private val releaseChannelProvider: () -> PrivilegedChannel?,
+) : PhoneDriver {
 
     override val screen: PhoneScreen = PhoneScreen.BACKGROUND
 
@@ -108,6 +111,10 @@ class BackgroundDisplay(private val channelProvider: () -> PrivilegedChannel?) :
     override fun perform(action: PhoneAction): ActionResult {
         // l10n:keep agent screen protocol
         val pkg = currentPackage ?: return ActionResult(false, "后台屏还没有打开应用")
+        if (action is PhoneAction.Key && action.key != PhoneAction.GlobalKey.BACK) {
+            // l10n:keep agent screen protocol
+            return ActionResult(false, "后台屏不支持该系统键，未执行；请用返回或打开指定应用")
+        }
         val request = Bundle().apply {
             putString(Proto.OWNER, "task")
             putString(Proto.PKG, pkg)
@@ -133,14 +140,8 @@ class BackgroundDisplay(private val channelProvider: () -> PrivilegedChannel?) :
                 request.putString(Proto.DIR, action.direction.name.lowercase())
             }
             is PhoneAction.Key -> {
-                val dir = when (action.key) {
-                    PhoneAction.GlobalKey.BACK -> "back"
-                    PhoneAction.GlobalKey.HOME -> "home"
-                    // l10n:keep agent screen protocol
-                    else -> return ActionResult(false, "后台屏不支持该全局键，请用返回或主页")
-                }
                 request.putString(Proto.OP, Proto.OP_KEY)
-                request.putString(Proto.DIR, dir)
+                request.putString(Proto.DIR, "back")
             }
             // l10n:keep agent screen protocol
             is PhoneAction.TapXY -> return ActionResult(false, "后台屏按元素编号操作，不用坐标")
@@ -153,7 +154,8 @@ class BackgroundDisplay(private val channelProvider: () -> PrivilegedChannel?) :
 
     fun release() {
         runCatching {
-            channelProvider()?.execute(Bundle().apply {
+            // Cleanup may use an existing session, but must not connect or start a new process.
+            releaseChannelProvider()?.execute(Bundle().apply {
                 putString(Proto.OP, Proto.OP_RELEASE); putString(Proto.OWNER, "task")
             })
         }
@@ -172,7 +174,7 @@ class BackgroundDisplay(private val channelProvider: () -> PrivilegedChannel?) :
 
     private fun toResult(response: Bundle, okMessage: String): ActionResult {
         val ok = response.getBoolean(Proto.OK)
-        val message = if (ok) okMessage else Reasons.of(response.getString(Proto.ERROR))
+        val message = if (ok) okMessage else Reasons.of(response.getString(Proto.ERROR), response.getString(Proto.ERROR_DETAIL))
         val snap = if (response.containsKey(Proto.COUNT) || response.getBoolean(Proto.SECURE))
             snapshot(response, markNew = true) else null
         return ActionResult(ok, message, snap)

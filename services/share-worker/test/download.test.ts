@@ -1,5 +1,6 @@
 // The download routes (China / Global / GitHub), the DOWNLOAD_ACCESS switch,
-// and the public /download files (edge copy, Range, cache headers).
+// the public download bucket behind Global, and the public /download files
+// (edge copy, Range, cache headers).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import worker from '../src/index';
@@ -18,9 +19,11 @@ const apkBytes = Uint8Array.from({ length: 6000 }, (_, i) => (i * 13 + 5) & 0xff
 const SHA = 'cd'.repeat(32);
 const KEY = 'dsh-k7m3x9qp';
 const TOKEN = 'dshc_' + 'A'.repeat(43);
-const CN = 'https://dshgo-dl.oss-cn-hongkong.aliyuncs.com/';
+const CN = 'https://dshgo-cn.oss-cn-hongkong.aliyuncs.com/';
 const CN_URL = `${CN}${VERSION}/${APK}`;
 const GITHUB_URL = `https://github.com/ccch1mneyyy/dsh-go/releases/download/v${VERSION}/${APK}`;
+const DL = 'https://dl.dshtui.com/';
+const DL_URL = `${DL}download/${VERSION}/${APK}`;
 
 function manifest(routes: unknown = ['global', 'cn', 'github'], notes = { zh: '- 中文说明', en: '- English notes' }) {
   return {
@@ -279,21 +282,41 @@ describe('public page (DOWNLOAD_ACCESS=public)', () => {
   });
 });
 
-describe('public page sent to GitHub (DOWNLOAD_REDIRECT)', () => {
-  const GH = 'https://github.com/ccch1mneyyy/dsh-go/releases/latest';
-  it('redirects /download to GitHub Releases; in-app browsers still get the open-in-browser page', async () => {
-    const { env } = await pub({ DOWNLOAD_REDIRECT: GH });
-    const res = await fetchWorker(env, req('/download', { country: 'CN' }));
-    expect(res.status).toBe(302);
-    expect(res.headers.get('Location')).toBe(GH);
-    expect(res.headers.get('Cache-Control')).toBe('no-store');
-    const wechat = await fetchWorker(env, req('/download', { headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android 14) MicroMessenger/8.0.50' } }));
-    expect(wechat.status).toBe(200);
-  });
-  it('keeps the R2 files for in-app updates', async () => {
-    const { env } = await pub({ DOWNLOAD_REDIRECT: GH });
-    const res = await fetchWorker(env, req(`/download/${VERSION}/SHA256SUMS`));
+describe('the public download bucket (DL_BASE_URL)', () => {
+  const hop = async (env: Env, via: string) => (await fetchWorker(env, req(`/download/get?via=${via}&v=${VERSION}`, { method: 'HEAD' }))).headers.get('Location');
+
+  it('Global sends the bytes from dl.dshtui.com once the release is there', async () => {
+    const { env } = await pub({ DL_BASE_URL: DL }, manifest(['global', 'dl', 'cn', 'github']));
+    const res = await fetchWorker(env, req('/download', { country: 'US' }));
     expect(res.status).toBe(200);
+    const p = picker(await res.text());
+    expect(p.ids).toEqual(['cn', 'global', 'github']);
+    expect(p.checked).toBe('global');
+    expect(p.links.find((l) => l.id === 'global')!.url).toBe(`/download/get?via=global&v=${VERSION}`);
+    expect(await hop(env, 'global')).toBe(DL_URL);
+    expect(await hop(env, 'cn')).toBe(CN_URL);
+    expect(await hop(env, 'github')).toBe(GITHUB_URL);
+    // Links already out there keep working.
+    expect((await fetchWorker(env, req(`/download/${VERSION}/${APK}`))).status).toBe(200);
+  });
+
+  it('Global stays on this Worker for a release that isn\'t there, or with no bucket set', async () => {
+    for (const [vars, routes] of [
+      [{ DL_BASE_URL: DL }, ['global', 'cn', 'github']],
+      [{ DL_BASE_URL: '' }, ['global', 'dl', 'cn', 'github']],
+      [{ DL_BASE_URL: 'http://dl.example.com/' }, ['global', 'dl']],
+    ] as const) {
+      resetBetaCache();
+      const { env } = await pub(vars, manifest(routes));
+      expect(await hop(env, 'global')).toBe(`/download/${VERSION}/${APK}`);
+    }
+  });
+
+  it('key mode keeps the signed link', async () => {
+    const { env } = await seeded({ DL_BASE_URL: DL }, manifest(['global', 'dl', 'cn', 'github']));
+    const body = (await (await fetchWorker(env, unlockReq({ country: 'US' }))).json()) as { url: string; routes: Route[] };
+    expect(body.routes.find((r) => r.id === 'global')!.url).toBe(body.url);
+    expect(body.url).toMatch(new RegExp(`^/beta/${VERSION}/${APK}\\?exp=`));
   });
 });
 

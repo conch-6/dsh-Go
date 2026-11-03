@@ -11,6 +11,8 @@ import java.nio.file.attribute.BasicFileAttributes
 /** Explicit glibc loader launch; no ELF or user-profile mutation. Pure JVM/testable. */
 object DirectLaunch {
     const val PRELOAD = "opt/dsh-go/direct/preload.mjs"
+    /** PRoot's Node gets Direct's per-family DNS resolver through this import (runtime/direct/proot-dns.mjs). */
+    const val PROOT_DNS = "/opt/dsh-go/direct/proot-dns.mjs"
     private const val OWNED = "opt/dsh-app/direct"
 
     /** Fallback reason: Direct already failed to launch here with this runtime. */
@@ -66,6 +68,10 @@ object DirectLaunch {
         val reason = compatibilityReason(rootfs)
         return Selection(reason == null, reason)
     }
+
+    /** NODE_OPTIONS for a PRoot launch: the caller's flags (heap, DNS order) plus [PROOT_DNS]. */
+    fun prootNodeOptions(nodeOptions: String?): String =
+        listOfNotNull(nodeOptions?.ifEmpty { null }, "--import=$PROOT_DNS").joinToString(" ")
 
     fun loaderPath(abi: String): String = when (abi) {
         "arm64-v8a" -> "usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1"

@@ -54,7 +54,8 @@ typedef LocalClientConnector = Future<DshClient> Function({required Uri baseUri,
 /// [DshClient.connect]; tests swap it to decide when a connect finishes.
 final localClientConnectorProvider = Provider<LocalClientConnector>(
   (ref) =>
-      ({required baseUri, required token}) => DshClient.connect(baseUri: baseUri, token: token, backgroundLists: true),
+      ({required baseUri, required token}) =>
+          DshClient.connect(baseUri: baseUri, token: token, backgroundLists: true, startMux: false),
 );
 
 /// Connects to the local `dsh web` once the native runtime reports it running.
@@ -85,6 +86,22 @@ class LocalConnectionController extends AsyncNotifier<HostConnection?> {
       return null;
     }
     r.onDispose(() => unawaited(client.close()));
+    (Object, StackTrace)? readyFailure;
+    final ready = client.mux.ready(timeout: const Duration(seconds: 20));
+    unawaited(
+      ready.then<void>(
+        (_) {},
+        onError: (Object error, StackTrace stack) {
+          readyFailure = (error, stack);
+          // Error/retry states retain their previous value. Retire our published
+          // connection before closing it, without changing an unpublished build.
+          if (r.mounted && identical(state.value?.client, client)) {
+            state = const AsyncData(null);
+          }
+          unawaited(client.close());
+        },
+      ),
+    );
 
     // Keep DSH's own credential store in sync with the key saved in the app.
     r.listen(settingsProvider.select((s) => s.apiKey), (prev, next) {
@@ -98,6 +115,12 @@ class LocalConnectionController extends AsyncNotifier<HostConnection?> {
     final apiKey = r.read(settingsProvider).apiKey;
     if (apiKey.isNotEmpty) await _pushKey(client, apiKey);
     if (!r.mounted) return null;
+    if (readyFailure case final failure?) Error.throwWithStackTrace(failure.$1, failure.$2);
+    final connection = HostConnection(client: client, isLocal: true);
+    // HTTP is usable now; keep build pending so ready failures retain Riverpod's retry policy.
+    state = AsyncData(connection);
+    await ready;
+    if (!r.mounted) return null;
     // Custom providers' keys kept on the phone go back in where the engine
     // lost them; never awaited (the catalog refreshes when they land).
     unawaited(
@@ -110,7 +133,7 @@ class LocalConnectionController extends AsyncNotifier<HostConnection?> {
     // starting; it comes out once, with a restart.
     unawaited(clearAutoDefaultPreset(r.container));
 
-    return HostConnection(client: client, isLocal: true);
+    return connection;
   }
 
   Future<void> _pushKey(DshClient client, String key) async {

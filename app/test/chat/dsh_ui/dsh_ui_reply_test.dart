@@ -18,6 +18,18 @@ void main() {
       expect(parseDshUiReply(reply.text), reply);
     });
 
+    test('a free-text answer rides on its own line', () {
+      final both = DshUiReply.choice(['方案 A'], title: '选一个方案', freetext: '先算一次成本');
+      expect(both.text, '[dsh-ui reply] 选一个方案\n选择：方案 A\n其他：先算一次成本');
+      expect(parseDshUiReply(both.text), both);
+      expect(both.chipLabel, '已选择：方案 A · 已填写：先算一次成本');
+
+      final only = DshUiReply.choice(const [], freetext: '都不要，先别动');
+      expect(only.text, '[dsh-ui reply]\n其他：都不要，先别动');
+      expect(parseDshUiReply(only.text), only);
+      expect(only.chipLabel, '已填写：都不要，先别动');
+    });
+
     test('confirm and cancel skip the default words', () {
       expect(DshUiReply.confirm(true, label: '开始').text, '[dsh-ui reply]\n确认：开始');
       expect(DshUiReply.confirm(true, label: '确认').text, '[dsh-ui reply]\n确认');
@@ -146,6 +158,22 @@ void main() {
       expect(dshUiAnswerFor(titled, DshUiReply.confirm(true)), isNull);
       final confirm = parse('{"type":"confirm","confirmLabel":"开始"}');
       expect(dshUiAnswerFor(confirm, DshUiReply.confirm(true, label: '开始'))!.confirmed, isTrue);
+    });
+
+    test('free text only counts on a card that allows it', () {
+      final free = parse(
+        '{"type":"stack","children":['
+        '{"type":"options","id":"plan","freetext":true,"options":[{"label":"方案 A"}]}]}',
+      );
+      final typed = dshUiAnswerFor(free, DshUiReply.choice(const [], freetext: '再算一次'));
+      expect(typed!.selected, isEmpty);
+      expect(typed.freetext, '再算一次');
+      // 选项和「其他」可以一起答。
+      final both = dshUiAnswerFor(free, DshUiReply.choice(['方案 A'], freetext: '先别动'));
+      expect(both!.selected, ['方案 A']);
+      expect(both.freetext, '先别动');
+      // 没开 freetext 的卡不认这句。
+      expect(dshUiAnswerFor(titled, DshUiReply.choice(const [], freetext: '再算一次')), isNull);
     });
   });
 }

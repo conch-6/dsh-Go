@@ -324,12 +324,12 @@ class PhoneCore(
             A11yState.ENABLED_NOT_CONNECTED -> {
                 env.notifyFix("a11y")
                 // l10n:keep agent tool result
-                "DSH 的无障碍服务被系统关掉了或还没连上，现在看不了屏幕。已发通知提醒用户到系统设置里重新打开。在那之前只能用 apps、open、intent、notify、clipboard。"
+                "无障碍服务没连上（被系统关了或还在启动）：已通知用户到系统设置重新打开。现在只能用 apps / open / intent / notify / clipboard。"
             }
             else -> {
                 env.notifyFix("a11y")
                 // l10n:keep agent tool result
-                "看屏幕和操作界面需要无障碍权限，用户还没开。已发通知提醒用户到 DSH 设置 → 手机操控 里开启。在那之前只能用 apps、open、intent、notify、clipboard。"
+                "无障碍没开，看不了屏幕：已通知用户到 DSH 设置 → 手机操控 开启。现在只能用 apps / open / intent / notify / clipboard。"
             }
         }
     }
@@ -349,9 +349,9 @@ class PhoneCore(
         return Either.Right(d)
     }
 
-    private fun routeScreenId(id: String?): Either<String, PhoneScreen> {
+    private fun routeScreenId(id: String?, parameterName: String = "screen"): Either<String, PhoneScreen> {
         // l10n:keep agent tool result
-        if (id == null) return Either.Left("缺少 screen（屏幕号，如 s7）。先调用 screen 拿到屏幕号。")
+        if (id == null) return Either.Left("缺少 $parameterName（屏幕号，如 s7）。先调用 screen 拿到屏幕号。")
         return PhoneScreen.ofScreenId(id)?.let { Either.Right(it) }
             // l10n:keep agent tool result
             ?: Either.Left("屏幕号「$id」不对：主屏以 s 开头（如 s7），后台屏以 b 开头（如 b3）。先调用 screen 拿到屏幕号。")
@@ -427,8 +427,9 @@ class PhoneCore(
 
     /** tap / type / scroll / tap_xy: route, resolve, gate, perform. */
     private fun act(name: String, a: Args, scope: SerialWorker.Scope): Out {
-        val sid = (if (name == PhoneToolCatalog.TAP_XY) a.str("observation") else a.str("screen"))
-        val which = when (val r = routeScreenId(sid)) {
+        val screenParameter = if (name == PhoneToolCatalog.TAP_XY) "observation" else "screen"
+        val sid = a.str(screenParameter)
+        val which = when (val r = routeScreenId(sid, screenParameter)) {
             is Either.Left -> return Out(r.value, error = true)
             is Either.Right -> r.value
         }

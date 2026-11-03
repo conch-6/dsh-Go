@@ -586,5 +586,14 @@
         "type": "int"
       }
     }
+  },
+  "shellQuickPanel": "快捷入口",
+  "shellQuickPanelHint": "在「{path}」里调整",
+  "@shellQuickPanelHint": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
   }
 }

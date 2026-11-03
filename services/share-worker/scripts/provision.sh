@@ -2,21 +2,40 @@
 # Provisions and deploys dshgo-share on our Cloudflare account. Touches only
 # its own resources:
 #   R2 bucket dshgo-share (+ its lifecycle rules), KV namespace
-#   dshgo-share-quota, Worker dshgo-share (+ its ADMIN_KEY secret), and one
-#   Workers Custom Domain (go.<zone>, else s.<zone>), which creates its own DNS
-#   record. Never reads or changes other Workers, DNS records or zone settings.
+#   dshgo-share-quota, Worker dshgo-share (+ its ADMIN_KEY secret and its
+#   cron), one Workers Custom Domain (go.<zone>, else s.<zone>), which creates
+#   its own DNS record, and one zone Redirect Rule, found by its description
+#   (the plugin market's files to the public bucket, below). Never reads or
+#   changes other Workers, DNS records, rules or zone settings.
 #
 #   CF_TOKEN_FILE=<file> scripts/provision.sh check    read-only: what exists, which domain
 #   CF_TOKEN_FILE=<file> scripts/provision.sh apply    create what's missing, deploy, e2e
-#   CF_TOKEN_FILE=<file> scripts/provision.sh deploy   redeploy the code only
+#   CF_TOKEN_FILE=<file> scripts/provision.sh deploy   redeploy the code only (+ the redirect rule)
+#   … apply|deploy --no-analytics   without the Analytics Engine datasets (wrangler.jsonc), for
+#                                   an account that hasn't enabled it; DSH_ANALYTICS=0 does the same
+#
+# Works from the public tree: the account id and the KV namespace id come from
+# the environment or files outside it (scripts/cloudflare.sh; apply writes the
+# KV id's file), are checked against the account, and only go into a temporary
+# copy of wrangler.jsonc that wrangler deploys with. The tracked file never changes.
 #
 # The token is only ever passed as `$(cat "$CF_TOKEN_FILE")` straight into
 # curl / wrangler: never echoed, stored or put in a URL. Don't add `set -x`.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+die() { echo "provision: $*" >&2; exit 1; }
+mode=${1:-check}
+ANALYTICS=${DSH_ANALYTICS:-1}
+case "${2:-}" in --no-analytics) ANALYTICS=0 ;; --analytics) ANALYTICS=1 ;; '') ;; *) mode=usage ;; esac
+[[ "$mode" =~ ^(check|apply|deploy)$ ]] || { echo "usage: CF_TOKEN_FILE=<file> $0 check|apply|deploy [--no-analytics]" >&2; exit 2; }
 : "${CF_TOKEN_FILE:?set CF_TOKEN_FILE to the API token file}"
-[[ -r "$CF_TOKEN_FILE" ]] || { echo "can't read CF_TOKEN_FILE" >&2; exit 1; }
+[[ -r "$CF_TOKEN_FILE" ]] || die "can't read CF_TOKEN_FILE"
+source scripts/cloudflare.sh
+# The placeholders are refused before anything runs; apply may still make the KV namespace.
+real_id "$ACCOUNT" || die "no Cloudflare account id: set CF_ACCOUNT_ID or write it to $ACCOUNT_FILE (wrangler.jsonc has only a placeholder in the public tree)"
+real_id "$KV_ID" || KV_ID=
+[[ -n "$KV_ID" || "$mode" != deploy ]] || die "no KV namespace id: set CF_KV_QUOTA_ID or write it to $KV_ID_FILE (provision.sh apply does)"
 ZONE_NAME=${ZONE_NAME:-dshtui.com}
 WORKER=dshgo-share
 BUCKET=dshgo-share
@@ -32,16 +51,13 @@ cf() { # METHOD PATH [JSON]
 }
 
 ok() { jq -e '.success == true' >/dev/null <<<"$1"; }
-die() { echo "provision: $*" >&2; exit 1; }
-
-wr() { CLOUDFLARE_API_TOKEN="$(cat "$CF_TOKEN_FILE")" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT" WRANGLER_SEND_METRICS=false npx wrangler "$@"; }
 
 # ── Read-only discovery ──────────────────────────────────────────────────
 zone_json=$(cf GET "/zones?name=$ZONE_NAME")
 ok "$zone_json" || die "zone lookup failed: $(jq -c '.errors' <<<"$zone_json")"
 ZONE=$(jq -r '.result[0].id // empty' <<<"$zone_json")
-ACCOUNT=$(jq -r '.result[0].account.id // empty' <<<"$zone_json")
-[[ -n "$ZONE" && -n "$ACCOUNT" ]] || die "zone $ZONE_NAME is not on this account"
+[[ -n "$ZONE" ]] || die "zone $ZONE_NAME is not on this account"
+[[ "$(jq -r '.result[0].account.id' <<<"$zone_json")" == "$ACCOUNT" ]] || die "zone $ZONE_NAME is on another account than $ACCOUNT (CF_ACCOUNT_ID / $ACCOUNT_FILE)"
 echo "zone $ZONE_NAME: $ZONE (account $ACCOUNT)"
 
 scripts=$(cf GET "/accounts/$ACCOUNT/workers/scripts")
@@ -97,10 +113,10 @@ echo "bucket $BUCKET exists: $([[ $BUCKET_EXISTS == 1 ]] && echo yes || echo no)
 
 kv_list=$(cf GET "/accounts/$ACCOUNT/storage/kv/namespaces?per_page=100")
 ok "$kv_list" || die "listing KV namespaces failed"
-KV_ID=$(jq -r --arg t "$KV_TITLE" '[.result[] | select(.title == $t) | .id] | first // empty' <<<"$kv_list")
-echo "kv $KV_TITLE: ${KV_ID:-missing}"
+FOUND_KV=$(jq -r --arg t "$KV_TITLE" '[.result[] | select(.title == $t) | .id] | first // empty' <<<"$kv_list")
+echo "kv $KV_TITLE: ${FOUND_KV:-missing}$([[ -n "$KV_ID" ]] || echo " (no id in CF_KV_QUOTA_ID / $KV_ID_FILE yet)")"
+[[ -z "$KV_ID" || -z "$FOUND_KV" || "$KV_ID" == "$FOUND_KV" ]] || die "$KV_TITLE is $FOUND_KV, not $KV_ID (CF_KV_QUOTA_ID / $KV_ID_FILE)"
 
-mode=${1:-check}
 [[ "$mode" == check ]] && exit 0
 
 # ── Writes: only our own resources ───────────────────────────────────────
@@ -122,11 +138,17 @@ if [[ "$mode" == apply ]]; then
   ok "$res" || die "setting lifecycle failed: $(jq -c '.errors' <<<"$res")"
   echo "lifecycle: 7d/ → 7 days, 30d/ → 30 days"
 
-  if [[ -z "$KV_ID" ]]; then
+  if [[ -z "$FOUND_KV" ]]; then
     res=$(cf POST "/accounts/$ACCOUNT/storage/kv/namespaces" "{\"title\":\"$KV_TITLE\"}")
     ok "$res" || die "creating KV failed: $(jq -c '.errors' <<<"$res")"
-    KV_ID=$(jq -r '.result.id' <<<"$res")
-    echo "created kv $KV_TITLE: $KV_ID"
+    FOUND_KV=$(jq -r '.result.id' <<<"$res")
+    echo "created kv $KV_TITLE: $FOUND_KV"
+  fi
+  if [[ -z "$KV_ID" ]]; then
+    mkdir -p "$(dirname "$KV_ID_FILE")"
+    printf '%s\n' "$FOUND_KV" >"$KV_ID_FILE"
+    KV_ID=$FOUND_KV
+    echo "kv id written to $KV_ID_FILE"
   fi
 
   if [[ ! -s "$ADMIN_FILE" ]]; then
@@ -137,17 +159,10 @@ if [[ "$mode" == apply ]]; then
   fi
 fi
 
-[[ -n "$KV_ID" ]] || die "KV namespace $KV_TITLE is missing: run apply"
-# Writes our KV id and the chosen host into wrangler.jsonc (neither is secret;
-# commit the result so later deploys match).
-node -e '
-  const fs = require("fs");
-  const [, kv, host] = process.argv;
-  let s = fs.readFileSync("wrangler.jsonc", "utf8");
-  s = s.replace(/"id": "[0-9a-f]{32}"/, `"id": "${kv}"`).replace(/"pattern": "[^"]+", "custom_domain": true/, `"pattern": "${host}", "custom_domain": true`);
-  fs.writeFileSync("wrangler.jsonc", s);
-' "$KV_ID" "$HOST"
-
+[[ -n "$FOUND_KV" ]] || die "KV namespace $KV_TITLE is missing: run apply"
+# Our ids and the chosen host, in a copy of wrangler.jsonc next to it.
+wrangler_config "$HOST"
+echo "analytics: $([[ $ANALYTICS == 1 ]] && echo 'on (DOWNLOADS, CHECKS, USAGE)' || echo 'off (--no-analytics)')"
 wr deploy
 if [[ "$mode" == apply ]]; then
   wr secret put ADMIN_KEY <"$ADMIN_FILE"
@@ -160,3 +175,65 @@ for _ in $(seq 1 60); do
   sleep 5
 done
 node scripts/e2e.mjs "https://$HOST" --admin-key-file "$ADMIN_FILE"
+
+# ── The plugin market off the Worker ─────────────────────────────────────
+# The cron puts the market's files on the public bucket every 10 minutes
+# (src/market.ts); apps read them there (docs/design/plugin-market.md §3).
+# Apps that ask go.<zone>/market/… get a 302 there from one zone Redirect
+# Rule, created once the bucket serves what the Worker does. A request with
+# an Origin header (a web page's fetch, which needs the Worker's CORS header)
+# still reaches the Worker, and so does every other path.
+DL_BASE=$(wrangler_json | jq -r '.vars.DL_BASE_URL // empty')
+[[ -n "$DL_BASE" ]] || { echo "market redirect: skipped (no DL_BASE_URL)"; exit 0; }
+DL_BASE=${DL_BASE%/}
+echo "market: waiting for $DL_BASE/market/ to serve what https://$HOST/market/ does (the cron runs every 10 minutes) …"
+tmp=$(mktemp -d)
+trap 'rm -f "$WRANGLER_CONFIG"; rm -rf "$tmp"' EXIT
+same=0
+for _ in $(seq 1 30); do
+  same=1
+  for f in index.json dsh-go.json; do
+    curl -sf -o "$tmp/dl" "$DL_BASE/market/$f" && curl -sf -H "Origin: https://$HOST" -o "$tmp/worker" "https://$HOST/market/$f" \
+      && jq -e . "$tmp/dl" >/dev/null && cmp -s "$tmp/dl" "$tmp/worker" || same=0
+  done
+  [[ $same == 1 ]] && break
+  sleep 30
+done
+[[ $same == 1 ]] || die "$DL_BASE/market/ doesn't serve the Worker's market yet; deploy again in a few minutes for the redirect"
+echo "  same files"
+
+DESCRIPTION="dshgo-share: plugin market from the public bucket"
+rule=$(jq -nc --arg d "$DESCRIPTION" --arg host "$HOST" --arg base "$DL_BASE" '{
+  description: $d,
+  expression: "(http.host eq \"\($host)\" and http.request.uri.path in {\"/market/index.json\" \"/market/dsh-go.json\"} and not any(http.request.headers.names[*] eq \"origin\"))",
+  action: "redirect",
+  action_parameters: {from_value: {status_code: 302, preserve_query_string: true,
+    target_url: {expression: "concat(\"\($base)\", http.request.uri.path)"}}},
+  enabled: true}')
+PHASE=/zones/$ZONE/rulesets/phases/http_request_dynamic_redirect/entrypoint
+entry=$(cf GET "$PHASE")
+if ! ok "$entry"; then
+  [[ "$(jq -r '.errors[0].code' <<<"$entry")" == 10003 ]] || die "reading the zone's redirect rules failed: $(jq -c '.errors' <<<"$entry")"
+  res=$(cf PUT "$PHASE" "$(jq -nc --argjson r "$rule" '{rules: [$r]}')")
+  ok "$res" || die "creating the redirect rule failed: $(jq -c '.errors' <<<"$res")"
+  echo "market redirect: created"
+else
+  RULESET=$(jq -r '.result.id' <<<"$entry")
+  current=$(jq -c --arg d "$DESCRIPTION" '[.result.rules[] | select(.description == $d)] | first // empty' <<<"$entry")
+  if [[ -z "$current" ]]; then
+    res=$(cf POST "/zones/$ZONE/rulesets/$RULESET/rules" "$rule")
+    ok "$res" || die "adding the redirect rule failed: $(jq -c '.errors' <<<"$res")"
+    echo "market redirect: added"
+  elif [[ "$(jq -cS '{expression, action, action_parameters, enabled}' <<<"$current")" != "$(jq -cS '{expression, action, action_parameters, enabled}' <<<"$rule")" ]]; then
+    res=$(cf PATCH "/zones/$ZONE/rulesets/$RULESET/rules/$(jq -r .id <<<"$current")" "$rule")
+    ok "$res" || die "updating the redirect rule failed: $(jq -c '.errors' <<<"$res")"
+    echo "market redirect: updated"
+  else
+    echo "market redirect: up to date"
+  fi
+fi
+for _ in $(seq 1 12); do
+  [[ "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "https://$HOST/market/index.json")" == "302 $DL_BASE/market/index.json" ]] && { echo "  https://$HOST/market/index.json → 302 $DL_BASE/market/index.json"; exit 0; }
+  sleep 5
+done
+die "https://$HOST/market/index.json isn't redirected yet"

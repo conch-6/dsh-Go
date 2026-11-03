@@ -42,7 +42,7 @@ No `error` lines means done. `--json` for machines.
 
 | | Item | |
 |---|---|---|
-| ⬜ | Only the 16 components; unknown ones become placeholders | ⚙️ |
+| ⬜ | Match the view root version: omitted `v` / `v: 1` uses v1; set `v: 2` for the added [components](components.md) and bounded [styles](styles.md). Keep manifest `dshGo.v` at `1`; use `caps` / `adaptView` for older apps | ⚙️ |
 | ⬜ | Tool cards ≤ 8 KiB, ≤ 40 components, ≤ 6 levels; panels ≤ 32 KiB, ≤ 120, ≤ 8 | ⚙️ |
 | ⬜ | Tool cards without bindings (no data model) and without buttons (not tappable in phase 0) | ⚙️ |
 | ⬜ | `presentationMeta` wrapped in `toolCard()`: never throws, never returns `undefined` / `NaN` | |

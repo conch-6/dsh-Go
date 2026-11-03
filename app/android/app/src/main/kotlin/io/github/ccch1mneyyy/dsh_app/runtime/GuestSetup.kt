@@ -31,6 +31,13 @@ object GuestSetup {
         |- 默认工作目录是 `/root/workspace`。{STORAGE_LINE}
         |- 已预装 node / npm / pnpm、python3 / pip、git；npm 和 pnpm 默认用国内镜像 registry.npmmirror.com。缺别的工具可以 `apt-get update && apt-get install -y <包名>`（需要联网）。
         |- 手机屏幕小：回复尽量简洁，代码块不要太宽；用用户使用的语言回答。
+        |
+        |## 界面与技能
+        |
+        |- 这个 App 的对话界面是 Flutter 原生界面，不是 Harness Web Client。改 App 自己的样子用 dsh-go-ui（ui.json）；给 App 加胶囊、菜单项、状态条、原生面板、工具卡这类功能用 dsh-go-plugin；只有用户明确要做 Cordis 插件、或要改 Harness 网页版 / 桌面端时，才用官方 cordis-plugin-development 等技能。
+        |- 没点名界面载体时，手机上的默认目标是 dsh-go 原生界面；先确定载体再选技能，不要按加载顺序决定。
+        |- dsh-go 原生插件不是 Cordis bundle：目录在 `${'$'}DSH_HOME/dsh-go/plugins/`，安装用 `dsh plugin --profile web add`；官方技能里的「工作区建包 + plugin_manager install_bundle」只用于 Cordis 插件，两套不要混用。
+        |- 用户报障、排查问题、写 bug 反馈时加载 `dsh-go-support` 技能：它教你怎么读本机诊断、按症状定位、生成脱敏的 issue 草稿。
         |""").trimMargin()
 
     /**
@@ -43,18 +50,48 @@ object GuestSetup {
         |
         |## 可视化回复（dsh-ui）
         |
-        |- 这个 App 能把 ```dsh-ui 代码块画成原生的图表和卡片。只在比文字更清楚时用：比较数值或看趋势用 chart，几个关键数字用 metric，方案对比用 compare，步骤和进度用 steps，需要用户点选时用 options 或 confirm。闲聊、单个数字、普通列表都不用。
+        |- 这个 App 能把带 ```dsh-ui 标记的代码块画成原生的图表和卡片。只在比文字更清楚时用：比较数值或看趋势用 chart，几个关键数字用 metric，方案对比用 compare，步骤和进度用 steps，需要用户点选时用 options 或 confirm。闲聊、单个数字、普通列表都不用。
         |- 先用一两句话给出结论，再放视图。同一份数据不要用文字、表格、图表各写一遍。一条回复最多两个视图。
-        |- 代码块里只放一个 JSON 对象，不写注释和尾逗号，不超过 4 KB。数据必须真实；示例或估算的数字在 caption 里说明。
-        |- 组件：stack / row {children}；text {text}；metric {label, value, tone?: good|warn|bad, caption?}；chart {kind: bar|hbar|line|donut, categories, series: [{name?, values}], unit?, caption?}（values 与 categories 一一对应，最多 6 组、每组 60 个点；donut 只放一组）；compare {items: [{title, badge?, rows: [[名称, 值]]}]}（2–4 项）；steps {items: [{label, status: done|current|todo|failed, detail?}]}；callout {text, tone?: info|good|warn|bad}；options {id, options: [{label, description?}], multi?}（最多 8 个）；confirm {id, confirmLabel?, cancelLabel?}。根节点可以带 title。
+        |- 必须写成围栏代码块：第一行单独写 ```dsh-ui，下一行开始是 JSON，最后一行单独写 ```。直接把 JSON 裸着写进正文是纯文本，画不出来。
+        |- 围栏里只放一个 JSON 对象，不写注释和尾逗号，不超过 4 KB。数据必须真实；示例或估算的数字在 caption 里说明。
+        |- 组件：stack / row {children}；text {text}；metric {label, value, tone?: good|warn|bad, caption?}；chart {kind: bar|hbar|line|donut, categories, series: [{name?, values}], unit?, caption?}（values 与 categories 一一对应，最多 6 组、每组 60 个点；donut 只放一组）；compare {items: [{title, badge?, rows: [[名称, 值]]}]}（2–4 项）；steps {items: [{label, status: done|current|todo|failed, detail?}]}；callout {text, tone?: info|good|warn|bad}；options {id, options: [{label, description?}], multi?, freetext?}（最多 8 个）；confirm {id, confirmLabel?, cancelLabel?}。根节点可以带 title。
+        |- options 想允许「选项以外」的回答时加 `freetext: true`（也可以写成一句提示词，如 `freetext: "自己写一个"`）：选项下面会出现输入框，用户填的内容会以「其他：…」跟选择一起回传。
 """ +
         // l10n:keep agent prompt
-        """        |- 例：{"type":"stack","title":"近 6 个月支出","children":[{"type":"metric","label":"月均","value":"¥4,180"},{"type":"chart","kind":"bar","categories":["5月","6月"],"series":[{"values":[3800,4100]}],"unit":"元"}]}
+        """        |- 例：
+        |```dsh-ui
+        |{"type":"stack","title":"近 6 个月支出","children":[{"type":"metric","label":"月均","value":"¥4,180"},{"type":"chart","kind":"bar","categories":["5月","6月"],"series":[{"values":[3800,4100]}],"unit":"元"}]}
+        |```
 """ +
         // l10n:keep agent prompt
-        """        |- 含 options 或 confirm 的视图放在回复最后，然后结束这一轮；用户的选择会以一条 "[dsh-ui reply]" 开头的消息发回来（如「选择：方案 A」「确认：开始」）。只问一个简单问题时用 ask_user_question。
+        """        |- 含 options 或 confirm 的视图放在回复最后，然后结束这一轮；用户的选择会以一条 "[dsh-ui reply]" 开头的消息发回来（如「选择：方案 A」「确认：开始」；自己填的另起一行「其他：…」）。只问一个简单问题时用 ask_user_question。
         |- 不要用视图收集密码、密钥或验证码。
         |""").trimMargin()
+
+    // l10n:keep agent prompt
+    private val DIAGNOSTICS_SECTION = """
+        |
+        |## 本机诊断
+        |
+        |- 用户报障（卡顿、发热、连不上、更新失败、闪退、插件不生效、手机操控失败）时，先读 `{PATH}`。App 每次都把最新的环境快照写在这里：版本、设备、引擎状态、连接方式、性能档位、最近错误和引擎日志尾部。这是给排查用的，读之前不用问用户。
+        |- 需要更多细节时，让用户在 设置 → 诊断 里导出完整诊断包（zip）；数据不足就直说，不要凭猜测下结论。
+        |- 报告已经脱敏（key、token、手机号之类不会出现）；仍然不要把里面的路径、设备信息原样贴到聊天或 issue 里。
+        |- 完整的排查流程（症状清单、issue 模板、隐私红线）在 `dsh-go-support` 技能里；用户报障时加载它再动手。
+        |""".trimMargin()
+
+    /** Where the engine's agent finds that snapshot, inside the guest. */
+    private const val DIAGNOSTICS_FILE = "root/.dsh/dsh-app/diagnostics.md"
+
+    /** Writes [markdown] where the engine's file tools can read it; returns the host file. */
+    fun writeDiagnostics(rootfs: File, markdown: String): File {
+        val file = File(rootfs, DIAGNOSTICS_FILE)
+        val dir = file.parentFile ?: throw IOException("no diagnostics directory")
+        if (!dir.isDirectory && !dir.mkdirs()) throw IOException("cannot create ${dir.path}")
+        val temp = File(dir, ".diagnostics.md.dsh-tmp")
+        temp.writeText(markdown)
+        if (!temp.renameTo(file)) throw IOException("cannot replace ${file.path}")
+        return file
+    }
 
     /** Global DSH instructions ($DSH_HOME/AGENTS.md); left alone once the user removes the marker. */
     fun writeAgentsMd(
@@ -83,7 +120,12 @@ object GuestSetup {
                     "手机相册、下载等用户文件不在这个环境里，看不到；如需访问，请用户在 App 设置里打开「访问手机文件」。"
                 },
             ) + (if (visualReplies) DSH_UI_SECTION else "") +
-                (if (phoneControl) PhoneGuest.AGENTS_SECTION else "")
+                (if (phoneControl) PhoneGuest.AGENTS_SECTION else "") +
+                DIAGNOSTICS_SECTION.replace(
+                    "{PATH}",
+                    if (directEngine) "${rootfs.canonicalPath}/root/.dsh/dsh-app/diagnostics.md"
+                    else "\$DSH_HOME/dsh-app/diagnostics.md",
+                )
             file.parentFile?.mkdirs()
             if (!file.exists() || file.readText() != text) file.writeText(text)
         } catch (_: Exception) {

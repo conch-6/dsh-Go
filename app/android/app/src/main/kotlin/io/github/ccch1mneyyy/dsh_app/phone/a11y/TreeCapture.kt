@@ -17,7 +17,8 @@ internal class Capture(
     /** Top-most first; the last is the main window. Empty when nothing readable is in front. */
     val windows: List<UiWindow>,
     val natives: List<AccessibilityNodeInfo>,
-    val keyboardShown: Boolean,
+    /** Null when the system did not give us a window enumeration. */
+    val keyboardShown: Boolean?,
     val screen: Box,
     /** Package of the top-most readable window (what the person is looking at). */
     val packageName: String?,
@@ -28,12 +29,21 @@ internal class Capture(
     val systemInFront: Boolean,
     /** Hit the node or time cap: the tree may be incomplete. */
     val truncated: Boolean,
+    /** A readable dialog is in front, but a lower application window did not supply a root. */
+    val partial: Boolean = false,
     /**
-     * Title of a front window whose content the system won't give us (null root): pages that
-     * mark themselves accessibilityDataSensitive, which non-tool services can't read — seen on
-     * the emulator's Wi-Fi page. Treated as a secure window.
+     * Title of a front window whose root the system won't give us. This can happen with
+     * accessibilityDataSensitive pages or a transition; conservatively forwarded as secure.
      */
     val hiddenWindowTitle: String? = null,
+    /**
+     * Title of the front window that is there but gives us only empty layout shells.
+     * Android 14+ hides views marked accessibilityDataSensitive from non-tool
+     * services this way (GitHub, banking and password pages), so the root survives while the
+     * content subtree does not. Only a hint: report 「可能受敏感视图策略限制」, never assert
+     * that the app is a sensitive page (a fresh, still-drawing app looks the same for a moment).
+     */
+    val unreadableWindowTitle: String? = null,
     val takenAt: Long = SystemClock.uptimeMillis(),
 ) {
     fun native(ref: Int): AccessibilityNodeInfo? = natives.getOrNull(ref)
@@ -71,19 +81,22 @@ internal object TreeCapture {
 
     fun capture(service: AccessibilityService, screen: Box, ownPackage: String, budgetMs: Long): Capture {
         val st = State(SystemClock.uptimeMillis() + budgetMs)
-        val all = try { service.windows } catch (_: Throwable) { emptyList() }
-        val sorted = all.sortedByDescending { it.layer }
-        var keyboard = false
+        val all = try { service.windows } catch (_: Throwable) { null }
+        val sorted = all.orEmpty().sortedByDescending { it.layer }
+        // Scan every window before the content loop can stop at an opaque app window.
+        val keyboard = WindowContent.keyboardShown(all?.map { it.type }, AccessibilityWindowInfo.TYPE_INPUT_METHOD)
         val chosen = mutableListOf<UiWindow>()
         var topPackage: String? = null
         var ownFront = false
         var systemFront = false
         var hidden: String? = null
+        var unreadable: String? = null
+        var partial = false
         val screenArea = screen.area.coerceAtLeast(1)
         try {
             for (w in sorted) {
                 when (w.type) {
-                    AccessibilityWindowInfo.TYPE_INPUT_METHOD -> { keyboard = true; continue }
+                    AccessibilityWindowInfo.TYPE_INPUT_METHOD -> continue
                     AccessibilityWindowInfo.TYPE_APPLICATION, AccessibilityWindowInfo.TYPE_SYSTEM -> {}
                     else -> continue // our overlay, other services' overlays, split-screen divider, magnifier
                 }
@@ -91,15 +104,19 @@ internal object TreeCapture {
                 w.getBoundsInScreen(st.rect)
                 val bounds = Box(st.rect.left, st.rect.top, st.rect.right, st.rect.bottom)
                 val share = bounds.intersect(screen).area.toDouble() / screenArea
+                if (share <= 0) continue
                 // Status bar, navigation bar, a floating ball: small system windows are chrome, not content.
                 if (w.type == AccessibilityWindowInfo.TYPE_SYSTEM && share < 0.5) continue
                 // Some windows answer getRoot() with null (seen on the API 35 emulator for a Settings
                 // sub-page); the active window's root is still reachable through the service.
                 val root = w.root ?: (if (w.isActive || w.isFocused) activeRoot(service, w.id) else null)
                 if (root == null) {
-                    // A full-screen app window we may not read covers whatever is below it.
-                    if (w.type == AccessibilityWindowInfo.TYPE_APPLICATION && share >= 0.8) {
-                        if (chosen.isEmpty()) hidden = (if (Build.VERSION.SDK_INT >= 24) w.title?.toString() else null) ?: ""
+                    // A dialog, split-screen pane or IME-resized app can be unreadable too.
+                    if (w.type == AccessibilityWindowInfo.TYPE_APPLICATION) {
+                        when (WindowContent.rootGap(chosen)) {
+                            WindowContent.RootGap.FRONT -> hidden = (if (Build.VERSION.SDK_INT >= 24) w.title?.toString() else null) ?: ""
+                            WindowContent.RootGap.PARTIAL -> partial = true
+                        }
                         break
                     }
                     continue
@@ -112,15 +129,20 @@ internal object TreeCapture {
                 }
                 val title = if (Build.VERSION.SDK_INT >= 24) w.title?.toString() else null
                 val node = convert(root, 0, st)
+                // Inspect the whole subtree, not just the root's child count. A chain of empty
+                // layouts is still unreadable; an unlabelled canvas is not evidence of filtering.
+                val emptyFront = chosen.isEmpty() && w.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                    !st.truncated && !WindowContent.usable(node)
+                if (emptyFront) unreadable = title ?: ""
                 chosen += UiWindow(
                     w.id, if (w.type == AccessibilityWindowInfo.TYPE_SYSTEM) WindowKind.SYSTEM else WindowKind.APP,
                     pkg, title, bounds, node,
                 )
-                if (share >= 0.8) break // anything under a full-screen window is covered
+                if (emptyFront || share >= 0.8) break // do not read through an unreadable front window
             }
         } finally {
             @Suppress("DEPRECATION")
-            if (Build.VERSION.SDK_INT < 33) all.forEach { runCatching { it.recycle() } }
+            if (Build.VERSION.SDK_INT < 33) all.orEmpty().forEach { runCatching { it.recycle() } }
         }
         return Capture(
             windows = chosen,
@@ -131,7 +153,9 @@ internal object TreeCapture {
             ownAppInFront = ownFront,
             systemInFront = systemFront,
             truncated = st.truncated,
+            partial = partial,
             hiddenWindowTitle = hidden,
+            unreadableWindowTitle = unreadable,
         )
     }
 

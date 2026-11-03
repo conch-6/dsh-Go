@@ -1,0 +1,19 @@
+# dsh-go: dispose each public Agent resolver registration once; preserve a later owner.
+# Cordis traced function reads do not preserve the original resolver identity.
+diff --git a/node_modules/@deepseek-ai/dsh-client-file-upload/lib/index.js b/node_modules/@deepseek-ai/dsh-client-file-upload/lib/index.js
+index deb9ccf7617598238dcce2615d90df94f4e222b6..14ce88974d37126e42deebc30cbe09a4c9d75a51 100644
+--- a/node_modules/@deepseek-ai/dsh-client-file-upload/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-client-file-upload/lib/index.js
+@@ -188,8 +188,11 @@
+ 		registerAgentResolver(resolve) {
+ 			if (this.agentResolver !== void 0) throw new Error("file-upload: Agent resolver is already registered");
+ 			this.agentResolver = resolve;
++			let disposed = false;
+ 			return () => {
+-				if (this.agentResolver === resolve) this.agentResolver = void 0;
++				if (disposed) return;
++				disposed = true;
++				this.agentResolver = void 0;
+ 			};
+ 		}
+ 		/**

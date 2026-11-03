@@ -3,8 +3,10 @@
 //   GET /download                     the page: the latest build on every route, no key
 //   GET /download/get?via=&v=         a download button: counted (src/stats.ts), then 302
 //                                     to the route's real URL; HEAD isn't counted
-//   GET /download/<version>/<file>    the APK or SHA256SUMS from R2 (the Global route):
-//                                     edge copy, Range, cacheable by browsers
+//   GET /download/<version>/<file>    the APK or SHA256SUMS from R2: edge copy, Range,
+//                                     cacheable by browsers. The Global route's file until
+//                                     a release is on the public bucket (DL_BASE_URL);
+//                                     kept for the links already out there
 //
 // The files are the beta channel's (R2 beta/<version>/), put there by
 // scripts/publish-release.sh. With the default DOWNLOAD_ACCESS=key all of
@@ -12,12 +14,12 @@
 // and the page is /beta behind an access key. The app's channel (/beta/update.json,
 // token downloads) and signed links work the same either way.
 
-import { FILE, VERSION, edgeKey, inAppBrowser, latestBuild } from './beta';
+import { type Build, FILE, VERSION, edgeKey, inAppBrowser, latestBuild } from './beta';
 import { type Mode, pageResponse, pickLang, publicPage } from './download-page';
 import type { Env } from './env';
 import { COMMON, type Ctx, plain, serveObject } from './files';
 import { burstAllowed, clientKey } from './limits';
-import { type Route, countryOf, pickRoute, routesFor } from './routes';
+import { type Route, countryOf, dlUrl, pickRoute, routesFor } from './routes';
 import { countDownload } from './stats';
 
 /** DOWNLOAD_ACCESS: "public" opens /download; anything else keeps the key. */
@@ -36,7 +38,9 @@ const FILE_PATH = /^\/download\/([^/]+)\/([^/]+)$/;
 export const PUBLIC_APK_CACHE = 'public, max-age=31536000, immutable';
 export const PUBLIC_SUMS_CACHE = 'public, max-age=3600';
 
-const fileUrl = (build: { version: string; name: string }) => `/download/${encodeURIComponent(build.version)}/${encodeURIComponent(build.name)}`;
+/** The Global route's file: on the public bucket (no Worker in between) when it's there. */
+const globalUrl = (env: Env, build: Build) =>
+  dlUrl(env, build) ?? `/download/${encodeURIComponent(build.version)}/${encodeURIComponent(build.name)}`;
 const getUrl = (route: Route, version: string) => `/download/get?via=${route.id}&v=${encodeURIComponent(version)}`;
 
 function found(location: string): Response {
@@ -49,7 +53,7 @@ function found(location: string): Response {
 async function get(request: Request, env: Env, ctx: Ctx, url: URL): Promise<Response> {
   const via = url.searchParams.get('via');
   const build = await latestBuild(env);
-  const route = build && url.searchParams.get('v') === build.version ? routesFor(env, build, fileUrl(build)).find((r) => r.id === via) : undefined;
+  const route = build && url.searchParams.get('v') === build.version ? routesFor(env, build, globalUrl(env, build)).find((r) => r.id === via) : undefined;
   if (!build || !route) return found(via && /^(cn|global|github)$/.test(via) ? `/download?via=${via}` : '/download');
   // HEAD (publish-release.sh checking the links) and floods aren't counted;
   // the redirect happens either way.
@@ -66,15 +70,11 @@ export async function download(request: Request, env: Env, ctx: Ctx): Promise<Re
 
   if (path === '/download') {
     const inApp = inAppBrowser(request);
-    // DOWNLOAD_REDIRECT: the public page sends people to that address instead (GitHub Releases).
-    // In-app browsers (WeChat, QQ) still get the "open in your browser" page.
-    const away = env.DOWNLOAD_REDIRECT?.trim();
-    if (away && !inApp) return new Response(null, { status: 302, headers: { ...COMMON, Location: away, 'Cache-Control': 'no-store' } });
     const build = inApp ? null : await latestBuild(env);
     let card = null;
     if (build) {
       // The buttons go through /download/get, which counts and redirects.
-      const routes = routesFor(env, build, fileUrl(build)).map((r) => ({ id: r.id, url: getUrl(r, build.version) }));
+      const routes = routesFor(env, build, globalUrl(env, build)).map((r) => ({ id: r.id, url: getUrl(r, build.version) }));
       card = { build, routes, selected: pickRoute(routes, countryOf(request), url.searchParams.get('via')) };
     }
     return pageResponse(request, publicPage(pickLang(request), inApp, card));

@@ -20,13 +20,14 @@ import kotlin.math.roundToInt
 
 /**
  * The pet itself, in a window of one of [PetFrames]' frames (the wide hit box at rest, grown
- * around the lifted pose while held): one cell of the current animation placed at its box on the
- * canvas, a whole number of physical pixels per art pixel and unfiltered for 1× pixel art, smoothly
- * scaled for hi-res packs. Effects reaching past the window are cut off, as the design accepts.
- * Software drawn (the window asks for no hardware acceleration): a small view redrawn only when
- * the frame changes.
+ * around the lifted pose while held, around the current animation's cell when it reaches past
+ * rest): one cell of the current animation placed at its box on the canvas, whole, a whole number
+ * of physical pixels per art pixel and unfiltered for 1× pixel art, smoothly scaled for hi-res
+ * packs. Software drawn (the window asks for no hardware acceleration): a small view redrawn only
+ * when the frame changes.
  *
- * Touch: drag moves the window, a tap opens the conversation, a long press opens the menu.
+ * Touch, on the body ([PetFrames.hit]): drag moves the window, a tap opens the conversation, a
+ * long press opens the menu. A touch that starts elsewhere in a grown window does nothing.
  */
 @SuppressLint("ViewConstructor")
 internal class PetView(context: Context, private val listener: Listener) : View(context) {
@@ -152,6 +153,9 @@ internal class PetView(context: Context, private val listener: Listener) : View(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // Off the body (a thought cloud, the air over a jump): not the pet's, and the rest
+                // of the gesture isn't either.
+                if (!onBody(event.x, event.y)) return false
                 downX = event.rawX
                 downY = event.rawY
                 dragging = false
@@ -190,6 +194,12 @@ internal class PetView(context: Context, private val listener: Listener) : View(
             }
         }
         return true
+    }
+
+    /** Whether ([x], [y]) in the view is on the shown animation's body, or anywhere before any is shown. */
+    private fun onBody(x: Float, y: Float): Boolean {
+        val f = sprites?.frames ?: return true
+        return f.hit(anim).contains(x + frame.left, y + frame.top)
     }
 
     private fun velocity(): Float {

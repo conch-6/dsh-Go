@@ -284,8 +284,10 @@ class FakeRemoteServer {
       });
     }
     if (request.method == 'GET' && path == '/api/v1/turn/credentials') {
-      turnRequests.add(request.uri.queryParameters['connection_id'] ?? '');
-      return json(200, {'iceServers': iceServers});
+      final connectionId = request.uri.queryParameters['connection_id'] ?? '';
+      turnRequests.add(connectionId);
+      final servers = await (iceServersForRequest?.call(connectionId) ?? Future.value(iceServers));
+      return json(200, {'iceServers': servers});
     }
     final presenceMatch = RegExp(r'^/api/v1/devices/([^/]+)/presence$').firstMatch(path);
     if (request.method == 'GET' && presenceMatch != null) {
@@ -334,6 +336,9 @@ class FakeRemoteServer {
   /// `GET /api/v1/turn/credentials` answer, and the connection ids asked.
   List<Map<String, Object?>> iceServers = [];
   final List<String> turnRequests = [];
+
+  /// Optional per-request response/gate, allowing concurrent credential fetches.
+  Future<List<Map<String, Object?>>> Function(String connectionId)? iceServersForRequest;
 
   // --- Relay node (`transport.relay.attach`) ---------------------------------
 

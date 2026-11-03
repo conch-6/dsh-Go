@@ -54,7 +54,7 @@ void main() {
       expect(attachmentProblem(textFile('a.txt', '')), contains('空文件'));
       expect(
         attachmentProblem(DraftAttachment(name: 'big.zip', bytes: Uint8List(maxFileBytes + 1))),
-        contains('30 MB'),
+        contains('200 MB'),
       );
       expect(attachmentProblem(textFile('ok.txt')), isNull);
     });
@@ -134,7 +134,7 @@ void main() {
       await attachFrom(tester, '文件');
       expect(find.text('small.txt'), findsOneWidget);
       expect(find.text('huge.bin'), findsNothing);
-      expect(find.textContaining('超过 30 MB'), findsOneWidget);
+      expect(find.textContaining('超过 200 MB'), findsOneWidget);
     });
 
     testWidgets('a cancelled camera adds nothing', (tester) async {

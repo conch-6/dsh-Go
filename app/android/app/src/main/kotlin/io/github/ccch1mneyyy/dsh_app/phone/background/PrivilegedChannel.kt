@@ -28,29 +28,24 @@ class ShizukuChannel(private val remote: IPrivilegedDisplay) : PrivilegedChannel
  * single stream, so one lock keeps request/response paired.
  */
 class AdbChannel(private val stream: AdbStream) : PrivilegedChannel {
-    private val lock = Any()
-    private val out = stream.openOutputStream()
-    private val input = stream.openInputStream()
-    private var synced = false
+    private val session = AdbFramedSession(
+        stream.openInputStream(), stream.openOutputStream(),
+        transportAlive = { !stream.isClosed }, closeTransport = { stream.close() },
+    )
 
-    override fun execute(request: Bundle): Bundle = synchronized(lock) {
-        if (!synced) {
-            if (!Frames.syncToMagic(input)) return Bundle().apply {
-                putBoolean(Proto.OK, false); putString(Proto.ERROR, "deviceUnavailable")
-            }
-            synced = true
-        }
-        Frames.write(out, Bundles.marshal(request))
-        val frame = Frames.read(input) ?: return Bundle().apply {
-            putBoolean(Proto.OK, false); putString(Proto.ERROR, "deviceUnavailable")
-        }
-        Bundles.unmarshal(frame)
+    override fun execute(request: Bundle): Bundle = try {
+        session.exchange(Bundles.marshal(request))?.let(Bundles::unmarshal) ?: unavailable("adb closed")
+    } catch (e: Exception) {
+        // Also retire a frame whose Bundle cannot be decoded; never reuse a partially read reply.
+        session.close()
+        unavailable("adb ${e.javaClass.simpleName}")
     }
 
-    override fun alive(): Boolean = runCatching { !stream.isClosed }.getOrDefault(false)
+    override fun alive(): Boolean = session.alive()
 
-    override fun close() {
-        runCatching { execute(Bundle().apply { putString(Proto.OP, Proto.OP_DESTROY) }) }
-        runCatching { stream.close() }
+    override fun close() = session.close()
+
+    private fun unavailable(detail: String) = Bundle().apply {
+        putBoolean(Proto.OK, false); putString(Proto.ERROR, "deviceUnavailable"); putString(Proto.ERROR_DETAIL, detail)
     }
 }

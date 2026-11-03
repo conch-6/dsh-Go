@@ -13,6 +13,22 @@ class ScriptedClient extends DshClient {
   final events = StreamController<DshEvent>.broadcast();
   final answered = <(String, ApprovalDecision)>[];
   final failing = <String>{};
+  final questionAnswers = <String>[];
+
+  @override
+  Future<void> answerQuestion(UserQuestionRequest request, List<QuestionAnswer> answers) async {
+    questionAnswers.add(request.eventId);
+  }
+
+  @override
+  Future<void> rejectQuestion(
+    UserQuestionRequest request, {
+    String name = 'UserQuestionError',
+    String message = 'declined',
+    String? code,
+  }) async {
+    questionAnswers.add(request.eventId);
+  }
 
   @override
   Stream<DshEvent> watch(String sessionId, {WatchOptions options = const WatchOptions()}) => events.stream;
@@ -103,6 +119,40 @@ void main() {
     chat.setAutoApprove(true);
     await settle();
     expect(client.answered, [('d', ApprovalDecision.allowOnce)]);
+  });
+
+  test('auto approval never answers or suppresses schedule authorization questions', () async {
+    final question = UserQuestionRequest.fromWaterfall('schedule-consent', 's', {
+      'purpose': 'schedule-authorization',
+      'questions': [
+        {
+          'id': 'dsh-go-schedule-authorization-one',
+          'question': 'Session: s\nCreate\nAutonomous execution risk\n{"prompt":"full prompt","at":"tomorrow"}',
+          'options': [
+            {'label': '授权 / Authorize'},
+            {'label': '拒绝 / Reject'},
+          ],
+        },
+      ],
+    });
+    client.events.add(UserQuestionRequestedEvent(question));
+    await settle();
+    chat.setAutoApprove(true);
+    await settle();
+    expect(state().questions.single.eventId, 'schedule-consent');
+    expect(client.questionAnswers, isEmpty);
+    expect(state().autoAnswered, isEmpty);
+    client.events.add(UserQuestionRequestedEvent(question));
+    client.events.add(ApprovalRequestedEvent(request('ordinary-command')));
+    await settle();
+    expect(state().questions.single.eventId, 'schedule-consent', reason: 'redelivery keeps one manual card');
+    expect(client.questionAnswers, isEmpty);
+    expect(client.answered, [('ordinary-command', ApprovalDecision.allowOnce)]);
+    expect(state().autoAnswered, {'ordinary-command'});
+    client.events.add(const HostRequestCancelledEvent('schedule-consent'));
+    await settle();
+    expect(state().questions, isEmpty);
+    expect(client.questionAnswers, isEmpty);
   });
 
   test('a failed auto answer puts the card back with an error', () async {

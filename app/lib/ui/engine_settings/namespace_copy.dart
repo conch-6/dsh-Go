@@ -8,9 +8,11 @@
 
 import '../../l10n/l10n.dart';
 import 'schema_fields.dart';
+import 'plugin_namespace_copy_zh.dart';
 
 /// Page titles of namespaces (the generated form's fallback title).
 Map<String, String> get namespaceTitles => <String, String>{
+  if (!AppLocale.isEnglish) ...pluginNamespaceTitlesZh,
   'subagent': appL10n.engineSubagentTitle,
   'subagent-model-selection-settings': appL10n.engineSubagentModelsTitle,
   'agent-loop': appL10n.engineAgentLoopTitle,
@@ -45,6 +47,7 @@ const _apiKey = FieldCopy(label: 'API Key');
 
 /// Copy by namespace, then by dotted field path.
 Map<String, Map<String, FieldCopy>> get namespaceCopy => <String, Map<String, FieldCopy>>{
+  if (!AppLocale.isEnglish) ...pluginNamespaceCopyZh,
   'subagent': {
     'maxDepth': FieldCopy(
       label: appL10n.engineSubagentMaxDepth,

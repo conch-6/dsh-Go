@@ -25,13 +25,17 @@ class _SwitchHost extends ActiveHostController {
 
 class _Backend implements SessionDeletionBackend {
   bool support = true;
+  int supportCalls = 0;
   final calls = <String>[];
   final failures = <String, Object>{};
   final gates = <String, Completer<void>>{};
   void Function(String)? afterDelete;
 
   @override
-  Future<bool> supported(DshClient client) async => support;
+  Future<bool> supported(DshClient client) async {
+    supportCalls++;
+    return support;
+  }
   @override
   Future<void> delete(DshClient client, String sessionId) async {
     calls.add(sessionId);
@@ -90,6 +94,8 @@ void main() {
     expect(result.deleted, ['s1']);
     expect(result.failures, {'s2': 'writer-held'});
     expect(result.retired, isFalse);
+    // The delete path is intent -> request: no extra capability roundtrip.
+    expect(backend.supportCalls, 0);
     expect(container.read(sessionsProvider).value!.map((s) => s.sessionId), ['s2']);
     expect(container.read(currentSessionProvider), isNull);
     expect(container.read(draftStoreProvider).drafts.containsKey('s1'), isFalse);
@@ -109,12 +115,16 @@ void main() {
     pending.cancel();
   });
 
-  test('unsupported Host preserves all rows and sends no deletion', () async {
+  test('a Host without the route keeps every row and reports unavailable per row', () async {
     final (container, _, backend) = await start();
-    backend.support = false;
+    // A Host that has no deletion route answers the POST with 404, which the
+    // client surfaces as a stable `unavailable` refusal. There is no separate
+    // pre-flight capability call in the delete path.
+    backend.failures['s1'] = const DshRemoteException('unavailable', 'controlled fake refusal');
     final result = await container.read(sessionDeletionProvider.notifier).delete(['s1'], owner: owner(container));
     expect(result.failures, {'s1': 'unavailable'});
-    expect(backend.calls, isEmpty);
+    expect(backend.calls, ['s1']);
+    expect(backend.supportCalls, 0);
     expect(container.read(sessionsProvider).value, hasLength(2));
   });
 
@@ -197,5 +207,60 @@ void main() {
     expect(container.read(draftStoreProvider).drafts.containsKey('s1'), isFalse);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString(DraftStore.preferenceKey), '{}');
+  });
+
+  test('no live connection answers unknown, not unsupported, and asks nobody', () async {
+    final backend = _Backend();
+    final container = ProviderContainer(
+      overrides: [
+        activeConnectionProvider.overrideWithValue(const AsyncData<HostConnection?>(null)),
+        activeHostProvider.overrideWith(_SwitchHost.new),
+        sessionDeletionBackendProvider.overrideWithValue(backend),
+      ],
+    );
+    addTearDown(container.dispose);
+    final sub = container.listen(sessionDeletionAvailableProvider, (previous, next) {});
+    addTearDown(sub.close);
+
+    await pumpEventQueue();
+    expect(container.read(sessionDeletionAvailableProvider).value, SessionDeletionSupport.unknown);
+    expect(backend.supportCalls, 0);
+  });
+
+  test('a mux without a ready generation is re-probed when one arrives', () async {
+    final host = FakeWorkspaceHost();
+    final connection = workspaceHost(host);
+    addTearDown(connection.client.close);
+    final backend = _Backend();
+    final container = ProviderContainer(
+      overrides: [
+        activeConnectionProvider.overrideWithValue(AsyncData<HostConnection?>(connection)),
+        activeHostProvider.overrideWith(_SwitchHost.new),
+        sessionDeletionBackendProvider.overrideWithValue(backend),
+      ],
+    );
+    addTearDown(container.dispose);
+    final answered = Completer<SessionDeletionSupport>();
+    final sub = container.listen(sessionDeletionAvailableProvider, (previous, next) {
+      final value = next.value;
+      if (value != null && value != SessionDeletionSupport.unknown && !answered.isCompleted) {
+        answered.complete(value);
+      }
+    });
+    addTearDown(sub.close);
+
+    // The connection exists but its mux has no ready generation: nothing is
+    // asked yet, and the answer must stay "unknown" (the UI says "temporarily
+    // unavailable"), never "this host does not support it".
+    await pumpEventQueue();
+    expect(container.read(sessionDeletionAvailableProvider).value, SessionDeletionSupport.unknown);
+    expect(backend.supportCalls, 0);
+
+    // Once the mux is ready the probe runs by itself: the connection object
+    // did not change, so only the generation listener can trigger it.
+    await connection.client.mux.start();
+    await pumpEventQueue(times: 5);
+    expect(await answered.future.timeout(const Duration(seconds: 5)), SessionDeletionSupport.supported);
+    expect(backend.supportCalls, 1);
   });
 }

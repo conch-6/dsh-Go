@@ -37,6 +37,21 @@ class ScreenFormatTest {
         assertEquals("sensitive:${element.sensitiveWord}", verdict.reason)
     }
 
+    @Test fun anUnreadableWindowIsNotCalledAPoorTree() {
+        val frame = Box(0, 0, 400, 800)
+        val windows = listOf(UiWindow(1, WindowKind.APP, "com.github.android", "GitHub", frame, UiNode(bounds = frame)))
+        val unreadable = ScreenFormat.format(
+            ScreenInput("s1", "GitHub", "com.github.android", 400, 800, false, windows,
+                notes = listOf("提示：这一屏读不到"), unreadable = true),
+        )
+        assertFalse(unreadable.text.contains(ScreenFormat.POOR_TREE_NOTE))
+        assertTrue(unreadable.text.contains("这一屏读不到"))
+
+        // 同样的空树,没有"被过滤"的证据时,照旧说文字信息不足。
+        val poor = ScreenFormat.format(ScreenInput("s2", "GitHub", "com.github.android", 400, 800, false, windows))
+        assertTrue(poor.text.contains(ScreenFormat.POOR_TREE_NOTE))
+    }
+
     @Test fun screenshotMasksIncludeFieldsOutsideTheTextBudget() {
         val frame = Box(0, 0, 400, 800)
         val passwordBox = Box(0, 500, 300, 550)

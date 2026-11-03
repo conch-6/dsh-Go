@@ -10,6 +10,7 @@ import 'package:dsh_app/ui/chat/widgets/live_clock.dart';
 import 'package:dsh_app/ui/chat/dock/dock_pill.dart';
 import 'package:dsh_app/ui/chat/dock/goal_bar.dart';
 import 'package:dsh_app/ui/chat/dock/todo_bar.dart';
+import 'package:dsh_app/ui/chat/widgets/activity_strip.dart';
 import 'package:dsh_app/ui/chat/widgets/whale_tail.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:dsh_client/dsh_client.dart';
@@ -117,6 +118,17 @@ void main() {
           above: Builder(builder: _behind),
         );
         await expectLater(find.byType(Scaffold), matchesGoldenFile('goldens/dock_stack_$suffix.png'));
+      });
+
+      testWidgets('deck: todo, goal, strip folded into one row, then spread', (tester) async {
+        final harness = DockHarness(
+          state: ChatState(loading: false, running: true, todos: todosRunning, goal: goalOf()),
+        );
+        await harness.pump(tester, brightness: brightness, strip: true, deck: true, above: Builder(builder: _behind));
+        await expectLater(find.byType(Scaffold), matchesGoldenFile('goldens/dock_deck_folded_$suffix.png'));
+        await tester.tap(find.byType(ActivityStrip));
+        await pumpFrames(tester);
+        await expectLater(find.byType(Scaffold), matchesGoldenFile('goldens/dock_deck_spread_$suffix.png'));
       });
 
       testWidgets('stack, checklist open', (tester) async {

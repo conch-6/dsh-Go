@@ -68,6 +68,22 @@ class PerformancePage extends ConsumerWidget {
           ],
         ),
         SettingsSection(
+          footer: Text(l10n.performanceRefreshHint),
+          children: [
+            SettingsSegmentTile<RefreshRateMode>(
+              key: const ValueKey('performance-refresh-rate'),
+              spot: Spots.refreshRate,
+              segments: [
+                PillSegment(RefreshRateMode.auto, l10n.performanceAuto),
+                PillSegment(RefreshRateMode.max, l10n.performanceRefreshMax),
+                PillSegment(RefreshRateMode.system, l10n.performanceRefreshSystem),
+              ],
+              selected: prefs.refreshRate,
+              onChanged: (mode) => unawaited(notifier.setRefreshRate(mode)),
+            ),
+          ],
+        ),
+        SettingsSection(
           title: l10n.performanceEffects,
           children: [
             SettingsSwitchTile(
@@ -92,6 +108,8 @@ class PerformancePage extends ConsumerWidget {
               ),
           ],
         ),
+        // 大字号下最后一行也要能整个滚进视野:滚动到底时留出一点余量。
+        const SizedBox(height: 72),
       ],
     );
   }

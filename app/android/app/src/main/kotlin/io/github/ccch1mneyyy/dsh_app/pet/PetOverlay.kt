@@ -23,6 +23,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.res.Resources
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.media.AudioManager
@@ -61,7 +62,8 @@ import kotlin.math.roundToInt
 
 /**
  * The out-of-app pet (docs/design/pets.md): a window the size of the pack's wide hit
- * box (grown around the lifted pose while held, [PetFrames]), a separate bubble window (with a
+ * box (grown around the lifted pose while held, and around an animation that reaches past it while
+ * that shows, [PetFrames]), a separate bubble window (with a
  * request's answers on it), a long-press menu, 问一句's input bar, and a 「×」 target while
  * dragging. Dart pushes the reduced state ([push]) and does what the bar and the bubble ask
  * ([Listener.call]); when it shows is [OverlayMachine]'s call, the permission branches
@@ -236,6 +238,9 @@ internal object PetOverlay {
         removeWindows()
         evaluate()
     }
+
+    /** [PetSprites.portrait] of the pack [id]; null before [init] or when it has none. Any thread. */
+    fun portrait(id: String, state: String, px: Int): Bitmap? = if (initialized) sprites.portrait(id, state, px) else null
 
     fun push(args: Map<*, *>) {
         if (!initialized) return
@@ -431,7 +436,7 @@ internal object PetOverlay {
         val request = ++loadRequest
         val density = app.resources.displayMetrics.density
         worker.execute {
-            val l = sprites.load(id, worker) { pack -> pack.screenScale(PetPack.bodyDp(size), density) }
+            val l = sprites.load(id, worker) { pack -> pack.screenScale(PetSize.fromName(size), density) }
             l?.warmResident()
             main.post {
                 if (request != loadRequest || loadingKey != key || packKey(machine.last) != key) {
@@ -567,8 +572,9 @@ internal object PetOverlay {
 
     /**
      * Sizes the pet window to what it shows (docs/design/pets.md §6.1): grown around the lifted pose
-     * while held and until that picture is gone, around happy / waking / typing while one of them
-     * shows, the rest frame otherwise. The rest frame keeps its place, so the pet doesn't move on
+     * while held and until that picture is gone, around the shown animation's whole cell when it
+     * reaches past rest (a jump, typing's laptop, a thought cloud, Zzz), the rest frame otherwise,
+     * so every frame is drawn whole. The rest frame keeps its place, so the pet doesn't move on
      * screen: held, the grown window is kept whole on screen; docked, the dock already left room for
      * every frame ([PetFrames.reach]). One window update when the frame changes, none while it stays.
      */
@@ -1779,6 +1785,7 @@ internal object PetOverlay {
         "host" to host.name.lowercase(),
         "x" to petParams?.x, "y" to petParams?.y, "w" to petParams?.width, "h" to petParams?.height,
         "frame" to petView?.frame?.let { "${it.left},${it.top} ${it.width}x${it.height}" },
+        "hit" to loaded?.frames?.hit(petView?.shown)?.let { "${it.left},${it.top} ${it.width}x${it.height}" },
         "shown" to petView?.shown?.name,
         "dragging" to dragging,
         "dock" to "${dock.side.name.lowercase()}@${"%.2f".format(dock.yFraction)}",

@@ -98,7 +98,7 @@ void main() {
           page,
           overrides: engine.engineOverrides(DshClient.withCarrier(engine.FakeSettingsHost())),
           brightness: brightness,
-          height: name == 'interface' ? 1300 : 844,
+          height: name == 'interface' ? 1500 : 844,
           fonts: true,
         );
         await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/${name}_$mode.png'));

@@ -52,10 +52,9 @@ List<ChatRow> check(
   ChatRowsCache cache,
   ChatState state, {
   bool foldTurns = false,
-  Set<int> openTurns = const {},
   List<TurnArtifacts> artifacts = const [],
 }) {
-  final actual = cache.update(state, foldTurns: foldTurns, openTurns: openTurns, artifacts: artifacts);
+  final actual = cache.update(state, foldTurns: foldTurns, artifacts: artifacts);
   final expected = deriveRows(
     items: state.items,
     approvals: state.approvals,
@@ -66,7 +65,6 @@ List<ChatRow> check(
     commands: state.commands,
     turns: state.turns,
     foldTurns: foldTurns,
-    openTurns: openTurns,
     artifacts: artifacts,
   );
   expect(actual.map(shape).toList(), expected.map(shape).toList());
@@ -235,7 +233,7 @@ void main() {
     check(cache, state);
     final folded = check(cache, state, foldTurns: true);
     expect(folded.whereType<TurnProcessRow>(), isNotEmpty);
-    check(cache, state, foldTurns: true, openTurns: {2});
+    check(cache, state, foldTurns: true);
     const artifact = TurnArtifacts(turn: 1, endSeq: 8, files: []);
     check(cache, state, foldTurns: true, artifacts: const [artifact]);
     check(cache, state, foldTurns: true);

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../phone/phone_channel.dart';
+import '../l10n/l10n.dart';
 import '../runtime/runtime_bridge.dart';
 import '../runtime/runtime_state.dart';
 import 'connection_state.dart';
@@ -203,6 +204,31 @@ class PhoneController extends Notifier<PhoneState> {
   }
 
   Future<PhoneResult> setBackgroundMode(PhoneBackgroundMode mode) => _thenRefresh(_channel.setBackgroundMode(mode));
+
+  /// Refused before any channel call when the native side doesn't offer [mode].
+  Future<PhoneResult> setPrivilegedMode(PhonePrivilegedMode mode) =>
+      _ifSupported(mode, () => _channel.setPrivilegedMode(mode));
+
+  /// Only an explicit keep choice; rebuilding or refreshing never writes it.
+  Future<PhoneResult> setBackgroundKeep(PhonePrivilegedMode mode, bool enabled) =>
+      _ifSupported(mode, () => _channel.setBackgroundKeep(mode, enabled));
+
+  /// Only an explicit tap: refresh, build and status events never prepare root.
+  Future<PhoneResult> prepareRoot() => _ifSupported(PhonePrivilegedMode.root, _channel.prepareRoot);
+
+  Future<PhoneResult> _ifSupported(PhonePrivilegedMode mode, Future<PhoneResult> Function() action) =>
+      state.status.background.supportedModes.contains(mode)
+      ? _thenRefresh(action())
+      : Future.value(PhoneResult(false, appL10n.phonePrivilegedUpgrade));
+
+  /// The old Shizuku choice asks whichever provider serves the shared API now, Sui included.
+  Future<bool> requestPrivilegedPermission(PhonePrivilegedMode mode) {
+    final background = state.status.background;
+    if (mode != PhonePrivilegedMode.shizuku && mode != PhonePrivilegedMode.sui) return Future.value(false);
+    if (!background.supportedModes.contains(mode)) return Future.value(false);
+    final provider = mode == PhonePrivilegedMode.sui ? 'sui' : background.shizuku.provider;
+    return provider == null ? requestShizukuPermission() : _thenRefresh(_channel.requestPrivilegedPermission(provider));
+  }
 
   Future<bool> requestShizukuPermission() => _thenRefresh(_channel.requestShizukuPermission());
 

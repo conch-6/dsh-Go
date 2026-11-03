@@ -3,9 +3,9 @@ import '../../../l10n/l10n.dart';
 /// Codes DSH (0.2.1-rc.4+) answers before sending anything when the model
 /// itself can't be served: the official model listing says it needs a newer
 /// DSH (`CLIENT_UPGRADE_REQUIRED`), or this DSH doesn't know it
-/// (`MODEL_UNSUPPORTED`). Sending again can't help; another model or a
-/// newer engine can.
-const modelRefusalCodes = {'CLIENT_UPGRADE_REQUIRED', 'MODEL_UNSUPPORTED'};
+/// (`MODEL_UNSUPPORTED`), or the chosen reasoning effort is unsupported.
+/// Sending unchanged can't help; choose a supported effort/model or upgrade.
+const modelRefusalCodes = {'CLIENT_UPGRADE_REQUIRED', 'MODEL_UNSUPPORTED', 'UNSUPPORTED_REASONING_EFFORT'};
 
 /// 一轮出错时说明行上的短句,按错误码给;后端原文放在点开的详情里。
 String turnFailureText(String? code) => switch (code) {
@@ -22,5 +22,6 @@ String turnFailureText(String? code) => switch (code) {
   // The engine is on the phone (updated with the app) or on the remote host.
   'CLIENT_UPGRADE_REQUIRED' => appL10n.chatErrEngineOutdated,
   'MODEL_UNSUPPORTED' => appL10n.chatErrModelUnsupported,
+  'UNSUPPORTED_REASONING_EFFORT' => appL10n.chatErrReasoningEffortUnsupported,
   _ => appL10n.chatErrTurn,
 };

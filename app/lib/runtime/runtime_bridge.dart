@@ -421,11 +421,31 @@ class RuntimeProgressEvent extends RuntimeEvent {
   double get fraction => total <= 0 ? 0 : (done / total).clamp(0, 1).toDouble();
 }
 
-class RuntimeLogEvent extends RuntimeEvent {
-  const RuntimeLogEvent(this.line, this.stream);
+class RuntimeLogEntry {
+  const RuntimeLogEntry(this.seq, this.line, this.stream);
+
+  factory RuntimeLogEntry.fromMap(Map<Object?, Object?> raw) =>
+      RuntimeLogEntry(raw['seq'] as int, raw['line'] as String, raw['stream'] as String);
+
+  final int seq;
   final String line;
   final String stream;
 }
+
+class RuntimeLogsEvent extends RuntimeEvent {
+  const RuntimeLogsEvent(this.entries);
+  final List<RuntimeLogEntry> entries;
+}
+
+class RuntimeLogSnapshot {
+  const RuntimeLogSnapshot(this.entries, this.throughSeq);
+  final List<RuntimeLogEntry> entries;
+  final int throughSeq;
+}
+
+List<RuntimeLogEntry> _logEntries(Object? raw) => [
+  for (final entry in raw as List) RuntimeLogEntry.fromMap(entry as Map<Object?, Object?>),
+];
 
 /// One-off message from the native side, e.g. "已用安全模式启动".
 class RuntimeNoticeEvent extends RuntimeEvent {
@@ -675,6 +695,11 @@ class RuntimeBridge {
   Future<List<String>> logs({int lines = 500}) async =>
       (await _methods.invokeListMethod<String>('getLogs', {'lines': lines})) ?? const [];
 
+  Future<RuntimeLogSnapshot> logSnapshot({int lines = 300}) async {
+    final raw = await _methods.invokeMapMethod<Object?, Object?>('getLogSnapshot', {'lines': lines});
+    return RuntimeLogSnapshot(_logEntries(raw!['entries']), raw['throughSeq'] as int);
+  }
+
   static RuntimeEvent? _parse(Map<Object?, Object?> raw) {
     switch (raw['type']) {
       case 'status':
@@ -685,8 +710,8 @@ class RuntimeBridge {
           done: (raw['done'] as num?)?.toInt() ?? 0,
           total: (raw['total'] as num?)?.toInt() ?? 0,
         );
-      case 'log':
-        return RuntimeLogEvent(raw['line'] as String? ?? '', raw['stream'] as String? ?? 'stdout');
+      case 'logs':
+        return RuntimeLogsEvent(_logEntries(raw['entries']));
       case 'notice':
         final text = raw['text'] as String?;
         return text == null || text.isEmpty ? null : RuntimeNoticeEvent(text);

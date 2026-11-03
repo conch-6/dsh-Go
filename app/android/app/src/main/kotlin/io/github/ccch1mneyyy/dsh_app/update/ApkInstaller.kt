@@ -34,6 +34,9 @@ class ApkInstaller(private val context: Context) {
             "sdkInt" to Build.VERSION.SDK_INT,
             "canRequestInstalls" to canRequestInstalls(),
             "freeBytes" to context.cacheDir.usableSpace,
+            // The base delta patches start from, and what tells one installed build from another.
+            "apkPath" to context.applicationInfo.sourceDir,
+            "lastUpdateTime" to pkg.lastUpdateTime,
         )
     }
 

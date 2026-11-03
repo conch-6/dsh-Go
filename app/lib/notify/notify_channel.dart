@@ -6,9 +6,11 @@
 import 'dart:async';
 
 import 'package:dsh_client/dsh_client.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../state/hosts_state.dart';
+import 'live_activity.dart';
 
 /// Whether the system lets DSH's chat notifications through.
 class NotifySystemStatus {
@@ -171,6 +173,72 @@ class NotifyAction {
   final ApprovalDecision decision;
 }
 
+/// What the live activity is told: whether it is on, the pet whose pictures
+/// it shows, and what the agent does ([LiveActivity]; null: nothing).
+@immutable
+class LivePush {
+  const LivePush({required this.enabled, this.packId, this.activity});
+
+  final bool enabled;
+  final String? packId;
+  final LiveActivity? activity;
+
+  Map<String, Object?> toMap() => {'enabled': enabled, 'packId': ?packId, 'activity': ?activity?.toMap()};
+
+  @override
+  bool operator ==(Object other) =>
+      other is LivePush && other.enabled == enabled && other.packId == packId && other.activity == activity;
+
+  @override
+  int get hashCode => Object.hash(enabled, packId, activity);
+}
+
+/// What the phone offers the live activity.
+class LiveSystemStatus {
+  const LiveSystemStatus({
+    this.native = true,
+    this.supported = false,
+    this.allowed = false,
+    this.settings = false,
+    this.xiaomiFocus = false,
+  });
+
+  const LiveSystemStatus.unavailable() : this(native: false);
+
+  factory LiveSystemStatus.fromMap(Map<Object?, Object?> m) => LiveSystemStatus(
+    supported: m['supported'] == true,
+    allowed: m['allowed'] == true,
+    settings: m['settings'] == true,
+    xiaomiFocus: m['xiaomiFocus'] == true,
+  );
+
+  final bool native;
+
+  /// Android 16 promotion exists here (QPR1+), or HyperOS takes the focus template.
+  final bool supported;
+
+  /// And it is allowed for DSH Go: the live activity will be posted.
+  final bool allowed;
+
+  /// The system page with the per-app switch opens.
+  final bool settings;
+
+  /// HyperOS shows DSH Go's focus notifications.
+  final bool xiaomiFocus;
+
+  @override
+  bool operator ==(Object other) =>
+      other is LiveSystemStatus &&
+      other.native == native &&
+      other.supported == supported &&
+      other.allowed == allowed &&
+      other.settings == settings &&
+      other.xiaomiFocus == xiaomiFocus;
+
+  @override
+  int get hashCode => Object.hash(native, supported, allowed, settings, xiaomiFocus);
+}
+
 /// Notification group of one conversation on one host.
 String notifyGroup(HostRef host, String sessionId) => '${host.kind.name}:${host.id}|$sessionId';
 
@@ -226,6 +294,31 @@ class NotifyChannel {
   Future<bool> openSettings({String? channel}) async {
     try {
       return await _methods.invokeMethod<bool>('openSettings', {'channel': ?channel}) ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Tells the live activity what to show (see [LivePush]).
+  Future<void> live(LivePush push) => _call('live', push.toMap());
+
+  Future<LiveSystemStatus> liveStatus() async {
+    try {
+      final raw = await _methods.invokeMethod<Object?>('liveStatus');
+      return raw is Map ? LiveSystemStatus.fromMap(raw) : const LiveSystemStatus();
+    } on MissingPluginException {
+      return const LiveSystemStatus.unavailable();
+    } on PlatformException {
+      return const LiveSystemStatus();
+    }
+  }
+
+  /// Opens DSH Go's 「实时活动」 switch where the system has one, else its notification settings.
+  Future<bool> openLiveSettings() async {
+    try {
+      return await _methods.invokeMethod<bool>('openLiveSettings') ?? false;
     } on MissingPluginException {
       return false;
     } on PlatformException {

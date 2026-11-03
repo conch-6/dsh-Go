@@ -291,7 +291,7 @@ class _WebEntryHostState extends ConsumerState<WebEntryHost> {
       ref.read(appLinksProvider).add(link.appLink);
       return;
     }
-    final request = await ComposeRequest.fromShare(share);
+    final request = await ComposeRequest.fromShare(share, maxBytes: maxWebComposeBytes);
     if (mounted) await _compose(request);
   }
 
@@ -316,7 +316,7 @@ class _WebEntryHostState extends ConsumerState<WebEntryHost> {
 
   Future<bool> _onFile(Uri uri) async {
     if (uri.scheme != 'file') return false;
-    final request = await ComposeRequest.fromFile(uri.toFilePath());
+    final request = await ComposeRequest.fromFile(uri.toFilePath(), maxBytes: maxWebComposeBytes);
     if (!mounted) return false;
     await _compose(request);
     return true;

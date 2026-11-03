@@ -14,7 +14,7 @@
   "searchKwSharedLinks": "links,share,shared,public link",
   "searchKwPhone": "accessibility,automation,tap,control phone",
   "searchKwAppRules": "apps,blocklist,allowlist,deny,app list",
-  "searchKwDnd": "dnd,shizuku,adb,background",
+  "searchKwDnd": "dnd,shizuku,sui,root,adb,background",
   "searchKwEngine": "engine,runtime,start,stop,restart,DSH",
   "searchKwBackground": "keep alive,background activity,battery optimization,autostart,killed",
   "searchKwSystemAccess": "permissions,grant,overlay,display over other apps,accessibility,background pop-ups,microphone,file access,notification permission,restricted settings",
@@ -67,6 +67,7 @@
   "searchKwNotifyFailed": "error,failed,stopped",
   "searchKwNotifyApproval": "approval,waiting for you",
   "searchKwNotifyQuestion": "question,asks you",
+  "searchKwNotifyLive": "dynamic island,live update,live activity,status bar chip,now bar,live alerts,lock screen progress",
   "searchKwNotifySystem": "sound,banner,lock screen,system",
   "searchKwPhoneConfirm": "don't ask,confirm,always ask,no confirmation",
   "searchKwPhoneAutoCollapse": "floating bar,collapse,bubble",
@@ -112,5 +113,6 @@
   "searchKwWebCollapse": "work steps,collapse,web",
   "searchKwWebBusySend": "send,queue,while AI works",
   "searchKwPluginsMarket": "plugin market,install plugins,marketplace",
-  "searchKwUsageStats": "statistics,stats,usage data,analytics,telemetry,anonymous,privacy,data"
+  "searchKwUsageStats": "statistics,stats,usage data,analytics,telemetry,anonymous,privacy,data",
+  "searchKwQuickPanel": "swipe,left swipe,shortcuts,gesture,quick panel,quick access"
 }

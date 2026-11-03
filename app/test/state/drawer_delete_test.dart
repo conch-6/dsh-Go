@@ -9,6 +9,7 @@ import 'package:dsh_app/state/session_deletion_state.dart';
 import 'package:dsh_app/state/sessions_state.dart';
 import 'package:dsh_app/state/workspaces_state.dart';
 import 'package:dsh_app/ui/shell/drawer/selection_bars.dart';
+import 'package:dsh_app/ui/shell/drawer/session_deletion.dart';
 import 'package:dsh_app/ui/shell/drawer/session_tile.dart';
 import 'package:dsh_app/ui/shell/home_shell.dart';
 import 'package:dsh_client/dsh_client.dart';
@@ -206,6 +207,34 @@ void main() {
     expect(fixture.backend.calls, isEmpty);
   });
 
+  testWidgets('capability states map to three different explanations, never a false refusal', (tester) async {
+    late BuildContext context;
+    await tester.pumpWidget(
+      goldenApp(
+        brightness: Brightness.light,
+        home: Builder(
+          builder: (inner) {
+            context = inner;
+            return const SizedBox.expand();
+          },
+        ),
+      ),
+    );
+    String? reason(SessionDeletionSupport support, {List<String> ids = const ['s1']}) =>
+        sessionDeletionDisabledReason(
+          context,
+          available: AsyncData(support),
+          busy: false,
+          sessions: const [],
+          ids: ids,
+        );
+    // Not asked yet (no live connection / no ready mux generation) is a
+    // "temporarily unavailable", never "this host does not support it".
+    expect(reason(SessionDeletionSupport.unknown), '安全永久删除暂不可用，请重连或更新此主机；不会改为归档。');
+    expect(reason(SessionDeletionSupport.unsupported), '此主机不支持安全永久删除，仍可使用归档。');
+    expect(reason(SessionDeletionSupport.supported, ids: const []), isNull);
+  });
+
   testWidgets('running single and mixed bulk selection cannot request deletion', (tester) async {
     final fixture = await _start(tester);
     await tester.longPress(_tile('A running'));
@@ -337,14 +366,19 @@ void main() {
     });
   }
 
-  testWidgets('same-client mux reconnect invalidates open confirmation', (tester) async {
+  testWidgets('a same-client mux reconnect keeps the open confirmation valid', (tester) async {
     final fixture = await _start(tester);
     await _singleConfirmation(tester);
     final ready = fixture.connection.client.mux.lastReadyGenerationNumber;
     fixture.connection.client.mux.reconnect();
     await _settle(tester);
     expect(fixture.connection.client.mux.lastReadyGenerationNumber, greaterThan(ready));
-    expect(tester.widget<FilledButton>(_confirm).onPressed, isNull);
+    // Deleting is one HTTP request, not an event-stream operation: the same
+    // client reconnected to the same host is still the same authority, so the
+    // confirmation is not thrown away (nor shown as "the host changed").
+    expect(find.text('主机或连接已变化。请取消后重新发起删除，原确认不再有效。'), findsNothing);
+    await _settle(tester);
+    expect(tester.widget<FilledButton>(_confirm).onPressed, isNotNull);
     expect(fixture.backend.calls, isEmpty);
     expect(tester.takeException(), isNull);
   });

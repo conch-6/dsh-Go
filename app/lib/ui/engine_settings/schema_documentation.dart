@@ -145,6 +145,13 @@ List<SchemaDocumentationEntry> schemaDocumentation(SchemaNode root, String local
   return result;
 }
 
+/// [schemaDocumentation], worked out once per schema and language: the page's
+/// ⓘ asks on every build of its bar.
+List<SchemaDocumentationEntry> cachedSchemaDocumentation(SchemaNode root, String locale) =>
+    (_documentation[root] ??= {})[locale] ??= schemaDocumentation(root, locale);
+
+final _documentation = Expando<Map<String, List<SchemaDocumentationEntry>>>('schemaDocumentation');
+
 /// Documentation links never resolve against the current host or chat session.
 Uri? schemaDocumentationUri(String value) {
   final uri = Uri.tryParse(value.trim());
@@ -163,7 +170,7 @@ class SchemaDocumentationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final entries = schemaDocumentation(schema, AppLocale.current.toLanguageTag());
+    final entries = cachedSchemaDocumentation(schema, AppLocale.current.toLanguageTag());
     if (entries.isEmpty) return const SizedBox.shrink();
     return IconButton(
       tooltip: schemaDocumentationLabel,

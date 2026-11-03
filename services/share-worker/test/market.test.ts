@@ -175,3 +175,39 @@ describe('market routes', () => {
     expect(validateCatalog(e.index, e.sidecar)).toBe(false);
   });
 });
+describe('market cron', () => {
+  const scheduled = (c: ReturnType<typeof setup>) => worker.scheduled({} as ScheduledController, c.env, c.ctx);
+  const text = (c: ReturnType<typeof setup>, key: string) => new TextDecoder().decode(c.dl.objects.get(key)!.bytes);
+  it('puts a valid catalog on the public bucket, the same the routes serve', async () => {
+    const c = setup(),
+      f = upstream();
+    await scheduled(c);
+    for (const key of ['market/index.json', 'market/dsh-go.json']) {
+      expect(c.dl.objects.get(key)).toMatchObject({ contentType: 'application/json; charset=utf-8', cacheControl: 'public, max-age=300' });
+    }
+    expect(JSON.parse(text(c, 'market/index.json'))).toEqual(docs().index);
+    expect(JSON.parse(text(c, 'market/dsh-go.json'))).toEqual(docs().sidecar);
+    const r = await worker.fetch(request('/market/index.json'), c.env, c.ctx);
+    expect(await r.text()).toBe(text(c, 'market/index.json'));
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+  it('leaves the files as they were when the fetch fails or the catalog is invalid', async () => {
+    const c = setup(),
+      f = upstream();
+    await scheduled(c);
+    const before = structuredClone([...c.dl.objects]);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bad = docs();
+    bad.sidecar.plugins['@scope/plugin'].version = '9.0.0';
+    f.mockImplementation(async (input) => Response.json(String(input).endsWith('index.json') ? bad.index : bad.sidecar));
+    await scheduled(c);
+    expect(log).toHaveBeenLastCalledWith('market publish failed', 'invalid-catalog', null);
+    f.mockResolvedValue(new Response('down', { status: 503 }));
+    await scheduled(c);
+    expect(log).toHaveBeenLastCalledWith('market publish failed', 'upstream-http', 503);
+    f.mockRejectedValue(new TypeError('offline'));
+    await scheduled(c);
+    expect([...c.dl.objects]).toEqual(before);
+    expect(JSON.stringify([...c.kv.values.values()])).not.toContain('9.0.0');
+  });
+});

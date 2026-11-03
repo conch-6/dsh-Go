@@ -3,7 +3,9 @@
      i18n/AppStrings.kt so it follows the app language. English here, Chinese in values-zh/. -->
 <resources>
     <!-- background -->
-    <string name="background_shizuku_missing">Shizuku isn’t installed</string>
+    <string name="background_shizuku_missing">No available Shizuku / Sui interface detected</string>
+    <string name="background_sui_stopped">The Sui interface is currently unavailable</string>
+    <string name="background_sui_permission">Sui permission not granted</string>
     <string name="background_shizuku_stopped">Shizuku isn’t running</string>
     <string name="background_shizuku_permission">Shizuku permission not granted</string>
     <string name="background_adb_not_paired">Wireless debugging isn’t paired</string>
@@ -15,7 +17,9 @@
     <string name="background_unknown_mode">Unknown mode</string>
     <string name="background_not_ready">Privileged connection isn’t ready</string>
     <string name="background_no_response">Privileged connection isn’t responding</string>
-    <string name="background_injection_denied">Input was blocked. Turn on “USB debugging (Security settings)” and try again</string>
+    <string name="background_injection_denied">Could not confirm background input. Check channel permission and device support.</string>
+    <string name="background_input_api_unavailable">This system has no background input API the App can use. Update the App, or report your device and system version.</string>
+    <string name="background_input_permission_denied">The system refused background input. Check the channel’s permission; on Xiaomi/Redmi, turn on “USB debugging (Security settings)”.</string>
     <!-- notify -->
     <string name="notify_decline">Decline</string>
     <string name="notify_allow_once">Allow once</string>
@@ -38,6 +42,10 @@
         <item quantity="other">%1$d reminders</item>
     </plurals>
     <string name="notify_new_reminder">New reminder</string>
+    <string name="live_channel">Live activity</string>
+    <string name="live_channel_description">What DSH is doing, waiting on, or doing on the phone, in the status bar and on the lock screen</string>
+    <string name="live_chip_phone">Acting</string>
+    <string name="live_chip_paused">Paused</string>
     <!-- overlay -->
     <string name="overlay_allow_task_no_ask">Allow for task</string>
     <string name="overlay_allow_task">Allow for task</string>
@@ -100,6 +108,8 @@
     <string name="pairing_port_missing">Pairing port not found. Open “Pair device with pairing code”</string>
     <string name="pairing_failed">Couldn’t pair. Get a new pairing code</string>
     <string name="pairing_error">Couldn’t pair: %1$s</string>
+    <string name="pairing_complete">Paired. Go back to the App and tap “Connect”.</string>
+    <string name="pairing_result_failure">%1$s\nGo back to the App and tap “Start pairing” to try again, or use “Enter manually”.</string>
     <!-- pet -->
     <string name="pet_open_chat">Open chat</string>
     <string name="pet_more">More</string>
@@ -275,4 +285,17 @@
     <string name="tile_new_chat_label">New chat</string>
     <string name="a11y_keeper_grant_failed">Authorization failed. You can use the computer command instead.</string>
     <string name="a11y_keeper_needs_setup">Set up Shizuku or wireless debugging first.</string>
+    <string name="background_root_legacy_client">Root was selected. Use an updated interface to manage it, or turn phone control off.</string>
+    <string name="background_root_starting">Waiting for root authorization</string>
+    <string name="background_root_not_selected">Choose root to request authorization</string>
+    <string name="background_root_timeout">Root authorization or communication timed out. Select root again to retry.</string>
+    <string name="background_root_cancelled">Root startup was cancelled</string>
+    <string name="background_root_identity">The root process identity or protocol did not match</string>
+    <string name="background_root_disconnected">Root disconnected. Select root again to reconnect.</string>
+    <string name="background_root_grant_failed">WRITE_SECURE_SETTINGS was not granted. Check root access and try again.</string>
+    <string name="background_root_failed">Could not start root. Check the root manager and authorization.</string>
+    <string name="background_sui_not_provider">The current interface is not provided by Sui. Check Sui and restart the app.</string>
+    <string name="background_selection_cancelled">The channel selection was cancelled</string>
+    <string name="background_keep_phone_disabled">Turn on phone control before keeping this connection.</string>
+    <string name="background_keep_save_failed">Could not save the connection preference. Check it before restarting the app.</string>
 </resources>

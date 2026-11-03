@@ -221,12 +221,6 @@ void main() {
       expect(done.whereType<TurnProcessRow>(), hasLength(2));
     });
 
-    test('a turn kept open stays open in every piece', () {
-      final rows = deriveRows(items: steered, turns: [_trace(0, 12)], foldTurns: true, openTurns: {0});
-      expect(rows.whereType<TurnProcessRow>(), isEmpty);
-      expect(_calls(rows), ['search', 'fetch', 'run']);
-    });
-
     for (final reason in ['aborted', 'error']) {
       test('an $reason turn stays open, steered or not', () {
         final rows = deriveRows(

@@ -18,6 +18,7 @@
 # `beta:chan:<SHA-256(token)>` → {label, created, expires, revoked}. Rotating
 # BETA_SECRET invalidates every access key (not channel tokens): `init --rotate`.
 # Secrets are only ever read from files or passed on stdin; nothing is echoed.
+# The account and KV ids come from outside the tree (scripts/cloudflare.sh).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -30,7 +31,10 @@ usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 : "${CF_TOKEN_FILE:?set CF_TOKEN_FILE to the API token file}"
 [[ -r "$CF_TOKEN_FILE" ]] || die "can't read CF_TOKEN_FILE"
-wr() { CLOUDFLARE_API_TOKEN="$(cat "$CF_TOKEN_FILE")" WRANGLER_SEND_METRICS=false npx wrangler "$@"; }
+source scripts/cloudflare.sh
+real_id "$ACCOUNT" || die "no Cloudflare account id: set CF_ACCOUNT_ID or write it to $ACCOUNT_FILE"
+real_id "$KV_ID" || die "no KV namespace id: set CF_KV_QUOTA_ID or write it to $KV_ID_FILE (provision.sh apply does)"
+wrangler_config
 
 private_file() { # FILE: must exist, readable only by us
   [[ -s "$1" ]] || die "$1 is missing or empty"

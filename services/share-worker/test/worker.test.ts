@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import worker from '../src/index';
 import { ALPHABET, ID_LENGTH, TIERS, newId, objectKey, parseTtl, tierOfId } from '../src/ids';
 import { clientKey } from '../src/limits';
-import { makeEnv } from './fakes';
+import { makeEnv, serve, workerFirst } from './fakes';
 
 const ORIGIN = 'https://go.dshtui.com';
 
@@ -242,9 +242,21 @@ describe('delete', () => {
 });
 
 describe('pages', () => {
+  // The site is files served without the Worker; the Worker runs first only
+  // for its own routes and the files it hides.
+  it('runs the Worker first only for its routes', () => {
+    for (const p of ['/api/v1/c', '/api/usage/v1', '/api/github/stars', '/c/Ab3dE5gH9k', '/market/index.json', '/market',
+      '/p/@scope/plugin', '/beta', '/beta/update.json', '/download', '/download/get', '/share', '/c.html', '/index.html']) {
+      expect(workerFirst(p), p).toBe(true);
+    }
+    for (const p of ['/', '/app.js', '/assets/dsh-go.svg', '/share/', '/share/index.html', '/share/share.js', '/robots.txt', '/favicon.svg']) {
+      expect(workerFirst(p), p).toBe(false);
+    }
+  });
+
   it('serves the viewer for /c/<id> with a strict policy', async () => {
     const ctx = makeEnv();
-    const res = await worker.fetch(get('/c/Ab3dE5gH9k'), ctx.env);
+    const res = await serve(get('/c/Ab3dE5gH9k'), ctx.env);
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('text/html');
     const csp = res.headers.get('Content-Security-Policy')!;
@@ -255,33 +267,34 @@ describe('pages', () => {
     expect(res.headers.get('X-Frame-Options')).toBe('DENY');
     expect(res.headers.get('Referrer-Policy')).toBe('no-referrer');
     expect(await res.text()).toContain('dv-root');
-    expect((await worker.fetch(get('/c/Ab3dE5gH9k/'), ctx.env)).status).toBe(200);
+    expect((await serve(get('/c/Ab3dE5gH9k/'), ctx.env)).status).toBe(200);
   });
 
   it('serves the landing page under /share/', async () => {
     const ctx = makeEnv();
-    expect((await worker.fetch(get('/share'), ctx.env)).status).toBe(301);
-    const page = await worker.fetch(get('/share/'), ctx.env);
+    expect((await serve(get('/share'), ctx.env)).status).toBe(301);
+    const page = await serve(get('/share/'), ctx.env);
     expect(page.status).toBe(200);
     expect(page.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
     expect(page.headers.get('X-Robots-Tag')).toBe('noindex');
     expect(await page.text()).toContain('share.js');
-    const js = await worker.fetch(get('/share/share.js'), ctx.env);
+    const js = await serve(get('/share/share.js'), ctx.env);
     expect(js.status).toBe(200);
     expect(js.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(js.headers.get('Cache-Control')).toBe('public, max-age=3600');
-    expect((await worker.fetch(get('/share/viewer.js'), ctx.env)).status).toBe(200);
+    expect((await serve(get('/share/viewer.js'), ctx.env)).status).toBe(200);
   });
 
   it('404s everything else', async () => {
     const ctx = makeEnv();
     for (const p of ['/c.html', '/c/', '/c/a_b', '/nope', '/share/nope.html', '/api/v2/c', '/api/v1/c/x/y',
       '/index.html', '/home/', '/home/index.html', '/home/app.js', '/assets/', '/assets/nope.webp', '/assets/features/']) {
-      expect((await worker.fetch(get(p), ctx.env)).status, p).toBe(404);
+      expect((await serve(get(p), ctx.env)).status, p).toBe(404);
     }
-    expect((await worker.fetch(new Request(`${ORIGIN}/c/Ab3dE5gH9k`, { method: 'POST' }), ctx.env)).status).toBe(405);
-    expect((await worker.fetch(get('/api/v1/c'), ctx.env)).status).toBe(405);
-    expect((await worker.fetch(get('/robots.txt'), ctx.env)).status).toBe(200);
+    expect((await serve(new Request(`${ORIGIN}/c/Ab3dE5gH9k`, { method: 'POST' }), ctx.env)).status).toBe(405);
+    expect((await serve(new Request(`${ORIGIN}/app.js`, { method: 'POST' }), ctx.env)).status).toBe(405);
+    expect((await serve(get('/api/v1/c'), ctx.env)).status).toBe(405);
+    expect((await serve(get('/robots.txt'), ctx.env)).status).toBe(200);
   });
 });
 
@@ -291,7 +304,7 @@ describe('home page', () => {
   it('is served at / with its own policy, indexable', async () => {
     const ctx = makeEnv();
     for (const method of ['GET', 'HEAD']) {
-      const res = await worker.fetch(new Request(`${ORIGIN}/`, { method }), ctx.env);
+      const res = await serve(new Request(`${ORIGIN}/`, { method }), ctx.env);
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toContain('text/html');
       expect(res.headers.get('Content-Security-Policy')).toBe(
@@ -305,7 +318,7 @@ describe('home page', () => {
       expect(res.headers.get('Cache-Control')).toBe('no-cache');
       expect(res.headers.has('X-Robots-Tag')).toBe(false);
     }
-    const body = await (await worker.fetch(get('/?from=qr'), ctx.env)).text();
+    const body = await (await serve(get('/?from=qr'), ctx.env)).text();
     expect(body).toContain('<title>DSH Go · 万物皆插件，随身而行</title>');
     expect(body).toContain('<link rel="canonical" href="https://go.dshtui.com/">');
     expect(body).toContain('<script src="app.js" defer></script>');
@@ -321,7 +334,7 @@ describe('home page', () => {
       ['/site-config.js', 'text/javascript'],
       ['/styles.css', 'text/css'],
     ]) {
-      const res = await worker.fetch(get(path!), ctx.env);
+      const res = await serve(get(path!), ctx.env);
       expect(res.status, path).toBe(200);
       expect(res.headers.get('Content-Type'), path).toContain(type);
       expect(res.headers.get('Cache-Control'), path).toBe('public, max-age=3600');
@@ -337,19 +350,27 @@ describe('home page', () => {
     expect(page).not.toMatch(/<script(?![^>]*\ssrc=)[^>]*>/i);
     expect(page).not.toMatch(/\son[a-z]+\s*=/i);
     expect(page).not.toMatch(/<style[\s>]/i);
-    const refs = [...page.matchAll(/\s(?:src|href)="([^"#][^"]*)"/g)].map((m) => m[1]!).filter((u) => u !== 'https://go.dshtui.com/');
+    // Every resource the page pulls in stays on this origin. Plain <a href>
+    // links may point anywhere: they are navigations, not loads, and the CSP
+    // does not govern where a click goes. The footer's friend links live there.
+    const refs = [
+      ...[...page.matchAll(/<(?:script|img)\b[^>]*\ssrc="([^"#][^"]*)"/gi)].map((m) => m[1]!),
+      ...[...page.matchAll(/<link\b[^>]*\srel="(?:stylesheet|icon|apple-touch-icon)"[^>]*\shref="([^"#][^"]*)"/gi)].map((m) => m[1]!),
+    ];
     expect(refs.filter((u) => /^[a-z]+:|^\/\//i.test(u))).toEqual([]);
+    expect(page).toContain('href="https://dshtui.com/"');
+    expect(page).toContain('href="https://github.com/ccch1mneyyy/dsh-TUI"');
     const images = [...site('site-config.js').matchAll(/(?:avatar|qrImage):\s*"([^"]+)"/g)].map((m) => m[1]!);
     expect(images).toEqual(['assets/dsh-go.svg', 'assets/author/download-qr.png']);
     const ctx = makeEnv();
     for (const ref of new Set([...refs, ...images])) {
-      expect((await worker.fetch(get('/' + ref), ctx.env)).status, ref).toBe(200);
+      expect((await serve(get('/' + ref), ctx.env)).status, ref).toBe(200);
     }
   });
 
   it('is the only thing robots.txt lets crawlers fetch', async () => {
     const ctx = makeEnv();
-    const lines = (await (await worker.fetch(get('/robots.txt'), ctx.env)).text()).trim().split('\n');
+    const lines = (await (await serve(get('/robots.txt'), ctx.env)).text()).trim().split('\n');
     expect(lines.slice(0, 2)).toEqual(['User-agent: *', 'Allow: /$']);
     expect(lines).toContain('Allow: /app.js$');
     expect(lines).toContain('Allow: /assets/features/01-local-engine.webp$');
@@ -359,13 +380,13 @@ describe('home page', () => {
 
   it('leaves the other routes alone', async () => {
     const ctx = makeEnv();
-    const viewer = await worker.fetch(get('/c/Ab3dE5gH9k'), ctx.env);
+    const viewer = await serve(get('/c/Ab3dE5gH9k'), ctx.env);
     expect(viewer.status).toBe(200);
     expect(viewer.headers.get('X-Robots-Tag')).toBe('noindex');
     expect(viewer.headers.get('Content-Security-Policy')).toMatch(/script-src 'sha256-/);
-    expect((await worker.fetch(get('/share/'), ctx.env)).status).toBe(200);
-    expect((await worker.fetch(get('/favicon.svg'), ctx.env)).status).toBe(200);
-    expect((await worker.fetch(get('/update.json'), ctx.env)).status).toBe(404);
-    expect((await worker.fetch(new Request(`${ORIGIN}/`, { method: 'POST' }), ctx.env)).status).toBe(405);
+    expect((await serve(get('/share/'), ctx.env)).status).toBe(200);
+    expect((await serve(get('/favicon.svg'), ctx.env)).status).toBe(200);
+    expect((await serve(get('/update.json'), ctx.env)).status).toBe(404);
+    expect((await serve(new Request(`${ORIGIN}/`, { method: 'POST' }), ctx.env)).status).toBe(405);
   });
 });

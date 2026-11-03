@@ -317,7 +317,7 @@ void main() {
       dialog.completeError(StateError('late platform failure'));
       await installing;
       expect(c.read(appUpdateProvider).task, UpdateTaskPhase.ready);
-      expect(c.read(appUpdateProvider).problem, UpdateProblem.installCancelled);
+      expect(c.read(appUpdateProvider).problem, UpdateProblem.installUnconfirmed);
     });
 
     test('a newer attempt is untouched by the abandoned one ending, with an answer or an exception', () async {

@@ -57,7 +57,7 @@ void main() {
     expect(_opacityOf(tester, find.text('第二个回答')), 1);
   });
 
-  testWidgets('committing a reply preserves its state and expanded thinking', (tester) async {
+  testWidgets('committing a reply preserves its state and folds the expanded thinking', (tester) async {
     usePhoneView(tester);
     final harness = ChatHarness(
       session: 's1',
@@ -69,6 +69,20 @@ void main() {
     await tester.pump();
     await tester.tap(find.byType(ThinkingPill));
     await pumpFrames(tester, 10);
+    // 展开时只有全文,行内预览让位。
+    expect(find.descendant(of: find.byType(ThinkingPill), matching: find.text('完整思考')), findsOneWidget);
+    bool pillExpanded() => tester
+        .widget<Semantics>(
+          find
+              .descendant(
+                of: find.byType(ThinkingPill),
+                matching: find.byWidgetPredicate((w) => w is Semantics && w.properties.expanded != null),
+              )
+              .first,
+        )
+        .properties
+        .expanded!;
+    expect(pillExpanded(), isTrue);
     final state = tester.state(find.byType(AssistantMessage));
     harness.controllers['s1']!.emit(_state([user(1, '问题'), assistant(16, '回答', rowKey: 'm1.1', reasoning: '完整思考')]));
     for (var i = 0; i < 20; i++) {
@@ -76,22 +90,8 @@ void main() {
       expect(tester.state(find.byType(AssistantMessage)), same(state));
       expect(_opacityOf(tester, find.text('回答')), 1);
     }
-    // Expanded thinking has its full Markdown body instead of the preview.
-    expect(find.descendant(of: find.byType(ThinkingPill), matching: find.text('完整思考')), findsOneWidget);
-    expect(
-      tester
-          .widget<Semantics>(
-            find
-                .descendant(
-                  of: find.byType(ThinkingPill),
-                  matching: find.byWidgetPredicate((w) => w is Semantics && w.properties.expanded != null),
-                )
-                .first,
-          )
-          .properties
-          .expanded,
-      isTrue,
-    );
+    // 一轮结束:亲手展开的全文收回去,只剩一行预览。
+    expect(pillExpanded(), isFalse);
   });
 
   testWidgets('adding a visual fence preserves the reply state', (tester) async {

@@ -223,7 +223,7 @@ DS Bot 的 NOTICE 原文附在文末。
 | Shizuku-API（`dev.rikka.shizuku:api`、`provider`） | 13.1.5 | MIT | Copyright (c) 2021 RikkaW | 不打扰模式经 Shizuku 获得 shell 权限 |
 | libadb-android | 3.1.1 | Apache-2.0（GPL-3.0-or-later 与 Apache-2.0 双许可，按 Apache-2.0 使用） | Copyright 2021 Muntashir Al-Islam | 无线调试配对、ADB 协议与 mDNS |
 | spake2-android（libadb-android 的依赖） | 2.2.1 | LGPL-3.0 | Copyright 2021 Muntashir Al-Islam | 无线调试配对的 SPAKE2 |
-| Conscrypt（`org.conscrypt:conscrypt-android`） | 2.5.3 | Apache-2.0 | Copyright 2016 The Android Open Source Project | libadb 的 TLS；NOTICE 原文见文末 |
+| Conscrypt（`org.conscrypt:conscrypt-android`） | 2.8.0 | Apache-2.0 | Copyright 2016 The Android Open Source Project | libadb 的 TLS；NOTICE 原文见文末 |
 | Bouncy Castle（`bcprov`、`bcpkix-jdk15to18`） | 1.81 | Bouncy Castle Licence（MIT 条款） | Copyright (c) 2000-2023 The Legion of the Bouncy Castle Inc. | 自签名 ADB 客户端证书 |
 | XZ for Java（`org.tukaani:xz`） | 1.10 | 0BSD | Copyright (C) The XZ for Java authors and contributors | 解压 `.tar.xz` 运行时包 |
 | AndroidX WebKit | 1.15.0 | Apache-2.0 | The Android Open Source Project | 网页插件的深色模式 |
@@ -660,7 +660,7 @@ their ideas; it does not contain their code.
     before it calls the plugin's speech service.
 ```
 
-### NOTICE：Conscrypt 2.5.3（原文照录）
+### NOTICE：Conscrypt 2.8.0（原文照录）
 
 ```text
 Copyright 2016 The Android Open Source Project

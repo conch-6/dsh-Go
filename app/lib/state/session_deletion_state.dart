@@ -29,47 +29,52 @@ class _HostSessionDeletion implements SessionDeletionBackend {
 
 final sessionDeletionBackendProvider = Provider<SessionDeletionBackend>((ref) => const _HostSessionDeletion());
 
-final sessionDeletionAvailableProvider = FutureProvider.autoDispose<bool>((ref) async {
+/// What this App knows about the Host's permanent-deletion capability.
+///
+/// [unknown] is a real answer and is not a refusal: the App may simply not have
+/// a live connection yet, or the mux may not have a ready generation. Only a
+/// Host that answered is [supported] or [unsupported]; the UI must never turn
+/// "not asked yet" into "this host does not support it".
+enum SessionDeletionSupport { unknown, supported, unsupported }
+
+final sessionDeletionAvailableProvider = FutureProvider.autoDispose<SessionDeletionSupport>((ref) async {
   final connection = ref.watch(readListLiveConnectionProvider);
-  if (connection == null || connection.client.mux.generation == null) return false;
+  if (connection == null) return SessionDeletionSupport.unknown;
+  // A new ready generation may answer differently (reconnect, Host restart).
+  // This listener is registered before the readiness check on purpose: the
+  // "not ready yet" answer below must be re-probed as soon as the mux is up,
+  // even though the connection object itself does not change.
   final ready = connection.client.mux.generations.listen((_) => ref.invalidateSelf());
   ref.onDispose(() => unawaited(ready.cancel()));
-  return ref.watch(sessionDeletionBackendProvider).supported(connection.client);
+  if (connection.client.mux.generation == null) return SessionDeletionSupport.unknown;
+  final backend = ref.watch(sessionDeletionBackendProvider);
+  final supported = await backend.supported(connection.client);
+  return supported ? SessionDeletionSupport.supported : SessionDeletionSupport.unsupported;
 });
 
-/// Authority captured before an action sheet/confirmation. Listeners remember
-/// *any* departure, so A -> B -> A cannot revive an old deletion confirmation.
+/// Consent captured before an action sheet/confirmation, re-checked at every
+/// destructive step.
+///
+/// It survives a mux reconnect: deleting is one HTTP request, not an operation
+/// on the event stream, so a network blip must not turn into "host changed".
+/// A real departure still retires it for good, so A -> B -> A cannot revive an
+/// old confirmation: a host switch or a replaced connection is remembered.
 class SessionDeletionOwner {
-  SessionDeletionOwner._(this.container, this.connection, this.host, this.generation, this.readyNumber);
+  SessionDeletionOwner._(this.container, this.connection, this.host);
 
   static SessionDeletionOwner? capture(ProviderContainer container) {
     final connection = container.read(readListLiveConnectionProvider);
-    final generation = connection?.client.mux.generation;
-    if (connection == null || generation == null) return null;
-    final owner = SessionDeletionOwner._(
-      container,
-      connection,
-      container.read(activeHostProvider),
-      generation,
-      connection.client.mux.lastReadyGenerationNumber,
-    );
+    if (connection == null) return null;
+    final owner = SessionDeletionOwner._(container, connection, container.read(activeHostProvider));
     final host = container.listen(activeHostProvider, (_, next) {
       if (next != owner.host) owner._retired = true;
-    });
-    final live = container.listen(readListLiveConnectionProvider, (_, next) {
-      if (!identical(next, connection)) owner._retired = true;
     });
     final active = container.listen(activeConnectionProvider, (_, next) {
       if (next.isLoading || next.hasError || !identical(next.value, connection)) owner._retired = true;
     });
-    final mux = connection.client.mux.states.listen((_) {
-      if (!identical(connection.client.mux.generation, generation)) owner._retired = true;
-    });
     owner._close = () {
       host.close();
-      live.close();
       active.close();
-      unawaited(mux.cancel());
     };
     return owner;
   }
@@ -77,8 +82,6 @@ class SessionDeletionOwner {
   final ProviderContainer container;
   final HostConnection connection;
   final HostRef host;
-  final MuxGeneration generation;
-  final int readyNumber;
   bool _retired = false;
   bool _closed = false;
   late final void Function() _close;
@@ -90,12 +93,7 @@ class SessionDeletionOwner {
       return !active.isLoading &&
           !active.hasError &&
           identical(active.value, connection) &&
-          container.read(activeHostProvider) == host &&
-          identical(container.read(readListLiveConnectionProvider), connection) &&
-          identical(connection.client.mux.generation, generation) &&
-          connection.client.mux.lastReadyGenerationNumber == readyNumber &&
-          !_retired &&
-          !_closed;
+          container.read(activeHostProvider) == host;
     } on StateError {
       return false;
     }
@@ -141,15 +139,9 @@ class SessionDeletionController extends Notifier<bool> {
     state = true;
     try {
       if (!owned()) return const SessionDeletionResult(retired: true);
-      // Recheck after confirmation; support is not inferred from an old read.
-      final bool supported;
-      try {
-        supported = await backend.supported(client);
-      } catch (error) {
-        return SessionDeletionResult(failures: {for (final id in ids) id: _failureCode(error)}, retired: !owned());
-      }
-      if (!owned()) return const SessionDeletionResult(retired: true);
-      if (!supported) return SessionDeletionResult(failures: {for (final id in ids) id: 'unavailable'});
+      // No pre-flight capability call: the delete request itself answers
+      // `unavailable` on a Host without the route, and that is the only place
+      // that answer is needed. One intent, one request.
       for (final id in ids) {
         if (!owned()) break;
         final sessions = ref.read(sessionsProvider.notifier);

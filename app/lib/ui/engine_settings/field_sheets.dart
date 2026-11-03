@@ -1080,7 +1080,7 @@ class _ListFieldSheetState extends ConsumerState<ListFieldSheet> {
 
   SchemaNode get _item => widget.item.effective;
 
-  String _label(Object? value) => valueLabel(value, FieldCopy(choices: widget.choices));
+  String _label(Object? value) => valueLabel(value, FieldCopy(choices: widget.choices), node: _item);
 
   Future<void> _add(List<Object?> items) async {
     final text = _controller.text.trim();

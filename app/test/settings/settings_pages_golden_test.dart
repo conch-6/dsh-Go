@@ -57,8 +57,9 @@ void main() {
     () => const DiagnosticsPage(),
     overrides: () => [
       localRuntimeProvider.overrideWith(
-        () => FakeRuntime(const LocalRuntimeState(loaded: true, status: _runningCompatible, logs: sampleLogs)),
+        () => FakeRuntime(const LocalRuntimeState(loaded: true, status: _runningCompatible)),
       ),
+      localRuntimeLogsProvider.overrideWithBuild((ref, notifier) => sampleLogs),
       settingsProvider.overrideWith(() => FakeSettings(const AppSettings(loaded: true))),
     ],
   );

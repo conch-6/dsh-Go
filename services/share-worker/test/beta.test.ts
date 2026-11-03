@@ -15,7 +15,7 @@ import {
 } from '../src/beta-auth';
 import { resetBetaCache } from '../src/beta';
 import { parseRange } from '../src/files';
-import { FakeCache, makeCtx, makeEnv } from './fakes';
+import { FakeCache, makeCtx, makeEnv, serve } from './fakes';
 
 const ORIGIN = 'https://go.dshtui.com';
 const SECRET = 'test-beta-secret-0123456789abcdef0123456789abcdef';
@@ -357,7 +357,7 @@ describe('the old public mirror', () => {
 
   it('leaves the share routes alone', async () => {
     const { env } = await seeded();
-    expect((await fetchWorker(env, req('/share/'))).status).toBe(200);
+    expect((await serve(req('/share/'), env)).status).toBe(200);
     expect((await fetchWorker(env, req('/c/Ab3dE5gH9k'))).status).toBe(200);
     expect((await fetchWorker(env, req('/betas'))).status).toBe(404);
   });

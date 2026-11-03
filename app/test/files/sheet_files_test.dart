@@ -148,6 +148,91 @@ void main() {
       expect(grid.truncated, isTrue);
     });
 
+    test('cell budget includes the sparse rectangular output', () {
+      final sparse = buildXlsx([
+        const TestSheet(
+          'A',
+          [
+            ['keep'],
+          ],
+          sparse: {'D4': 'far'},
+        ),
+      ]);
+      // The original fixture also writes A99; the sparse sheet is 99 by 4.
+      final grid = parseXlsx(sparse, maxCells: 200, maxRows: 100).single;
+      expect(grid.rows.length * grid.columns, lessThanOrEqualTo(200));
+      expect(grid.rows.length, 50);
+      expect(grid.columns, 4);
+      expect(grid.rows[0][0], 'keep');
+      expect(grid.rows[3][3], 'far');
+      expect(grid.rows[2], ['', '', '', '']);
+      expect(grid.truncated, isTrue);
+    });
+
+    test('a discarded wide row does not widen the retained prefix', () {
+      final sparse = buildXlsx([
+        const TestSheet(
+          'A',
+          [
+            ['keep'],
+          ],
+          sparse: {'Z4': 'late'},
+        ),
+      ]);
+      final grid = parseXlsx(sparse, maxCells: 8, maxRows: 100).single;
+      expect(grid.rows, [
+        ['keep'],
+        [''],
+        [''],
+      ]);
+      expect(grid.truncated, isTrue);
+    });
+
+    test('visible sheets share the remaining rectangular budget', () {
+      final multiple = buildXlsx([
+        const TestSheet('hidden fixture', [], hidden: true),
+        const TestSheet('first', [
+          ['a', 'b'],
+          ['c', 'd'],
+        ]),
+        const TestSheet(
+          'second',
+          [
+            ['keep'],
+          ],
+          sparse: {'D4': 'late'},
+        ),
+      ]);
+      final grids = parseXlsx(multiple, maxCells: 12);
+      expect(grids.map((grid) => grid.name), ['first', 'second']);
+      expect(grids.first.rows, [
+        ['a', 'b'],
+        ['c', 'd'],
+      ]);
+      expect(grids.last.rows, [
+        ['keep'],
+        [''],
+        [''],
+      ]);
+      expect(grids.last.truncated, isTrue);
+      expect(
+        grids.fold<int>(
+          0,
+          (sum, grid) => sum + grid.rows.length * grid.columns,
+        ),
+        lessThanOrEqualTo(12),
+      );
+    });
+
+    test('a first row wider than the budget is left out', () {
+      final wide = buildXlsx([
+        const TestSheet('A', [], sparse: {'D1': 'too wide'}),
+      ]);
+      final grid = parseXlsx(wide, maxCells: 2).single;
+      expect(grid.rows, isEmpty);
+      expect(grid.truncated, isTrue);
+    });
+
     test('not a workbook', () {
       expect(() => parseXlsx(Uint8List.fromList(utf8.encode('hello'))), throwsA(isA<SheetFormatException>()));
     });

@@ -35,14 +35,21 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "dsh-runtime") }
     private val sinks = LinkedHashSet<EventSink>()
-    private val logs = ArrayDeque<String>()
     private val logDir = File(app.filesDir, "runtime/logs")
-    private val logFile = File(logDir, "dsh.log")
+    private val runtimeLogs = RuntimeLogs(
+        File(logDir, "dsh.log"), SystemClock::elapsedRealtime,
+        post = { action -> main.post { action() } },
+        deliver = { entries ->
+            val event = mapOf("type" to "logs", "entries" to entries.map { it.toMap() })
+            val targets = synchronized(sinks) { sinks.toList() }
+            targets.forEach { it.emit(event) }
+        },
+    )
     private val lkgFile = File(app.filesDir, "runtime/lkg/lkg.json")
     private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     val manifest: RuntimeManifest by lazy { RuntimeManifest.load(app) }
-    private val installer by lazy { RuntimeInstaller(app, manifest) }
+    private val installer by lazy { RuntimeInstaller(app, manifest, ::note) }
     @Volatile private var process: DshProcess? = null
     @Volatile private var lastLaunch: LaunchDiagnostics? = null
     /** The start in progress is turning PRoot's fake hard links into real files (see [L2sMigration]). */
@@ -222,6 +229,22 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         }
         val intent = Intent(app, DshService::class.java).setAction(DshService.ACTION_START)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) app.startForegroundService(intent) else app.startService(intent)
+    }
+
+    /**
+     * Writes the app's diagnostics snapshot where the engine's agent can read it
+     * (`$DSH_HOME/dsh-app/diagnostics.md`). A few KB on the platform thread, after the
+     * engine came up or when the person asks from 设置 → 诊断. Null when the runtime is
+     * not installed or the write failed.
+     */
+    fun publishDiagnostics(markdown: String): Map<String, Any?>? = try {
+        if (!installer.isCurrent()) null
+        else {
+            val file = GuestSetup.writeDiagnostics(installer.rootfs, markdown)
+            mapOf("path" to file.absolutePath, "bytes" to file.length())
+        }
+    } catch (_: Exception) {
+        null
     }
 
     fun stop() {
@@ -408,10 +431,15 @@ class RuntimeController private constructor(private val app: Context) : DshProce
             try {
                 process?.let { p ->
                     p.stop()
-                    p.awaitExit(15_000)
+                    check(p.awaitExit(15_000)) { "runtime stop incomplete; retry reset after cleanup" }
                 }
                 lastLaunch = null
-                installer.reset(keep.flatMap { it.paths })
+                try {
+                    check(runtimeLogs.pauseDisk()) { "log reset pause timed out" }
+                    installer.reset(keep.flatMap { it.paths })
+                } finally {
+                    runtimeLogs.resumeDisk()
+                }
                 if (keep.isNotEmpty()) log("[dsh-app] reset keeps ${keep.joinToString { it.wire }}", "system")
                 baseUrl = null
                 token = null
@@ -427,9 +455,14 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 setPhase(Phase.NOT_INSTALLED)
                 main.post { onDone(null) }
             } catch (e: Throwable) {
-                // Not left at "stopping": either the runtime is still whole or it is gone.
                 log("[dsh-app] reset failed: ${e.message}", "system")
-                setPhase(if (runCatching { installer.isCurrent() }.getOrDefault(false)) Phase.INSTALLED else Phase.NOT_INSTALLED)
+                // Still stopping while the old process hasn't exited (its exit report moves the
+                // phase on); otherwise the runtime is either still whole or gone.
+                setPhase(when {
+                    process != null -> Phase.STOPPING
+                    runCatching { installer.isCurrent() }.getOrDefault(false) -> Phase.INSTALLED
+                    else -> Phase.NOT_INSTALLED
+                })
                 main.post { onDone(e) }
             } finally {
                 resetting = false
@@ -437,7 +470,8 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         }
     }
 
-    fun recentLogs(lines: Int): List<String> = synchronized(logs) { logs.toList().takeLast(lines) }
+    fun recentLogs(lines: Int): List<String> = runtimeLogs.recent(lines)
+    fun logSnapshot(lines: Int): Map<String, Any?> = runtimeLogs.snapshot(lines).toMap()
 
     // ── Safe mode / last known good (called by RuntimePlugin) ───────────────────────
 
@@ -710,72 +744,76 @@ class RuntimeController private constructor(private val app: Context) : DshProce
 
     @Synchronized override fun onExit(source: DshProcess, code: Int, expected: Boolean) {
         if (source !== process) return
-        if (!expected && stopGen < runGen) {
-            source.launchDiagnostics.failed(if (source.startupError != null) "startFailed" else "exit:$code")
-        }
-        process = null
-        PhoneControl.get(app).onEngineStopped()
-        baseUrl = null
-        token = null
-        healthyAt = null
-        log("[dsh-app] DSH exited with code $code", "system")
-        if (expected || stopGen >= runGen) {
-            if (!resetting && phase == Phase.STOPPING) setPhase(Phase.INSTALLED)
-            DshService.stopSelfIfRunning(app)
-            return
-        }
-        source.startupError?.let {
-            // A local startup failure is neither a user stop nor proof of a
-            // plugin failure; do not count it toward automatic safe mode.
-            error = "start failed: $it"
-            setPhase(Phase.ERROR)
-            DshService.postStoppedAlert(app)
-            DshService.stopSelfIfRunning(app)
-            return
-        }
-        val tail = synchronized(runTail) { runTail.toList() }
-        var f = CrashClassifier.classify(code, readyAt, SystemClock.elapsedRealtime(), System.currentTimeMillis(), tail, runSafe, source.direct)
-        if (SafePolicy.directLaunchFailed(f, source.direct)) {
-            // Direct can't launch on this device: PRoot from now on with this runtime, no failure card,
-            // no strike. A new runtime, or the user turning Direct on again, gives it another try.
-            prefs.edit().putString(K_DIRECT_FAILED, manifest.runtimeVersion).apply()
-            log("[dsh-app] direct launch failed (${f.summary}); starting again with compatible launch", "system")
-            restartNow("with compatible launch")
-            return
-        }
-        if (!runSafe) f = f.copy(recent = recentChanges())
-        val outcome = SafePolicy.onFailure(safeState, strikes, f, autoSafe(),
-            AppStrings.get(app, R.string.safe_probation_failed), AppStrings.get(app, R.string.safe_auto_started))
-        val now = SystemClock.elapsedRealtime()
-        val delay = SafePolicy.autoRestartDelay(f.kind, code, readyAt?.let { now - it }, autoRestarts.toList(), now)
-        if (!outcome.restartSafe && delay != null && DshService.isRunning) {
-            // Killed from outside after a good run (memory pressure, a phantom-process sweep): try again.
-            autoRestarts.removeAll { now - it >= 600_000L }
-            autoRestarts.addLast(now)
-            val gen = runGen
-            setPhase(Phase.STARTING)
-            log("[dsh-app] killed from outside; restarting in ${delay / 1000}s", "system")
-            main.postDelayed({
-                if (gen == runGen && stopGen < gen && phase == Phase.STARTING && process == null && DshService.isRunning) {
-                    startProcess()
-                }
-            }, delay)
-            return
-        }
-        recordFailure(f, tail)
-        strikes = outcome.strikes
-        prefs.edit().putInt(K_STRIKES, strikes).apply()
-        if (outcome.state != safeState) setSafeState(outcome.state, outcome.reason ?: safeReason)
-        log("[dsh-app] classified as ${f.kind.wire}${if (f.safeMode) " (safe mode)" else ""}; consecutive failures: $strikes", "system")
-        error = "DSH exited unexpectedly (code $code)"
-        if (outcome.restartSafe) {
-            log("[dsh-app] restarting in safe mode", "system")
-            outcome.notice?.let { notice(it) }
-            restartNow("in safe mode")
-        } else {
-            setPhase(Phase.ERROR)
-            DshService.postStoppedAlert(app)
-            DshService.stopSelfIfRunning(app)
+        try {
+            if (!expected && stopGen < runGen) {
+                source.launchDiagnostics.failed(if (source.startupError != null) "startFailed" else "exit:$code")
+            }
+            process = null
+            PhoneControl.get(app).onEngineStopped()
+            baseUrl = null
+            token = null
+            healthyAt = null
+            log("[dsh-app] DSH exited with code $code", "system")
+            if (expected || stopGen >= runGen) {
+                if (!resetting && phase == Phase.STOPPING) setPhase(Phase.INSTALLED)
+                DshService.stopSelfIfRunning(app)
+                return
+            }
+            source.startupError?.let {
+                // A local startup failure is neither a user stop nor proof of a
+                // plugin failure; do not count it toward automatic safe mode.
+                error = "start failed: $it"
+                setPhase(Phase.ERROR)
+                DshService.postStoppedAlert(app)
+                DshService.stopSelfIfRunning(app)
+                return
+            }
+            val tail = synchronized(runTail) { runTail.toList() }
+            var f = CrashClassifier.classify(code, readyAt, SystemClock.elapsedRealtime(), System.currentTimeMillis(), tail, runSafe, source.direct)
+            if (SafePolicy.directLaunchFailed(f, source.direct)) {
+                // Direct can't launch on this device: PRoot from now on with this runtime, no failure card,
+                // no strike. A new runtime, or the user turning Direct on again, gives it another try.
+                prefs.edit().putString(K_DIRECT_FAILED, manifest.runtimeVersion).apply()
+                log("[dsh-app] direct launch failed (${f.summary}); starting again with compatible launch", "system")
+                restartNow("with compatible launch")
+                return
+            }
+            if (!runSafe) f = f.copy(recent = recentChanges())
+            val outcome = SafePolicy.onFailure(safeState, strikes, f, autoSafe(),
+                AppStrings.get(app, R.string.safe_probation_failed), AppStrings.get(app, R.string.safe_auto_started))
+            val now = SystemClock.elapsedRealtime()
+            val delay = SafePolicy.autoRestartDelay(f.kind, code, readyAt?.let { now - it }, autoRestarts.toList(), now)
+            if (!outcome.restartSafe && delay != null && DshService.isRunning) {
+                // Killed from outside after a good run (memory pressure, a phantom-process sweep): try again.
+                autoRestarts.removeAll { now - it >= 600_000L }
+                autoRestarts.addLast(now)
+                val gen = runGen
+                setPhase(Phase.STARTING)
+                log("[dsh-app] killed from outside; restarting in ${delay / 1000}s", "system")
+                main.postDelayed({
+                    if (gen == runGen && stopGen < gen && phase == Phase.STARTING && process == null && DshService.isRunning) {
+                        startProcess()
+                    }
+                }, delay)
+                return
+            }
+            recordFailure(f, tail)
+            strikes = outcome.strikes
+            prefs.edit().putInt(K_STRIKES, strikes).apply()
+            if (outcome.state != safeState) setSafeState(outcome.state, outcome.reason ?: safeReason)
+            log("[dsh-app] classified as ${f.kind.wire}${if (f.safeMode) " (safe mode)" else ""}; consecutive failures: $strikes", "system")
+            error = "DSH exited unexpectedly (code $code)"
+            if (outcome.restartSafe) {
+                log("[dsh-app] restarting in safe mode", "system")
+                outcome.notice?.let { notice(it) }
+                restartNow("in safe mode")
+            } else {
+                setPhase(Phase.ERROR)
+                DshService.postStoppedAlert(app)
+                DshService.stopSelfIfRunning(app)
+            }
+        } finally {
+            runtimeLogs.flush()
         }
     }
 
@@ -798,24 +836,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         }
     }
 
-    private fun log(line: String, stream: String) {
-        val stamped = CrashClassifier.redact(line)
-        synchronized(logs) {
-            logs.addLast(stamped)
-            while (logs.size > MAX_LOG_LINES) logs.removeFirst()
-        }
-        appendLogFile(stamped)
-        emit(mapOf("type" to "log", "line" to stamped, "stream" to stream))
-    }
-
-    private fun appendLogFile(line: String) {
-        try {
-            logFile.parentFile?.mkdirs()
-            if (logFile.length() > MAX_LOG_BYTES) logFile.renameTo(File(logFile.path + ".1"))
-            logFile.appendText(line + "\n")
-        } catch (_: Exception) {
-        }
-    }
+    private fun log(line: String, stream: String) = runtimeLogs.accept(line, stream)
 
     private fun setPhase(next: Phase) {
         if (next != Phase.RUNNING) managedSkillGate.retire()
@@ -833,9 +854,6 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     }
 
     companion object {
-        private const val MAX_LOG_LINES = 2000
-        private const val MAX_LOG_BYTES = 2L * 1024 * 1024
-
         private const val PREFS = "dsh_runtime"
         private const val K_SAFE_STATE = "safeState"
         private const val K_SAFE_REASON = "safeReason"

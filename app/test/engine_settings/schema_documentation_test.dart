@@ -4,7 +4,7 @@ import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/state/engine_settings_state.dart';
 import 'package:dsh_app/ui/engine_settings/engine_settings_page.dart';
 import 'package:dsh_app/ui/engine_settings/schema_documentation.dart';
-import 'package:dsh_app/ui/engine_settings/schema_fields.dart' show FieldCopy, hintFor, plainSchemaText;
+import 'package:dsh_app/ui/engine_settings/schema_fields.dart' show FieldCopy, hintFor, labelFor, plainSchemaText;
 import 'package:dsh_app/ui/plugins/plugin_inventory_page.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
@@ -58,7 +58,10 @@ void main() {
     expect(plainSchemaText('- __Hold__ to talk'), 'Hold to talk');
     expect(plainSchemaText('2 * 3 = 6, a_b_c'), '2 * 3 = 6, a_b_c');
     final hotkey = SchemaNode.fromJson(catalogFixture('schemastery-description')).dict['hotkey']!;
-    expect(hintFor(hotkey, const FieldCopy()), '按住快捷键开始录音。');
+    // Its first sentence names the field; the list under it is the hint.
+    expect(labelFor('hotkey', hotkey, const FieldCopy()), '按住快捷键开始录音');
+    expect(hintFor(hotkey, const FieldCopy()), '松开后发送。');
+    expect(hintFor(hotkey, const FieldCopy(label: '快捷键')), '按住快捷键开始录音。');
   });
 
   test('raw nested intersect and transform documentation keeps every visible structural layer', () {

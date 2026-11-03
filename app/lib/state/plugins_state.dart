@@ -7,6 +7,7 @@ import 'dart:math';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleListener, AppLifecycleState, WidgetsBinding;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/l10n.dart';
 import '../runtime/runtime_state.dart';
@@ -57,21 +58,30 @@ class MarketFetchException implements Exception {
 
 /// GETs [url] and reads it in a background isolate (≈3 MB for dshfind).
 Future<MarketIndex> fetchMarketIndex(Uri url) async {
-  final body = await _fetchMarketText(url);
+  final body = (await fetchMarketFile(url)).text!;
   return Isolate.run(() => parseMarketIndexText(body, url));
 }
 
-/// GETs the official sidecar ([officialSidecarUrl]); small, read in place.
-Future<MarketSidecar> fetchMarketSidecar(Uri url) async => parseMarketSidecarText(await _fetchMarketText(url));
+/// One market file and its ETag; [text] is null when the server answered
+/// 304 to the [etag] sent (the copy that has it is current).
+typedef MarketFile = ({String? text, String? etag});
 
-Future<String> _fetchMarketText(Uri url) async {
+typedef MarketFileFetcher = Future<MarketFile> Function(Uri url, {String? etag});
+
+/// GETs [url], with `If-None-Match: [etag]` when given.
+Future<MarketFile> fetchMarketFile(Uri url, {String? etag}) async {
   final http = HttpClient()
     ..connectionTimeout = const Duration(seconds: 15)
     ..userAgent = 'dsh-app';
   try {
     final request = await http.getUrl(url);
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    if (etag != null) request.headers.set(HttpHeaders.ifNoneMatchHeader, etag);
     final response = await request.close().timeout(const Duration(seconds: 30));
+    if (etag != null && response.statusCode == HttpStatus.notModified) {
+      await response.drain<void>();
+      return (text: null, etag: etag);
+    }
     if (response.statusCode != HttpStatus.ok) {
       await response.drain<void>();
       throw MarketFetchException(appL10n.stateMarketHttpError(response.statusCode), statusCode: response.statusCode);
@@ -85,7 +95,7 @@ Future<String> _fetchMarketText(Uri url) async {
           return buffer..write(chunk);
         })
         .timeout(const Duration(seconds: 60));
-    return text.toString();
+    return (text: text.toString(), etag: response.headers.value(HttpHeaders.etagHeader));
   } on SocketException {
     throw MarketFetchException(appL10n.stateMarketUnreachable);
   } on TimeoutException {
@@ -210,51 +220,139 @@ final marketCatalogProvider = FutureProvider<MarketCatalog>((ref) async {
 // ── Official index ───────────────────────────────────────────────────────────
 
 /// The official market (docs/design/plugin-market.md): a format-1 index with
-/// one pinned version per plugin, and the DSH Go sidecar beside it.
+/// one pinned version per plugin, and the DSH Go sidecar (`dsh-go.json`)
+/// beside it, read from [officialMarketBases]. Wherever it was read, the
+/// index is the Worker's (this URL resolves its links).
 const officialIndexUrl = 'https://go.dshtui.com/market/index.json';
-const officialSidecarUrl = 'https://go.dshtui.com/market/dsh-go.json';
+
+/// Where both files are read, in turn: the public bucket the Worker's cron
+/// writes (no Worker request), then the Worker.
+const officialMarketBases = ['https://dl.dshtui.com/market/', 'https://go.dshtui.com/market/'];
+
+/// How long the copy on the phone is used without asking the server.
+const officialMarketFresh = Duration(hours: 6);
+
+const _officialCopyKey = 'market.official';
 
 typedef OfficialMarketFetcher = Future<MarketCatalog> Function();
 
-bool _notPublished(Object error) => error is MarketFetchException && error.statusCode == 404;
+bool _notPublished(Object? error) => error is MarketFetchException && error.statusCode == 404;
 
-/// Both files at once ([index] and [sidecar] fetch them). An index not
-/// published yet (404) is an empty market. A sidecar that is missing or not
-/// schema 1 leaves the plugins without a tier (under 全部 only); one that
-/// can't be fetched fails the read, so a network problem doesn't pass for 暂无.
-Future<MarketCatalog> fetchOfficialMarket({
-  MarketIndexFetcher index = fetchMarketIndex,
-  Future<MarketSidecar> Function(Uri url) sidecar = fetchMarketSidecar,
-}) async {
-  final url = Uri.parse(officialIndexUrl);
-  Future<MarketSidecar> readSidecar() async {
-    try {
-      return await sidecar(Uri.parse(officialSidecarUrl));
-    } on MarketIndexException {
-      return MarketSidecar.empty;
-    } on MarketFetchException catch (error) {
-      if (_notPublished(error)) return MarketSidecar.empty;
-      rethrow;
-    }
-  }
+/// The last official catalog that read well, kept between sessions.
+typedef _OfficialCopy = ({String index, String? indexTag, String sidecar, String? sidecarTag, DateTime at});
 
-  // Read alongside the index; a failure of its own counts once the index is in.
-  final listings = readSidecar();
-  unawaited(listings.then((_) {}, onError: (Object _) {}));
-  final MarketIndex fetched;
+Future<_OfficialCopy?> _readOfficialCopy() async {
   try {
-    fetched = await index(url);
-  } on Object catch (error) {
-    if (_notPublished(error)) return MarketCatalog(MarketIndex(url: url, title: LocalizedText.plain(url.host)));
-    rethrow;
+    final json = jsonDecode((await SharedPreferences.getInstance()).getString(_officialCopyKey)!) as Map<String, Object?>;
+    return (
+      index: json['index']! as String,
+      indexTag: json['indexTag'] as String?,
+      sidecar: json['sidecar']! as String,
+      sidecarTag: json['sidecarTag'] as String?,
+      at: DateTime.parse(json['at']! as String),
+    );
+  } catch (_) {
+    return null; // none yet, or unreadable: as if none
   }
-  return MarketCatalog(fetched, listings: (await listings).plugins);
 }
 
-final officialMarketFetcherProvider = Provider<OfficialMarketFetcher>((ref) => fetchOfficialMarket);
+Future<void> _writeOfficialCopy(_OfficialCopy copy) async {
+  try {
+    await (await SharedPreferences.getInstance()).setString(
+      _officialCopyKey,
+      jsonEncode({
+        'index': copy.index,
+        'indexTag': copy.indexTag,
+        'sidecar': copy.sidecar,
+        'sidecarTag': copy.sidecarTag,
+        'at': copy.at.toUtc().toIso8601String(),
+      }),
+    );
+  } catch (_) {
+    // No preferences (tests without a mock): the next session asks again.
+  }
+}
 
-/// Fetched once per app session like dshfind's; the chat's 生成 entry reads
-/// it too (the media plugin it offers).
+Future<MarketCatalog> _officialCatalog(String index, MarketSidecar sidecar) async {
+  final url = Uri.parse(officialIndexUrl);
+  return MarketCatalog(await Isolate.run(() => parseMarketIndexText(index, url)), listings: sidecar.plugins);
+}
+
+/// Both files from [base]. A sidecar that is missing or not schema 1 leaves
+/// the plugins without a tier; one that can't be fetched fails the read, so a
+/// network problem doesn't pass for 暂无. The pair is kept when every plugin
+/// has its listing for the pinned version (the edge may briefly serve one
+/// file newer than the other).
+Future<MarketCatalog> _readOfficial(String base, MarketFileFetcher get, _OfficialCopy? copy) async {
+  final sidecarFile = get(Uri.parse('${base}dsh-go.json'), etag: copy?.sidecarTag);
+  unawaited(sidecarFile.then((_) {}, onError: (Object _) {}));
+  final indexFile = await get(Uri.parse('${base}index.json'), etag: copy?.indexTag);
+  final index = indexFile.text ?? copy!.index;
+  String? sidecarText;
+  String? sidecarTag;
+  var sidecar = MarketSidecar.empty;
+  try {
+    final file = await sidecarFile;
+    sidecarText = file.text ?? copy!.sidecar;
+    sidecarTag = file.etag;
+    sidecar = parseMarketSidecarText(sidecarText);
+  } on MarketIndexException {
+    sidecarText = null;
+  } on MarketFetchException catch (error) {
+    if (!_notPublished(error)) rethrow;
+  }
+  final catalog = await _officialCatalog(index, sidecar);
+  if (sidecarText != null && catalog.entries.every((e) => e.listing != null)) {
+    await _writeOfficialCopy((
+      index: index,
+      indexTag: indexFile.etag,
+      sidecar: sidecarText,
+      sidecarTag: sidecarTag,
+      at: DateTime.now(),
+    ));
+  }
+  return catalog;
+}
+
+/// The official catalog: the copy on the phone while it is younger than
+/// [officialMarketFresh] (unless [refresh]); else both files from the first
+/// of [officialMarketBases] that serves them, sending the copy's ETags (304:
+/// still current); else, offline, the copy at any age. Without a copy, an
+/// index published nowhere (404) is an empty market and other failures fail.
+Future<MarketCatalog> fetchOfficialMarket({MarketFileFetcher get = fetchMarketFile, bool refresh = false}) async {
+  final copy = await _readOfficialCopy();
+  if (copy != null && !refresh && DateTime.now().difference(copy.at) < officialMarketFresh) {
+    return _officialCatalog(copy.index, parseMarketSidecarText(copy.sidecar));
+  }
+  Object? failure;
+  for (final base in officialMarketBases) {
+    try {
+      return await _readOfficial(base, get, copy);
+    } on Object catch (error) {
+      failure = error;
+    }
+  }
+  if (copy != null) return _officialCatalog(copy.index, parseMarketSidecarText(copy.sidecar));
+  if (_notPublished(failure)) {
+    return MarketCatalog(MarketIndex(url: Uri.parse(officialIndexUrl), title: LocalizedText.plain('go.dshtui.com')));
+  }
+  throw failure!;
+}
+
+/// The first read in a session may use the copy on the phone; any later one
+/// is a pull to refresh or 重试 (both invalidate [officialMarketProvider]) and
+/// asks the server.
+final officialMarketFetcherProvider = Provider<OfficialMarketFetcher>((ref) {
+  final get = ref.watch(marketFileFetcherProvider);
+  var reads = 0;
+  return () => fetchOfficialMarket(get: get, refresh: reads++ > 0);
+});
+
+final marketFileFetcherProvider = Provider<MarketFileFetcher>((ref) => fetchMarketFile);
+
+/// Read once per app session like dshfind's (the copy on the phone may
+/// answer: [fetchOfficialMarket]); the chat's 生成 entry reads it too (the
+/// media plugin it offers).
 final officialMarketProvider = FutureProvider<MarketCatalog>(
   (ref) => ref.watch(officialMarketFetcherProvider)(),
   retry: (_, _) => null,

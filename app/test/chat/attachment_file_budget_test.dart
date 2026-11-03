@@ -135,12 +135,12 @@ void main() {
 
   for (final reported in <int?>[null, 0, 1, maxFileBytes]) {
     test('unknown or stale size $reported still stops at the first oversized chunk', () async {
-      final file = _File('export.zip', _megabytes(33), reportedLength: reported);
+      final file = _File('export.zip', _megabytes(maxFileBytes ~/ _mib + 1), reportedLength: reported);
       picker.selected = [file];
       final result = await device.pickFiles();
       expect(result.attachments, isEmpty);
       expect(result.problem, appL10n.stateAttachmentFileLimit(file.name));
-      expect(file.consumed, 31 * _mib);
+      expect(file.consumed, maxFileBytes + _mib);
       expect(file.closed, isTrue);
       expect(file.wholeReads, 0);
     });
@@ -152,6 +152,37 @@ void main() {
     final result = await device.pickFiles();
     expect(result.attachments, isEmpty);
     expect(file.emitted, 1);
+    expect(file.closed, isTrue);
+  });
+
+  test('a multi-file pick stops at the message byte budget', () async {
+    // 150 MiB each with known sizes: two fit (300 MiB), the third would pass 400 MiB.
+    final files = [
+      for (var i = 0; i < 3; i++) _File('part$i.bin', _megabytes(150), reportedLength: 150 * _mib),
+    ];
+    picker.selected = files;
+    final result = await device.pickFiles();
+    expect(result.attachments.map((a) => a.name), ['part0.bin', 'part1.bin']);
+    expect(result.problem, appL10n.stateAttachmentTotalLimit);
+    expect(files[2].streams, 0);
+  });
+
+  test('bytes already in the tray count before another file is opened', () async {
+    final file = _File('tail.bin', _megabytes(150), reportedLength: 150 * _mib);
+    picker.selected = [file];
+    final result = await device.pickFiles(heldBytes: maxMessageBytes - 100 * _mib);
+    expect(result.attachments, isEmpty);
+    expect(result.problem, appL10n.stateAttachmentTotalLimit);
+    expect(file.streams, 0);
+  });
+
+  test('a streamed aggregate overflow reports the total-size limit', () async {
+    // Unknown length, so the guard fires while streaming, not on metadata.
+    final file = _File('extra.bin', _megabytes(20));
+    picker.selected = [file];
+    final result = await device.pickFiles(heldBytes: maxMessageBytes - 10 * _mib);
+    expect(result.attachments, isEmpty);
+    expect(result.problem, appL10n.stateAttachmentTotalLimit);
     expect(file.closed, isTrue);
   });
 
@@ -182,8 +213,8 @@ void main() {
     expect(file.closed, isTrue);
   });
 
-  test('normal file named png retains the 30 MiB allowance and accepts its exact boundary', () async {
-    final file = _File('not-an-image.png', _megabytes(30), reportedLength: maxFileBytes);
+  test('normal file named png retains the 200 MiB allowance and accepts its exact boundary', () async {
+    final file = _File('not-an-image.png', _megabytes(maxFileBytes ~/ _mib), reportedLength: maxFileBytes);
     picker.selected = [file];
     final result = await device.pickFiles();
     expect(result.problem, isNull);

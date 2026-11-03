@@ -44,8 +44,10 @@ class _ProbeState extends State<_Probe> {
           lastPct = pct;
         case RuntimeStatusEvent(:final status):
           _log('phase ${status.phase.name}${status.error != null ? ' error=${status.error}' : ''}');
-        case RuntimeLogEvent(:final line):
-          debugPrint('[dsh] $line');
+        case RuntimeLogsEvent(:final entries):
+          for (final entry in entries) {
+            debugPrint('[dsh] ${entry.line}');
+          }
         case RuntimeNoticeEvent(:final text):
           _log('notice: $text');
       }

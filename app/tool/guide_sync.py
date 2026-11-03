@@ -265,4 +265,7 @@ def main() -> int:
 
 
 if __name__ == '__main__':
+    # CLI output is UTF-8 even when redirected through a legacy-codepage pipe.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding='utf-8', errors=stream.errors)
     raise SystemExit(main())

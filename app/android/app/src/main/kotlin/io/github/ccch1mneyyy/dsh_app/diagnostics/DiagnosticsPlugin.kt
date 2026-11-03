@@ -20,7 +20,8 @@ import kotlin.concurrent.thread
  * Facts for the diagnostics bundle that only Android knows: MethodChannel `dsh/diagnostics`.
  *
  * - `info` → `{app: {versionName, versionCode, abi}, device: {manufacturer, brand, model,
- *   android, sdkInt, abis, memoryMb, freeStorageMb}, manifest: {runtimeVersion, abi,
+ *   android, sdkInt, abis, memoryMb, freeStorageMb, display: {widthPx, heightPx, density,
+ *   densityDpi, fontScale}}, manifest: {runtimeVersion, abi,
  *   dshVersion, nodeVersion, pnpmVersion, ubuntuVersion, prootVersion, rootfsBytes,
  *   uncompressedBytes, files}}` (the bundled runtime's `assets/runtime/manifest.json`).
  * - `engineLog {maxBytes}` → the last lines of the engine's log file (`dsh.log`, and the
@@ -90,6 +91,20 @@ class DiagnosticsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "abis" to Build.SUPPORTED_ABIS.toList(),
             "memoryMb" to memory.totalMem / MB,
             "freeStorageMb" to context.filesDir.usableSpace / MB,
+            // What dp and the pet's k are computed from (pet/PetPack.kt): a size that looks wrong
+            // in the overlay or the app is read against these.
+            "display" to display(),
+        )
+    }
+
+    private fun display(): Map<String, Any?> {
+        val metrics = context.resources.displayMetrics
+        return mapOf(
+            "widthPx" to metrics.widthPixels,
+            "heightPx" to metrics.heightPixels,
+            "density" to metrics.density,
+            "densityDpi" to metrics.densityDpi,
+            "fontScale" to context.resources.configuration.fontScale,
         )
     }
 

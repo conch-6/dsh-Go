@@ -7,7 +7,7 @@ import 'dart:io';
 
 import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/state/media_generation.dart';
-import 'package:dsh_app/ui/engine_settings/engine_settings_page.dart';
+import 'package:dsh_app/ui/engine_settings/engine_settings_page.dart' show curatedNamespaces;
 import 'package:dsh_app/ui/settings/index/spots.dart';
 import 'package:dsh_app/ui/settings/media_settings_page.dart';
 import 'package:dsh_app/ui/settings/search/settings_search.dart';
@@ -46,7 +46,7 @@ void main() {
     expect(find.text('在此主机上安装'), findsOneWidget);
   });
 
-  testWidgets('with the plugin: its own settings, drawn from its schema', (tester) async {
+  testWidgets('with the plugin: the curated page, with a word for a missing catalogue', (tester) async {
     final describe = recordedDescribe();
     final namespaces = [
       ...(describe['namespaces']! as List),
@@ -72,12 +72,14 @@ void main() {
       const MediaSettingsPage(),
       overrides: [...engineOverrides(client), mediaPluginProvider.overrideWithValue(MediaPluginState.ready)],
     );
-    expect(find.byType(EngineSettingsPage), findsOneWidget);
+    // The plugin's namespace is there but its schema carries no catalogue:
+    // the curated page still renders and says why nothing can be added.
     expect(find.text('图像与视频'), findsWidgets);
     expect(find.text('在此主机上安装'), findsNothing);
+    expect(find.text(_zh.mediaSettingsCatalogMissing), findsOneWidget);
   });
 
-  testWidgets('an instance the host renamed: found by its catalogue, its own form shown', (tester) async {
+  testWidgets('an instance the host renamed: found by its catalogue, the curated page shown', (tester) async {
     final describe = recordedDescribe();
     final m0 = jsonDecode(File('test/media/fixtures/settings_describe_media_m0.json').readAsStringSync()) as Map;
     final media = Map<String, Object?>.of(((m0['namespaces'] as List).single as Map).cast<String, Object?>())
@@ -95,7 +97,14 @@ void main() {
       const MediaSettingsPage(),
       overrides: [...engineOverrides(client), mediaPluginProvider.overrideWithValue(MediaPluginState.ready)],
     );
-    expect(tester.widget<EngineSettingsPage>(find.byType(EngineSettingsPage)).ns, 'media-lab');
+    // The host renamed the namespace; the catalogue finds it and the page
+    // shows the service that catalogue carries (0.2.1, no video models).
+    expect(find.text('办公室'), findsOneWidget);
+    expect(find.text('图像与视频'), findsWidgets);
+    // The M0 schema has one general default pair, not the 0.3 image/video
+    // pairs: the page offers the shape that host has.
+    expect(find.text(_zh.mediaSettingsDefaultModel), findsOneWidget);
+    expect(find.text(_zh.mediaSettingsDefaultFooterLegacy), findsOneWidget);
   });
 
   test('the plugin\'s namespace has this page, not a second generic one', () {

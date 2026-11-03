@@ -2,7 +2,19 @@
 
 [中文](CONTRIBUTING.md) · [Project overview](README.en.md)
 
-Contributions can fix bugs, improve documentation and translations, add tests, or extend plugins. Look for a related issue first. For larger changes to protocols, data formats or permissions, explain the problem and proposed approach before implementation so work can be coordinated.
+## No external pull requests for now
+
+This repository currently **does not accept any external pull requests** (code, docs, configuration or templates).
+
+- External PRs are closed automatically by the intake check, see `.github/workflows/pr-gate.yml`.
+- For feature ideas, improvements or bug reports, please [open an issue](https://github.com/ccch1mneyyy/dsh-Go/issues/new/choose) with the use case and expected behavior.
+- Internal PRs by the maintainer (and maintainer agents) are unaffected.
+
+This is temporary; this page will be updated when external PRs reopen.
+
+## Welcome
+
+Contributions through issues are welcome — bug reports, documentation and translation improvements, tests, or plugin work. For larger changes to protocols, data formats or permissions, explain the problem and proposed approach before implementation so work can be coordinated.
 
 ## Report an issue
 

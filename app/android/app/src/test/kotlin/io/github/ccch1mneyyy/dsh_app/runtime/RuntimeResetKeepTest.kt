@@ -53,7 +53,7 @@ class RuntimeResetKeepTest {
         settleReset(retired, keep, dropKept)
         write(base, "staging/bin/sh", "staging/etc/os-release")
         File(base, "staging/root/.dsh").mkdirs()
-        activateRootfs(base, version, keep, dropKept)
+        activateRootfs(base, version, keep, dropKept, sync = {})
     }
 
     private fun assertKeepFailed(block: () -> Unit) {
@@ -135,7 +135,7 @@ class RuntimeResetKeepTest {
         settleReset(retired, keep)
         File(base, "staging/root/.dsh/skills/shipped").mkdirs()
         File(base, "staging/root/.dsh/skills/shipped/SKILL.md").writeText("fresh")
-        activateRootfs(base, "r1", keep)
+        activateRootfs(base, "r1", keep, sync = {})
         assertSettled()
         assertEquals("SKILL.md", text("root/.dsh/skills/mine/SKILL.md"))
         assertNull(text("root/.dsh/skills/shipped/SKILL.md"))
@@ -204,7 +204,7 @@ class RuntimeResetKeepTest {
         retireRuntime(base, retired, keep, ui)
         lock(File(keep, "root/.agents")) // the shared skills cannot move out
         write(base, "staging/root/.agents/skills/shipped/SKILL.md")
-        assertKeepFailed { activateRootfs(base, "r1", keep) }
+        assertKeepFailed { activateRootfs(base, "r1", keep, sync = {}) }
         // Not installed, nothing lost: what moved is in place, the rest still kept, the fresh copy back.
         assertFalse(File(base, "rootfs.version").exists())
         assertEquals("ui.json", text("root/.dsh/dsh-go/ui.json"))
@@ -225,7 +225,7 @@ class RuntimeResetKeepTest {
         retireRuntime(base, retired, keep, ui)
         lock(File(keep, "root/.agents")) // the shared skills cannot move out
         write(base, "staging/root/.agents/skills/shipped/SKILL.md")
-        assertKeepFailed { activateRootfs(base, "r1", keep) }
+        assertKeepFailed { activateRootfs(base, "r1", keep, sync = {}) }
         write(files, "runtime-keep.dropped/root/old") // left by an earlier drop cut short
 
         // 「不保留，继续安装」: what can move goes back, the rest is given up, the install finishes.
@@ -330,7 +330,7 @@ class RuntimeResetKeepTest {
     @Test fun anUpgradeWithoutAKeepLeavesTheHomeAlone() {
         installed()
         write(base, "staging/bin/sh")
-        activateRootfs(base, "r2", keep)
+        activateRootfs(base, "r2", keep, sync = {})
         assertEquals("ui.json", text("root/.dsh/dsh-go/ui.json"))
         assertEquals("notes", text("root/workspace/notes"))
         assertEquals("r2", File(base, "rootfs.version").readText())

@@ -8,6 +8,7 @@ import '../../l10n/l10n.dart';
 import '../../state/phone_state.dart';
 import '../common/app_sheet.dart';
 import '../common/brief_notice.dart';
+import '../common/risk_notice.dart';
 import 'dnd_mode_page.dart';
 
 Future<void> showA11yRestoreSheet(BuildContext context) =>
@@ -37,7 +38,7 @@ class _A11yRestoreSheetState extends ConsumerState<A11yRestoreSheet> {
     super.dispose();
   }
 
-  Future<void> _grant() async {
+  Future<void> _grant(String path) async {
     if (_busy) return;
     setState(() {
       _busy = true;
@@ -45,14 +46,36 @@ class _A11yRestoreSheetState extends ConsumerState<A11yRestoreSheet> {
     });
     final result = await ref.read(phoneProvider.notifier).grantSecureSettings();
     if (!mounted) return;
+    final l10n = context.l10n;
     setState(() {
       _busy = false;
       _message = result.pending
-          ? context.l10n.a11yRestoreWaiting
+          ? (path == 'suiPermission' ? l10n.a11yRestoreWaitingSui : l10n.a11yRestoreWaiting)
           : result.ok
           ? null
-          : result.reason ?? context.l10n.phoneActionFailedLater;
+          : result.reason ?? l10n.phoneActionFailedLater;
     });
+  }
+
+  /// Only a root connection; 不打扰模式 stays as it is, and so does an Android
+  /// version that can't run it (the grant needs no virtual display).
+  Future<void> _prepareRoot() async {
+    if (_busy || !await confirmRisk(context, RiskNotices.rootChannel) || !mounted) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    final result = await ref.read(phoneProvider.notifier).prepareRoot();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _message = result.ok ? null : result.reason ?? context.l10n.phoneActionFailedLater;
+    });
+  }
+
+  Future<void> _setUp() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => const PhoneDndPage()));
+    if (mounted) await ref.read(phoneProvider.notifier).refreshStatus();
   }
 
   @override
@@ -60,6 +83,15 @@ class _A11yRestoreSheetState extends ConsumerState<A11yRestoreSheet> {
     final l10n = context.l10n;
     final status = ref.watch(phoneProvider).status;
     final keeper = status.a11yKeeper;
+    final privileged = status.background.privileged;
+    // The versioned path names Sui and root too; old native modules say it in a11yKeeper.
+    final path = privileged?.grantPath ?? keeper.path;
+    // Root was picked but its connection is gone: never quietly another way.
+    final rootLost = path == 'setup' && (privileged?.rootSelected ?? false);
+    final offerRoot =
+        path == 'setup' && !rootLost && status.background.supportedModes.contains(PhonePrivilegedMode.root);
+    // A root prompt already open (from either page) is answered first, not asked twice.
+    final idle = status.enabled && !_busy && !status.background.root.starting;
     return SafeArea(
       top: false,
       child: Column(
@@ -81,17 +113,34 @@ class _A11yRestoreSheetState extends ConsumerState<A11yRestoreSheet> {
                   else ...[
                     FilledButton(
                       key: const Key('a11y-restore-grant'),
-                      onPressed: !status.enabled || _busy
+                      onPressed: !idle
                           ? null
-                          : keeper.path == 'setup'
-                          ? () async {
-                              await Navigator.of(context)
-                                  .push<void>(MaterialPageRoute(builder: (_) => const PhoneDndPage()));
-                              if (mounted) await ref.read(phoneProvider.notifier).refreshStatus();
-                            }
-                          : _grant,
-                      child: Text(keeper.path == 'setup' ? l10n.a11yRestoreSetup : l10n.a11yRestoreGrant),
+                          : path != 'setup'
+                          ? () => _grant(path)
+                          : rootLost
+                          ? _prepareRoot
+                          : _setUp,
+                      child: Text(switch (path) {
+                        'setup' => rootLost ? l10n.phonePrivilegedRootPrepare : l10n.a11yRestoreSetup,
+                        'shizuku' => l10n.a11yRestoreGrantShizuku,
+                        'shizukuPermission' => l10n.a11yRestoreGrantShizukuPermission,
+                        'sui' => l10n.phonePrivilegedGrantSui,
+                        'suiPermission' => l10n.phonePrivilegedGrantSuiPermission,
+                        'root' => l10n.phonePrivilegedGrantRoot,
+                        'adb' => l10n.a11yRestoreGrantAdb,
+                        _ => l10n.a11yRestoreGrant,
+                      }),
                     ),
+                    if (path == 'root') ...[
+                      const SizedBox(height: 8),
+                      Text(l10n.a11yRestoreRootNote, style: Theme.of(context).textTheme.bodySmall),
+                    ],
+                    if (offerRoot)
+                      TextButton(
+                        key: const Key('a11y-restore-root'),
+                        onPressed: idle ? _prepareRoot : null,
+                        child: Text(l10n.phonePrivilegedRootPrepare),
+                      ),
                     if (_message != null) ...[const SizedBox(height: 8), Text(_message!)],
                   ],
                   if (keeper.command.isNotEmpty) ...[

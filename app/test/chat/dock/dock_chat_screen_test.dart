@@ -8,6 +8,7 @@ import 'package:dsh_app/ui/chat/widgets/live_clock.dart';
 import 'package:dsh_app/ui/chat/chat_list.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:dsh_app/ui/chat/composer.dart';
+import 'package:dsh_app/ui/chat/dock/dock_stack.dart';
 import 'package:dsh_app/ui/chat/dock/goal_bar.dart';
 import 'package:dsh_app/ui/chat/dock/todo_bar.dart';
 import 'package:dsh_app/ui/chat/widgets/activity_strip.dart';
@@ -15,6 +16,7 @@ import 'package:dsh_app/ui/chat/widgets/whale_tail.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/harness.dart';
 import '../support/run_info_fixture.dart';
@@ -72,6 +74,7 @@ void main() {
   });
 
   testWidgets('in the composer column: above the strip, same side edges', (tester) async {
+    SharedPreferences.setMockInitialValues({DockFoldController.key: false});
     final running = runInfoState();
     await _open(
       tester,
@@ -92,11 +95,53 @@ void main() {
     expect(goal.bottom, lessThan(strip.top));
     for (final r in [todo, goal, strip]) {
       expect(r.left, composer.left);
+    }
+    for (final r in [goal, strip]) {
       expect(r.right, composer.right);
     }
+    // The top bar makes room for the fold button, which ends where the composer does.
+    final fold = tester.getRect(find.byKey(const ValueKey('dock-fold')));
+    expect(fold.top, todo.top);
+    expect(fold.right, composer.right);
+    expect(fold.left - todo.right, DockStackMetrics.accessoryGap);
     // The strip does not repeat the count the todo bar shows.
     expect(find.textContaining('进度 '), findsNothing);
     expect(_seam(tester), moreOrLessEquals(0, epsilon: 0.5));
+  });
+
+  testWidgets('folded: todo, goal and strip take one row, the strip shows the count, a tap spreads them', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final running = runInfoState();
+    await _open(
+      tester,
+      ChatState(
+        items: running.items,
+        running: true,
+        loading: false,
+        turns: running.turns,
+        todos: running.todos,
+        goal: goalOf(),
+      ),
+    );
+    final todo = tester.getRect(find.byType(TodoBar));
+    final goal = tester.getRect(find.byType(GoalBar));
+    final strip = tester.getRect(find.byType(ActivityStrip));
+    final composer = tester.getRect(find.byType(Composer));
+    expect(strip.top - goal.top, moreOrLessEquals(DockStackMetrics.peek, epsilon: 0.01));
+    expect(goal.top - todo.top, moreOrLessEquals(DockStackMetrics.peek, epsilon: 0.01));
+    expect(strip.left, composer.left);
+    expect(strip.right, composer.right);
+    // The todo bar is behind: the strip says the count instead.
+    expect(find.textContaining('进度 '), findsOneWidget);
+    expect(_seam(tester), moreOrLessEquals(0, epsilon: 0.5));
+
+    await tester.tap(find.byType(ActivityStrip));
+    await _framesWithoutSeam(tester);
+    expect(tester.getRect(find.byType(TodoBar)).bottom, lessThan(tester.getRect(find.byType(GoalBar)).top));
+    expect(tester.getRect(find.byType(GoalBar)).bottom, lessThan(tester.getRect(find.byType(ActivityStrip)).top));
+    expect(find.textContaining('进度 '), findsNothing);
   });
 
   testWidgets('bars rising and sinking: the list follows every frame', (tester) async {

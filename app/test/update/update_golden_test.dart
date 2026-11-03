@@ -270,6 +270,19 @@ void main() {
       expect(find.text('已跳过 1.2.0'), findsOneWidget);
     });
 
+    testWidgets('an unconfirmed install keeps neutral wording and the system installer', (tester) async {
+      final update = await pump(
+        tester,
+        FakeUpdate(_offer(task: UpdateTaskPhase.ready, problem: UpdateProblem.installUnconfirmed)),
+      );
+      await _openSheet(tester);
+      expect(find.text('尚未确认安装结果'), findsOneWidget);
+      expect(find.text('已取消安装'), findsNothing);
+      await tester.tap(find.text('用系统安装器安装'));
+      await tester.pump();
+      expect(update.calls, ['installWithSystem']);
+    });
+
     testWidgets('a stopped or failed install offers the system installer', (tester) async {
       final update = await pump(
         tester,

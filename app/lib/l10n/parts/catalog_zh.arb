@@ -123,5 +123,9 @@
     }
   },
   "catalogToolsSection": "工具",
-  "catalogAllSettings": "全部设置"
+  "catalogAllSettings": "全部设置",
+  "diagnosticsForAi": "让 AI 看诊断",
+  "diagnosticsForAiHint": "把环境快照写进引擎，AI 自己读",
+  "diagnosticsForAiDone": "已写入诊断，问 AI「看下诊断」就行",
+  "diagnosticsForAiFailed": "写不进去：本机运行时还没装好"
 }

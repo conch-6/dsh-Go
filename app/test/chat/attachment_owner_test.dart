@@ -29,7 +29,7 @@ final _connectionProvider = NotifierProvider<_Connection, HostConnection?>(() =>
 class _PendingPicker extends FakePicker {
   final result = Completer<List<DraftAttachment>>();
   @override
-  Future<PickedAttachments> pickFiles({int limit = maxAttachments}) {
+  Future<PickedAttachments> pickFiles({int limit = maxAttachments, int heldBytes = 0}) {
     calls.add('files');
     return result.future.then((files) => PickedAttachments(files));
   }

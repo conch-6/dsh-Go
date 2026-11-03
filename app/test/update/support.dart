@@ -1,10 +1,12 @@
 // Fakes for the updater: HTTP routes keyed by URL, a scripted native installer,
-// fixture loading.
+// fixture loading, DSHDLT01 patches.
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:dsh_app/update/installer.dart';
 import 'package:dsh_app/update/update_http.dart';
 
@@ -140,3 +142,18 @@ class FakeInstaller implements UpdateInstaller {
     return systemInstallerOpens;
   }
 }
+
+Uint8List _u64(int value) => (ByteData(8)..setUint64(0, value)).buffer.asUint8List();
+
+/// A DSHDLT01 patch from [base] to [target]: the header, then [ops] as they are.
+List<int> deltaPatch(List<int> base, List<int> target, List<List<int>> ops) => [
+  ...ascii.encode('DSHDLT01'),
+  ...sha256.convert(base).bytes,
+  ...sha256.convert(target).bytes,
+  ..._u64(target.length),
+  for (final op in ops) ...op,
+];
+
+List<int> deltaCopy(int offset, int length) => [0x01, ..._u64(offset), ..._u64(length)];
+List<int> deltaData(List<int> bytes) => [0x02, ..._u64(bytes.length), ...bytes];
+const deltaEnd = [0x00];

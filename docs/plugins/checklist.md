@@ -42,7 +42,7 @@ node sdk/plugin-kit/bin/check.mjs 插件目录 --load   # 再加载宿主半侧�
 
 | | 项 | |
 |---|---|---|
-| ⬜ | 只用 16 个组件；不认识的组件 App 画成占位 | ⚙️ |
+| ⬜ | 按根节点视图版本选组件：省略 `v` / `v: 1` 用 v1；新增组件与有界样式显式写 `v: 2`，见[组件目录](components.md)和[样式](styles.md)。清单 `dshGo.v` 仍为 `1`；旧 App 按 `caps` / `adaptView` 降级 | ⚙️ |
 | ⬜ | 工具卡 ≤ 8 KiB、≤ 40 个组件、≤ 6 层；面板 ≤ 32 KiB、≤ 120 个、≤ 8 层 | ⚙️ |
 | ⬜ | 工具卡不用绑定（没有数据模型），不放按钮（第 0 期不能点） | ⚙️ |
 | ⬜ | `presentationMeta` 用 `toolCard()` 包住：不抛错、不返回 `undefined` / `NaN` | |

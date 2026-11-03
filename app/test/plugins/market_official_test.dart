@@ -5,6 +5,7 @@
 // in fixtures/official-index.json and fixtures/dsh-go.json follow §3.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dsh_app/state/plugins_state.dart';
 import 'package:dsh_app/ui/common/list_page_row.dart';
@@ -19,6 +20,7 @@ import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../chat/support/harness.dart';
 import 'support/fake_plugin_host.dart';
@@ -185,36 +187,39 @@ void main() {
     });
 
     test('fetch: 404 is an empty market, other failures fail, a missing sidecar leaves no tiers', () async {
-      final index = parseMarketIndex(officialIndexJson(), Uri.parse(officialIndexUrl));
-      final sidecar = parseMarketSidecar(officialSidecarJson());
-      Future<MarketIndex> indexOk(Uri _) async => index;
-      Future<MarketSidecar> sidecarOk(Uri _) async => sidecar;
+      SharedPreferences.setMockInitialValues({});
+      final index = jsonEncode(officialIndexJson());
+      final sidecar = jsonEncode(officialSidecarJson());
       Never http(int status) => throw MarketFetchException('HTTP $status', statusCode: status);
+      // Both bases answer alike; [sidecarOf] stands in for dsh-go.json.
+      MarketFileFetcher serve({Object? indexOf, Object? sidecarOf}) => (url, {etag}) async {
+        final body = url.path.endsWith('index.json') ? indexOf : sidecarOf;
+        if (body is Never Function()) body();
+        return (text: body as String, etag: null);
+      };
 
-      final full = await fetchOfficialMarket(index: indexOk, sidecar: sidecarOk);
+      final full = await fetchOfficialMarket(get: serve(indexOf: index, sidecarOf: sidecar), refresh: true);
       expect(full.byName['@dsh-go/media']!.section, MarketSection.official);
+      SharedPreferences.setMockInitialValues({});
 
-      final unpublished = await fetchOfficialMarket(index: (_) async => http(404), sidecar: (_) async => http(404));
+      final unpublished = await fetchOfficialMarket(get: serve(indexOf: () => http(404), sidecarOf: () => http(404)));
       expect(unpublished.entries, isEmpty);
 
       await expectLater(
-        fetchOfficialMarket(index: (_) async => http(503), sidecar: sidecarOk),
+        fetchOfficialMarket(get: serve(indexOf: () => http(503), sidecarOf: sidecar)),
         throwsA(isA<MarketFetchException>().having((e) => e.statusCode, 'status', 503)),
       );
       await expectLater(
-        fetchOfficialMarket(index: (_) async => throw const MarketFetchException('offline'), sidecar: sidecarOk),
+        fetchOfficialMarket(get: serve(indexOf: () => throw const MarketFetchException('offline'), sidecarOf: sidecar)),
         throwsA(isA<MarketFetchException>()),
       );
       // The sidecar unreachable: an error, not 暂无.
       await expectLater(
-        fetchOfficialMarket(index: indexOk, sidecar: (_) async => throw const MarketFetchException('offline')),
+        fetchOfficialMarket(get: serve(indexOf: index, sidecarOf: () => throw const MarketFetchException('offline'))),
         throwsA(isA<MarketFetchException>()),
       );
-      for (final missing in <Future<MarketSidecar> Function(Uri)>[
-        (_) async => http(404),
-        (_) async => throw const MarketIndexException(r'$.schema', 'must be 1'),
-      ]) {
-        final bare = await fetchOfficialMarket(index: indexOk, sidecar: missing);
+      for (final missing in <Object>[() => http(404), '{"schema": 2}']) {
+        final bare = await fetchOfficialMarket(get: serve(indexOf: index, sidecarOf: missing));
         expect(bare.entries, hasLength(5));
         expect(bare.entries.every((e) => e.listing == null && e.section == null), isTrue);
       }

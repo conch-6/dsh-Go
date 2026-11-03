@@ -11,13 +11,26 @@ import 'composer_strip.dart';
 import 'native_capability_scope.dart';
 
 class NativeComposerBar extends ConsumerStatefulWidget {
-  const NativeComposerBar({super.key, required this.sessionId, required this.visible});
+  const NativeComposerBar({
+    super.key,
+    required this.sessionId,
+    required this.visible,
+    this.leading,
+    this.strip = true,
+  });
 
   /// The conversation on screen; null on the new-chat screen.
   final String? sessionId;
 
   /// False while a reply generates.
   final bool visible;
+
+  /// The chat's own pills, pinned at the capsule row's start ([ComposerCapsuleRow.leading]).
+  final Widget? leading;
+
+  /// Draws the status line too; false where it is a card of the chat's dock
+  /// deck instead (`DockStack`).
+  final bool strip;
 
   @override
   ConsumerState<NativeComposerBar> createState() => _NativeComposerBarState();
@@ -45,8 +58,8 @@ class _NativeComposerBarState extends ConsumerState<NativeComposerBar> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ComposerStripSlot(sessionId: widget.sessionId, visible: widget.visible),
-          ComposerCapsuleBar(sessionId: widget.sessionId, visible: widget.visible),
+          if (widget.strip) ComposerStripSlot(sessionId: widget.sessionId, visible: widget.visible),
+          ComposerCapsuleBar(sessionId: widget.sessionId, visible: widget.visible, leading: widget.leading),
         ],
       ),
     );

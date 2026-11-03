@@ -24,6 +24,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../remote/support/ready_mux.dart';
+
 class _Connection extends Notifier<AsyncValue<HostConnection?>> {
   @override
   AsyncValue<HostConnection?> build() => const AsyncData(null);
@@ -79,6 +81,9 @@ class _Carrier extends DshCarrier {
 class _Client extends DshClient {
   _Client(this.wire) : super.withCarrier(wire);
   final _Carrier wire;
+  final _mux = ReadyMux();
+  @override
+  DshMux get mux => _mux;
   final streams = <String, StreamController<DshEvent>>{};
   final watched = <String>[];
   final hosts = StreamController<HostEvent>.broadcast();

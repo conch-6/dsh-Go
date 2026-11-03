@@ -16,9 +16,9 @@ import '../update/update_http.dart';
 import '../update/version.dart';
 import 'app_info.dart';
 
-/// In-app updates: daily check of GitHub Releases (with mirror fallback),
-/// download with resume, SHA-256 check, PackageInstaller install. Conventions
-/// in `docs/release.md`.
+/// In-app updates: daily check of our release copy and GitHub Releases (with
+/// mirror fallback), a delta patch or the whole APK with resume, SHA-256
+/// check, PackageInstaller install. Conventions in `docs/release.md`.
 
 // ── Seams (tests override these) ─────────────────────────────────────────────
 
@@ -68,6 +68,7 @@ enum UpdateProblem {
   noSpace,
   permissionUnavailable,
   installCancelled,
+  installUnconfirmed,
   signature,
   notDsh,
   downgrade,
@@ -93,6 +94,8 @@ class AppUpdateState {
     this.total,
     this.source,
     this.problem,
+    this.installedSha256,
+    this.patchFailedVersion,
   });
 
   /// Preferences were read; nothing automatic runs before that.
@@ -119,9 +122,26 @@ class AppUpdateState {
   final String? source;
   final UpdateProblem? problem;
 
+  /// SHA-256 of the installed APK, once hashed (only for offers with patches).
+  final String? installedSha256;
+
+  /// The release whose patch failed: its whole APK is downloaded instead.
+  final String? patchFailedVersion;
+
   bool get hasUpdate => latest != null;
   bool get isSkipped => latest != null && skippedVersion == latest!.version.toString();
   ReleaseAsset? get asset => latest?.apkFor(flavor);
+
+  /// What a download fetches in place of [asset]: the patch from the installed
+  /// APK, unless one already failed for this release.
+  ReleasePatch? get patch {
+    final latest = this.latest;
+    if (latest == null || asset == null || latest.version.toString() == patchFailedVersion) return null;
+    return latest.patchFor(flavor, installedSha256);
+  }
+
+  /// Bytes a download fetches.
+  int? get downloadSize => patch?.size ?? asset?.size;
 
   /// 0..1 while downloading with a known size.
   double? get progress => total == null || total == 0 ? null : (received / total!).clamp(0.0, 1.0);
@@ -144,6 +164,8 @@ class AppUpdateState {
     int? Function()? total,
     String? Function()? source,
     UpdateProblem? Function()? problem,
+    String? installedSha256,
+    String? Function()? patchFailedVersion,
   }) => AppUpdateState(
     loaded: loaded ?? this.loaded,
     autoCheck: autoCheck ?? this.autoCheck,
@@ -159,6 +181,8 @@ class AppUpdateState {
     total: total == null ? this.total : total(),
     source: source == null ? this.source : source(),
     problem: problem == null ? this.problem : problem(),
+    installedSha256: installedSha256 ?? this.installedSha256,
+    patchFailedVersion: patchFailedVersion == null ? this.patchFailedVersion : patchFailedVersion(),
   );
 }
 
@@ -231,6 +255,8 @@ class AppUpdateController extends Notifier<AppUpdateState> {
   static const _endpointKey = 'update_endpoint';
   static const _mirrorKey = 'update_mirror';
   static const _latestKey = 'update_latest';
+  static const _installedKey = 'update_installed_sha256';
+  static const _patchFailedKey = 'update_patch_failed';
 
   /// Free space wanted on top of twice the APK (download + install staging).
   static const _spareBytes = 64 * 1024 * 1024;
@@ -240,6 +266,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
   Future<UpdateCheckPhase>? _checking;
   CancelToken? _cancel;
   _ReadyApk? _apk;
+  Future<String?>? _installedHash;
 
   /// Bumped per download and install attempt: a late answer from an abandoned
   /// one, or a check that started before it, can't change what it works on.
@@ -304,14 +331,45 @@ class AppUpdateController extends Notifier<AppUpdateState> {
       lastCheckedAt: ms(_checkedKey) == null ? null : DateTime.fromMillisecondsSinceEpoch(ms(_checkedKey)!),
       latest: () => latest,
       check: latest != null ? UpdateCheckPhase.available : UpdateCheckPhase.idle,
+      patchFailedVersion: () => prefs.getString(_patchFailedKey),
     );
+    unawaited(_hashIfPatched());
   }
 
-  Future<void> _cleanDownloads({String? keep}) async {
+  Future<void> _cleanDownloads() async {
     try {
       final dir = await ref.read(updateDirectoryProvider)();
-      await ApkDownloader(http: _http, directory: dir).clean(keep: keep);
+      await ApkDownloader(http: _http, directory: dir).clean();
     } catch (_) {}
+  }
+
+  /// Hashes the installed APK when the offer has patches for this device, so
+  /// the sheet can tell which applies (and say its size).
+  Future<void> _hashIfPatched() async {
+    if (state.latest?.patches[state.flavor]?.isNotEmpty ?? false) await _installedSha256();
+  }
+
+  /// SHA-256 of the installed APK, which patches name as their base.
+  Future<String?> _installedSha256() => _installedHash ??= _hashInstalled();
+
+  /// Hashed off the UI isolate once per installed build (versionCode +
+  /// install time), then remembered. Null when the native side doesn't say
+  /// where the APK is, or it can't be read.
+  Future<String?> _hashInstalled() async {
+    String? digest;
+    try {
+      final app = await _installer.installedApp();
+      final build = '${app.versionCode}:${app.lastUpdateTime}:';
+      final known = _prefs?.getString(_installedKey);
+      if (known != null && known.startsWith(build)) {
+        digest = known.substring(build.length);
+      } else if (app.apkPath case final path?) {
+        digest = await sha256OfFile(File(path));
+        unawaited(_prefs?.setString(_installedKey, '$build$digest'));
+      }
+    } catch (_) {}
+    if (digest != null && ref.mounted) state = state.copyWith(installedSha256: digest);
+    return digest;
   }
 
   // ── Checking ───────────────────────────────────────────────────────────────
@@ -347,7 +405,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
     final prefs = _prefs;
     final now = _now();
     final checker = UpdateChecker(http: _http, sources: ref.read(updateSourcesProvider), userAgent: _userAgent);
-    final result = await checker.check(preferred: prefs?.getString(_endpointKey));
+    final result = await checker.check(preferred: prefs?.getString(_endpointKey), installed: state.current);
     if (!ref.mounted) return UpdateCheckPhase.idle;
     unawaited(prefs?.setInt(_attemptKey, now.millisecondsSinceEpoch));
     switch (result) {
@@ -381,6 +439,8 @@ class AppUpdateController extends Notifier<AppUpdateState> {
           problem: changed ? () => null : null,
         );
         if (answer == _Answer.conflict) await _conflicted();
+        // Before the offer shows: its size is the patch's when one applies.
+        await _hashIfPatched();
       case CheckFailed(:final failure):
         // A cached offer stays on screen; the check just couldn't refresh it.
         state = state.copyWith(
@@ -490,7 +550,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
     state = state.copyWith(
       task: UpdateTaskPhase.downloading,
       received: 0,
-      total: () => asset.size,
+      total: () => state.downloadSize,
       source: () => null,
       problem: () => null,
     );
@@ -499,15 +559,20 @@ class AppUpdateController extends Notifier<AppUpdateState> {
       if (owns()) state = state.copyWith(task: UpdateTaskPhase.failed, problem: () => problem);
     }
 
+    await _hashIfPatched();
+    if (!owns()) return;
+    InstalledApp? app;
     try {
-      final app = await _installer.installedApp();
-      if (app.freeBytes != null && asset.size != null && app.freeBytes! < asset.size! * 2 + _spareBytes) {
-        return fail(UpdateProblem.noSpace);
-      }
+      app = await _installer.installedApp();
     } catch (_) {
-      // Unknown free space: let the download find out.
+      // Unknown free space and no APK to patch: let the download find out.
     }
     if (!owns()) return;
+    // Room for the APK and its install staging copy. A patch needs no more:
+    // it builds the APK from the installed one and goes before the install.
+    if (app?.freeBytes case final free? when asset.size != null && free < asset.size! * 2 + _spareBytes) {
+      return fail(UpdateProblem.noSpace);
+    }
 
     final sources = ref.read(updateSourcesProvider);
     final mirror = _prefs?.getString(_mirrorKey);
@@ -534,22 +599,60 @@ class AppUpdateController extends Notifier<AppUpdateState> {
     }
     if (!owns()) return;
     final downloader = ApkDownloader(http: _http, directory: dir);
-    await downloader.clean(keep: asset.name);
+    final patch = state.patch;
+    final base = app?.apkPath;
+    await downloader.clean(keep: [asset.name, ?patch?.name]);
     if (!owns()) return;
-    final outcome = await downloader.download(
+    void onProgress(DownloadProgress p) {
+      if (owns()) state = state.copyWith(received: p.received, total: () => p.total, source: () => p.source);
+    }
+
+    void onVerifying() {
+      if (owns()) state = state.copyWith(task: UpdateTaskPhase.verifying);
+    }
+
+    // A file of this release: where the manifest puts it, then the GitHub
+    // release asset through every mirror.
+    List<DownloadUrl> urls(Uri own, String name) =>
+        sources.downloadUrls([own, githubReleaseAsset(release.tag, name)], preferredMirror: mirror);
+
+    // An APK already here (built or downloaded before) is checked and kept.
+    var outcome = patch != null && base != null && !await File('${dir.path}/${asset.name}').exists()
+        ? await downloader.downloadPatched(
+            patch: patch,
+            base: File(base),
+            fileName: asset.name,
+            sha256: sha256,
+            // Next to the APK, wherever that is.
+            urls: urls(asset.url.resolve(patch.name), patch.name),
+            expectedSize: asset.size,
+            cancel: cancel,
+            onProgress: onProgress,
+            onVerifying: onVerifying,
+          )
+        : null;
+    if (!owns()) return;
+    if (outcome is DownloadFailed) {
+      // Silently the whole APK instead, and never this release's patch again.
+      outcome = null;
+      final version = release.version.toString();
+      unawaited(_prefs?.setString(_patchFailedKey, version));
+      state = state.copyWith(
+        task: UpdateTaskPhase.downloading,
+        received: 0,
+        total: () => asset.size,
+        source: () => null,
+        patchFailedVersion: () => version,
+      );
+    }
+    outcome ??= await downloader.download(
       fileName: asset.name,
       sha256: sha256,
-      urls: sources.downloadUrls([asset.url, githubReleaseAsset(release.tag, asset.name)], preferredMirror: mirror),
+      urls: urls(asset.url, asset.name),
       expectedSize: asset.size,
       cancel: cancel,
-      onProgress: (p) {
-        if (owns()) {
-          state = state.copyWith(received: p.received, total: () => p.total, source: () => p.source);
-        }
-      },
-      onVerifying: () {
-        if (owns()) state = state.copyWith(task: UpdateTaskPhase.verifying);
-      },
+      onProgress: onProgress,
+      onVerifying: onVerifying,
     );
     if (!owns()) return;
     if (!_offers(state, release.version, asset.name, sha256: sha256)) {
@@ -727,7 +830,9 @@ class AppUpdateController extends Notifier<AppUpdateState> {
         await Future<void>.delayed(confirmGrace);
         if (ref.mounted && run == _run && state.task == UpdateTaskPhase.installing) {
           _run++;
-          state = state.copyWith(task: UpdateTaskPhase.ready, problem: () => UpdateProblem.installCancelled);
+          // No result is not evidence of user cancellation: even inspect may
+          // still be pending. Keep the package and the existing retry/fallback.
+          state = state.copyWith(task: UpdateTaskPhase.ready, problem: () => UpdateProblem.installUnconfirmed);
           // The offer named another digest for it meanwhile: not ready again.
           if (_apk case final apk? when !apk.isFor(state)) await _conflicted();
         }

@@ -245,8 +245,8 @@ class WorkspaceDirController extends Notifier<WorkspaceDir> {
   bool _again = false;
   Completer<void>? _next;
 
-  /// Sizes the times were read for, by name.
-  final Map<String, int?> _timedSizes = {};
+  /// Size and latest timestamp request for each file name.
+  final Map<String, ({int? size, Object request})> _timed = {};
 
   static const _relistDelay = Duration(milliseconds: 250);
   static const _readyWait = Duration(milliseconds: 600);
@@ -261,7 +261,7 @@ class WorkspaceDirController extends Notifier<WorkspaceDir> {
     final kept = identical(source, _source) ? _kept : null;
     _source = source;
     _path = workspaceHostPath(ref.watch(workspaceRootProvider(sessionId)), rel);
-    _timedSizes.clear();
+    _timed.clear();
     final generation = ++_generation;
 
     final link = ref.keepAlive();
@@ -327,7 +327,7 @@ class WorkspaceDirController extends Notifier<WorkspaceDir> {
 
   /// Pull to refresh: relist and read every time again.
   Future<void> refresh() async {
-    _timedSizes.clear();
+    _timed.clear();
     _set(state.copyWith(refreshing: true));
     await _load();
   }
@@ -367,7 +367,7 @@ class WorkspaceDirController extends Notifier<WorkspaceDir> {
       if (!ref.mounted || generation != _generation) return;
       final entries = [...listing.entries]..sort(compareWorkspaceEntries);
       final names = {for (final e in entries) e.name};
-      _timedSizes.removeWhere((name, _) => !names.contains(name));
+      _timed.removeWhere((name, _) => !names.contains(name));
       _set(
         state.copyWith(
           entries: _same(entries, state.entries) ? state.entries : entries,
@@ -392,10 +392,11 @@ class WorkspaceDirController extends Notifier<WorkspaceDir> {
   Future<void> _readTimes(WorkspaceSource source, List<DshWorkspaceEntry> entries, int generation) async {
     final wanted = [
       for (final e in entries.where((e) => e.isFile).take(workspaceTimedFiles))
-        if (!_timedSizes.containsKey(e.name) || _timedSizes[e.name] != e.size) e,
+        if (!_timed.containsKey(e.name) || _timed[e.name]?.size != e.size) e,
     ];
+    final request = Object();
     for (final e in wanted) {
-      _timedSizes[e.name] = e.size;
+      _timed[e.name] = (size: e.size, request: request);
     }
     const batch = 6;
     for (var i = 0; i < wanted.length; i += batch) {
@@ -408,6 +409,7 @@ class WorkspaceDirController extends Notifier<WorkspaceDir> {
       final times = {...state.times};
       var changed = false;
       for (final (j, e) in chunk.indexed) {
+        if (!identical(_timed[e.name]?.request, request)) continue;
         final at = found[j];
         if (at != null && times[e.name] != at) {
           times[e.name] = at;

@@ -111,6 +111,25 @@ class PetPackTest {
         assertEquals(PetBox(6f, 12f, 58f, 49f), p.windowBox())
     }
 
+    /** As the chat page's hitBoxFor (pet_pack.dart): byAnim over sleepingAnims over wideAnims, else default, else the body. */
+    @Test fun hitBoxesAsTheChatPageReadsThem() {
+        val p = PetPack.parse(json.replace(
+            "\"reactions\":",
+            """"hitBoxes": {"default": {"x": 13, "y": 12, "w": 50, "h": 48}, "wide": {"x": 10, "y": 12, "w": 53, "h": 48},
+                            "sleeping": {"x": 12, "y": 12, "w": 51, "h": 49},
+                            "byAnim": {"typing": {"x": 2, "y": 12, "w": 66, "h": 54}},
+                            "wideAnims": ["typing", "music"], "sleepingAnims": ["music"]},
+               "reactions":""",
+        ))
+        fun hit(name: String) = p.hitBoxFor(p.animations.getValue(name))
+        assertEquals(PetBox(2f, 12f, 66f, 54f), hit("typing"))
+        assertEquals(PetBox(12f, 12f, 51f, 49f), hit("music"))
+        assertEquals(PetBox(13f, 12f, 50f, 48f), hit("idle"))
+        // No hitBoxes at all: the body.
+        val bare = PetPack.parse(json)
+        assertEquals(bare.contentBox, bare.hitBoxFor(bare.animations.getValue("typing")))
+    }
+
     @Test fun bonusFromTheStateListAtAThird() {
         val p = PetPack.parse(json)
         val b = p.bonusOf("attention", 0)!!
@@ -130,12 +149,21 @@ class PetPackTest {
         assertEquals(61f, w.bottom)
     }
 
-    @Test fun screenScaleIsWholeForCrispPacksOnly() {
+    @Test fun screenScaleMatchesTheAppForEverySize() {
         val p = PetPack.parse(json)
-        // Medium (30 dp body) on a 2.75 phone: 30 × 2.75 / 49 = 1.68 → 2 physical px per art px.
-        assertEquals(2f, p.screenScale(PetPack.bodyDp("medium"), 2.75f))
-        assertEquals(1f, p.screenScale(PetPack.bodyDp("small"), 2.0f))
-        assertEquals(3f, p.screenScale(PetPack.bodyDp("large"), 3.5f))
+        // The app's petDevicePixels (pet_sprite.dart, and pet_pixel_test.dart's ratio list): whole
+        // physical px per art px, 22/30/40 dp over a 49 px body, the three sizes at least one apart.
+        val expected = mapOf(
+            2.0f to listOf(1, 2, 3),
+            2.625f to listOf(1, 2, 3),
+            2.75f to listOf(1, 2, 3),
+            3.0f to listOf(1, 2, 3),
+            3.5f to listOf(2, 3, 4),
+        )
+        for ((density, ks) in expected) {
+            assertEquals("at $density", ks.map { it.toFloat() }, PetSize.values().map { p.screenScale(it, density) })
+        }
+        // A high-ratio pack is still pixel art: always whole.
         val hiRes = PetPack.parse(
             """{"schema": 1, "id": "deepy-whale", "pixelArt": true, "scale": 5, "canvas": {"w": 52, "h": 52},
                 "contentBox": {"x": 12, "y": 26, "w": 36, "h": 22},
@@ -143,11 +171,44 @@ class PetPackTest {
                   "box": {"x": 12, "y": 26, "w": 36, "h": 24}, "frames": [{"i": 0, "ms": 50}]}}}""",
         )
         assertFalse(hiRes.crisp)
-        assertEquals(30 * 2.625f / 22, hiRes.screenScale(30f, 2.625f), 1e-4f)
-        assertEquals(22f, PetPack.bodyDp("small"))
-        assertEquals(30f, PetPack.bodyDp("medium"))
-        assertEquals(40f, PetPack.bodyDp("large"))
-        assertEquals(30f, PetPack.bodyDp(null))
+        assertEquals(4f, hiRes.screenScale(PetSize.MEDIUM, 2.625f))
+        // A smooth (non-pixel-art) pack draws at the target body height instead.
+        val smooth = PetPack.parse(json.replace("\"pixelArt\": true", "\"pixelArt\": false"))
+        assertEquals(30 * 2.625f / 49, smooth.screenScale(PetSize.MEDIUM, 2.625f), 1e-4f)
+        assertEquals(22f, PetSize.SMALL.dp)
+        assertEquals(30f, PetSize.MEDIUM.dp)
+        assertEquals(40f, PetSize.LARGE.dp)
+        assertEquals(PetSize.MEDIUM, PetSize.fromName(null))
+        assertEquals(PetSize.LARGE, PetSize.fromName("large"))
+        assertEquals(PetSize.SMALL, PetSize.fromName("small"))
+        assertEquals(PetSize.MEDIUM, PetSize.fromName("medium"))
+    }
+
+    /** The same table as `pet_pixel_test.dart` (the app) and `test/pets/pet_pixel_test.dart`: a drift on either side is caught. */
+    @Test fun screenScaleMatchesTheAppForTheShippedPacks() {
+        val packs = shipped()
+        val expected = mapOf(
+            "whale-girl" to mapOf(
+                2.0f to listOf(1, 2, 3),
+                2.625f to listOf(1, 2, 3),
+                2.75f to listOf(1, 2, 3),
+                3.0f to listOf(1, 2, 3),
+                3.5f to listOf(2, 3, 4),
+            ),
+            "deepy-whale" to mapOf(
+                2.0f to listOf(2, 3, 4),
+                2.625f to listOf(3, 4, 5),
+                2.75f to listOf(3, 4, 5),
+                3.0f to listOf(3, 4, 5),
+                3.5f to listOf(4, 5, 6),
+            ),
+        )
+        for ((id, byDensity) in expected) {
+            val p = packs.getValue(id)
+            for ((density, ks) in byDensity) {
+                assertEquals("$id at $density", ks.map { it.toFloat() }, PetSize.values().map { p.screenScale(it, density) })
+            }
+        }
     }
 
     @Test fun reactionsAndPlayTimes() {
@@ -183,19 +244,27 @@ class PetPackTest {
         }
     }
 
-    /** The bundled packs parse, and every sheet fits the decode budget at the scale it is drawn. */
-    @Test fun shippedPacksParse() {
+    /** The bundled packs, by id, with their folder. */
+    private fun shippedDirs(): Map<String, Pair<File, PetPack>> {
         val root = generateSequence(File("").absoluteFile) { it.parentFile }.map { File(it, "app/assets/pets") }.firstOrNull { it.isDirectory }
             ?: generateSequence(File("").absoluteFile) { it.parentFile }.map { File(it, "assets/pets") }.firstOrNull { it.isDirectory }
-            ?: return
-        val packs = root.listFiles { f -> File(f, "pack.json").isFile }.orEmpty()
-        for (dir in packs) {
-            val p = PetPack.parse(File(dir, "pack.json").readText())
-            assertEquals(dir.name, p.id)
+            ?: return emptyMap()
+        return root.listFiles { f -> File(f, "pack.json").isFile }.orEmpty().associate { dir ->
+            dir.name to (dir to PetPack.parse(File(dir, "pack.json").readText()))
+        }
+    }
+
+    private fun shipped(): Map<String, PetPack> = shippedDirs().mapValues { it.value.second }
+
+    /** The bundled packs parse, and every sheet fits the decode budget at the scale it is drawn. */
+    @Test fun shippedPacksParse() {
+        for ((id, dirAndPack) in shippedDirs()) {
+            val (dir, p) = dirAndPack
+            assertEquals(id, p.id)
             for (a in p.animations.values) {
                 assertTrue("${p.id}/${a.sheet}", File(dir, a.sheet).isFile)
-                for (size in listOf("small", "medium", "large")) {
-                    val k = p.screenScale(PetPack.bodyDp(size), 3.5f)
+                for (size in PetSize.values()) {
+                    val k = p.screenScale(size, 3.5f)
                     val r = PetSprites.perLogicalFor(p.scale, k, a, PetSprites.SHEET_BYTES)
                     val bytes = 4L * minOf(a.cols, a.cells) * a.box.w.toLong() * r * a.rows * a.box.h.toLong() * r
                     assertTrue("${p.id}/${a.name} r=$r $bytes", r == 1 || bytes <= PetSprites.SHEET_BYTES)

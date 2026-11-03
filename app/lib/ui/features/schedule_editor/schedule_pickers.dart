@@ -270,26 +270,27 @@ String zoneLabel(String name, {DateTime? at}) {
 }
 
 /// The searchable zone list: this phone's zone first, then every zone by
-/// offset. Pops with the IANA name.
-Future<String?> showZoneSheet(BuildContext context, {required String selected, required String device}) =>
+/// its offset [at] (now when null). Pops with the IANA name.
+Future<String?> showZoneSheet(BuildContext context, {required String selected, required String device, DateTime? at}) =>
     showAppSheet<String>(
       context,
       heightFactor: 0.82,
-      builder: (_) => _ZoneSheet(selected: selected, device: device),
+      builder: (_) => _ZoneSheet(selected: selected, device: device, at: at),
     );
 
 class _ZoneSheet extends StatefulWidget {
-  const _ZoneSheet({required this.selected, required this.device});
+  const _ZoneSheet({required this.selected, required this.device, this.at});
 
   final String selected;
   final String device;
+  final DateTime? at;
 
   @override
   State<_ZoneSheet> createState() => _ZoneSheetState();
 }
 
 class _ZoneSheetState extends State<_ZoneSheet> {
-  final _zones = allZones();
+  late final _zones = allZones(at: widget.at);
   final _search = TextEditingController();
   String _query = '';
 

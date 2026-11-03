@@ -3,6 +3,8 @@
 ///
 /// 接入点：
 /// - `MarkdownBody._codeBuilder`：语言是 `dsh-ui` 时返回 [DshUiBlock]；
+/// - `MarkdownBody.repairBareViews`：模型忘了写围栏时，裸 JSON 也按视图画
+///   （[fenceBareDshUiViews] 补围栏）；
 /// - `AssistantMessage` 外面包 [DshUiScope]（状态用 [dshUiStateFor] 推）；
 /// - 用户气泡：[parseDshUiReply] 认出回复，画 [DshUiReply.chipLabel]；
 /// - 复制 / 分享 / 导出：[dshUiPlainText] 把块换成一行摘要。

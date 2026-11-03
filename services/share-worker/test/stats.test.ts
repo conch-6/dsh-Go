@@ -13,7 +13,7 @@ import { FakeCache, makeCtx, makeEnv } from './fakes';
 const ORIGIN = 'https://go.dshtui.com';
 const VERSION = '0.9.8';
 const APK = `dsh-go-${VERSION}-arm64.apk`;
-const CN = 'https://dshgo-dl.oss-cn-hongkong.aliyuncs.com/';
+const CN = 'https://dshgo-cn.oss-cn-hongkong.aliyuncs.com/';
 const TOKEN = 'dshc_' + 'A'.repeat(43);
 const IP = '203.0.113.77';
 const IP6 = '2001:db8:abcd:12:1111:2222:3333:4444';

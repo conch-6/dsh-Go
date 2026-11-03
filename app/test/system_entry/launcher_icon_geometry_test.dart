@@ -137,6 +137,7 @@ void main() {
     final shortcuts = _source('shortcuts/ShortcutsPlugin.kt');
     expect(int.parse(_constant(share, 'MAX_ITEMS')), maxAttachments);
     expect(_bytes(_constant(share, 'MAX_FILE_BYTES')), maxFileBytes);
+    expect(_bytes(_constant(share, 'MAX_TOTAL_BYTES')), maxMessageBytes);
     expect(int.parse(_constant(shortcuts, 'MAX_RECENT')), maxRecentShortcuts);
   });
 }

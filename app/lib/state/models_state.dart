@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'connection_state.dart';
+import 'hosts_state.dart';
 import 'read_list_cache.dart';
 import 'read_list_identity.dart';
 import 'settings_state.dart';
@@ -25,11 +27,11 @@ final modelCatalogProvider = FutureProvider<ModelCatalog?>((ref) async {
   final sub = conn.client.hostEvents.listen((event) {
     final refresh = switch (event) {
       CredentialUpdatedEvent() || HostReadyEvent() => true,
-      SettingsUpdatedEvent(:final namespace) => namespace == piAiSettingsNs,
+      SettingsUpdatedEvent(:final namespace) => namespace == piAiSettingsNs || namespace == defaultModelSettingsNs,
       UnknownHostEvent(:final event) => event == 'llm/adapters-updated',
       _ => false,
     };
-    if (refresh) ref.invalidateSelf();
+    if (refresh && ref.mounted) ref.invalidateSelf();
   });
   ref.onDispose(() => unawaited(sub.cancel()));
   final catalog = await conn.client.listModels();
@@ -65,11 +67,47 @@ final modelListViewProvider = Provider.autoDispose<ReadListView<ModelCatalog>>((
   );
 });
 
+const defaultModelSettingsNs = 'agent-default-model';
+
+/// A picker belongs to one host/connection lifetime, including same-client
+/// reconnects and A -> B -> A. It must not acquire a new destination later.
+final modelSelectionScopeProvider = Provider<Object>((ref) {
+  ref.watch(activeHostProvider);
+  ref.watch(activeConnectionProvider);
+  final connection = ref.watch(readListLiveConnectionProvider);
+  if (connection != null) {
+    final client = connection.client;
+    final generation = client.mux.generation;
+    final sub = client.mux.states.listen((state) {
+      if (ref.mounted &&
+          (!identical(generation, client.mux.generation) ||
+              state == DshConnectionState.reconnecting ||
+              state == DshConnectionState.unauthorized ||
+              state == DshConnectionState.closed)) {
+        ref.invalidateSelf();
+      }
+    });
+    ref.onDispose(() => unawaited(sub.cancel()));
+  }
+  return Object();
+});
+
+/// Only a current response can supply the new-chat chip's effective default;
+/// cached or retained catalogs are for browsing, not a claim about defaults.
+final currentModelCatalogProvider = Provider<ModelCatalog?>((ref) {
+  final view = ref.watch(modelListViewProvider);
+  return view.readOnly ? null : view.value;
+});
+
 /// Model picked on the new-chat screen before a session exists. Applied to the
-/// session right after it is created, then cleared.
+/// session right after it is created, then cleared; never carried to a host
+/// selected later or a new connection generation.
 class PendingModelController extends Notifier<ModelSelection?> {
   @override
-  ModelSelection? build() => null;
+  ModelSelection? build() {
+    ref.watch(modelSelectionScopeProvider);
+    return null;
+  }
 
   void select(ModelSelection? selection) => state = selection;
 }
@@ -86,6 +124,15 @@ ModelInfo? findModel(ModelCatalog? catalog, ModelSelection? selection) {
     }
   }
   return null;
+}
+
+/// Selection validation must use the fresh route and effort list together.
+/// A retained current selection can outlive an adapter's effort edits.
+bool isValidModelSelection(ModelCatalog? catalog, ModelSelection? selection) {
+  final model = findModel(catalog, selection);
+  if (model == null) return false;
+  final effort = selection?.reasoningEffort;
+  return effort == null || model.efforts.any((entry) => entry.id == effort);
 }
 
 /// The effort [model] starts at when it is picked: the engine's own default

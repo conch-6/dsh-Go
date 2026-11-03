@@ -206,8 +206,11 @@ void main() {
       ];
       expect(requests, [
         ['lan', 'p2p', 'turn', 'relay'],
+        ['lan', 'p2p', 'turn', 'relay'],
         ['relay'],
       ]);
+      expect(server.turnRequests, hasLength(2));
+      expect(server.turnRequests.toSet(), hasLength(2), reason: 'TURN credentials are connection-scoped');
       expect(host.rtcOffers, hasLength(1));
       final relayConnection = server.links.values.single.id;
       expect(host.rtcOffers.single, isNot(relayConnection));
@@ -376,6 +379,79 @@ void main() {
         client.remoteCarrier!.session!.networkDiagnostics!.fallbackReason,
         RemoteNetworkFallbackReason.directRecentlyFailed,
       );
+    });
+
+    for (final firstFetchTimesOut in [false, true]) {
+      test(
+        'fresh TURN credentials succeed after direct credentials ${firstFetchTimesOut ? 'time out' : 'are empty'}',
+        () async {
+          await account.close();
+          account = RemoteAccount(
+            secrets: MemorySecretStore(),
+            serverUrl: server.url,
+            peerConnector: network.connector,
+            onDirectFallback: fallbacks.add,
+            directTimeout: const Duration(milliseconds: 300),
+            iceServersTimeout: const Duration(milliseconds: 50),
+          );
+          final firstResponse = Completer<List<Map<String, Object?>>>();
+          addTearDown(() {
+            if (!firstResponse.isCompleted) firstResponse.complete([]);
+          });
+          server.iceServersForRequest = (_) async {
+            if (server.turnRequests.length == 1) {
+              return firstFetchTimesOut ? firstResponse.future : [];
+            }
+            return [
+              {
+                'urls': ['turn:turn.example:3478'],
+                'username': 'fresh-user',
+                'credential': 'fresh-credential',
+              },
+            ];
+          };
+          network.policyOutcomes[RemoteIceTransportPolicy.all] = FakeRtcOutcome.fail;
+          final client = await connect();
+          expect(await client.listSessions(), isEmpty);
+          expect(server.turnRequests, hasLength(2));
+          expect(server.turnRequests.toSet(), hasLength(2), reason: 'TURN uses a fresh connection-scoped request');
+          expect(host.rtcOffers, server.turnRequests);
+          expect(network.policies, [RemoteIceTransportPolicy.all, RemoteIceTransportPolicy.relay]);
+          expect(network.iceServers.first, isEmpty);
+          final turnServer = network.iceServers.last.single;
+          expect(turnServer.urls, ['turn:turn.example:3478']);
+          expect(turnServer.username, 'fresh-user');
+          expect(turnServer.credential, 'fresh-credential');
+          expect(network.clients.first.closed, isTrue);
+          expect(client.remoteCarrier!.state!.transport, 'turn');
+          expect(host.handshakes, [server.turnRequests.last]);
+          expect(server.controlRelayFrames, 0);
+          expect(fallbacks, ['directFailed']);
+          if (firstFetchTimesOut) {
+            expect(firstResponse.isCompleted, isFalse, reason: 'fresh TURN does not await the timed-out request');
+            firstResponse.complete([]);
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            expect(client.remoteCarrier!.state!.transport, 'turn');
+          }
+        },
+      );
+    }
+
+    test('default credential timeout accepts a response taking six seconds', () async {
+      server.iceServersForRequest = (_) async {
+        await Future<void>.delayed(const Duration(seconds: 6));
+        return [
+          {
+            'urls': ['stun:stun.example:3478'],
+          },
+        ];
+      };
+      final client = await connect();
+      expect(await client.listSessions(), isEmpty);
+      expect(server.turnRequests, hasLength(1));
+      expect(network.iceServers.single.single.urls, ['stun:stun.example:3478']);
+      expect(client.remoteCarrier!.state!.transport, 'lan');
+      expect(fallbacks, isEmpty);
     });
 
     test('failed direct and TURN attempts reach Relay with exactly one Noise handshake', () async {

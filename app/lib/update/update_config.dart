@@ -1,20 +1,21 @@
 /// Where in-app updates come from. Everything network-facing about updates is
 /// configured here; the conventions and trade-offs are in `docs/release.md`.
 ///
+/// Every build asks our own copy of the release files first
+/// ([updateDownloadOrigin]: `/update.json`, `/download/<version>/<file>`), then
+/// GitHub and the public accelerators, and the rate-limited GitHub API last.
 /// Beta builds carry a channel token (`--dart-define=DSH_BETA_CHANNEL_TOKEN`,
-/// put in by `tooling/build-apk.sh`): they ask the beta channel first
-/// ([UpdateChannel], `go.dshtui.com/beta/update.json`, docs/design/share-links.md)
-/// and download from it with the token. Builds without one (dev builds) only
-/// ask GitHub.
+/// put in by `tooling/build-apk.sh`): they ask the beta channel before all of
+/// that ([UpdateChannel], `go.dshtui.com/beta/update.json`,
+/// docs/design/share-links.md) and download from it with the token.
 ///
 /// Build-time overrides (no code change needed):
 /// - `--dart-define=DSH_BETA_CHANNEL_ORIGIN=https://example.com` moves the beta
 ///   channel;
-/// - `--dart-define=DSH_UPDATE_MIRROR=https://example.com` adds a public copy
-///   of the GitHub release files (`/update.json`, `/download/<version>/<file>`;
-///   none by default);
+/// - `--dart-define=DSH_UPDATE_MIRROR=https://example.com` moves the copy of
+///   the release files (empty string = none);
 /// - `--dart-define=DSH_UPDATE_FEED=https://example.com/dsh/update.json`
-///   asks another self-hosted feed before GitHub (empty string = none);
+///   asks another manifest in place of the copy's (empty string = none);
 /// - `--dart-define=DSH_UPDATE_MIRRORS=https://a.example/,https://b.example/`
 ///   replaces the public GitHub accelerator list (empty string = none).
 library;
@@ -38,9 +39,13 @@ Uri githubReleaseAsset(String tag, String name) =>
     Uri.parse('https://github.com/$updateRepo/releases/download/$tag/$name');
 
 /// The share host (services/share-worker). It serves the beta channel under
-/// `/beta/` but no public mirror, so [UpdateMirror.selfHosted] is only used
-/// when a build asks for it.
+/// `/beta/`; public files come from [updateDownloadOrigin].
 const updateMirrorOrigin = 'https://go.dshtui.com';
+
+/// Our public copy of the release files (an R2 bucket): `/update.json`, the
+/// latest public manifest with absolute asset URLs, and
+/// `/download/<version>/<file>` for every file of every release.
+const updateDownloadOrigin = 'https://dl.dshtui.com';
 
 /// The beta channel: `<origin>/beta/update.json` and `<origin>/beta/<version>/<file>`,
 /// both behind `Authorization: Bearer <token>`. The token is compiled into beta
@@ -99,8 +104,8 @@ class UpdateMirror {
 
   static const github = UpdateMirror(id: 'github', label: 'GitHub');
 
-  /// The app's own mirror at [origin] (default [updateMirrorOrigin]).
-  static UpdateMirror selfHosted([String origin = updateMirrorOrigin]) {
+  /// The app's own mirror at [origin] (default [updateDownloadOrigin]).
+  static UpdateMirror selfHosted([String origin = updateDownloadOrigin]) {
     final base = origin.endsWith('/') ? origin.substring(0, origin.length - 1) : origin;
     return UpdateMirror(id: 'dshgo', label: Uri.tryParse(base)?.host ?? base, releases: '$base/download/');
   }
@@ -129,17 +134,18 @@ class UpdateMirror {
   }
 }
 
-/// Public GitHub accelerators, tried in order after GitHub itself. They come
-/// and go (domains change every few months); everything they serve is checked
-/// against the release's SHA-256 and, at install time, against the installed
-/// app's signing key.
+/// Public GitHub accelerators, tried in order after our copy and GitHub
+/// itself. They come and go (domains change every few months, and some answer
+/// 403 to whole networks); everything they serve is checked against the
+/// release's SHA-256 and, at install time, against the installed app's
+/// signing key.
 const publicMirrors = [
   UpdateMirror(id: 'ghfast', label: 'ghfast.top', prefix: 'https://ghfast.top/'),
   UpdateMirror(id: 'gh-proxy', label: 'gh-proxy.com', prefix: 'https://gh-proxy.com/'),
 ];
 
 const _unset = '\u0000';
-const _mirrorDefine = String.fromEnvironment('DSH_UPDATE_MIRROR');
+const _mirrorDefine = String.fromEnvironment('DSH_UPDATE_MIRROR', defaultValue: updateDownloadOrigin);
 const _feedDefine = String.fromEnvironment('DSH_UPDATE_FEED', defaultValue: _unset);
 const _mirrorsDefine = String.fromEnvironment('DSH_UPDATE_MIRRORS', defaultValue: _unset);
 const _betaTokenDefine = String.fromEnvironment('DSH_BETA_CHANNEL_TOKEN');
@@ -154,13 +160,13 @@ UpdateSources defaultUpdateSources() => buildUpdateSources(
   channelOrigin: _betaOriginDefine,
 );
 
-/// [defaultUpdateSources] from the defines' values: [mirror] is a public
-/// mirror origin ('' = none); [feed] another manifest to ask (null = the
-/// mirror's, '' = none); [accelerators] a comma list replacing
+/// [defaultUpdateSources] from the defines' values: [mirror] is the origin of
+/// a copy of the release files ('' = none); [feed] another manifest to ask
+/// (null = the mirror's, '' = none); [accelerators] a comma list replacing
 /// [publicMirrors] (null = keep them); [channelToken] turns on the beta
 /// channel at [channelOrigin] ('' = off).
 UpdateSources buildUpdateSources({
-  String mirror = '',
+  String mirror = updateDownloadOrigin,
   String? feed,
   String? accelerators,
   String channelToken = '',
@@ -219,12 +225,14 @@ class UpdateEndpoint {
 /// The ordered list of update sources.
 ///
 /// Metadata: the beta channel (beta builds only; always asked first, since a
-/// GitHub release can lag behind it) → self-hosted feed (if configured) →
-/// GitHub API → `update.json` on the latest release through each GitHub
-/// mirror, GitHub first. Downloads: the asset's own URL (the channel's, with
-/// its token, when the channel answered), then each mirror in order. Apart
-/// from the channel, whatever worked last time moves to the front, so a phone
-/// that can't reach one source stops waiting on it every time.
+/// GitHub release can lag behind it) → our `update.json` → `update.json` on
+/// the latest release through each GitHub mirror, GitHub first → GitHub API.
+/// Downloads: the asset's own URL (the channel's, with its token, when the
+/// channel answered), then each mirror in order, our copy first. Apart from
+/// the channel and the API, whatever worked last time moves to the front, so
+/// a phone that can't reach one source stops waiting on it every time. The
+/// API stays last even then: anonymous calls get 60 an hour per IP, shared
+/// IPs often find them spent, and its answer carries no delta patches.
 class UpdateSources {
   const UpdateSources({this.channel, this.feed, this.useGithubApi = true, this.mirrors = const [UpdateMirror.github]});
 
@@ -234,10 +242,8 @@ class UpdateSources {
   final List<UpdateMirror> mirrors;
 
   List<UpdateEndpoint> metadataEndpoints({String? preferred}) {
-    final rest = [
+    final manifests = [
       if (feed case final feed?) UpdateEndpoint(id: 'feed', kind: EndpointKind.manifest, url: feed, mirrorId: null),
-      if (useGithubApi)
-        UpdateEndpoint(id: 'api', kind: EndpointKind.githubApi, url: githubLatestApi, mirrorId: UpdateMirror.github.id),
       for (final mirror in mirrors)
         if (mirror.rewrite(githubLatestAsset(updateManifestName)) case final url?)
           UpdateEndpoint(id: 'manifest:${mirror.id}', kind: EndpointKind.manifest, url: url, mirrorId: mirror.id),
@@ -251,7 +257,9 @@ class UpdateSources {
           mirrorId: null,
           headers: channel.headers,
         ),
-      ..._preferFirst(rest, (e) => e.id == preferred),
+      ..._preferFirst(manifests, (e) => e.id == preferred),
+      if (useGithubApi)
+        UpdateEndpoint(id: 'api', kind: EndpointKind.githubApi, url: githubLatestApi, mirrorId: UpdateMirror.github.id),
     ];
   }
 

@@ -112,29 +112,45 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundControl.get(applicationContext).restoreKeptChannel()
         inForeground = true
-        preferFastestDisplayMode()
+        // Coming back counts as activity: the first frames may not be scheduled yet.
+        framesActive = true
+        applyRefreshRate()
     }
 
     /**
-     * Asks for the screen's fastest mode at its current resolution. Apps that don't ask stay at
-     * 60 or 90 Hz on some 120 Hz phones (OriginOS, HyperOS, ColorOS). The user's refresh-rate
-     * setting and power saving still cap it. On resume: the resolution may have changed in
-     * Settings meanwhile (density changes don't recreate this activity).
+     * The window's preferred display mode, from the in-app refresh-rate setting.
+     *
+     * `preferredDisplayModeId = 0` means "no preference": the system picks, and its own
+     * refresh-rate setting and power saving still decide. Apps that never ask stay at 60 or
+     * 90 Hz on some 120 Hz phones (OriginOS, HyperOS, ColorOS); once an app does ask, those
+     * systems show their per-app switch as an in-app setting – hence the setting in 设置 › 性能.
+     *
+     * auto: fastest mode while Flutter is producing frames, released after the last one.
+     * max: pinned. system: never declared.
      */
-    private fun preferFastestDisplayMode() {
+    private fun applyRefreshRate() {
         @Suppress("DEPRECATION")
         val display = windowManager.defaultDisplay
         val now = display.mode
         val fastest = display.supportedModes
             .filter { it.physicalWidth == now.physicalWidth && it.physicalHeight == now.physicalHeight }
-            .maxByOrNull { it.refreshRate } ?: return
-        if (window.attributes.preferredDisplayModeId == fastest.modeId) return
-        window.attributes = window.attributes.apply { preferredDisplayModeId = fastest.modeId }
+            .maxByOrNull { it.refreshRate }
+        val want = when (refreshMode) {
+            "max" -> fastest
+            "system" -> null
+            else -> if (framesActive) fastest else null
+        }
+        val target = want?.modeId ?: 0
+        if (window.attributes.preferredDisplayModeId == target) return
+        window.attributes = window.attributes.apply { preferredDisplayModeId = target }
     }
 
     override fun onPause() {
         inForeground = false
+        framesActive = false
+        applyRefreshRate()
         super.onPause()
     }
 
@@ -147,6 +163,19 @@ class MainActivity : FlutterActivity() {
                 "getTimeZoneId" -> result.success(TimeZone.getDefault().id)
                 // A browser sign-in finished (a Custom Tab on top of this task): clearing down
                 // to this activity closes the tab and shows the app again.
+                // 设置 → 性能 → 刷新率: auto | max | system, and whether Flutter is drawing.
+                "setRefreshRateMode" -> {
+                    when (call.argument<String>("mode")) {
+                        "auto", "max", "system" -> refreshMode = call.argument<String>("mode")!!
+                    }
+                    applyRefreshRate()
+                    result.success(null)
+                }
+                "setFrameActive" -> {
+                    framesActive = call.argument<Boolean>("active") ?: framesActive
+                    applyRefreshRate()
+                    result.success(null)
+                }
                 "bringToFront" -> {
                     startActivity(
                         Intent(this, MainActivity::class.java)
@@ -168,6 +197,12 @@ class MainActivity : FlutterActivity() {
     // Back on the home screen sends the app to the background instead of finishing the activity
     // (Android 12's default for launcher roots): coming back finds it as it was.
     override fun popSystemNavigator(): Boolean = moveTaskToBack(true)
+
+    /** 设置 › 性能 › 刷新率; the Flutter side owns the stored choice. */
+    private var refreshMode = "auto"
+
+    /** Flutter produced a frame recently (see RefreshRateService): auto mode follows it. */
+    private var framesActive = true
 
     companion object {
         private const val ENGINE_ID = "dsh-main"

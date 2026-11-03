@@ -450,12 +450,14 @@ class TerminalWorkspace extends Notifier<TerminalWorkspaceState> {
     final tab = _tab(id);
     final next = title.trim();
     if (backend == null || tab == null || next.isEmpty || next == tab.title) return false;
+    final epoch = _epoch;
     final previous = tab.title;
     _update(id, (t) => t.copyWith(title: next));
     try {
       await backend.rename(id, next.length > 120 ? next.substring(0, 120) : next);
       return true;
     } on Object {
+      if (_stale(epoch)) return false;
       _update(id, (t) => t.copyWith(title: previous));
       return false;
     }

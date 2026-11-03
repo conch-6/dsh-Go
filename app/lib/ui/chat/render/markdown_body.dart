@@ -57,6 +57,7 @@ class MarkdownBody extends StatefulWidget {
     this.streaming = false,
     this.selectable = true,
     this.secondary = false,
+    this.repairBareViews = false,
   });
 
   final String text;
@@ -65,6 +66,10 @@ class MarkdownBody extends StatefulWidget {
 
   /// 次级排版(思考过程):小一号、次级文字色,标题也不抢眼。
   final bool secondary;
+
+  /// 助手回复:模型把 `dsh-ui` 的 JSON 裸着写进正文时,也当成视图画
+  /// (见 [fenceBareDshUiViews])。别的 Markdown(文档、说明页)不开。
+  final bool repairBareViews;
 
   /// 表格单列最宽多少;更长的单元格在列内换行,而不是把整表拉得很长。
   static const _maxColumnWidth = 260.0;
@@ -482,14 +487,22 @@ class MarkdownBody extends StatefulWidget {
   }
 
   /// What gpt_markdown is given for [text]: maths delimiters normalised,
-  /// tables separated from the paragraph above and their headers bold, and,
+  /// tables separated from the paragraph above and their headers bold and,
   /// while [streaming], the unfinished tail repaired and the cursor sentinel
-  /// placed.
+  /// placed. With [repairBareViews] a bare `dsh-ui` JSON block gets its fence
+  /// back first (see [fenceBareDshUiViews]).
   @visibleForTesting
-  static String prepareSource(String text, {bool streaming = false}) => _prepareSource(text, streaming: streaming);
+  static String prepareSource(String text, {bool streaming = false, bool repairBareViews = false}) =>
+      _prepareSource(text, streaming: streaming, repairBareViews: repairBareViews);
 
-  static String _prepareSource(String text, {bool streaming = false, StreamingMarkdownRepair? repair}) {
-    final source = boldTableHeaders(blankLineBeforeTables(normalizeMath(text, streaming: streaming)));
+  static String _prepareSource(
+    String text, {
+    bool streaming = false,
+    bool repairBareViews = false,
+    StreamingMarkdownRepair? repair,
+  }) {
+    final repaired = repairBareViews ? fenceBareDshUiViews(text) : text;
+    final source = boldTableHeaders(blankLineBeforeTables(normalizeMath(repaired, streaming: streaming)));
     if (!streaming) return source;
     return _withCursor(repair?.repair(source) ?? repairStreamingMarkdown(source));
   }
@@ -530,11 +543,16 @@ class _MarkdownBodyState extends State<MarkdownBody> {
   // Preparation depends only on text and streaming, not theme, text scale or
   // selection. Keep one result for this mounted body; unrelated stream rows
   // can rebuild its parent without rescanning the unchanged Markdown.
-  late String _source = _prepareSource();
+  late String _source = _prepare();
 
-  String _prepareSource() {
+  String _prepare() {
     _repair = widget.streaming ? (_repair ?? StreamingMarkdownRepair()) : null;
-    return MarkdownBody._prepareSource(widget.text, streaming: widget.streaming, repair: _repair);
+    return MarkdownBody._prepareSource(
+      widget.text,
+      streaming: widget.streaming,
+      repairBareViews: widget.repairBareViews,
+      repair: _repair,
+    );
   }
 
   /// 这棵树里有没有 ProviderScope。只在依赖变化时向上找一次 —— 正文随流式
@@ -553,8 +571,10 @@ class _MarkdownBodyState extends State<MarkdownBody> {
   @override
   void didUpdateWidget(MarkdownBody oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.text != widget.text || oldWidget.streaming != widget.streaming) {
-      _source = _prepareSource();
+    if (oldWidget.text != widget.text ||
+        oldWidget.streaming != widget.streaming ||
+        oldWidget.repairBareViews != widget.repairBareViews) {
+      _source = _prepare();
     }
   }
 

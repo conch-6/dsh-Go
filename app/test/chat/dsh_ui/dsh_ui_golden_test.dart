@@ -192,6 +192,23 @@ final quick = j({
   ],
 });
 
+/// options + 「其他（自己填）」：选中一项、填一句话、发送按钮亮起的样子。
+final free = j({
+  'type': 'stack',
+  'title': '要不要先算一遍',
+  'children': [
+    {
+      'type': 'options',
+      'id': 'f',
+      'freetext': true,
+      'options': [
+        {'label': '直接开始'},
+        {'label': '先算成本'},
+      ],
+    },
+  ],
+});
+
 final wide = j({
   'type': 'stack',
   'title': '每日活跃',
@@ -301,11 +318,13 @@ final _sheets = <String, (double, List<Widget> Function())>{
   'display': (1640, () => [scoped(spending), scoped(trend), scoped(shares)]),
   'content': (1380, () => [scoped(plan), scoped(three), scoped(four)]),
   'answers': (
-    2280,
+    2680,
     () => [
       KeyedSubtree(key: const ValueKey('live'), child: scoped(choose)),
       scoped(choose, state: answered('[dsh-ui reply] 选一个方案\n选择：方案 A')),
       KeyedSubtree(key: const ValueKey('multi'), child: scoped(toppings)),
+      KeyedSubtree(key: const ValueKey('free'), child: scoped(free)),
+      scoped(free, state: answered('[dsh-ui reply] 要不要先算一遍\n选择：先算成本\n其他：先算一次总利息')),
       scoped(deploy),
       scoped(deploy, state: answered('[dsh-ui reply] 部署到生产\n确认：开始部署')),
       scoped(quick, state: DshUiState.running),
@@ -345,6 +364,13 @@ void main() {
           final multi = find.byKey(const ValueKey('multi'));
           await tester.tap(find.descendant(of: multi, matching: find.text('Node.js 22')));
           await tester.tap(find.descendant(of: multi, matching: find.text('Rust 工具链')));
+          // options + 自己填：选一项、写一句，发送按钮亮起。
+          final free = find.byKey(const ValueKey('free'));
+          await tester.tap(find.descendant(of: free, matching: find.text('先算成本')));
+          await tester.enterText(
+            find.descendant(of: free, matching: find.byType(TextField)),
+            '先算一次总利息',
+          );
           await pumpFrames(tester, 12);
         }
         if (name == 'states') {

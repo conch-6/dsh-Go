@@ -13,6 +13,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.Build
+import android.os.SystemClock
 import android.view.Display
 import io.github.ccch1mneyyy.dsh_app.phone.SensitiveWords
 import java.io.ByteArrayOutputStream
@@ -30,7 +31,11 @@ internal class ImageGeometry(val originX: Int, val originY: Int, val scaleX: Flo
     }
 }
 
-internal class Shot(val bytes: ByteArray?, val mime: String?, val geometry: ImageGeometry?, val secure: Boolean, val error: String?)
+internal class Shot(
+    val bytes: ByteArray?, val mime: String?, val geometry: ImageGeometry?, val secure: Boolean, val error: String?,
+    /** When the system took the frame (device clock, ms), from [AccessibilityService.ScreenshotResult.getTimestamp]. */
+    val takenAtMillis: Long? = null,
+)
 
 internal class ScreenShooter(private val service: AccessibilityService, private val overlay: ControlOverlay) {
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "dsh-a11y-shot") }
@@ -59,6 +64,7 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
         try {
             // l10n:keep agent screenshot result
             if (looksBlack(bitmap)) return Shot(null, null, null, true, "截图全黑，可能是禁止截图的页面")
+            val takenAt = raw.takenAtMillis
             val origin = if (useWindow) window.bounds else screen
             val factor = minOf(1f, 1300f / max(bitmap.width, bitmap.height))
             val w = (bitmap.width * factor).roundToInt().coerceAtLeast(1)
@@ -75,12 +81,12 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
                 draw(scaled, marks, secrets, origin, sx, sy)
                 val out = ByteArrayOutputStream()
                 scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
-                return Shot(out.toByteArray(), "image/jpeg", ImageGeometry(origin.left, origin.top, sx, sy, w, h), false, null)
+                return Shot(out.toByteArray(), "image/jpeg", ImageGeometry(origin.left, origin.top, sx, sy, w, h), false, null, takenAt)
             } finally { scaled.recycle() }
         } finally { bitmap.recycle() }
     }
 
-    private class Raw(val bitmap: Bitmap?, val secure: Boolean, val error: String?)
+    private class Raw(val bitmap: Bitmap?, val secure: Boolean, val error: String?, val takenAtMillis: Long? = null)
 
     private fun capture(timeoutMs: Long, start: (AccessibilityService.TakeScreenshotCallback) -> Unit): Raw {
         if (Build.VERSION.SDK_INT < 30) return Raw(null, false, "unsupported")
@@ -96,7 +102,9 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
                         val software = hardware?.copy(Bitmap.Config.ARGB_8888, false)
                         hardware?.recycle()
                         // l10n:keep agent screenshot result
-                        Raw(software, false, if (software == null) "截图失败" else null)
+                        // ScreenshotResult.getTimestamp(): milliseconds on the uptime clock.
+                        val wallClock = ScreenshotClock.wallTime(screenshot.timestamp, SystemClock.uptimeMillis(), System.currentTimeMillis())
+                        Raw(software, false, if (software == null) "截图失败" else null, wallClock)
                     } catch (_: Throwable) {
                         // l10n:keep agent screenshot result
                         Raw(null, false, "截图失败")
