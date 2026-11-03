@@ -40,6 +40,11 @@ jobs:
           keyPassword=$KEY_PASSWORD
           EOF
 
+      - name: Regenerate l10n from parts
+        run: |
+          cd app
+          python3 tool/l10n_merge.py
+
       - name: Build APK (arm64, release)
         run: tooling/build-apk.sh
 
