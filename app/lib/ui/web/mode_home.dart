@@ -71,9 +71,10 @@ class _ModeHomeState extends ConsumerState<ModeHome> {
 /// 新对话 beside it, with 界面's own mark (the globe at the drawer's foot
 /// opens the web page on top; this one makes it the home).
 class WebModeKey extends ConsumerWidget {
-  const WebModeKey({super.key, this.size = 36});
+  const WebModeKey({super.key, this.size = 36, this.tier = GlassTier.chrome});
 
   final double size;
+  final GlassTier tier;
 
   static String get tooltip => appL10n.webSwitchToWeb;
 
@@ -83,6 +84,7 @@ class WebModeKey extends ConsumerWidget {
       icon: AppIcons.swap,
       tooltip: context.l10n.webSwitchToWeb,
       size: size,
+      tier: tier,
       onPressed: () => unawaited(ref.read(uiModeProvider.notifier).set(UiMode.web)),
     );
   }

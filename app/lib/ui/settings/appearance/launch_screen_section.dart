@@ -59,6 +59,7 @@ class _LaunchScreenSectionState extends ConsumerState<LaunchScreenSection> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+    if (!mounted) return;
     final bytes = ref.read(customLaunchProvider).value?.bytes;
     final text = switch (problem) {
       // Once, as it comes in: how much it takes in the app.
@@ -460,6 +461,10 @@ final launchThumbProvider = FutureProvider.autoDispose.family<ui.Image?, String>
   );
   try {
     final image = (await codec.getNextFrame()).image;
+    if (!ref.mounted) {
+      image.dispose();
+      return null;
+    }
     ref.onDispose(image.dispose);
     return image;
   } finally {

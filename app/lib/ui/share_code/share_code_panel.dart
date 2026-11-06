@@ -176,8 +176,7 @@ class _ShareCodePanelState extends ConsumerState<ShareCodePanel> {
     final out = ref.read(shareOutProvider);
     String? error;
     try {
-      final file = await out.write(_fileName, encodeShareFile(widget.payload, code: _code));
-      await out.save(file);
+      await out.save(_fileName, encodeShareFile(widget.payload, code: _code));
       _shared();
     } on PlatformException catch (e) {
       error = e.code == 'permission' ? appL10n.pluginsSavePermissionDenied : appL10n.commonSaveFailedRetry;

@@ -13,6 +13,7 @@ import '../../l10n/l10n.dart';
 import '../../state/connection_state.dart';
 import '../../state/features_state.dart';
 import '../chat/render/ansi_text.dart' show stripAnsi;
+import '../common/app_dialog.dart';
 import '../common/list_page_row.dart';
 import '../common/status_dot.dart';
 import '../engine/log_view.dart' show TerminalCard;
@@ -169,7 +170,7 @@ class _JobOutputPageState extends ConsumerState<JobOutputPage> {
 
   Future<void> _stop() async {
     final l10n = context.l10n;
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(l10n.featuresJobStopTitle),

@@ -6,12 +6,13 @@ import '../../l10n/l10n.dart';
 import '../../remote/ssh/ssh_link.dart';
 import '../../state/connection_state.dart';
 import '../../state/hosts_state.dart';
+import '../common/app_dialog.dart';
 import '../theme/theme.dart';
 
 /// "信任这台主机？" — trust on first use. Shows the fingerprint to compare and
 /// how to read it on the computer. Returns true to pin and continue.
 Future<bool> confirmHostKey(BuildContext context, HostKeyPrompt prompt) async {
-  final ok = await showDialog<bool>(
+  final ok = await showAppDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (dialog) => HostKeyDialog(prompt: prompt),
@@ -108,7 +109,7 @@ Future<bool> activateHost(BuildContext context, WidgetRef ref, HostRef host) asy
     if (config.hostKeyFingerprint == null) {
       final messenger = ScaffoldMessenger.maybeOf(context);
       final navigator = Navigator.of(context);
-      showDialog<void>(context: context, barrierDismissible: false, builder: (_) => const _Fetching());
+      showAppDialog<void>(context: context, barrierDismissible: false, builder: (_) => const _Fetching());
       PresentedHostKey? key;
       String? error;
       try {
@@ -141,7 +142,7 @@ Future<bool> activateHost(BuildContext context, WidgetRef ref, HostRef host) asy
     if (target != null && target.trust != RelayTrust.pinned && target.trust != RelayTrust.unknown) {
       final changed = target.trust == RelayTrust.keyChanged;
       if (!context.mounted) return false;
-      final ok = await showDialog<bool>(
+      final ok = await showAppDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (_) => RelayTrustDialog(host: target, keyChanged: changed),

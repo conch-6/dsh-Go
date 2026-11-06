@@ -56,6 +56,7 @@ final class AssistantChatItem extends ChatItem {
     this.time,
     this.streaming = false,
     this.interrupted = false,
+    this.isFinalAnswer = false,
     this.usage,
     this.model,
     this.rowKey,
@@ -76,6 +77,9 @@ final class AssistantChatItem extends ChatItem {
 
   /// The turn was cancelled mid-stream; [text] is the delivered prefix.
   final bool interrupted;
+
+  /// The committed message contains explicitly marked final-answer text.
+  final bool isFinalAnswer;
   final TokenUsage? usage;
   final String? model;
 
@@ -417,6 +421,7 @@ class ChatTranscript {
                 text: message.text,
                 reasoning: message.reasoning,
                 interrupted: event.interrupted,
+                isFinalAnswer: message.isFinalAnswer,
                 usage: event.usage,
                 model: message.source.model,
               ),

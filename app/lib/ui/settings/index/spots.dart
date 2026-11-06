@@ -40,7 +40,10 @@ enum SpotCondition {
   engineField,
 
   /// Only with a conversation open.
-  openChat;
+  openChat,
+
+  /// Only with animations on.
+  animationsOn;
 
   String label(L10n l10n) => switch (this) {
     localHost => l10n.searchNeedsLocal,
@@ -48,6 +51,7 @@ enum SpotCondition {
     nativeUi => l10n.searchNeedsNativeUi,
     engineField => l10n.searchNeedsEngineField,
     openChat => l10n.searchNeedsChat,
+    animationsOn => l10n.searchNeedsAnimations,
   };
 }
 
@@ -856,6 +860,13 @@ abstract final class Spots {
     title: (l) => l.performanceAnimations,
     keywords: (l) => l.searchKwAnimations,
   );
+  static final fluidMotion = SettingSpot(
+    'fluid-motion',
+    page: SettingsPageId.performance,
+    title: (l) => l.performanceFluid,
+    keywords: (l) => l.searchKwFluidMotion,
+    condition: SpotCondition.animationsOn,
+  );
 
   // 通知.
   static final notifyEnabled = SettingSpot(
@@ -971,6 +982,13 @@ abstract final class Spots {
     keywords: (l) => l.searchKwRemoteAutoConnect,
   );
 
+  static final remoteCompactHistory = SettingSpot(
+    'remote-compact-history',
+    page: SettingsPageId.remote,
+    title: (l) => l.remoteCompactHistory,
+    keywords: (l) => l.searchKwRemoteCompactHistory,
+  );
+
   // 引擎参数 and its pages (drawn from the engine's schema).
   static final subagentDepth = SettingSpot(
     'subagent-depth',
@@ -1073,6 +1091,7 @@ final _rows = <SettingSpot>[
   Spots.refreshRate,
   Spots.blur,
   Spots.animations,
+  Spots.fluidMotion,
   Spots.notifyEnabled,
   Spots.notifyDone,
   Spots.notifyFailed,
@@ -1090,6 +1109,7 @@ final _rows = <SettingSpot>[
   Spots.engineUninstall,
   Spots.addSshHost,
   Spots.remoteAutoConnect,
+  Spots.remoteCompactHistory,
   Spots.subagentDepth,
   Spots.parallelCalls,
   Spots.commandTimeout,

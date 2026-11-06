@@ -161,22 +161,18 @@ Future<void> _fetch(
         throw VoiceDownloadException(VoiceDownloadError.http, status: response.statusCode, file: name);
       }
       var received = offset;
-      var unflushed = 0;
       report(received, force: true);
-      await for (final chunk in response.timeout(stall)) {
-        if (stop()) throw VoiceDownloadException(VoiceDownloadError.cancelled, file: name);
-        received += chunk.length;
-        if (received > job.bytes) throw VoiceDownloadException(VoiceDownloadError.integrity, file: name);
-        sink.add(chunk);
-        hasher.add(chunk);
-        unflushed += chunk.length;
-        if (unflushed >= 4 << 20) {
-          await sink.flush();
-          unflushed = 0;
-        }
-        report(received);
-      }
-      await sink.flush();
+      // Await the file consumer so an asynchronous write failure reaches this catch.
+      await sink.addStream(
+        response.timeout(stall).map((chunk) {
+          if (stop()) throw VoiceDownloadException(VoiceDownloadError.cancelled, file: name);
+          received += chunk.length;
+          if (received > job.bytes) throw VoiceDownloadException(VoiceDownloadError.integrity, file: name);
+          hasher.add(chunk);
+          report(received);
+          return chunk;
+        }),
+      );
       await sink.close();
       sink = null;
     }

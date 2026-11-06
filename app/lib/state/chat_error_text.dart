@@ -16,6 +16,12 @@ String chatErrorText(Object error, {required String action}) {
       'session/attachment-invalid' => appL10n.stateChatAttachmentInvalid,
       'session/fork-unavailable' => appL10n.stateChatForkUnavailable,
       'FRAME_TOO_LARGE' => appL10n.stateChatImagesTooLarge,
+      'WORKSPACE_UPLOAD_UNSUPPORTED' => appL10n.stateRemoteUploadUnsupported,
+      'WORKSPACE_UPLOAD_TOO_LARGE' => appL10n.stateRemoteUploadTooLarge,
+      'UPLOAD_INVALID_NAME' => appL10n.stateRemoteUploadNameInvalid,
+      'UPLOAD_WORKSPACE_UNAVAILABLE' => appL10n.stateRemoteUploadWorkspaceUnavailable,
+      'UPLOAD_WORKSPACE_CHANGED' => appL10n.stateRemoteUploadWorkspaceChanged,
+      'UPLOAD_LIMIT' => appL10n.stateRemoteUploadLimit,
       _ => engineErrorReason(error),
     },
     // Uploads and exports go over HTTP: any other status means no engine.

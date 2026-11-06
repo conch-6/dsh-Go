@@ -64,7 +64,7 @@ async function route(request: Request, env: Env, ctx: Ctx): Promise<Response> {
     return json(404, { error: 'not_found' });
   }
 
-  if (isMarketPath(path)) return market(request, env);
+  if (isMarketPath(path)) return market(request, env, ctx);
   if (isBetaPath(path)) return beta(request, env, ctx);
   if (isDownloadPath(path) && accessMode(env) === 'public') return download(request, env, ctx);
   if (RETIRED.test(path) || path.startsWith('/__edge/')) return notFound();

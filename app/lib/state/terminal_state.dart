@@ -454,7 +454,13 @@ class TerminalWorkspace extends Notifier<TerminalWorkspaceState> {
     final previous = tab.title;
     _update(id, (t) => t.copyWith(title: next));
     try {
-      await backend.rename(id, next.length > 120 ? next.substring(0, 120) : next);
+      var end = next.length > 120 ? 120 : next.length;
+      if (end < next.length) {
+        final before = next.codeUnitAt(end - 1);
+        final after = next.codeUnitAt(end);
+        if (before >= 0xD800 && before <= 0xDBFF && after >= 0xDC00 && after <= 0xDFFF) end--;
+      }
+      await backend.rename(id, next.substring(0, end));
       return true;
     } on Object {
       if (_stale(epoch)) return false;
@@ -469,7 +475,10 @@ class TerminalWorkspace extends Notifier<TerminalWorkspaceState> {
     if (cached != null) return cached;
     final backend = _backend;
     if (backend == null) return const [];
-    return _shells = await backend.shells();
+    final epoch = _epoch;
+    final shells = await backend.shells();
+    if (_stale(epoch)) return const [];
+    return _shells = shells;
   }
 
   // ── Connection ──

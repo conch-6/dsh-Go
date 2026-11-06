@@ -45,6 +45,7 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.animation.PathInterpolator
 import android.view.inputmethod.InputMethodManager
+import android.widget.Toast
 import io.github.ccch1mneyyy.dsh_app.MainActivity
 import io.github.ccch1mneyyy.dsh_app.R
 import io.github.ccch1mneyyy.dsh_app.nativemedia.MicArbiter
@@ -154,6 +155,8 @@ internal object PetOverlay {
     private var bubbleView: BubbleView? = null
     private var bubbleId: String? = null
     private var menuView: PetMenuView? = null
+    private var closingMenu: PetMenuView? = null
+    private val capture = PetCaptureState()
     private var target: DismissTargetView? = null
     private var targetCenter: WindowPos? = null
     private var dock = Dock.DEFAULT
@@ -226,6 +229,7 @@ internal object PetOverlay {
     }
 
     private fun resetProducer() {
+        capture.invalidate()
         loadRequest++
         loadingKey = null
         pendingSettings = false
@@ -252,6 +256,7 @@ internal object PetOverlay {
     }
 
     fun setEnabled(on: Boolean): Map<String, Any?> {
+        if (!on) capture.invalidate()
         machine.enabled = on
         prefs.edit().putBoolean(K_ENABLED, on).apply()
         if (on) {
@@ -294,7 +299,7 @@ internal object PetOverlay {
             "canDraw" to canDraw,
             "accessibility" to a11y,
             "snoozed" to machine.snoozed(now()),
-            "showing" to (petView?.isAttachedToWindow == true),
+            "showing" to (petView?.isAttachedToWindow == true && !capture.inFlight),
             "sdk" to Build.VERSION.SDK_INT,
             "manufacturer" to Build.MANUFACTURER,
         )
@@ -302,6 +307,7 @@ internal object PetOverlay {
 
     /** 「今天不再显示」: hidden until local midnight. */
     fun snoozeToday() {
+        capture.invalidate()
         val c = Calendar.getInstance().apply {
             add(Calendar.DAY_OF_YEAR, 1)
             set(Calendar.HOUR_OF_DAY, 0)
@@ -323,13 +329,22 @@ internal object PetOverlay {
     fun evaluate() {
         if (!initialized) return
         main.removeCallbacks(evaluateRunnable)
+        if (capture.inFlight) {
+            // Keep the invisible PET ticket for openIntent's authenticated generation, but never
+            // let polling, an incoming Dart push or window-cleanup callbacks re-show captured UI.
+            stopLoop()
+            petView?.visibility = View.INVISIBLE
+            speaksForResults = false
+            publishStatus()
+            return
+        }
         refreshCanDraw()
         machine.canHost = overlayHost() != OverlayHost.NONE
         machine.hasPet = loaded != null && loadedKey == packKey(machine.last)
         machine.phoneTask = PhoneControl.peek()?.foregroundLine() != null
         machine.dshService = DshService.isRunning
         machine.interactive = interactive()
-        machine.holding = askView != null || answerState.bubbleId != null || returnAsk
+        machine.holding = askView != null || menuView != null || answerState.bubbleId != null || returnAsk
         val t = now()
         val d = machine.decide(t)
         if (d.visibility != lastVisibility || d.why != lastWhy) {
@@ -343,6 +358,7 @@ internal object PetOverlay {
                 removeWindows()
             }
             Visibility.PAUSED -> {
+                petView?.cancelInteraction()
                 stopLoop()
                 dismissMenu()
                 removeAsk()
@@ -353,6 +369,7 @@ internal object PetOverlay {
                     // With the permission now known not to work, decide again; else retry at the next poll.
                     if (lastAdd != before) main.post(evaluateRunnable)
                 } else {
+                    petView?.visibility = View.VISIBLE
                     retarget()
                     if (!dragging) setDimmed(d.dimmed)
                     if (dimmed || !systemShown) stopLoop() else startLoop()
@@ -722,6 +739,7 @@ internal object PetOverlay {
 
     private fun remove(v: View) {
         val ticket = windowTickets.remove(v)
+        v.visibility = View.GONE // A deferred or failed platform removal must not leak UI into a screenshot.
         windows.remove(ticket)
         v.animate().cancel()
         scheduleCleanup()
@@ -911,6 +929,17 @@ internal object PetOverlay {
             slide(v, p, EdgeSnap.position(dock, v.reach, area, edge(v.context))) { evaluate() }
         }
 
+        override fun onDragCancel() {
+            if (!alive(ticket)) return
+            dragging = false
+            player.endReaction()
+            hideTarget()
+            redraw()
+            val v = petView ?: return
+            val p = petParams ?: return
+            slide(v, p, EdgeSnap.position(dock, v.reach, safeArea(), edge(v.context))) { evaluate() }
+        }
+
         override fun onTap(leftHalf: Boolean) {
             if (!alive(ticket)) return
             machine.onTouch(now())
@@ -921,17 +950,28 @@ internal object PetOverlay {
             open(push?.sessionId, push?.host, null)
         }
 
-        override fun onLongPress() {
+        override fun onLongPress(rawX: Float?, rawY: Float?) {
             if (!alive(ticket)) return
             machine.onTouch(now())
             if (dimmed) evaluate()
-            showMenu()
+            showMenu(rawX, rawY)
+        }
+
+        override fun onMenuMove(rawX: Float, rawY: Float) {
+            if (alive(ticket)) menuView?.movePointer(rawX, rawY)
+        }
+
+        override fun onMenuEnd(rawX: Float, rawY: Float, cancelled: Boolean) {
+            if (!alive(ticket)) return
+            menuView?.endPointer(rawX, rawY, cancelled)
+            menuView?.let { windowTickets[it] }?.takeIf(::alive)?.let(::scheduleMenuTimeout)
         }
 
         override fun onShownChanged(shown: Boolean) {
             if (!alive(ticket)) return
             if (shown == systemShown) return
             systemShown = shown
+            if (!shown) dismissMenu()
             // Hidden by the system (another app's setHideOverlayWindows): wait, don't re-add.
             main.post(evaluateRunnable)
         }
@@ -1017,7 +1057,7 @@ internal object PetOverlay {
     // ---- bubble ---------------------------------------------------------------------------------
 
     private fun showBubble(b: PetBubble?) {
-        if (b == null || dragging || dimmed || slideAnim != null) {
+        if (b == null || dragging || dimmed || slideAnim != null || menuView != null || closingMenu != null || capture.inFlight) {
             removeBubble()
             return
         }
@@ -1206,20 +1246,26 @@ internal object PetOverlay {
     private var menuTimeout: Runnable? = null
     private var menuParams: WindowManager.LayoutParams? = null
 
-    private fun showMenu() {
+    private fun showMenu(rawX: Float? = null, rawY: Float? = null) {
+        if (capture.inFlight || !interactive()) return
         val currentTicket = menuView?.let { windowTickets[it] }
         if (currentTicket != null && alive(currentTicket)) {
             // Reuse the live menu: removing it would reserve MENU until the
             // next-loop confirmation, so an immediate replacement cannot add.
+            if (rawX != null && rawY != null) menuView?.beginPointer(rawX, rawY)
             scheduleMenuTimeout(currentTicket)
             return
         }
         dismissMenu()
         val ctx = hostContext ?: return
         val ticket = windows.claim(OverlayWindowOwner.Role.MENU) ?: return
+        slideAnim?.cancel()
+        removeBubble()
         val menuTarget = machine.last
-        val rows = PetMenuItem.of(menuTarget).map { item -> PetMenuView.Row(menuLabel(item)) { if (alive(ticket)) onMenu(item, ticket, menuTarget) } }
-        val view = PetMenuView(ctx, rows, onOutside = { if (alive(ticket)) dismissMenu() })
+        val rows = menuItems(menuTarget).map { item ->
+            PetMenuView.Row(menuLabel(item), item = item, shortLabel = wheelLabel(item)) { if (alive(ticket)) onMenu(item, ticket, menuTarget) }
+        }
+        val view = PetMenuView(ctx, rows, onOutside = { if (alive(ticket)) dismissMenu(animated = true) }, motion = ::animationsOn)
         val params = baseParams(0, 0, WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH)
         if (!placeMenu(view, params)) return
         try {
@@ -1231,52 +1277,59 @@ internal object PetOverlay {
         }
         menuView = view
         menuParams = params
-        if (animationsOn()) {
-            view.alpha = 0f
-            view.animate().alpha(1f).setDuration(150).setInterpolator(easing).start()
-        }
+        if (rawX != null && rawY != null) view.beginPointer(rawX, rawY)
         scheduleMenuTimeout(ticket)
     }
 
-    /**
-     * Sizes [params] to the menu's rows and puts it beside the docked spot (the pet may still be
-     * sliding there after a drag), clear of whatever frame the window may grow to there.
-     */
     private fun placeMenu(view: PetMenuView, params: WindowManager.LayoutParams): Boolean {
         val ctx = hostContext ?: return false
         val pv = petView ?: return false
-        val reach = pv.reach
-        val (mw, mh) = view.measureFor()
-        val area = safeArea()
-        val gap = ctx.dp(8f)
-        val at = EdgeSnap.position(dock, reach, area, edge(ctx))
-        val x = if (dock.side == Side.RIGHT) at.x + reach.left - gap - mw else at.x + reach.right + gap
-        val y = at.y + pv.pixelHeight / 2 - mh / 2
-        params.width = mw
-        params.height = mh
-        params.x = x.coerceIn(area.left + gap, max(area.left + gap, area.screenW - area.right - gap - mw))
-        params.y = y.coerceIn(area.top + gap, max(area.top + gap, area.screenH - area.bottom - gap - mh))
+        val pp = petParams ?: return false
+        val rest = restPos(pv, pp)
+        val body = loaded?.frames?.body?.at(rest) ?: return false
+        val g = PetWheelGeometry.fit(
+            if (view.hosts) machine.last?.hosts?.size?.coerceAtLeast(1) ?: 1 else menuItems(machine.last).size,
+            dock.side, body.centerX.toFloat(), body.centerY.toFloat(), safeArea(), ctx.resources.displayMetrics.density,
+            if (view.hosts) 2f else ctx.resources.configuration.fontScale,
+        )
+        view.place(g)
+        params.width = g.bounds.width
+        params.height = g.bounds.height
+        params.x = g.bounds.left
+        params.y = g.bounds.top
         return true
     }
 
     private fun menuLabel(item: PetMenuItem): String = AppStrings.get(app, when (item) {
         PetMenuItem.ASK -> R.string.pet_ask
         PetMenuItem.NEW_CHAT -> R.string.pet_new_chat
+        PetMenuItem.SCREENSHOT -> R.string.pet_screenshot
         PetMenuItem.STOP -> R.string.pet_stop
         PetMenuItem.SWITCH_HOST -> R.string.pet_switch_host
         PetMenuItem.SNOOZE -> R.string.pet_snooze
         PetMenuItem.SETTINGS -> R.string.pet_settings
     })
 
+    private fun wheelLabel(item: PetMenuItem): String = AppStrings.get(app, when (item) {
+        PetMenuItem.ASK -> R.string.pet_ask
+        PetMenuItem.NEW_CHAT -> R.string.pet_new_chat
+        PetMenuItem.SCREENSHOT -> R.string.pet_wheel_screenshot
+        PetMenuItem.STOP -> R.string.pet_wheel_stop
+        PetMenuItem.SWITCH_HOST -> R.string.pet_wheel_hosts
+        PetMenuItem.SNOOZE -> R.string.pet_wheel_snooze
+        PetMenuItem.SETTINGS -> R.string.pet_wheel_settings
+    })
+
     private fun onMenu(item: PetMenuItem, ticket: OverlayWindowOwner.Ticket, target: PetPush?) {
         machine.onTouch(now())
         when (item) {
             PetMenuItem.ASK, PetMenuItem.NEW_CHAT -> {
-                dismissMenu()
+                dismissMenu(animated = true)
                 showAsk(fresh = item == PetMenuItem.NEW_CHAT)
             }
+            PetMenuItem.SCREENSHOT -> captureScreenshot()
             PetMenuItem.STOP -> {
-                dismissMenu()
+                dismissMenu(animated = true)
                 callDart("stop", mapOf("host" to target?.host, "sessionId" to target?.sessionId)) { evaluate() }
             }
             PetMenuItem.SWITCH_HOST -> showHosts(ticket)
@@ -1294,6 +1347,9 @@ internal object PetOverlay {
     }
 
     /** 切换主机: the menu's rows become the hosts, the one in use muted. */
+    /** The rows this phone can offer: the accessibility screenshot exists from Android 11. */
+    private fun menuItems(push: PetPush?) = PetMenuItem.of(push, screenshots = Build.VERSION.SDK_INT >= 30)
+
     private fun showHosts(ticket: OverlayWindowOwner.Ticket) {
         val view = menuView ?: return
         val params = menuParams ?: return
@@ -1305,7 +1361,9 @@ internal object PetOverlay {
                 }
             }
         })
-        if (placeMenu(view, params)) update(view, params)
+        // Rows and buttons only match again once placed; a list that can't be shown goes.
+        if (!placeMenu(view, params)) { dismissMenu(); return }
+        update(view, params)
         scheduleMenuTimeout(ticket)
     }
 
@@ -1317,12 +1375,61 @@ internal object PetOverlay {
         }
     }
 
-    private fun dismissMenu() {
+    private fun dismissMenu(animated: Boolean = false) {
         menuTimeout?.let(main::removeCallbacks)
         menuTimeout = null
-        menuView?.let { remove(it) }
+        closingMenu?.let { remove(it) }
+        closingMenu = null
+        val view = menuView
         menuView = null
         menuParams = null
+        if (view != null) {
+            if (animated && animationsOn() && alive(windowTickets[view])) {
+                closingMenu = view
+                view.close {
+                    remove(view)
+                    if (closingMenu === view) closingMenu = null
+                }
+            } else remove(view)
+        }
+    }
+
+    private fun captureScreenshot() {
+        val ticket = petTicket
+        if (!alive(ticket)) return
+        val request = capture.begin() ?: return
+        // No exit animation may remain in the image. INVISIBLE keeps the PET generation alive
+        // for EntryActivity's authenticated openIntent without drawing or intercepting touches.
+        dismissMenu()
+        removeBubble()
+        removeAsk()
+        hideTarget()
+        stopLoop()
+        petView?.animate()?.cancel()
+        petView?.visibility = View.INVISIBLE
+        speaksForResults = false
+        publishStatus()
+        PetScreenshot.capture(app) { result ->
+            val accepted = capture.finish(request) && alive(ticket) && interactive() && machine.enabled &&
+                started == 0 && !machine.appForeground && !machine.snoozed(now()) &&
+                // A phone task that began meanwhile keeps the screen; DSH Go doesn't jump in front of it.
+                PhoneControl.peek()?.foregroundLine() == null
+            val path = result.path
+            if (accepted && path != null) {
+                openIntent(EntryActivity.screenshot(app, path), null)
+            } else {
+                if (path != null) PetScreenshot.discard(app, path)
+                if (accepted) Toast.makeText(app, AppStrings.get(app, when (result.error) {
+                    PetScreenshot.Error.UNSUPPORTED -> R.string.pet_screenshot_unsupported
+                    PetScreenshot.Error.ACCESSIBILITY_REQUIRED -> R.string.pet_screenshot_accessibility
+                    PetScreenshot.Error.SECURE -> R.string.pet_screenshot_secure
+                    PetScreenshot.Error.BUSY -> R.string.pet_screenshot_busy
+                    PetScreenshot.Error.TIMEOUT -> R.string.pet_screenshot_timeout
+                    else -> R.string.pet_screenshot_failed
+                }), Toast.LENGTH_LONG).show()
+            }
+            evaluate()
+        }
     }
 
     private fun deliverSettings() {
@@ -1363,6 +1470,7 @@ internal object PetOverlay {
      * Dart where a send would go meanwhile.
      */
     private fun showAsk(fresh: Boolean) {
+        if (capture.inFlight || !interactive()) return
         removeAsk()
         val ctx = hostContext ?: return
         val pv = petView ?: return
@@ -1557,7 +1665,18 @@ internal object PetOverlay {
     private fun startRecording(view: AskBarView) {
         stopRecording()
         val gen = ++recording
-        val r = WavRecorder(maxSeconds = 60, onLevel = {}, onLimit = { main.post { if (gen == recording) micUp(cancelled = false) } })
+        lateinit var r: WavRecorder
+        r = WavRecorder(
+            maxSeconds = 60,
+            onLevel = {},
+            onLimit = { main.post { if (gen == recording) micUp(cancelled = false) } },
+            onError = { main.post {
+                if (gen == recording && recorder === r) {
+                    stopRecording()
+                    if (askView === view) view.setStatus(AppStrings.get(app, R.string.pet_ask_not_heard), error = true)
+                }
+            } },
+        )
         val mic = MicArbiter.beginDictation()
         if (!runCatching { r.start() }.getOrDefault(false)) {
             MicArbiter.endDictation(mic)
@@ -1703,6 +1822,7 @@ internal object PetOverlay {
 
     private val screen = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF || !interactive()) capture.invalidate()
             evaluate()
         }
     }
@@ -1711,8 +1831,9 @@ internal object PetOverlay {
         override fun onConfigurationChanged(newConfig: Configuration) {
             val diff = lastConfig?.diff(newConfig) ?: 0
             lastConfig = Configuration(newConfig)
-            val relevant = ActivityInfo.CONFIG_ORIENTATION or ActivityInfo.CONFIG_SCREEN_SIZE or ActivityInfo.CONFIG_UI_MODE or ActivityInfo.CONFIG_DENSITY
+            val relevant = ActivityInfo.CONFIG_ORIENTATION or ActivityInfo.CONFIG_SCREEN_SIZE or ActivityInfo.CONFIG_UI_MODE or ActivityInfo.CONFIG_DENSITY or ActivityInfo.CONFIG_FONT_SCALE
             if (diff and relevant == 0) return
+            capture.invalidate()
             removeWindows()
             if (diff and ActivityInfo.CONFIG_DENSITY != 0) {
                 loadRequest++
@@ -1737,6 +1858,7 @@ internal object PetOverlay {
         override fun onActivityStarted(activity: Activity) {
             if (activity !is MainActivity) return
             started++
+            capture.invalidate()
             machine.onForeground(true, now())
             app.getSystemService(NotificationManager::class.java)?.cancel(NOTICE_ID)
             evaluate()

@@ -234,19 +234,17 @@ class _AccountButton extends StatelessWidget {
         button: true,
         label: label,
         excludeSemantics: true,
-        child: Pressable(
-          child: SizedBox.square(
-            dimension: size,
-            child: GlassSurface(
-              tier: GlassTier.chrome,
-              circle: true,
-              grouped: true,
-              onTap: () => unawaited(showForumAccountSheet(context)),
-              child: Center(
-                child: auth.signedIn && user != null
-                    ? ForumAvatar(username: user.username, template: user.avatarTemplate, size: size - 10)
-                    : Icon(AppIcons.profile, size: 22, color: scheme.onSurface),
-              ),
+        child: SizedBox.square(
+          dimension: size,
+          child: GlassSurface(
+            tier: GlassTier.chrome,
+            circle: true,
+            grouped: true,
+            onTap: () => unawaited(showForumAccountSheet(context)),
+            child: Center(
+              child: auth.signedIn && user != null
+                  ? ForumAvatar(username: user.username, template: user.avatarTemplate, size: size - 10)
+                  : Icon(AppIcons.profile, size: 22, color: scheme.onSurface),
             ),
           ),
         ),

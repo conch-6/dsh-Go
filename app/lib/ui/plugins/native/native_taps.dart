@@ -31,6 +31,7 @@ import '../../../state/hosts_state.dart';
 import '../../../state/sessions_state.dart';
 import '../../../ui_config/ui_config_model.dart';
 import '../../features/all_features_page.dart' show dshWebOpenerProvider;
+import '../../common/app_dialog.dart';
 import '../../features/feature_catalog.dart';
 import '../../settings/index/settings_pages.dart' show settingsPageForLink;
 import '../../settings/settings_screen.dart';
@@ -277,7 +278,10 @@ Future<bool> runNativeTap(
 
   // What may travel with this tap, after asking once.
   final wants = switch (surface) {
-    NativeSurface.composerActions => {if (plugin.wantsDraft) 'draft', if (plugin.wantsClipboard) 'clipboard'},
+    NativeSurface.composerActions || NativeSurface.composerTools => {
+      if (plugin.wantsDraft) 'draft',
+      if (plugin.wantsClipboard) 'clipboard',
+    },
     NativeSurface.messageActions => {if (plugin.wantsMessage && message != null) 'message'},
     _ => const <String>{},
   };
@@ -683,7 +687,7 @@ Future<void> _runEffect(
       if (target == null) {
         issues.add(NativeIssue('/effects', l10n.plugslotsIssueUnknownPage('panel:$panel')));
       } else {
-        await Navigator.of(context).push(NativePanelPage.route(panel: target, sessionId: sessionId));
+        await openNativePanel(context, target, sessionId: sessionId);
       }
     case LinkEffect(:final url):
       await openConfirmedLink(context, url, stillCurrent: stillCurrent);
@@ -786,7 +790,7 @@ Future<void> openNativePage(BuildContext context, WidgetRef ref, String page, {S
 Future<void> openConfirmedLink(BuildContext context, Uri url, {bool Function()? stillCurrent}) async {
   if (url.scheme != 'https') return;
   final l10n = context.l10n;
-  final ok = await showDialog<bool>(
+  final ok = await showAppDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
       title: Text(l10n.pluginsOpenBrowserHost(url.host)),
@@ -810,7 +814,7 @@ Future<bool> _askWants(BuildContext context, String title, Set<String> wants) as
       : wants.contains('draft')
       ? l10n.plugslotsWantsDraft(title)
       : l10n.plugslotsWantsClipboard(title);
-  final ok = await showDialog<bool>(
+  final ok = await showAppDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
       title: Text(heading),

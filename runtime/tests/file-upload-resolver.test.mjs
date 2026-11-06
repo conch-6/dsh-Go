@@ -15,7 +15,7 @@ const prefix = process.env.DSH_TEST_PREFIX ?? process.env.DSH_PREFIX;
 assert.ok(prefix, 'set DSH_TEST_PREFIX to the locked, patched DSH npm prefix');
 const require = createRequire(join(resolve(prefix), 'package.json'));
 const cliPackage = require.resolve('@deepseek-ai/dsh/package.json');
-assert.equal(JSON.parse(await readFile(cliPackage)).version, '0.2.1-rc.4');
+assert.equal(JSON.parse(await readFile(cliPackage)).version, '0.2.2-rc.1');
 const cli = join(dirname(cliPackage), 'lib/bin.js');
 const observer = fileURLToPath(new URL('./file-upload-resolver-observer.mjs', import.meta.url));
 

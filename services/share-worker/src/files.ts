@@ -86,6 +86,46 @@ export interface ServeOptions {
   edgeKey?: string;
 }
 
+/** Syntax only. The cursor only advances, including through empty list members. */
+function validTagList(value: string): boolean {
+  if (value === '*') return true;
+  let i = 0;
+  let found = false;
+  while (i < value.length) {
+    while (value[i] === ' ' || value[i] === '\t' || value[i] === ',') i++;
+    if (i === value.length) break;
+    if (value.startsWith('W/', i)) i += 2;
+    if (value[i++] !== '"') return false;
+    while (i < value.length && value[i] !== '"') {
+      const c = value.charCodeAt(i++);
+      if (!(c === 0x21 || c >= 0x23 && c <= 0x7e || c >= 0x80 && c <= 0xff)) return false;
+    }
+    if (i === value.length) return false;
+    i++;
+    found = true;
+    while (value[i] === ' ' || value[i] === '\t') i++;
+    if (i < value.length && value[i] !== ',') return false;
+  }
+  return found;
+}
+
+/** Only cache validators: other preconditions must not become a 304. */
+function validators(request: Request): Headers | undefined {
+  const headers = new Headers();
+  const tag = request.headers.get('If-None-Match')?.trim();
+  if (tag !== undefined) {
+    // R2 rejects malformed ETags. Ignore those as before; comparison itself
+    // (including weak tags, quoted commas and empty list members) belongs to R2.
+    if (!validTagList(tag)) return;
+    headers.set('If-None-Match', tag);
+  } else {
+    const modified = request.headers.get('If-Modified-Since');
+    if (!modified) return;
+    headers.set('If-Modified-Since', modified);
+  }
+  return headers;
+}
+
 export async function serveObject(request: Request, env: Env, ctx: Ctx, options: ServeOptions): Promise<Response> {
   const { key, name, cacheControl, edgeKey } = options;
   const head = request.method === 'HEAD';
@@ -107,7 +147,8 @@ export async function serveObject(request: Request, env: Env, ctx: Ctx, options:
   }
 
   const headers = new Headers({ ...COMMON, ...fileHeaders(name), 'Cache-Control': cacheControl, 'Accept-Ranges': 'bytes' });
-  if (head) {
+  const onlyIf = validators(request);
+  if (head && !onlyIf) {
     const object = await env.BUCKET.head(key);
     if (!object) return plain(404, 'Not found');
     headers.set('Content-Length', String(object.size));
@@ -116,11 +157,13 @@ export async function serveObject(request: Request, env: Env, ctx: Ctx, options:
     return new Response(null, { status: 200, headers });
   }
 
-  const range = parseRange(request.headers.get('Range'));
-  let object: R2ObjectBody | null;
+  const range = head ? null : parseRange(request.headers.get('Range'));
+  let object: R2ObjectBody | R2Object | null;
   try {
-    object = await env.BUCKET.get(key, range ? { range } : undefined);
-  } catch {
+    object = await env.BUCKET.get(key, { ...(range ? { range } : {}), ...(onlyIf ? { onlyIf } : {}) });
+  } catch (error) {
+    // Only R2 InvalidRange (10039) belongs to the 416/reset path.
+    if (!range || !(error instanceof Error) || !error.message.endsWith('(10039)')) throw error;
     const meta = await env.BUCKET.head(key);
     if (!meta) return plain(404, 'Not found');
     return plain(416, 'Range not satisfiable', { 'Content-Range': `bytes */${meta.size}` });
@@ -129,6 +172,13 @@ export async function serveObject(request: Request, env: Env, ctx: Ctx, options:
   headers.set('ETag', object.httpEtag);
   headers.set('Last-Modified', object.uploaded.toUTCString());
   headers.set('X-Cache', 'MISS');
+
+  if (!('body' in object)) return new Response(null, { status: 304, headers });
+  if (head) {
+    await object.body.cancel().catch(() => {});
+    headers.set('Content-Length', String(object.size));
+    return new Response(null, { status: 200, headers });
+  }
 
   const size = object.size;
   if (range) {

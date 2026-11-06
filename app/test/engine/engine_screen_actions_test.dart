@@ -79,6 +79,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(runtime.resets, isEmpty);
     await openReset(tester);
+    // Beyond the choices: what else in /root goes with the runtime.
+    expect(find.textContaining('AGENTS.md'), findsOneWidget);
     await tester.tap(find.text('删除并重置'));
     await tester.pumpAndSettle();
     expect(runtime.resets, [const ResetKeep(uiAndSkills: true)]);

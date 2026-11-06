@@ -8,6 +8,7 @@ import '../../l10n/l10n.dart';
 import '../../state/engine_control.dart';
 import '../../state/hosts_state.dart';
 import '../../state/plugins_state.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../theme/theme.dart';
 import 'market_widgets.dart';
@@ -111,7 +112,7 @@ Future<bool> confirmMarketRisk(BuildContext context, MarketEntry entry) async {
     if (!identical(next, host)) current = false;
   });
   final ok =
-      await showDialog<bool>(
+      await showAppDialog<bool>(
         context: context,
         builder: (dialog) {
           final theme = Theme.of(dialog);
@@ -183,7 +184,7 @@ Future<bool> confirmMarketRisk(BuildContext context, MarketEntry entry) async {
 /// Restart dialog for the on-device engine after `restart-required`.
 Future<void> offerEngineRestart(BuildContext context, ProviderContainer container, String name) async {
   final l10n = context.l10n;
-  final restart = await showDialog<bool>(
+  final restart = await showAppDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
       title: Text(l10n.pluginsRestartRequired),
@@ -228,7 +229,7 @@ Future<void> approveBuildsAndRetry(BuildContext context, PluginInstallJob job) a
     if (!identical(next, host)) current = false;
   });
   final ok =
-      await showDialog<bool>(
+      await showAppDialog<bool>(
         context: context,
         builder: (dialog) {
           final theme = Theme.of(dialog);
@@ -312,7 +313,7 @@ Future<bool> confirmPluginUpdate(
   }
 
   final ok =
-      await showDialog<bool>(
+      await showAppDialog<bool>(
         context: context,
         builder: (dialog) => AlertDialog(
           title: Text(l10n.pluginsUpdateNamed(name)),
@@ -355,7 +356,7 @@ Future<bool> removePluginBundle(BuildContext context, PluginBundle bundle, {Rout
   final readyGeneration = host?.client.mux.lastReadyGenerationNumber;
   final title = bundle.title();
   final colors = DshColors.of(context);
-  final ok = await showDialog<bool>(
+  final ok = await showAppDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
       title: Text(l10n.pluginsUninstallNamed(title)),

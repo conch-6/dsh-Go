@@ -92,7 +92,7 @@ class DshMux {
   final StreamController<HostEvent> _hostEvents = StreamController.broadcast();
   final StreamController<MuxGeneration> _generations = StreamController.broadcast();
   final Map<String, MuxStream> _streams = {};
-  final List<MuxStream> _pendingOpens = [];
+  final Set<MuxStream> _pendingOpens = {};
   final List<Completer<MuxGeneration>> _readyWaiters = [];
   final Map<String, HostEvent> _pendingRequests = {};
   final Random _random = Random();

@@ -421,6 +421,7 @@
   "featuresRepeatInterval": "间隔",
   "featuresRepeatOnce": "仅一次",
   "featuresRepeatAdvanced": "高级",
+  "featuresRepeatCustom": "自定义",
   "featuresIntervalSeconds": "秒",
   "featuresZoneUnavailable": "时区不可用",
   "featuresChooseDay": "至少选一天",

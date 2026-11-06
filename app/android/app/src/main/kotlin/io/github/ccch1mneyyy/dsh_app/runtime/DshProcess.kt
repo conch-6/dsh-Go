@@ -14,6 +14,8 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
@@ -38,6 +40,7 @@ class DshProcess(
     @Volatile private var stopping = false
     @Volatile private var expectedExit = false
     @Volatile private var readyReported = false
+    private val startupSignal = CountDownLatch(1)
     @Volatile private var waiter: Thread? = null
     @Volatile private var stopper: Thread? = null
     // Share captured identities across launcher replacement within this app
@@ -179,6 +182,7 @@ class DshProcess(
         val err = pump(p.errorStream.bufferedReader(), "stderr")
         waiter = thread(name = "dsh-wait", isDaemon = true) {
             val code = try { p.waitFor() } catch (_: InterruptedException) { -1 }
+            startupSignal.countDown()
             // The fatal message is usually the last output: let the pumps drain it before reporting.
             try {
                 out.join(2000)
@@ -195,6 +199,16 @@ class DshProcess(
             // controller's ownership until this UID sweep has finished.
             if (stopThread == null) killStrays()
             listener.onExit(this, code, expectedExit)
+        }
+        // The port deadline starts only after a token. A stuck loader/Node can emit nothing.
+        thread(name = "dsh-start-deadline", isDaemon = true) {
+            if (startupSignal.await(TOKEN_TIMEOUT_MS, TimeUnit.MILLISECONDS)) return@thread
+            synchronized(this) {
+                // Token detection and stop share this lock; a late deadline cannot retire either.
+                if (process === p && p.isAlive && !readyReported && !stopping) {
+                    failStart("no startup token received within ${TOKEN_TIMEOUT_MS / 1000}s")
+                }
+            }
         }
         if (stopping) stop()
     }
@@ -251,6 +265,7 @@ class DshProcess(
      */
     @Synchronized fun stop(expected: Boolean = true) {
         stopping = true
+        startupSignal.countDown()
         if (expected) expectedExit = true
         if (stopper != null) return
         val p = process ?: return
@@ -324,6 +339,7 @@ class DshProcess(
         val url = match.value
         val token = TOKEN_PARAM.find(url)?.groupValues?.get(1) ?: return
         readyReported = true
+        startupSignal.countDown()
         val base = "http://127.0.0.1:$port"
         thread(name = "dsh-ready", isDaemon = true) {
             val deadline = System.currentTimeMillis() + 90_000
@@ -423,6 +439,8 @@ class DshProcess(
     companion object {
         const val DEFAULT_PORT = 3080
         const val GUEST_ENV = "{GUEST_ENV}"
+        // Bootstrap budget (not a device measurement); token-to-port retains its own 90 seconds.
+        private const val TOKEN_TIMEOUT_MS = 180_000L
         private val TOKEN_URL = Regex("""https?://[^\s'"]*[?&#]token=[A-Za-z0-9._~%-]+""")
         private val TOKEN_PARAM = Regex("""[?&#]token=([A-Za-z0-9._~%-]+)""")
         private val SECRET_KEY = Regex("(?i)(key|token|secret|password)")

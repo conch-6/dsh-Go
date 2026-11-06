@@ -171,7 +171,7 @@ class _PetStageState extends ConsumerState<PetStage> {
   @override
   Widget build(BuildContext context) {
     // The overlay outside the app hears every state while the chat lives.
-    ref.watch(petOverlayBridgeProvider);
+    ref.listen<void>(petOverlayBridgeProvider, (_, _) {});
     return PetPerchScope(
       registry: _registry,
       child: Listener(

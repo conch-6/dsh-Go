@@ -185,6 +185,7 @@
   "featuresRepeatInterval": "Interval",
   "featuresRepeatOnce": "Once",
   "featuresRepeatAdvanced": "Advanced",
+  "featuresRepeatCustom": "Custom",
   "featuresIntervalSeconds": "Seconds",
   "featuresZoneUnavailable": "Time zone unavailable",
   "featuresChooseDay": "Choose at least one day",

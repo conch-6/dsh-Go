@@ -243,6 +243,20 @@ void main() {
     expect(find.byKey(const ValueKey('dock-fold')).hitTestable(), findsNothing);
   });
 
+  testWidgets('a card regains the full width when its accessory disappears', (tester) async {
+    usePhoneView(tester);
+    const cards = [_Card('todo')];
+    await tester.pumpWidget(_deck(cards, accessory: const SizedBox(width: 60, height: DockMetrics.height)));
+    await pumpFrames(tester);
+    final width = tester.getSize(find.byType(DockStack)).width;
+    expect(tester.getSize(find.byKey(const ValueKey('todo'))).width, width - 60 - DockStackMetrics.accessoryGap);
+
+    await tester.pumpWidget(_deck(cards));
+    await pumpFrames(tester);
+    expect(tester.getSize(find.byKey(const ValueKey('todo'))).width, width);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the accessory sits right of the front card and answers on the folded deck', (tester) async {
     usePhoneView(tester);
     var off = 0;

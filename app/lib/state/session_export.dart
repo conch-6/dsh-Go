@@ -37,27 +37,17 @@ class SessionLogExporter {
   /// False over the relay tunnel: the download is an HTTP route.
   bool get supported => connection?.client.canExportSessionLog ?? false;
 
-  /// Fetches the archive into the app cache (`exports/`), replacing an older
-  /// copy: an export is always the conversation as it is now.
-  Future<File> fetch(String sessionId) async {
+  /// The system share sheet with this export's own archive. share_plus gives
+  /// data-backed files unique temporary paths; its result is not a receipt
+  /// that the native worker has finished reading the source.
+  Future<void> share(String sessionId) async {
     final conn = connection;
     if (conn == null) throw const DshTransportException('offline');
     final bytes = await conn.client.exportSessionLog(sessionId);
-    final root = await _cacheRoot();
-    final dir = Directory('${root.path}/exports');
-    await dir.create(recursive: true);
-    final file = File('${dir.path}/${sessionLogZipName(sessionId)}');
-    await file.writeAsBytes(bytes, flush: true);
-    return file;
-  }
-
-  /// The system share sheet with the archive.
-  Future<void> share(String sessionId) async {
-    final file = await fetch(sessionId);
     final name = sessionLogZipName(sessionId);
     await _share(
       ShareParams(
-        files: [XFile(file.path, mimeType: mime, name: name)],
+        files: [XFile.fromData(bytes, mimeType: mime, name: name)],
         fileNameOverrides: [name],
       ),
     );

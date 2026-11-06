@@ -10,6 +10,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../l10n/l10n.dart';
 import '../../../plugins/seams/seat_models.dart';
+import '../../common/app_dialog.dart';
 import '../../common/smooth_size.dart';
 import '../../theme/theme.dart';
 import 'island_gate.dart';
@@ -384,7 +385,7 @@ class _Closed extends StatelessWidget {
 /// 「在浏览器打开 example.com？」
 Future<bool> _confirmLink(BuildContext context, Uri url) async {
   final l10n = context.l10n;
-  final ok = await showDialog<bool>(
+  final ok = await showAppDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
       title: Text(l10n.pluginsOpenBrowserHost(url.host)),

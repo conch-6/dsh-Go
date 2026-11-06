@@ -105,6 +105,7 @@ void main() {
     final gesture = await tester.startGesture(tester.getCenter(option));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 16));
     expect(tester.widget<ScaleTransition>(scales.first).scale.value, lessThan(1));
     await gesture.moveBy(const Offset(kTouchSlop + 4, 0));
     await pumpFrames(tester, 4);

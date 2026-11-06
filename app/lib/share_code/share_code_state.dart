@@ -31,9 +31,12 @@ Future<String> fetchShareLinkText(ShareLink link, ShareNet net) async {
 }
 
 String? _codeOf(String fileText) {
-  final match = RegExp(r'"code"\s*:\s*"([A-Za-z0-9_-]+\.[A-Za-z0-9_-]{8})"').firstMatch(fileText);
-  return match?.group(1) ??
-      (RegExp(r'^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{8}$').hasMatch(fileText.trim()) ? fileText.trim() : null);
+  try {
+    final code = readShareEnvelope(fileText).code;
+    return RegExp(r'^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{8}$').hasMatch(code) ? code : null;
+  } on ShareDecodeException {
+    return null;
+  }
 }
 
 /// Engines an import can go to: 本机 when its engine runs, and the active

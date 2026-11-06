@@ -371,6 +371,7 @@ class SharePanelModel extends ChangeNotifier {
   void setScope(ShareScope scope) {
     if (scope == _scope) return;
     _scope = scope;
+    _export = null;
     _changed();
     if (scope == ShareScope.whole) unawaited(_loadHistory());
   }
@@ -380,6 +381,7 @@ class SharePanelModel extends ChangeNotifier {
     if (keys.isEmpty) return;
     _picked = {...keys};
     _scope = ShareScope.picked;
+    _export = null;
     _changed();
   }
 
@@ -638,7 +640,7 @@ class SharePanelModel extends ChangeNotifier {
   LinkExpiry _expiry = LinkExpiry.month;
   ConversationLink? _link;
   Object? _linkFor;
-  ConversationLink? _stopped;
+  ({ConversationLink link, Object key})? _stopped;
   Timer? _stopTimer;
 
   LinkExpiry get expiry => _expiry;
@@ -654,7 +656,7 @@ class SharePanelModel extends ChangeNotifier {
   ConversationLink? get link => _linkFor == (_contentKey, _expiry) ? _link : null;
 
   /// A link just stopped, while it can still be brought back.
-  ConversationLink? get stopped => _stopped;
+  ConversationLink? get stopped => _stopped?.link;
 
   Future<void> makeLink() => _busy(ShareWork.link, () async {
     final maker = linkMaker;
@@ -680,10 +682,11 @@ class SharePanelModel extends ChangeNotifier {
     final maker = linkMaker;
     final link = this.link;
     if (maker == null || link == null) return;
+    final key = _linkFor!;
     await maker.revoke(link);
     _link = null;
     _linkFor = null;
-    _stopped = link;
+    _stopped = (link: link, key: key);
     _stopTimer?.cancel();
     _stopTimer = Timer(maker.undoWindow, () {
       _stopped = null;
@@ -695,13 +698,13 @@ class SharePanelModel extends ChangeNotifier {
   /// Takes 「停止分享」 back.
   Future<void> restoreLink() async {
     final maker = linkMaker;
-    final link = _stopped;
-    if (maker == null || link == null) return;
+    final stopped = _stopped;
+    if (maker == null || stopped == null) return;
     _stopTimer?.cancel();
-    await maker.restore(link);
+    await maker.restore(stopped.link);
     _stopped = null;
-    _link = link;
-    _linkFor = (_contentKey, _expiry);
+    _link = stopped.link;
+    _linkFor = stopped.key;
     _notify();
   }
 
@@ -753,8 +756,7 @@ class SharePanelModel extends ChangeNotifier {
         final out = _ref.read(conversationOutProvider);
         final built = await prepare();
         final content = built.of(_format).text;
-        final file = await out.write(ConversationOut.fileName(built.share.title, _format), content);
-        await out.save(file, _format);
+        await out.save(ConversationOut.fileName(built.share.title, _format), content, _format);
       }
       _shared();
       HapticFeedback.lightImpact();

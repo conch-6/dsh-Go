@@ -18,7 +18,9 @@ import android.view.Display
 import io.github.ccch1mneyyy.dsh_app.phone.SensitiveWords
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -38,9 +40,24 @@ internal class Shot(
 )
 
 internal class ScreenShooter(private val service: AccessibilityService, private val overlay: ControlOverlay) {
+    private val captureLock = Any()
+    private var closed = false
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "dsh-a11y-shot") }
+    private val callbackExecutor = Executor { callback ->
+        try {
+            executor.execute(callback)
+        } catch (e: RejectedExecutionException) {
+            if (!synchronized(captureLock) { closed }) throw e
+            // The system still owns pending callbacks after close. They only release their
+            // buffer now; rejecting them can also strand the framework's callback entry.
+            callback.run()
+        }
+    }
 
-    fun close() { executor.shutdownNow() }
+    fun close() {
+        synchronized(captureLock) { closed = true }
+        executor.shutdown() // drain already queued callbacks so their buffers are closed
+    }
 
     /**
      * Captures [window] (API 34+, overlay excluded by construction) or the whole display
@@ -51,10 +68,10 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
         // l10n:keep agent screenshot result
         if (Build.VERSION.SDK_INT < 30) return Shot(null, null, null, false, "本机系统低于 Android 11，不支持无障碍截图")
         val useWindow = Build.VERSION.SDK_INT >= 34 && window != null
-        val raw = if (useWindow) capture(timeoutMs) { cb -> service.takeScreenshotOfWindow(window.id, executor, cb) }
+        val raw = if (useWindow) capture(timeoutMs) { cb -> service.takeScreenshotOfWindow(window.id, callbackExecutor, cb) }
         else {
             overlay.hideForCapture(true)
-            try { capture(timeoutMs) { cb -> service.takeScreenshot(Display.DEFAULT_DISPLAY, executor, cb) } }
+            try { capture(timeoutMs) { cb -> service.takeScreenshot(Display.DEFAULT_DISPLAY, callbackExecutor, cb) } }
             finally { overlay.hideForCapture(false) }
         }
         // l10n:keep agent screenshot result
@@ -90,44 +107,80 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
 
     private fun capture(timeoutMs: Long, start: (AccessibilityService.TakeScreenshotCallback) -> Unit): Raw {
         if (Build.VERSION.SDK_INT < 30) return Raw(null, false, "unsupported")
-        var result: Raw? = null
         repeat(2) { attempt ->
             val latch = CountDownLatch(1)
+            var accepting = true
+            var result: Raw? = null
             var tooSoon = false
-            start(object : AccessibilityService.TakeScreenshotCallback {
+            fun publish(next: Raw, retry: Boolean = false) {
+                val accepted = synchronized(captureLock) {
+                    if (accepting && !closed) {
+                        result = next
+                        tooSoon = retry
+                        true
+                    } else false
+                }
+                if (!accepted) next.bitmap?.recycle()
+            }
+            val callback = object : AccessibilityService.TakeScreenshotCallback {
                 override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
                     val buffer = screenshot.hardwareBuffer
-                    result = try {
-                        val hardware = Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
-                        val software = hardware?.copy(Bitmap.Config.ARGB_8888, false)
-                        hardware?.recycle()
-                        // l10n:keep agent screenshot result
-                        // ScreenshotResult.getTimestamp(): milliseconds on the uptime clock.
-                        val wallClock = ScreenshotClock.wallTime(screenshot.timestamp, SystemClock.uptimeMillis(), System.currentTimeMillis())
-                        Raw(software, false, if (software == null) "截图失败" else null, wallClock)
-                    } catch (_: Throwable) {
-                        // l10n:keep agent screenshot result
-                        Raw(null, false, "截图失败")
-                    } finally { buffer.close() }
-                    latch.countDown()
+                    try {
+                        if (!synchronized(captureLock) { accepting && !closed }) return
+                        val next = try {
+                            val hardware = Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
+                            val software = try { hardware?.copy(Bitmap.Config.ARGB_8888, false) }
+                            finally { hardware?.recycle() }
+                            // l10n:keep agent screenshot result
+                            // ScreenshotResult.getTimestamp(): milliseconds on the uptime clock.
+                            val wallClock = ScreenshotClock.wallTime(screenshot.timestamp, SystemClock.uptimeMillis(), System.currentTimeMillis())
+                            Raw(software, false, if (software == null) "截图失败" else null, wallClock)
+                        } catch (_: Throwable) {
+                            // l10n:keep agent screenshot result
+                            Raw(null, false, "截图失败")
+                        }
+                        publish(next)
+                    } finally {
+                        buffer.close()
+                        latch.countDown()
+                    }
                 }
 
                 override fun onFailure(errorCode: Int) {
-                    tooSoon = errorCode == AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT
                     val secure = Build.VERSION.SDK_INT >= 34 && errorCode == AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW
                     // l10n:keep agent screenshot result
-                    result = Raw(null, secure, "截图失败（错误 $errorCode）")
+                    publish(Raw(null, secure, "截图失败（错误 $errorCode）"), errorCode == AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT)
                     latch.countDown()
                 }
-            })
+            }
+            var received: Raw? = null
+            var retry = false
+            try {
+                // l10n:keep agent screenshot result
+                if (synchronized(captureLock) { closed }) return Raw(null, false, "截图失败")
+                start(callback)
+                // l10n:keep agent screenshot result
+                if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) return Raw(null, false, "截图超时")
+                synchronized(captureLock) {
+                    if (!closed) {
+                        received = result
+                        result = null // the caller now owns this bitmap
+                        retry = tooSoon
+                    }
+                }
+            } finally {
+                val abandoned = synchronized(captureLock) {
+                    accepting = false
+                    result.also { result = null }
+                }
+                abandoned?.bitmap?.recycle()
+            }
             // l10n:keep agent screenshot result
-            if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) return Raw(null, false, "截图超时")
-            // l10n:keep agent screenshot result
-            if (!tooSoon || attempt == 1) return result ?: Raw(null, false, "截图失败")
+            if (!retry || attempt == 1) return received ?: Raw(null, false, "截图失败")
             Thread.sleep(1_050) // the system allows one screenshot per second
         }
         // l10n:keep agent screenshot result
-        return result ?: Raw(null, false, "截图失败")
+        return Raw(null, false, "截图失败")
     }
 
     /** ≥ 97% of a 32×32 sample near-black: a FLAG_SECURE layer blanked out of a display capture. */

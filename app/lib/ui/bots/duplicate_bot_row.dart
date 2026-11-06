@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/bots_state.dart';
+import '../common/app_dialog.dart';
 import '../common/list_page_row.dart';
 import '../theme/app_icons.dart';
 import 'bot_chat_page.dart';
@@ -66,7 +67,7 @@ class _DuplicateBotRowState extends ConsumerState<DuplicateBotRow> {
     setState(() => _busy = true);
     try {
       final l10n = context.l10n;
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showAppDialog<bool>(
         context: context,
         builder: (dialog) => AlertDialog(
           title: Text(l10n.botsDuplicateNamed(widget.bot.name)),

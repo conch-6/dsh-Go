@@ -100,11 +100,12 @@ class _PermissionPageState extends ConsumerState<PermissionPage> {
   }
 
   Future<void> _setDefault(String value, int? revision) async {
+    final owner = ref.read(activeHostProvider);
     final client = ref.read(activeConnectionProvider).value?.client;
     final state = ref.read(permissionStateProvider(widget.sessionId)).value;
     final allowed = state?.defaultOptions ?? state?.options.where((o) => o.value != 'auto');
     if (client == null || _busy || revision == null || allowed?.any((o) => o.value == value) != true) return;
-    if (!await _confirm(value) || !mounted) return;
+    if (!await _confirm(value) || !mounted || ref.read(activeHostProvider) != owner) return;
     setState(() => _busy = true);
     try {
       final problem = await writePermissionDefault(ref, client, value, revision);

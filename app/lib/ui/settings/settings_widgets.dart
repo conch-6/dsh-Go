@@ -1,6 +1,7 @@
 // Layout idea after PiPilot (https://github.com/CikeSeven/pi_pilot), MIT, Copyright (c) 2026 CikeSeven. See THIRD_PARTY_NOTICES.md.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../common/app_sheet.dart';
 import '../common/list_page_row.dart' show ListPageRow;
@@ -162,7 +163,7 @@ class SettingsTile extends StatelessWidget {
       spot,
       InkWell(
         onTap: onTap,
-        splashFactory: NoSplash.splashFactory,
+        splashFactory: rowSplash(context),
         highlightColor: scheme.onSurface.withValues(alpha: 0.05),
         child: ConstrainedBox(
           constraints: BoxConstraints(
@@ -248,6 +249,12 @@ class SettingsSwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final fluid = AppMotion.fluid(context);
+    void change(bool next) {
+      if (fluid) HapticFeedback.selectionClick();
+      onChanged!(next);
+    }
+
     return MergeSemantics(
       child: SettingsTile(
         icon: icon,
@@ -256,8 +263,8 @@ class SettingsSwitchTile extends StatelessWidget {
         subtitle: subtitle,
         tint: tint,
         tinted: tinted,
-        onTap: onChanged == null ? null : () => onChanged!(!value),
-        trailing: Switch(value: value, onChanged: onChanged),
+        onTap: onChanged == null ? null : () => change(!value),
+        trailing: Switch(value: value, onChanged: onChanged == null ? null : change),
       ),
     );
   }

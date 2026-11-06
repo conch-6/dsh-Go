@@ -5,9 +5,9 @@ import 'package:dsh_app/plugins/seams/seams.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('every slot of 0.2.1-rc.4 plus the app surface, keyed by their own key', () {
-    expect(slotCatalogRelease, '0.2.1-rc.4');
-    expect(slotCatalog.length, 104);
+  test('every slot of 0.2.2-rc.1 plus the app surface, keyed by their own key', () {
+    expect(slotCatalogRelease, '0.2.2-rc.1');
+    expect(slotCatalog.length, 110);
     expect(slotCatalog.values.where((s) => s.synthetic).map((s) => s.key), [Slots.dshGoPanel]);
     for (final MapEntry(:key, :value) in slotCatalog.entries) {
       expect(value.key, key);
@@ -19,7 +19,7 @@ void main() {
     // key / kind / scope / replaceRisk only. A DSH bump brings a new extract.
     final file = File('test/plugins/seams/fixtures/slot-catalog-$slotCatalogRelease.json');
     final rows = (jsonDecode(file.readAsStringSync()) as List).cast<Map<String, Object?>>();
-    expect(rows.length, 103);
+    expect(rows.length, 109);
     for (final row in rows) {
       final info = slotInfo(row['key']! as String)!;
       expect(info.kind.name, row['kind']);

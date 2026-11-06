@@ -10,6 +10,7 @@ library;
 
 import 'dart:async';
 
+import 'errors.dart';
 import 'json.dart';
 import 'session_api.dart';
 
@@ -19,8 +20,7 @@ import 'session_api.dart';
 
 /// One `schedule/catalog` entry: a stored reminder plus where it lives.
 ///
-/// Tasks are created only by the model (`schedule_create`); the Host has no
-/// create Remote, so a client lists, renames, edits the prompt and deletes.
+/// Supports legacy session-owned records and 0.2.2 target-based Host tasks.
 class ScheduleTask {
   const ScheduleTask({
     required this.id,
@@ -38,15 +38,26 @@ class ScheduleTask {
     this.weekdays = const [],
     this.expression,
     this.lastDeliveredAt,
+    this.target,
+    this.involvedSessionIds = const [],
+    this.status,
+    this.updatedAt,
   });
 
-  /// Null when the entry has no id or session (unusable).
+  /// Null when the entry has no identity or supported destination.
   static ScheduleTask? fromJson(Object? json) {
     final map = asMap(json);
     if (map == null) return null;
     final id = asString(map['id']);
-    final sessionId = asString(map['sessionId']);
-    if (id == null || id.isEmpty || sessionId == null) return null;
+    final target = asMap(map['target']);
+    final targetKind = asString(target?['kind']);
+    if (target != null && !const {'session', 'new_once', 'new'}.contains(targetKind)) return null;
+    final sessionId = target == null
+        ? asString(map['sessionId'])
+        : targetKind == 'session'
+        ? asString(target['sessionId'])
+        : null;
+    if (id == null || id.isEmpty || (target == null && sessionId == null)) return null;
     final prompt = asString(map['prompt']) ?? '';
     final title = asString(map['title'])?.trim();
     final last = asMap(map['lastDelivery']);
@@ -63,7 +74,11 @@ class ScheduleTask {
       // Records saved before titles existed fall back to the prompt's first line.
       title: title == null || title.isEmpty ? prompt.split('\n').first.trim() : title,
       prompt: prompt,
-      active: map['status'] != 'inactive',
+      active: target == null ? map['status'] != 'inactive' : map['status'] == 'active',
+      target: target == null ? null : Map.unmodifiable(target),
+      involvedSessionIds: [for (final id in asListOrEmpty(map['involvedSessionIds'])) ?asString(id)],
+      status: asString(map['status']),
+      updatedAt: asString(map['updatedAt']),
       record: Map.unmodifiable(record),
       scheduledAt: DateTime.tryParse(asString(map['scheduledAt']) ?? ''),
       afterSeconds: asInt(map['afterSeconds']),
@@ -77,7 +92,16 @@ class ScheduleTask {
   }
 
   final String id;
-  final String sessionId;
+
+  /// Existing delivery session; null for `new` and the uncreated `new_once` target.
+  final String? sessionId;
+  final Map<String, Object?>? target;
+  final List<String> involvedSessionIds;
+  final String? status;
+  final String? updatedAt;
+
+  /// Wire evidence from the Host's catalog, independent of release strings.
+  bool get usesTargetProtocol => target != null;
 
   /// `after`, `at`, `every`, `daily`, `weekly` or `cron`.
   final String kind;
@@ -107,15 +131,18 @@ class ScheduleTask {
   /// The stored record as returned (for `schedule/update`'s `expected`).
   final Map<String, Object?> record;
 
-  bool get recurring => const {'every', 'daily', 'weekly', 'cron'}.contains(kind);
+  bool get recurring => const {'every', 'daily', 'weekly', 'cron', 'rrule'}.contains(kind);
 }
 
 /// One delivered run (`schedule/history` record).
 class ScheduleRun {
-  const ScheduleRun({required this.scheduledAt, required this.deliveredAt, this.prompt});
+  const ScheduleRun({required this.scheduledAt, required this.deliveredAt, this.prompt, this.targetSessionId});
 
   final DateTime? scheduledAt;
   final DateTime? deliveredAt;
+
+  /// Actual destination of this run; absent on legacy receipts.
+  final String? targetSessionId;
 
   /// The prompt as delivered; absent on receipts older than prompt capture.
   final String? prompt;
@@ -395,7 +422,12 @@ extension FeaturesApi on DshClient {
   Future<ScheduleHistory> scheduleHistory(ScheduleTask task, {int limit = 20, String? before}) async {
     final value = asMapOrEmpty(
       await rpc.call('schedule/history', {
-        'request': {'sessionId': task.sessionId, 'id': task.id, 'limit': limit, 'before': ?before},
+        'request': {
+          if (!task.usesTargetProtocol) 'sessionId': task.sessionId,
+          'id': task.id,
+          'limit': limit,
+          'before': ?before,
+        },
       }),
     );
     final code = asString(value['code']);
@@ -409,6 +441,7 @@ extension FeaturesApi on DshClient {
               scheduledAt: DateTime.tryParse(asString(run['scheduledAt']) ?? ''),
               deliveredAt: DateTime.tryParse(asString(run['deliveredAt']) ?? ''),
               prompt: asString(run['prompt']),
+              targetSessionId: asString(run['targetSessionId']),
             ),
       ],
       nextBefore: asString(value['nextBefore']),
@@ -421,6 +454,7 @@ extension FeaturesApi on DshClient {
   /// `schedule/update` with the task's stored record as `expected`
   /// (compare-and-set): renames and/or rewrites the prompt.
   Future<ScheduleUpdate> updateSchedule(ScheduleTask task, {String? title, String? prompt}) async {
+    if (task.usesTargetProtocol) return updateTargetSchedule(task, {'title': ?title, 'prompt': ?prompt});
     final value = asMapOrEmpty(
       await rpc.call('schedule/update', {
         'request': {
@@ -451,12 +485,53 @@ extension FeaturesApi on DshClient {
   /// `schedule/delete` (hard delete, history included). False when the task
   /// was already gone.
   Future<bool> deleteSchedule(ScheduleTask task) async {
+    if (task.usesTargetProtocol) {
+      final value = asMapOrEmpty(
+        await rpc.call('schedule/edit', {
+          'request': {'id': task.id, 'action': 'delete', 'expectedUpdatedAt': task.updatedAt},
+        }),
+      );
+      final code = asString(value['code']);
+      if (code != null && code != 'schedule_not_found') throw DshRemoteException(code, code);
+      return value['deleted'] == true;
+    }
     final value = asMapOrEmpty(
       await rpc.call('schedule/delete', {
         'request': {'sessionId': task.sessionId, 'id': task.id},
       }),
     );
     return value['deleted'] == true;
+  }
+
+  /// Update one 0.2.2 task using its catalog revision; never replay a failed write.
+  Future<ScheduleUpdate> updateTargetSchedule(ScheduleTask task, Map<String, Object?> patch) async {
+    final value = asMapOrEmpty(
+      await rpc.call('schedule/edit', {
+        'request': {'id': task.id, 'action': 'update', 'patch': patch, 'expectedUpdatedAt': task.updatedAt},
+      }),
+    );
+    final code = asString(value['code']);
+    return ScheduleUpdate(
+      updated: code == null && value['id'] == task.id,
+      task: code == null ? ScheduleTask.fromJson(value) : null,
+      code: code,
+      message: asString(value['message']),
+    );
+  }
+
+  /// Run through the Host's target semantics on 0.2.2; retain legacy queued prompts.
+  Future<void> runScheduledTask(ScheduleTask task, {String? timeZone}) async {
+    if (!task.usesTargetProtocol) {
+      await prompt(task.sessionId!, task.prompt, mode: PromptMode.queue, timeZone: timeZone);
+      return;
+    }
+    final value = asMapOrEmpty(
+      await rpc.call('schedule/run', {
+        'request': {'id': task.id},
+      }),
+    );
+    final code = asString(value['code']);
+    if (code != null) throw DshRemoteException(code, code);
   }
 
   // ── jobs ─────────────────────────────────────────────────────────────────
@@ -524,7 +599,6 @@ extension FeaturesApi on DshClient {
             order: asInt(preset['order']),
           ),
     ];
-    presets.sort((a, b) => (a.order ?? 1 << 20).compareTo(b.order ?? 1 << 20));
     return presets;
   }
 
@@ -593,14 +667,14 @@ extension FeaturesApi on DshClient {
       onListen: () async {
         try {
           await mux.ready();
+          if (cancelled || out.isClosed) return;
+          final stream = mux.open(endpoint, args);
+          sub = stream.items.listen(out.add, onError: out.addError, onDone: out.close);
         } on Object catch (error) {
           if (!cancelled && !out.isClosed) out.addError(error);
           await out.close();
           return;
         }
-        if (cancelled || out.isClosed) return;
-        final stream = mux.open(endpoint, args);
-        sub = stream.items.listen(out.add, onError: out.addError, onDone: out.close);
       },
       onCancel: () async {
         cancelled = true;

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "release": "0.2.1-rc.4",
+  "release": "0.2.2-rc.1",
   "labels": {
     "pluginsBack": ["返回插件", "Back to plugins"],
     "more": ["更多", "More"],

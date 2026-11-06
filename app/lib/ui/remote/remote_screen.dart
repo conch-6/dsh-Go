@@ -11,6 +11,7 @@ import '../../runtime/runtime_state.dart';
 import '../../state/app_info.dart';
 import '../../state/connection_state.dart';
 import '../../state/hosts_state.dart';
+import '../common/app_dialog.dart';
 import '../common/ask_ai.dart';
 import '../common/overview_card.dart';
 import '../common/status_chip.dart';
@@ -96,6 +97,18 @@ class RemoteScreen extends ConsumerWidget {
       children: [
         _ActiveCard(active: active),
         _RelaySection(onUse: (h) => _use(context, ref, h)),
+        SettingsSection(
+          title: l10n.remoteTransferSettings,
+          children: [
+            SettingsSwitchTile(
+              key: const ValueKey('remote-compact-history'),
+              spot: Spots.remoteCompactHistory,
+              subtitle: l10n.remoteCompactHistoryHint,
+              value: ref.watch(remoteCompactHistoryProvider),
+              onChanged: (value) => unawaited(ref.read(remoteCompactHistoryProvider.notifier).set(value)),
+            ),
+          ],
+        ),
         SettingsSection(
           title: l10n.remoteSshHosts,
           footer: Text(l10n.remoteSshRequirements),
@@ -451,7 +464,7 @@ class _RelaySection extends ConsumerWidget {
 
   Future<void> _confirmLogout(BuildContext context, RelayAccountController notifier) async {
     final l10n = context.l10n;
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(l10n.remoteRelaySignOutTitle),

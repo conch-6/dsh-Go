@@ -16,7 +16,10 @@ enum NativeSurface {
   composerActions(DshGoSurfaces.composerActions, DshGoSurfaces.composerActions),
   messageActions(DshGoSurfaces.messageActions, DshGoSurfaces.messageActions),
   composerStrip(DshGoSurfaces.composerStrip, DshGoSurfaces.composerStrip),
-  panel(DshGoSurfaces.panels, DshGoSurfaces.panel);
+  panel(DshGoSurfaces.panels, DshGoSurfaces.panel),
+  composerTools(DshGoSurfaces.composerTools, DshGoSurfaces.composerTools),
+  sessionActions(DshGoSurfaces.sessionActions, DshGoSurfaces.sessionActions),
+  turnNote(DshGoSurfaces.turnNote, DshGoSurfaces.turnNote);
 
   const NativeSurface(this.wire, this.invoke);
 
@@ -31,9 +34,31 @@ enum NativeSurface {
     messageActions => appL10n.plugslotsSurfaceMessageActions,
     composerStrip => appL10n.plugslotsSurfaceComposerStrip,
     panel => appL10n.plugslotsSurfacePanel,
+    composerTools => appL10n.plugslotsSurfaceComposerTools,
+    sessionActions => appL10n.plugslotsSurfaceSessionActions,
+    turnNote => appL10n.plugslotsSurfaceTurnNote,
   };
 
   static NativeSurface? byWire(String wire) => values.where((s) => s.wire == wire).firstOrNull;
+}
+
+/// One plugin's word on a turn (`turn.note`), in the tone it asked for.
+typedef NativeTurnNote = ({String text, String? tone});
+
+/// The notes on one turn. Compares by content, so a push that changes nothing here redraws nothing.
+@immutable
+class NativeTurnNotes {
+  const NativeTurnNotes(this.notes);
+
+  final List<NativeTurnNote> notes;
+
+  String get text => notes.map((note) => note.text).join(' · ');
+
+  @override
+  bool operator ==(Object other) => other is NativeTurnNotes && listEquals(other.notes, notes);
+
+  @override
+  int get hashCode => Object.hashAll(notes);
 }
 
 /// The app's limits (protocol §7; the bridge enforces them first).
@@ -52,6 +77,19 @@ abstract final class NativeLimits {
 
   /// A panel's title.
   static const panelTitleMax = 16;
+
+  /// A ＋ panel tool's name, under its tile.
+  static const toolLabelMax = 8;
+
+  /// ＋ panel tools on the panel, every plugin's.
+  static const toolsTotal = 8;
+
+  /// Plugins whose note follows one turn's footnote.
+  static const turnNotesShown = 2;
+
+  /// Note plugins one conversation follows. The stream allows 32 subscriptions a connection, and
+  /// panels and strips must still get theirs however many note plugins are installed.
+  static const turnNoteFeeds = 8;
 
   /// Panels per plugin.
   static const panelsPerPlugin = 4;
@@ -233,11 +271,15 @@ class NativePanel {
     this.placement = const {},
     this.live = false,
     this.micro,
+    this.sheet = false,
   });
 
   final String package;
   final String id;
   final String title;
+
+  /// Opens as a sheet instead of a pushed page.
+  final bool sheet;
 
   /// IconName.
   final String? icon;
@@ -260,6 +302,7 @@ class NativePanel {
       other.icon == icon &&
       other.live == live &&
       other.micro == micro &&
+      other.sheet == sheet &&
       setEquals(other.placement, placement);
 
   @override
@@ -280,6 +323,9 @@ class NativePlugin {
     this.messageActions = const [],
     this.strips = const [],
     this.panels = const [],
+    this.composerTools = const [],
+    this.sessionActions = const [],
+    this.turnNotes = const [],
     this.issues = const [],
     this.declared = const {},
     this.capabilities = const {},
@@ -306,6 +352,11 @@ class NativePlugin {
   final List<NativeAction> messageActions;
   final List<NativeStrip> strips;
   final List<NativePanel> panels;
+  final List<NativeAction> composerTools;
+  final List<NativeAction> sessionActions;
+
+  /// Ids of its per-turn notes.
+  final List<String> turnNotes;
 
   /// The bridge's and the app's findings.
   final List<NativeIssue> issues;
@@ -328,7 +379,14 @@ class NativePlugin {
   bool get wantsClipboard => wants.contains('clipboard');
   bool get wantsMessage => wants.contains('message');
 
-  bool get isEmpty => composerActions.isEmpty && messageActions.isEmpty && strips.isEmpty && panels.isEmpty;
+  bool get isEmpty =>
+      composerTools.isEmpty &&
+      sessionActions.isEmpty &&
+      turnNotes.isEmpty &&
+      composerActions.isEmpty &&
+      messageActions.isEmpty &&
+      strips.isEmpty &&
+      panels.isEmpty;
 
   @override
   bool operator ==(Object other) =>
@@ -343,6 +401,9 @@ class NativePlugin {
       listEquals(other.messageActions, messageActions) &&
       listEquals(other.strips, strips) &&
       listEquals(other.panels, panels) &&
+      listEquals(other.composerTools, composerTools) &&
+      listEquals(other.sessionActions, sessionActions) &&
+      listEquals(other.turnNotes, turnNotes) &&
       listEquals(other.issues, issues) &&
       setEquals(other.declared, declared) &&
       setEquals(other.capabilities, capabilities) &&
@@ -455,7 +516,10 @@ NativePlugin _plugin(DshGoPlugin p, Set<String> features) {
     for (final panel in p.panels.where((x) => x.ready).take(NativeLimits.panelsPerPlugin))
       if ({
             for (final where in panel.placement)
-              if (where == DshGoPanel.sessionTab || where == DshGoPanel.features || where == DshGoPanel.chatPanel)
+              if (where == DshGoPanel.sessionTab ||
+                  where == DshGoPanel.features ||
+                  where == DshGoPanel.chatPanel ||
+                  where == DshGoPanel.pluginPage)
                 where,
           }
           case final placement when placement.isNotEmpty)
@@ -467,11 +531,15 @@ NativePlugin _plugin(DshGoPlugin p, Set<String> features) {
           placement: placement,
           live: panel.live,
           micro: p.capabilities.contains('micro') && p.micro.contains(panel.micro) ? panel.micro : null,
+          sheet: panel.presentation == DshGoPanel.sheet,
         ),
   ];
 
   final composer = actions(NativeSurface.composerActions, p.composerActions, NativeLimits.capsuleLabelMax);
   final menu = actions(NativeSurface.messageActions, p.messageActions, NativeLimits.menuLabelMax);
+  final tools = actions(NativeSurface.composerTools, p.composerTools, NativeLimits.toolLabelMax);
+  final sessionActions = actions(NativeSurface.sessionActions, p.sessionActions, NativeLimits.menuLabelMax);
+  final turnNotes = p.turnNotes.take(1).toList();
   return NativePlugin(
     package: p.pkg,
     title: p.title,
@@ -485,12 +553,18 @@ NativePlugin _plugin(DshGoPlugin p, Set<String> features) {
     messageActions: List.unmodifiable(menu),
     strips: List.unmodifiable(strips),
     panels: List.unmodifiable(panels),
+    composerTools: List.unmodifiable(tools),
+    sessionActions: List.unmodifiable(sessionActions),
+    turnNotes: List.unmodifiable(turnNotes),
     issues: List.unmodifiable(issues),
     declared: {
       if (composer.isNotEmpty) NativeSurface.composerActions,
       if (menu.isNotEmpty) NativeSurface.messageActions,
       if (strips.isNotEmpty) NativeSurface.composerStrip,
       if (panels.isNotEmpty) NativeSurface.panel,
+      if (tools.isNotEmpty) NativeSurface.composerTools,
+      if (sessionActions.isNotEmpty) NativeSurface.sessionActions,
+      if (turnNotes.isNotEmpty) NativeSurface.turnNote,
     },
     capabilities: p.capabilities,
     media: p.capabilities.contains('audio') ? p.media : const [],

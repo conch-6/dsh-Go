@@ -104,6 +104,7 @@ LiveActivity? liveActivityOf({
   required PetState pet,
   required List<PetRun> runs,
   required List<PetPending> pending,
+  PetFocus? focus,
   Map<PetTarget, String> titles = const {},
   bool showDone = true,
   bool showFailed = true,
@@ -132,6 +133,11 @@ LiveActivity? liveActivityOf({
       title = t;
       break;
     }
+  }
+  // The open chat already follows title changes that an older list misses.
+  final focusedTitle = focus?.title;
+  if (focus?.target == target && focusedTitle != null && focusedTitle.trim().isNotEmpty) {
+    title = focusedTitle;
   }
 
   // More conversations than the one it names: 「· 3 个对话在跑」.
@@ -182,15 +188,20 @@ LiveActivity? liveActivityOf({
   }
 }
 
-/// Remembers conversation titles from [runs] into [titles], the newest last,
+/// Remembers titles from [runs] and then the current [focus], newest last,
 /// keeping at most [max].
-void learnLiveTitles(Map<PetTarget, String> titles, List<PetRun> runs, {int max = 32}) {
+void learnLiveTitles(Map<PetTarget, String> titles, List<PetRun> runs, {PetFocus? focus, int max = 32}) {
   for (final r in runs) {
     final title = r.title;
     if (title == null || title.trim().isEmpty) continue;
     final key = PetTarget(r.host, r.root);
     titles.remove(key);
     titles[key] = title;
+  }
+  final focusedTitle = focus?.title;
+  if (focus != null && focusedTitle != null && focusedTitle.trim().isNotEmpty) {
+    titles.remove(focus.target);
+    titles[focus.target] = focusedTitle;
   }
   while (titles.length > max) {
     titles.remove(titles.keys.first);

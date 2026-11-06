@@ -53,3 +53,10 @@ test('NJS1 micro rev has its own epoch and positive safe-integer sequence gramma
   for (const rev of ['legacy', 'epoch.1', '0123456789ABCDEF.1', '0123456789abcde.1', '0123456789abcdef.0', '0123456789abcdef.01', '0123456789abcdef.-1', '0123456789abcdef.1.2', '0123456789abcdef.9007199254740992', '0123456789abcdef.9999999999999999', '0123456789abcdef.10000000000000000']) bad(frame(rev), 'stream.schema.json', '/$defs/down')
   ok({ t: 'data', sub: 's', rev: 'legacy-arbitrary-rev', data: {} }, 'stream.schema.json', '/$defs/down')
 })
+
+test('a tool writes panel or effect, not both', () => {
+  const tool = (t) => ({ v: 1, contributes: { 'composer.tools': [{ id: 'a', label: 'x', ...t }] } })
+  ok(tool({ panel: 'p' }), 'manifest.schema.json')
+  ok(tool({ effect: { type: 'toast', text: 'x' } }), 'manifest.schema.json')
+  bad(tool({ panel: 'p', effect: { type: 'toast', text: 'x' } }), 'manifest.schema.json')
+})

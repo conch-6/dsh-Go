@@ -128,6 +128,13 @@ void main() {
       }
     });
 
+    testWidgets('the tail paints in its own layer inside the glass', (tester) async {
+      final a = act(ActivityKind.thinking, '思考中', ago: Duration.zero);
+      await pumpSheet(tester, [ActivityStrip(activity: a, speedLevel: 2)]);
+      final boundary = find.ancestor(of: find.byType(WhaleTail), matching: find.byType(RepaintBoundary)).first;
+      expect(tester.widget<RepaintBoundary>(boundary).child, isA<WhaleTail>());
+    });
+
     testWidgets('the copy holds for its window, then moves on', (tester) async {
       final a = act(ActivityKind.thinking, '思考中', ago: Duration.zero);
       await pumpSheet(tester, [ActivityStrip(activity: a, speedLevel: 2)]);

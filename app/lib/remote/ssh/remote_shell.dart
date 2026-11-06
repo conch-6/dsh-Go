@@ -21,6 +21,15 @@ abstract class RemoteShell {
   Future<RemoteExecResult> run(String script, {Duration timeout = const Duration(seconds: 30)});
 }
 
+/// SSH can finish a startup script before a background child releases the
+/// session. Ordinary commands keep the full drain-and-exit contract of run.
+abstract interface class RemoteBootstrapShell implements RemoteShell {
+  Future<RemoteExecResult> runBootstrap(String script, {required Duration timeout});
+}
+
+/// A URL query value ends at a query separator, fragment or whitespace.
+String redactRemoteTokens(String text) => text.replaceAll(RegExp(r'token=[^\s&#]+', caseSensitive: false), 'token=•••');
+
 /// Single-quotes [value] for POSIX sh.
 String shQuote(String value) => "'${value.replaceAll("'", r"'\''")}'";
 

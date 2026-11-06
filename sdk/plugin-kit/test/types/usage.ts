@@ -44,6 +44,10 @@ dshGo.strip('today', (_scope, emit) => emit({ text: '今日 12k', tone: 'muted' 
 
 const host = createTestHost({ dir: '.' })
 void host.invoke('translate', { context: { clipboard: 'x' } }).then((r) => r.effects.map((e) => e.type))
+const started: Promise<void> = host.subscribe('today').settled
+const microStarted: Promise<void> = host.subscribeMicro('caption').settled
+void started
+void microStarted
 void localize('en-US', { zh: '用量', en: 'Usage' })
 void bad
 void meta

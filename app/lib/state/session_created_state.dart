@@ -96,7 +96,7 @@ class SessionCreatedController extends Notifier<Map<String, DateTime>> {
     if (!_loaded) return;
     final fetch = ref.read(sessionCreatedFetcherProvider);
     if (fetch == null) return;
-    final key = _key;
+    final owner = ref;
     while (_workers < parallel && _queue.isNotEmpty) {
       final id = _queue.removeAt(0);
       if (state.containsKey(id)) {
@@ -113,9 +113,9 @@ class SessionCreatedController extends Notifier<Map<String, DateTime>> {
         }
         _workers--;
         if (!ref.mounted) return;
-        // A read for the host before a switch only frees its slot (the
-        // current host's queue may be waiting for it).
-        if (_key == key) {
+        // An earlier build only frees its slot: the current queue may use
+        // a new client for the same host and must own its failures too.
+        if (owner.mounted) {
           _asking.remove(id);
           if (at == null) {
             _failed.add(id);

@@ -25,7 +25,7 @@ void _window(WidgetTester tester, Size size) {
 
 final _sheet = find.byKey(const ValueKey('detail-sheet'));
 
-Future<void> _open(WidgetTester tester, {VoidCallback? onWide}) async {
+Future<void> _open(WidgetTester tester, {VoidCallback? onWide, bool canPop = true}) async {
   await tester.pumpWidget(
     testApp(
       Builder(
@@ -34,19 +34,22 @@ Future<void> _open(WidgetTester tester, {VoidCallback? onWide}) async {
             onPressed: () => showDetailSheet(
               context,
               onWide: onWide,
-              builder: (context) => Column(
-                children: [
-                  // The content's own title row moves the sheet too.
-                  DetailSheetScope.maybeOf(context)!.dragArea(
-                    const SizedBox(
-                      key: ValueKey('title-row'),
-                      height: 52,
-                      width: double.infinity,
-                      child: ColoredBox(color: Color(0x00000000)),
+              builder: (context) => PopScope<void>(
+                canPop: canPop,
+                child: Column(
+                  children: [
+                    // The content's own title row moves the sheet too.
+                    DetailSheetScope.maybeOf(context)!.dragArea(
+                      const SizedBox(
+                        key: ValueKey('title-row'),
+                        height: 52,
+                        width: double.infinity,
+                        child: ColoredBox(color: Color(0x00000000)),
+                      ),
                     ),
-                  ),
-                  const Expanded(child: SizedBox.expand()),
-                ],
+                    const Expanded(child: SizedBox.expand()),
+                  ],
+                ),
               ),
             ),
             child: const Text('open'),
@@ -135,6 +138,134 @@ void main() {
     await tester.drag(title, const Offset(0, 200));
     await tester.pumpAndSettle();
     expect(_sheet, findsNothing);
+  });
+
+  group('a release carries the finger on', () {
+    final title = find.byKey(const ValueKey('title-row'));
+
+    /// How far the sheet's top moves in the two frames after a release.
+    Future<double> movedAfterRelease(WidgetTester tester) async {
+      await tester.pump();
+      final from = tester.getRect(_sheet).top;
+      await tester.pump(const Duration(milliseconds: 16));
+      return (tester.getRect(_sheet).top - from).abs();
+    }
+
+    Future<void> toFull(WidgetTester tester) async {
+      await tester.drag(title, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_sheet).top, _top + 12);
+    }
+
+    testWidgets('between the heights: at its speed, not from a standstill', (tester) async {
+      _window(tester, const Size(720, 900));
+      await _open(tester);
+      await toFull(tester);
+      await tester.fling(title, const Offset(0, 120), 2000);
+      final flung = await movedAfterRelease(tester);
+      expect(flung, greaterThan(20), reason: '2000 px/s is 32 px a frame, before the spring has braked');
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_sheet).top, 450);
+
+      await toFull(tester);
+      await tester.drag(title, const Offset(0, 120));
+      final let = await movedAfterRelease(tester);
+      expect(let, lessThan(10));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_sheet).top, _top + 12);
+    });
+
+    testWidgets('a hard fling lands on the half height without sinking past it', (tester) async {
+      _window(tester, const Size(720, 900));
+      await _open(tester);
+      await toFull(tester);
+      await tester.fling(title, const Offset(0, 370), 6000);
+      await tester.pump();
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(tester.getRect(_sheet).top, lessThanOrEqualTo(450));
+      }
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_sheet).top, 450);
+    });
+
+    testWidgets('closing: it leaves at its speed, and the scrim goes with it', (tester) async {
+      _window(tester, const Size(720, 900));
+      await _open(tester);
+      await tester.fling(title, const Offset(0, 120), 2000);
+      expect(await movedAfterRelease(tester), greaterThan(20));
+      await tester.pumpAndSettle();
+      expect(_sheet, findsNothing);
+    });
+
+    testWidgets('pulled far down then flicked back up: it stays', (tester) async {
+      _window(tester, const Size(720, 900));
+      await _open(tester);
+      var time = Duration.zero;
+      final finger = await tester.startGesture(tester.getCenter(title));
+      for (var i = 0; i < 10; i++) {
+        time += const Duration(milliseconds: 50);
+        await finger.moveBy(const Offset(0, 22), timeStamp: time);
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(tester.getRect(_sheet).top, greaterThan(450 + 450 * 0.25));
+      for (var i = 0; i < 8; i++) {
+        time += const Duration(milliseconds: 8);
+        await finger.moveBy(const Offset(0, -16), timeStamp: time);
+      }
+      await finger.up(timeStamp: time);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_sheet).top, 450);
+    });
+
+    testWidgets('content that refuses to pop: back up to the half height', (tester) async {
+      _window(tester, const Size(720, 900));
+      await _open(tester, canPop: false);
+      await tester.drag(title, const Offset(0, 200));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_sheet).top, 450);
+      // And it can still go by the next drag.
+      await tester.drag(title, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_sheet).top, _top + 12);
+    });
+
+    testWidgets('past the full height: a rubber band that lets go exactly', (tester) async {
+      _window(tester, const Size(720, 900));
+      await _open(tester);
+      await toFull(tester);
+      final finger = await tester.startGesture(tester.getCenter(title));
+      for (var i = 0; i < 30; i++) {
+        await finger.moveBy(const Offset(0, -20));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      final past = _top + 12 - tester.getRect(_sheet).top;
+      expect(past, greaterThan(10), reason: 'it gives');
+      expect(past, lessThanOrEqualTo(48), reason: 'it gives only so much');
+      expect(tester.getRect(_sheet).bottom, 900);
+      await finger.up();
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_sheet), Rect.fromLTRB(0, _top + 12, 720, 900));
+    });
+
+    testWidgets('remove animations: every release lands within the frame', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(
+        disableAnimations: true,
+      );
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      _window(tester, const Size(720, 900));
+      await _open(tester);
+      await tester.drag(title, const Offset(0, -300));
+      await tester.pump();
+      expect(tester.getRect(_sheet).top, _top + 12);
+      await tester.fling(title, const Offset(0, 120), 2000);
+      await tester.pump();
+      expect(tester.getRect(_sheet).top, 450);
+      await tester.fling(title, const Offset(0, 120), 2000);
+      await tester.pump();
+      await tester.pump();
+      expect(_sheet, findsNothing);
+    });
   });
 
   testWidgets('a tap on the scrim closes it', (tester) async {

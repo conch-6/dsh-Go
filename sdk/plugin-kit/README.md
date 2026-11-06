@@ -53,6 +53,8 @@ broken-demo 0.0.1
 - 视图问题：路径和措辞与 App 插件详情页逐字相同（`lib/messages.json` 从 App 的 ARB 同步，`test/parity/` 里的用例 App 侧也在跑）。
 - 中英文各量一遍文字长度；`--load` 在临时 `DSH_HOME` 里加载你的代码，不碰真的 DSH 主目录。
 
+`--load` 从空配置开始，先通过插件自身 `Config` 的 Standard Schema 校验并应用默认值，再调用 `apply`；未导出 `Config` 时传入空对象。与 Host 一样，只接受同步配置校验；必填字段没有默认值、校验抛错或异步校验都会报告加载失败，不调用 `apply`。检查器不读取用户的主机配置。
+
 参数值必须完整：`--lang zh|en`、`--budget toolCard|panel|strip`、`--app x.y.z`。参数错误返回 3；带 `--json` 时也输出可解析的诊断对象。多个目标会分别检查，标准输入读取失败不会阻止后面的文件。以 `-` 开头的文件名放在 `--` 后面，例如 `node bin/check.mjs -- --view.json`。
 
 `package.json` 必须是 JSON 对象；错误的 `contributes.panels` 会保留桥接诊断。静态视图使用桥接的包内路径规则，拒绝的包外路径和符号链接不会再被当成 App 视图读取。这是检查行为的一致性约束，`--load` 仍会执行插件自己的代码，不是代码沙箱。

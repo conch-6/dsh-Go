@@ -282,6 +282,13 @@ class VoicePlugin :
             onLimit = { main.post {
                 if (generation == ownGeneration && recorder === r) emit(sessionId, mapOf("type" to "limit"))
             } },
+            onError = { main.post {
+                if (generation == ownGeneration && recorder === r) {
+                    VoiceDiagnostics.failure(appContext, environment, 100, "record")
+                    releaseAll()
+                    emit(sessionId, mapOf("type" to "error", "code" to 100))
+                }
+            } },
         )
         val mic = MicArbiter.beginDictation()
         val started = runCatching { r.start() }

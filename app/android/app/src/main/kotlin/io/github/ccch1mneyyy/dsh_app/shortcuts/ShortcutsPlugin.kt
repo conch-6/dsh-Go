@@ -24,8 +24,9 @@ import java.util.concurrent.Executors
  * Launcher shortcuts and the Quick Settings tile: MethodChannel `dsh/shortcuts`.
  *
  * Entries ([EntryActivity] → MainActivity as [ACTION_ENTRY]) are pushed to Dart as `entry`
- * calls, `{kind: new | voice | chat, sessionId?, host?, text?}`, after Dart's `ready` (held until
- * then, like links/LinksPlugin). An entry without this process's [token] is ignored. `text` is
+ * calls, `{kind: new | voice | chat | screenshot, sessionId?, host?, text?, path?}`, after
+ * Dart's `ready` (held until then, like links/LinksPlugin). An entry without this process's
+ * [token] is ignored. `text` is
  * 问一句's text the floating pet couldn't send itself (pet/PetOverlay.kt): it waits in the composer.
  *
  * - `setRecent {items: [{id, title, host}]}`: the recent conversations as dynamic shortcuts
@@ -137,9 +138,15 @@ class ShortcutsPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
     /** Delivers an entry; false when [intent] isn't one of ours. */
     private fun take(intent: Intent): Boolean {
         if (intent.action != ACTION_ENTRY) return false
+        val kind = intent.getStringExtra(EXTRA_KIND) ?: return true
+        if (kind == KIND_SCREENSHOT) {
+            val event = ScreenshotEntry.event(context.cacheDir, token,
+                intent.getStringExtra(EXTRA_TOKEN), intent.getStringExtra(EXTRA_PATH)) ?: return true
+            if (ready) methods.invokeMethod("entry", event) else pending += event
+            return true
+        }
         // Consumed either way: an entry without our token goes nowhere.
         if (intent.getStringExtra(EXTRA_TOKEN) != token) return true
-        val kind = intent.getStringExtra(EXTRA_KIND) ?: return true
         if (kind != KIND_NEW && kind != KIND_VOICE && kind != KIND_CHAT) return true
         val sessionId = intent.getStringExtra(EXTRA_SESSION)
         if (kind == KIND_CHAT && sessionId.isNullOrEmpty()) return true
@@ -158,12 +165,14 @@ class ShortcutsPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHa
         const val EXTRA_SESSION = "io.github.ccch1mneyyy.dsh_app.entry.SESSION"
         const val EXTRA_HOST = "io.github.ccch1mneyyy.dsh_app.entry.HOST"
         const val EXTRA_TEXT = "io.github.ccch1mneyyy.dsh_app.entry.TEXT"
+        const val EXTRA_PATH = "io.github.ccch1mneyyy.dsh_app.entry.PATH"
         const val EXTRA_TOKEN = "io.github.ccch1mneyyy.dsh_app.entry.TOKEN"
         private const val EXTRA_TAKEN = "io.github.ccch1mneyyy.dsh_app.entry.TAKEN"
 
         const val KIND_NEW = "new"
         const val KIND_VOICE = "voice"
         const val KIND_CHAT = "chat"
+        const val KIND_SCREENSHOT = "screenshot"
 
         const val MAX_RECENT = 3
         const val RECENT_PREFIX = "chat:"

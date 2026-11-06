@@ -50,8 +50,11 @@ object PhoneStorage {
         // l10n:keep guest filesystem path
         val link = java.io.File(rootfs, "root/手机存储")
         try {
-            android.system.Os.lstat(link.path)
-            if (!enabled) link.delete()
+            val info = android.system.Os.lstat(link.path)
+            if (!enabled && android.system.OsConstants.S_ISLNK(info.st_mode) &&
+                android.system.Os.readlink(link.path) == GUEST_PATH) {
+                link.delete()
+            }
             return
         } catch (_: Exception) {
             // absent

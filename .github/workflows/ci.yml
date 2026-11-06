@@ -1,0 +1,266 @@
+# A PR runs what it touches; a push to main runs everything, which also catches
+# whatever the path filters below miss. `CI OK` is the one result to look at.
+# External PRs are closed by pr-gate.yml and spend no runner here.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  NODE_VERSION: 24.22.1
+  GRADLE_VERSION: 9.3.1
+  TZ: Asia/Shanghai
+
+jobs:
+  changes:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      app: ${{ github.event_name != 'pull_request' || steps.filter.outputs.app == 'true' }}
+      packages: ${{ github.event_name != 'pull_request' || steps.filter.outputs.packages == 'true' }}
+      runtime: ${{ github.event_name != 'pull_request' || steps.filter.outputs.runtime == 'true' }}
+    steps:
+      - id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          # The paths outside each area's own are files its tests read.
+          filters: |
+            ci: &ci .github/workflows/ci.yml
+            app: [*ci, 'app/**', 'packages/**', 'sdk/plugin-kit/**', 'site/share/**', 'docs/guide/**', 'THIRD_PARTY_NOTICES.md']
+            packages: [*ci, 'packages/**']
+            runtime: [*ci, 'runtime/**', 'examples/**', 'sdk/plugin-kit/**', 'app/tool/engine_auth/**', 'app/test/plugin_config/fixtures/**', 'app/test/media/fixtures/**']
+
+  checks:
+    name: Generated files, tooling, SDK, web
+    needs: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - &checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - &node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Generated files are in sync
+        run: |
+          python3 app/tool/l10n_merge.py --check
+          python3 app/tool/guide_sync.py --check
+          node sdk/plugin-kit/scripts/sync-skill.mjs --check
+          # Not --check: this also writes site/build/share, which the share worker builds from.
+          python3 app/tool/make_replay_viewer.py
+          git diff --exit-code -- app/lib/share_code/replay_viewer.g.dart
+      - name: Python tooling
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q Pillow==13.0.0 numpy==2.4.0
+          for dir in tooling runtime/tests app/tool; do
+            "$RUNNER_TEMP/venv/bin/python" -m unittest discover -s "$dir" -p 'test_*.py'
+          done
+      - name: Plugin SDK
+        working-directory: sdk/plugin-kit
+        run: |
+          npm install --ignore-scripts --no-package-lock --no-audit --no-fund
+          npm test
+      - name: Market, sites, share worker
+        run: |
+          (cd market && npm ci --ignore-scripts --no-audit --no-fund && npm test)
+          (cd site/home && npm run check && npm run check:content && npm test)
+          (cd services/share-worker && npm ci --ignore-scripts --no-audit --no-fund && npm run build && npm run typecheck && npm test)
+          node --test site/share/test/viewer_test.mjs
+
+  flutter:
+    name: Flutter ${{ matrix.shard }}
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    env:
+      DSH_TEST_FONT_DIR: /usr/share/fonts/opentype/noto
+      NOTO_CJK_VERSION: 1:20230817+repack1-3
+      NOTO_EMOJI_VERSION: v2.051
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - *checkout
+      - *node
+      - &flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      # The goldens have Noto Color Emoji 2.051; Ubuntu's 2.047 draws the glyphs differently.
+      # Only the files the tests read, cached: the 206 MB of packages sometimes take apt's
+      # mirror longer than the job's whole timeout. Saved right after the download, so a
+      # job that fails or times out later doesn't lose it.
+      - name: Restore the fonts the goldens were drawn with
+        id: fonts
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/test-fonts
+          key: test-fonts-${{ env.NOTO_CJK_VERSION }}-${{ env.NOTO_EMOJI_VERSION }}
+      - name: Download the fonts
+        if: steps.fonts.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
+        run: |
+          sudo apt-get update -q
+          apt-get download fonts-noto-cjk="$NOTO_CJK_VERSION" fonts-noto-cjk-extra="$NOTO_CJK_VERSION"
+          for deb in fonts-noto-cjk*.deb; do dpkg-deb -x "$deb" unpacked; done
+          mkdir -p ~/test-fonts
+          cp unpacked/usr/share/fonts/opentype/noto/NotoSansCJK-{Regular,Bold,Light}.ttc ~/test-fonts/
+          curl -fsSL --retry 3 -o ~/test-fonts/NotoColorEmoji.ttf "https://raw.githubusercontent.com/googlefonts/noto-emoji/$NOTO_EMOJI_VERSION/fonts/NotoColorEmoji.ttf"
+          echo "72a635cb3d2f3524c51620cdde406b217204e8a6a06c6a096ff8ed4b5fd6e27b  $HOME/test-fonts/NotoColorEmoji.ttf" | sha256sum -c -
+      - name: Save the fonts
+        if: steps.fonts.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/test-fonts
+          key: ${{ steps.fonts.outputs.cache-primary-key }}
+      - name: Install the fonts
+        run: |
+          sudo install -Dm644 -t "$DSH_TEST_FONT_DIR" ~/test-fonts/NotoSansCJK-*.ttc
+          sudo install -Dm644 ~/test-fonts/NotoColorEmoji.ttf /usr/share/fonts/noto/NotoColorEmoji.ttf
+      - run: flutter pub get --enforce-lockfile
+      - name: Analyze, and generated localization matches its source
+        if: matrix.shard == 0
+        run: |
+          flutter analyze --no-pub
+          python3 tool/l10n_merge.py
+          git diff --exit-code -- lib/l10n
+      # Split by file, not with --total-shards: that still compiles every file on every shard.
+      - name: Test every third file
+        run: flutter test --no-pub --concurrency=4 --reporter github $(find test -name '*_test.dart' | sort | awk 'NR % 3 == ${{ matrix.shard }}')
+      - name: Keep golden diffs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: golden-failures-${{ matrix.shard }}
+          path: app/test/**/failures/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+  dart:
+    name: Dart packages
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PUB_HOSTED_URL: https://pub.flutter-io.cn # The registry these two lockfiles were resolved from.
+    steps:
+      - *checkout
+      - *flutter
+      - run: |
+          for pkg in packages/dsh_client packages/dsh_remote; do
+            (cd "$pkg" && dart pub get --enforce-lockfile && dart analyze && dart test)
+          done
+
+  runtime:
+    name: Runtime and bridge
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      UV_USE_IO_URING: 0
+    steps:
+      - *checkout
+      - *node
+      - name: Install a throwaway patched DSH
+        run: |
+          version=$(sed -nE 's/^DSH_VERSION="\$\{DSH_VERSION:-(.+)\}"$/\1/p' runtime/build-runtime.sh)
+          prefix="$RUNNER_TEMP/dsh"
+          mkdir "$prefix"
+          cp "runtime/locks/dsh-$version/package.json" "runtime/locks/dsh-$version/package-lock.json" "$prefix/"
+          npm ci --prefix "$prefix" --ignore-scripts --no-audit --no-fund
+          cp "$prefix/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js" "$prefix/fs-local-original.js"
+          python3 -I runtime/lib/rtbuild.py patch-dsh --prefix "$prefix" --dsh-version "$version"
+          pnpm_version=$(sed -nE 's/^PNPM_VERSION="\$\{PNPM_VERSION:-(.+)\}"$/\1/p' runtime/build-runtime.sh)
+          pnpm_prefix="$RUNNER_TEMP/pnpm"
+          mkdir "$pnpm_prefix"
+          cp "runtime/locks/pnpm-$pnpm_version/package.json" "runtime/locks/pnpm-$pnpm_version/package-lock.json" "$pnpm_prefix/"
+          npm ci --prefix "$pnpm_prefix" --ignore-scripts --no-audit --no-fund
+          {
+            echo "DSH_PREFIX=$prefix"
+            echo "DSH_TEST_PREFIX=$prefix"
+            echo "PNPM_BIN=$pnpm_prefix/node_modules/pnpm/bin/pnpm.mjs"
+            echo "DSH_INSTALL=$prefix/node_modules/@deepseek-ai/dsh"
+            echo "DSH_TOOLS_DIR=$prefix/node_modules/@deepseek-ai/dsh-tools"
+            echo "DSH_FS_LOCAL_ORIGINAL_JS=$prefix/fs-local-original.js"
+          } >> "$GITHUB_ENV"
+      - name: Unit tests
+        run: |
+          node --test runtime/tests/*.test.mjs app/tool/engine_auth/*.test.mjs
+          python3 -I runtime/tests/test_patch_dsh.py
+      - name: Media and example plugins
+        run: |
+          (cd runtime/media/dsh-media && npm install --ignore-scripts --no-package-lock --no-audit --no-fund && npm test)
+          for plugin in examples/plugins/dsh-go-example-*/; do
+            (cd "$plugin" && npm test && npm run check)
+          done
+      - name: Route guard and native bridge against a real host
+        run: |
+          bash runtime/tests/run-guard-tests.sh "$DSH_PREFIX"
+          bash runtime/tests/run-native-tests.sh "$DSH_PREFIX"
+
+  android:
+    name: Android JVM
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      DSH_MAVEN_MIRRORS: 0 # The Aliyun mirrors are slow and unreliable from a US runner.
+    steps:
+      - *checkout
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - *flutter
+      - name: Flutter plugins and local.properties
+        working-directory: app
+        run: |
+          flutter pub get --enforce-lockfile
+          printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$ANDROID_HOME" "$FLUTTER_ROOT" > android/local.properties
+      # gradlew is not tracked, so Gradle comes from here. The two flavors differ only in ABI.
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      - working-directory: app/android
+        run: gradle --stacktrace :app:testArm64DebugUnitTest
+
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs: [changes, checks, flutter, dart, runtime, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - if: needs.changes.result != 'success' || contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

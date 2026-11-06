@@ -324,6 +324,158 @@ void main() {
   });
 
   group('session', () {
+    testWidgets('[login-cancel] failed polling is cancelled when the real sheet closes', (tester) async {
+      final bridge = _CancellationBridge(failPoll: true);
+      try {
+        await _openSheet(tester, bridge);
+        expect(bridge.calls.where((c) => c.startsWith('begin:')).toList(), ['begin:openai-codex']);
+        expect(bridge.calls.where((c) => c.startsWith('poll:')).toList(), ['poll:att-1']);
+        await tester.pump(const Duration(seconds: 1));
+        expect(bridge.polls, 2);
+        await tester.pump(const Duration(seconds: 1));
+        expect(bridge.polls, 3);
+        expect(find.text('登录没有完成'), findsOneWidget);
+
+        // A local transport failure did not report a terminal Host step.
+        // Cancelling as soon as polling is abandoned is also valid.
+        await tester.tap(find.byTooltip('关闭'));
+        await settle(tester);
+        await Future.wait(bridge.cancellations);
+        expect(find.byType(SubscriptionLoginSheet), findsNothing);
+        expect(find.text('result: false'), findsOneWidget);
+        expect(bridge.calls.where((c) => c.startsWith('cancel:')).toList(), ['cancel:att-1']);
+        await tester.pump(const Duration(seconds: 3));
+        expect(bridge.polls, 3);
+      } finally {
+        await _closeCancellationSheet(tester, bridge);
+      }
+    });
+
+    testWidgets('[login-cancel] failed answer is cancelled before the next poll', (tester) async {
+      final bridge = _CancellationBridge(
+        steps: const [LoginStep(phase: LoginPhase.prompt, message: 'Paste the code')],
+        failAnswer: true,
+      );
+      final session = LoginSession(bridge, Subscription.claude);
+      try {
+        await session.start();
+        expect(session.step.phase, LoginPhase.prompt);
+        expect(bridge.calls, ['begin:anthropic', 'poll:att-1']);
+        await session.answer('code');
+        expect(bridge.calls, contains('answer:att-1:code'));
+        expect(session.step.phase, LoginPhase.failed);
+        expect(session.answering, isFalse);
+        expect(bridge.polls, 1);
+
+        // Do not advance the existing polling timer before this close.
+        session.close();
+        session.close();
+        await Future.wait(bridge.cancellations);
+        expect(bridge.calls.where((c) => c.startsWith('cancel:')).toList(), ['cancel:att-1']);
+        await tester.pump(const Duration(seconds: 1));
+        expect(bridge.polls, 1);
+      } finally {
+        session.dispose();
+        await Future.wait(bridge.cancellations);
+      }
+    });
+
+    for (final phase in [LoginPhase.done, LoginPhase.failed, LoginPhase.cancelled]) {
+      testWidgets('[login-cancel] Host ${phase.name} remains terminal when closing', (tester) async {
+        final bridge = _CancellationBridge(steps: [LoginStep(phase: phase)]);
+        final session = LoginSession(bridge, Subscription.claude);
+        try {
+          await session.start();
+          expect(session.step.phase, phase);
+          expect(bridge.calls, ['begin:anthropic', 'poll:att-1']);
+          session.close();
+          session.close();
+          await Future.wait(bridge.cancellations);
+          expect(bridge.calls.where((c) => c.startsWith('cancel:')), isEmpty);
+          await tester.pump(const Duration(seconds: 1));
+          expect(bridge.polls, 1);
+        } finally {
+          session.dispose();
+          await Future.wait(bridge.cancellations);
+        }
+      });
+    }
+
+    testWidgets('[login-cancel] failed begin has no known attempt to cancel', (tester) async {
+      final bridge = _CancellationBridge()..beginError = const DshTransportException('timeout');
+      final session = LoginSession(bridge, Subscription.claude);
+      try {
+        await session.start();
+        expect(session.step.phase, LoginPhase.failed);
+        expect(bridge.calls, ['begin:anthropic']);
+        session.close();
+        await Future.wait(bridge.cancellations);
+        expect(bridge.calls.where((c) => c.startsWith('cancel:')), isEmpty);
+      } finally {
+        session.dispose();
+        await Future.wait(bridge.cancellations);
+      }
+    });
+
+    testWidgets('[login-cancel] retry after Host failure cancels only the new attempt', (tester) async {
+      final bridge = _CancellationBridge(
+        steps: const [LoginStep(phase: LoginPhase.failed, error: '授权已过期')],
+      );
+      try {
+        await _openSheet(tester, bridge);
+        expect(find.text('登录没有完成'), findsOneWidget);
+        expect(bridge.calls.where((c) => c.startsWith('poll:')).toList(), ['poll:att-1']);
+        bridge.steps = const [LoginStep(phase: LoginPhase.open, url: _url)];
+        await tester.tap(find.text('再试一次'));
+        await settle(tester);
+        expect(bridge.calls.where((c) => c.startsWith('begin:')).toList(), [
+          'begin:openai-codex',
+          'begin:openai-codex',
+        ]);
+        expect(bridge.calls.where((c) => c.startsWith('poll:')).toList(), ['poll:att-1', 'poll:att-2']);
+        expect(find.text('在浏览器中完成登录'), findsOneWidget);
+        await tester.tap(find.byTooltip('关闭'));
+        await settle(tester);
+        await Future.wait(bridge.cancellations);
+        expect(find.byType(SubscriptionLoginSheet), findsNothing);
+        expect(find.text('result: false'), findsOneWidget);
+        expect(bridge.calls.where((c) => c.startsWith('cancel:')).toList(), ['cancel:att-2']);
+        final polls = bridge.polls;
+        await tester.pump(const Duration(seconds: 3));
+        expect(bridge.polls, polls);
+      } finally {
+        await _closeCancellationSheet(tester, bridge);
+      }
+    });
+
+    testWidgets('[login-cancel] retry after local failure still cancels when begin fails', (tester) async {
+      final bridge = _CancellationBridge(failPoll: true);
+      final session = LoginSession(bridge, Subscription.claude);
+      try {
+        await session.start();
+        expect(bridge.calls, ['begin:anthropic', 'poll:att-1']);
+        await tester.pump(const Duration(seconds: 1));
+        expect(bridge.polls, 2);
+        await tester.pump(const Duration(seconds: 1));
+        expect(bridge.polls, 3);
+        expect(session.step.phase, LoginPhase.failed);
+
+        bridge.beginError = const DshRemoteException('gateway/internal', 'could not reach https://auth.example.com');
+        await session.start();
+        expect(bridge.calls.where((c) => c.startsWith('begin:')).toList(), ['begin:anthropic', 'begin:anthropic']);
+        expect(session.step.phase, LoginPhase.failed);
+        session.close();
+        session.close();
+        await Future.wait(bridge.cancellations);
+        expect(bridge.calls.where((c) => c.startsWith('cancel:')).toList(), ['cancel:att-1']);
+        await tester.pump(const Duration(seconds: 1));
+        expect(bridge.polls, 3);
+      } finally {
+        session.dispose();
+        await Future.wait(bridge.cancellations);
+      }
+    });
+
     test('three failed polls in a row give up; one recovers', () async {
       final bridge = _FlakyBridge(failures: 3);
       final session = LoginSession(bridge, Subscription.claude, interval: Duration.zero);
@@ -402,4 +554,43 @@ class _FlakyBridge extends FakeSubscriptionBackend {
     if (failures-- > 0) throw const DshTransportException('timeout');
     return const LoginStep(phase: LoginPhase.done);
   }
+}
+
+/// The existing backend seam, with only ordinary transport errors added.
+class _CancellationBridge extends FakeSubscriptionBackend {
+  _CancellationBridge({super.steps, this.failPoll = false, this.failAnswer = false});
+
+  final bool failPoll;
+  final bool failAnswer;
+  final cancellations = <Future<void>>[];
+
+  @override
+  Future<LoginStep> poll(String attemptId) async {
+    if (!failPoll) return super.poll(attemptId);
+    calls.add('poll:$attemptId');
+    throw const DshTransportException('timeout');
+  }
+
+  @override
+  Future<void> answer(String attemptId, String value) async {
+    await super.answer(attemptId, value);
+    if (failAnswer) throw const DshTransportException('timeout');
+  }
+
+  @override
+  Future<void> cancel(String attemptId) {
+    final cancellation = super.cancel(attemptId);
+    cancellations.add(cancellation);
+    return cancellation;
+  }
+}
+
+Future<void> _closeCancellationSheet(WidgetTester tester, _CancellationBridge bridge) async {
+  if (find.byType(SubscriptionLoginSheet).evaluate().isNotEmpty) {
+    await tester.tap(find.byTooltip('关闭'));
+    await settle(tester);
+  }
+  await Future.wait(bridge.cancellations);
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump();
 }

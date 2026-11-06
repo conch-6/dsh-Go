@@ -234,7 +234,10 @@ void main() {
           _rect(tester, find.ancestor(of: find.byIcon(icon), matching: find.byType(GlassSurface)).first);
       final features = key(AppIcons.allFeatures);
       final settings = key(AppIcons.settings);
-      final pill = _rect(tester, find.descendant(of: bar, matching: find.byType(InkWell)).first);
+      final pill = _rect(
+        tester,
+        find.descendant(of: bar, matching: find.byKey(const ValueKey('identity-host-controls'))),
+      );
       expect(features.size, settings.size);
       expect(features.width, _near(44));
       expect(features.height, _near(44));

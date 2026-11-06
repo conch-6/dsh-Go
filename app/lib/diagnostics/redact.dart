@@ -16,11 +16,12 @@ final _launchToken = RegExp(r'token=[A-Za-z0-9._~%-]+');
 
 /// `Authorization: Bearer <credential>` (and `Basic`).
 final _bearer = RegExp(r'\b(Bearer|Basic)\s+(?!•)[A-Za-z0-9._~+/=-]+', caseSensitive: false);
+final _maskedAuthorization = RegExp(r'^(?:Bearer|Basic)\s+•••$', caseSensitive: false);
 
 /// Assignments whose value is a secret whatever it looks like:
 /// `password=…`, `"secret": "…"`, `Cookie: …`, `Authorization: Basic …`.
 final _secretAssignment = RegExp(
-  r'''\b([A-Za-z0-9_.-]*(?:passw(?:or)?d|passphrase|secret|credential|cookie|authorization)[A-Za-z0-9_.-]*)("?\s*[:=]\s*["']?)(?!•)(?!(?:Bearer|Basic)\b)([^\s"',;&]+)''',
+  r'''\b([A-Za-z0-9_.-]*(?:passw(?:or)?d|passphrase|secret|credential|cookie|authorization)[A-Za-z0-9_.-]*)("?\s*[:=]\s*)(?:(["'])((?:\\.|(?!\3)[^\\\r\n])*)\3|(["']?)(?!•)(?!(?:Bearer|Basic)\b)([^\s"',;&]+))''',
   caseSensitive: false,
 );
 
@@ -81,7 +82,17 @@ String redactDiagnostics(String text) {
   if (out.length > maxLineLength) {
     out = out
         .split('\n')
-        .map((line) => line.length > maxLineLength ? '${line.substring(0, maxLineLength)}…' : line)
+        .map((line) {
+          if (line.length <= maxLineLength) return line;
+          var end = maxLineLength;
+          final before = line.codeUnitAt(end - 1);
+          final after = line.codeUnitAt(end);
+          // Keep a supplementary character whole at the truncation boundary.
+          if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) {
+            end--;
+          }
+          return '${line.substring(0, end)}…';
+        })
         .join('\n');
   }
   final secrets = findSecrets(out);
@@ -99,13 +110,25 @@ String redactDiagnostics(String text) {
   }
   out = out.replaceAll(_launchToken, 'token=$redactionMark');
   out = out.replaceAllMapped(_bearer, (m) => '${m[1]} $redactionMark');
-  out = out.replaceAllMapped(_secretAssignment, (m) => '${m[1]}${m[2]}$redactionMark');
+  out = out.replaceAllMapped(_secretAssignment, (m) {
+    final quote = m[3];
+    if (quote == null) return '${m[1]}${m[2]}${m[5]}$redactionMark';
+    final value = m[4]!;
+    // A closed quoted value can contain spaces, separators and escaped quotes.
+    // Keep an empty value and an already masked auth scheme readable.
+    final masked = value.isEmpty || _maskedAuthorization.hasMatch(value) ? value : redactionMark;
+    return '${m[1]}${m[2]}$quote$masked$quote';
+  });
   out = out.replaceAllMapped(_keyAssignment, (m) => '${m[1]}${m[2]}$redactionMark');
   return out;
 }
 
-/// Every line through [redactDiagnostics].
-List<String> redactLines(Iterable<String> lines) => [for (final line in lines) redactDiagnostics(line)];
+/// Redacts the log together so private-key blocks retain their line context.
+List<String> redactLines(Iterable<String> lines) {
+  final source = lines.toList();
+  if (source.isEmpty) return source;
+  return redactDiagnostics(source.join('\n')).split('\n');
+}
 
 /// A JSON-shaped value with every string through [redactDiagnostics]; keys
 /// and non-string values unchanged (`"hasApiKey": true` stays readable).
@@ -119,7 +142,9 @@ Object? redactJson(Object? value) => switch (value) {
 String _maskSpan(String secret) {
   if (secret.startsWith('-----BEGIN')) {
     final lines = secret.split('\n');
-    return lines.length < 2 ? redactionMark : '${lines.first}\n$redactionMark\n${lines.last}';
+    if (lines.length < 2) return redactionMark;
+    final hasEnd = lines.last.startsWith('-----END ') && lines.last.endsWith('PRIVATE KEY-----');
+    return '${lines.first}\n$redactionMark${hasEnd ? '\n${lines.last}' : ''}';
   }
   for (final prefix in _prefixes) {
     if (secret.startsWith(prefix)) return '$prefix$redactionMark';

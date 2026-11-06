@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dsh_app/l10n/l10n.dart';
@@ -5,6 +6,7 @@ import 'package:dsh_app/state/attachments.dart';
 import 'package:dsh_app/state/draft_store.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -21,12 +23,13 @@ Iterable<Uint8List> _megabytes(int count) sync* {
 }
 
 final class _File extends PlatformFile {
-  _File(this.name, this.chunks, {this.reportedLength});
+  _File(this.name, this.chunks, {this.reportedLength, this.failure});
 
   @override
   final String name;
   final Iterable<Uint8List> chunks;
   final int? reportedLength;
+  final Exception? failure;
   int streams = 0;
   int wholeReads = 0;
   int emitted = 0;
@@ -56,6 +59,7 @@ final class _File extends PlatformFile {
         consumed += chunk.length;
         yield chunk;
       }
+      if (failure case final error?) throw error;
     } finally {
       closed = true;
     }
@@ -64,6 +68,7 @@ final class _File extends PlatformFile {
 
 class _Picker extends FilePickerPlatform {
   List<PlatformFile> selected = [];
+  Exception? failure;
 
   @override
   Future<List<PlatformFile>> pickFiles({
@@ -78,7 +83,10 @@ class _Picker extends FilePickerPlatform {
     WindowsOptions windowsOptions = const WindowsOptions(),
     LinuxOptions linuxOptions = const LinuxOptions(),
     WebOptions webOptions = const WebOptions(),
-  }) async => selected;
+  }) async {
+    if (failure case final error?) throw error;
+    return selected;
+  }
 }
 
 _File _small(String name) => _File(name, [
@@ -120,6 +128,93 @@ void main() {
     FilePickerPlatform.instance = picker;
   });
   tearDown(() => FilePickerPlatform.instance = original);
+
+  test('failed file read keeps earlier and later valid selections', () async {
+    final unreadable = _File('unreadable.txt', [
+      Uint8List.fromList([1, 2]),
+    ], failure: const FileSystemException('read interrupted'));
+    picker.selected = [_small('before.txt'), unreadable, _small('after.txt')];
+
+    final result = await device.pickFiles(limit: 2);
+
+    expect(result.attachments.map((a) => a.name), ['before.txt', 'after.txt']);
+    expect(result.attachments.map((a) => a.bytes.toList()), [
+      [1, 2, 3],
+      [1, 2, 3],
+    ]);
+    expect(result.problem, appL10n.stateShareReadFailed(unreadable.name));
+    expect(unreadable.consumed, 2);
+    expect(unreadable.closed, isTrue);
+    expect(unreadable.wholeReads, 0);
+  });
+
+  test('failed partial read leaves its message budget for a later file', () async {
+    final unreadable = _File('unreadable.txt', [
+      Uint8List.fromList([1, 2]),
+    ], failure: const FileSystemException('read interrupted'));
+    picker.selected = [unreadable, _small('fits.txt')];
+
+    final result = await device.pickFiles(limit: 1, heldBytes: maxMessageBytes - 3);
+
+    expect(result.attachments.single.name, 'fits.txt');
+    expect(result.attachments.single.size, 3);
+    expect(result.problem, appL10n.stateShareReadFailed(unreadable.name));
+    expect(unreadable.closed, isTrue);
+  });
+
+  test('first rejection remains visible after a later file read failure', () async {
+    final large = _File('large.zip', const [], reportedLength: maxFileBytes + 1);
+    final unreadable = _File('unreadable.txt', const [], failure: const FileSystemException('cannot open'));
+    picker.selected = [large, unreadable, _small('good.txt')];
+
+    final result = await device.pickFiles();
+
+    expect(result.attachments.single.name, 'good.txt');
+    expect(result.problem, appL10n.stateAttachmentFileLimit(large.name));
+    expect(large.streams, 0);
+    expect(unreadable.closed, isTrue);
+  });
+
+  test('all failed file reads still return the first named failure', () async {
+    final first = _File('first.txt', const [], failure: const FileSystemException('cannot open'));
+    final second = _File('second.txt', const [], failure: const FileSystemException('cannot open'));
+    picker.selected = [first, second];
+
+    final result = await device.pickFiles();
+
+    expect(result.attachments, isEmpty);
+    expect(result.problem, appL10n.stateShareReadFailed(first.name));
+    expect(first.closed, isTrue);
+    expect(second.closed, isTrue);
+  });
+
+  test('picker permission failure still propagates before any file reads', () async {
+    final denied = PlatformException(code: 'permission_denied', message: 'selection was denied');
+    final selected = _small('not-read.txt');
+    picker
+      ..selected = [selected]
+      ..failure = denied;
+
+    await expectLater(device.pickFiles(), throwsA(same(denied)));
+
+    expect(selected.streams, 0);
+  });
+
+  testWidgets('composer keeps valid selections and names a failed file read', (tester) async {
+    final unreadable = _File('unreadable.txt', [
+      Uint8List.fromList([1, 2]),
+    ], failure: const FileSystemException('read interrupted'));
+    picker.selected = [_small('before.txt'), unreadable, _small('after.txt')];
+    await _screen(tester, ChatHarness(session: 's1'));
+
+    await _choose(tester);
+
+    final container = ProviderScope.containerOf(tester.element(find.byType(ChatScreen)));
+    final attachments = container.read(draftStoreProvider).drafts['s1']?.attachments ?? const [];
+    expect(attachments.map((a) => a.name), ['before.txt', 'after.txt']);
+    expect(find.text(appL10n.stateShareReadFailed(unreadable.name)), findsOneWidget);
+    expect(unreadable.closed, isTrue);
+  });
 
   test('known oversize is rejected before opening, while later valid files survive', () async {
     // 500 MiB is metadata only. The fixture would yield at most 1 MiB.

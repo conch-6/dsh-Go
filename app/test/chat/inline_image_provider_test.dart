@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/ui/chat/artifact_preview.dart';
 import 'package:dsh_app/ui/chat/render/markdown_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/harness.dart';
@@ -53,7 +55,12 @@ void main() {
       bytes = await png(40, 30);
     });
     final url = 'data:image/png;base64,${base64Encode(bytes)}';
-    await tester.pumpWidget(testApp(Scaffold(body: MarkdownImage(url: url))));
+    await tester.pumpWidget(
+      testApp(
+        Scaffold(body: MarkdownImage(url: url)),
+        overrides: [activeConnectionProvider.overrideWithValue(const AsyncData<HostConnection?>(null))],
+      ),
+    );
     final context = tester.element(find.byType(MarkdownImage));
     final inline = tester.widget<Image>(find.byType(Image)).image;
     await tester.runAsync(() => precacheImage(inline, context));

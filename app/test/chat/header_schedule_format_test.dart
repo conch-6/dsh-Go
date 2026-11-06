@@ -132,6 +132,22 @@ void main() {
   });
 
   group('scheduleNextRuns', () {
+    test('a custom rule has only the Host\'s committed run and reads 自定义', () {
+      final task = ScheduleTask.fromJson({
+        'id': 'r',
+        'kind': 'rrule',
+        'title': 'r',
+        'prompt': 'r',
+        'rrule': 'DTSTART;TZID=Asia/Shanghai:20261025T090000\nRRULE:FREQ=DAILY;COUNT=3',
+        'scheduledAt': '2026-10-25T01:00:00.000Z',
+        'target': {'kind': 'new'},
+        'status': 'active',
+      })!;
+      expect(task.recurring, isTrue);
+      expect(scheduleNextRuns(task, deviceZone: 'Asia/Shanghai'), [DateTime.parse('2026-10-25T01:00:00.000Z')]);
+      expect(scheduleRuleLine(task), '自定义');
+    });
+
     test('daily: the committed target, then the next days', () {
       final runs = scheduleNextRuns(
         _task('daily', time: '21:30:00.000', zone: 'Asia/Shanghai', next: DateTime.utc(2026, 10, 24, 13, 30)),

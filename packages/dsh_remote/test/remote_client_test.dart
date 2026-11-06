@@ -346,6 +346,80 @@ void main() {
       expect(host.rpcMethods, contains('harness.remote.transfer.read'));
     });
 
+    test('an oversized command result does not execute the command again', () async {
+      final target = await signInAndFindHost();
+      host.directResponseLimit = 4 * 1024 * 1024;
+      var executions = 0;
+      host.handlers['commands/execute'] = (args) {
+        expect(args['line'], '/report');
+        executions++;
+        return {
+          'ok': true,
+          'value': {
+            'commandId': 'cmd-$executions',
+            'result': {'kind': 'success', 'text': 'x' * (5 * 1024 * 1024)},
+          },
+        };
+      };
+      final client = await account.connectHost(target, muxOptions: fastMux);
+      // The Host has executed the command before its direct-response size check.
+      // The original error must remain visible, with no second submission.
+      Object? outcome;
+      try {
+        outcome = await client.executeCommand('session-1', '/report');
+      } catch (error) {
+        outcome = error;
+      }
+      expect(executions, 1);
+      expect(outcome, isA<DshRemoteException>().having((e) => e.code, 'code', 'RESPONSE_TOO_LARGE'));
+      expect(host.rpcMethods.where((m) => m.startsWith('harness.remote.transfer.')), isEmpty);
+    });
+
+    test('a normal command result still uses one direct call', () async {
+      final target = await signInAndFindHost();
+      host.directResponseLimit = 4 * 1024 * 1024;
+      var executions = 0;
+      host.handlers['commands/execute'] = (_) {
+        executions++;
+        return {
+          'ok': true,
+          'value': {
+            'commandId': 'cmd-$executions',
+            'result': {'kind': 'success', 'text': 'done'},
+          },
+        };
+      };
+      final client = await account.connectHost(target, muxOptions: fastMux);
+      final result = await client.executeCommand('session-1', '/report');
+      expect(result.success, isTrue);
+      expect(result.text, 'done');
+      expect(executions, 1);
+      expect(host.rpcMethods.where((m) => m.startsWith('harness.remote.transfer.')), isEmpty);
+    });
+
+    test('an initially large command request transfers and executes once', () async {
+      final target = await signInAndFindHost();
+      var executions = 0;
+      final line = '/report ${'x' * (3 * 1024 * 1024)}';
+      host.handlers['commands/execute'] = (args) {
+        expect(args['line'], line);
+        executions++;
+        return {
+          'ok': true,
+          'value': {
+            'commandId': 'cmd-$executions',
+            'result': {'kind': 'success', 'text': 'done'},
+          },
+        };
+      };
+      final client = await account.connectHost(target, muxOptions: fastMux);
+      final result = await client.executeCommand('session-1', line);
+      expect(result.success, isTrue);
+      expect(executions, 1);
+      expect(host.rpcMethods.where((m) => m == 'harness.remote.transfer.commit'), hasLength(1));
+      expect(host.rpcMethods.where((m) => m == 'harness.remote.call'), isEmpty);
+    });
+
     test('a dropped connection reconnects with a new generation and resyncs watch()', () async {
       final target = await signInAndFindHost();
       final states = <RemoteConnectionPhase>[];

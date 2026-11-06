@@ -87,6 +87,13 @@ Map<String, Object?> _entry(String id, String kind, Map<String, Object?> fields,
 
 final _daily = _entry('sch-1', 'daily', {'time': '09:00:00.000', 'timeZone': 'Asia/Shanghai'});
 
+final _rrule = {
+  ..._entry('sch-2', 'rrule', {'rrule': 'DTSTART;TZID=Asia/Shanghai:20261025T090000\nRRULE:FREQ=DAILY;COUNT=3'}),
+  'target': {'kind': 'new'},
+  'involvedSessionIds': ['s1'],
+  'updatedAt': '2026-10-24T00:00:00.000Z',
+};
+
 ScheduleTask _task(Map<String, Object?> entry) => ScheduleTask.fromJson(entry)!;
 
 void main() {
@@ -261,6 +268,32 @@ void main() {
   });
 
   group('edit', () {
+    testWidgets('a custom rule is shown as such and a new name leaves it alone', (tester) async {
+      carrier.handlers['schedule/edit'] = (args) {
+        final request = args['request']! as Map<String, Object?>;
+        return {..._rrule, ...(request['patch']! as Map<String, Object?>)};
+      };
+      usePhoneView(tester);
+      await tester.pumpWidget(
+        testApp(
+          ScheduleEditorPage(task: _task(_rrule), now: _now),
+          overrides: overrides(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('自定义'), findsOneWidget);
+      expect(find.text('仅一次'), findsNothing, reason: 'not the one-shot the builder would read it as');
+
+      await tester.enterText(find.widgetWithText(TextField, '日报提醒'), '周报提醒');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, '保存'));
+      await tester.pumpAndSettle();
+
+      final request = carrier.argsOf('schedule/edit').single['request']! as Map<String, Object?>;
+      expect(request['patch'], {'title': '周报提醒'}, reason: 'the rule is not sent back');
+    });
+
     testWidgets('switching to 工作日 sends a weekly change with the new name', (tester) async {
       carrier.handlers['schedule/update'] = (args) {
         final request = args['request']! as Map<String, Object?>;

@@ -227,7 +227,7 @@ class WallpaperRenderer {
     int outW,
     int outH,
     double sigmaPx,
-  ) {
+  ) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     final out = Rect.fromLTWH(0, 0, outW.toDouble(), outH.toDouble());
@@ -248,12 +248,17 @@ class WallpaperRenderer {
     // stretches the picture's own last pixels where it ends.
     if (sigmaPx > 0) paint.imageFilter = ui.ImageFilter.blur(sigmaX: sigmaPx, sigmaY: sigmaPx);
     canvas.drawImageRect(source, src, dst, paint);
-    return recorder.endRecording().toImage(outW, outH);
+    final recording = recorder.endRecording();
+    try {
+      return await recording.toImage(outW, outH);
+    } finally {
+      recording.dispose();
+    }
   }
 
   /// [soft] with the page's gradient laid over it through [mask] (one texel a cell, stretched
   /// smoothly over the cells).
-  static Future<ui.Image> _compose(ui.Image soft, ui.Image mask, VeilRequest r, WallpaperLook look) {
+  static Future<ui.Image> _compose(ui.Image soft, ui.Image mask, VeilRequest r, WallpaperLook look) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     final out = Rect.fromLTWH(0, 0, r.width.toDouble(), r.height.toDouble());
@@ -270,7 +275,12 @@ class WallpaperRenderer {
           ..filterQuality = FilterQuality.low,
       )
       ..restore();
-    return recorder.endRecording().toImage(r.width, r.height);
+    final recording = recorder.endRecording();
+    try {
+      return await recording.toImage(r.width, r.height);
+    } finally {
+      recording.dispose();
+    }
   }
 
   static Shader _veilShader(WallpaperLook look, Rect out) =>

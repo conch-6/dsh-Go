@@ -9,10 +9,11 @@ import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../l10n/l10n.dart';
 import 'connection_state.dart';
 
 /// The app's interface language, the target of `auto`.
-const reasoningUiLanguage = 'zh';
+String get reasoningUiLanguage => AppLocale.current.languageCode;
 
 /// `cotTranslation/limits` of the active host; null while the bundle is off,
 /// its provider can't take requests, or nothing is connected. Read only while
@@ -49,20 +50,29 @@ final reasoningTranslatorProvider = Provider<ReasoningTranslator?>((ref) {
 });
 
 /// Whether [text] is worth translating into [target]: reasoning already in
-/// the target script (Chinese into `zh`) is not.
+/// the target script (Chinese into `zh`, Latin into the other interface
+/// languages) is not.
 bool reasoningNeedsTranslation(String text, String target) {
-  if (!target.toLowerCase().startsWith('zh')) return true;
-  var cjk = 0;
-  for (final rune in text.runes) {
-    if (rune >= 0x4E00 && rune <= 0x9FFF || rune >= 0x3400 && rune <= 0x4DBF) {
-      cjk++;
-    }
-  }
-  // A Chinese character carries about as much as a Latin word; identifiers in
-  // Chinese reasoning don't make it foreign.
-  final words = RegExp('[A-Za-z]+').allMatches(text).length;
-  return words > cjk;
+  // Kana, Hangul, Cyrillic and other scripts belong to neither interface
+  // language. Keep an explicit translation choice for such text.
+  if (_reasoningOtherLetters.hasMatch(text)) return true;
+  // A Han character carries about as much as a Latin word: identifiers in
+  // Chinese reasoning don't make it foreign, nor a quoted Chinese word in
+  // English. This is only an offer heuristic: Han-only Japanese cannot be
+  // distinguished from Chinese by script alone.
+  final cjk = _reasoningHan.allMatches(text).length;
+  final words = _reasoningLatinWords.allMatches(text).length;
+  return target.toLowerCase().startsWith('zh') ? words > cjk : cjk > words;
 }
+
+final _reasoningHan = RegExp(r'\p{Script=Han}', unicode: true);
+final _reasoningLatinWords = RegExp(r'\p{Script=Latin}+', unicode: true);
+// A lone Greek letter (θ, α) or a letterlike symbol (µ, ℝ) is notation, not a
+// language; Greek words still are.
+final _reasoningOtherLetters = RegExp(
+  r'(?!\p{Script=Han}|\p{Script=Latin}|\p{Script=Greek}|\p{Script=Common})\p{L}|\p{Script=Greek}{2,}',
+  unicode: true,
+);
 
 /// Sequential paragraph translation for one reasoning block, as the official
 /// client does it: complete paragraphs (and request-sized pieces of long ones)

@@ -1,4 +1,4 @@
-// The official web client's slots (DSH 0.2.1-rc.4) and what the app does
+// The official web client's slots (DSH 0.2.2-rc.1) and what the app does
 // with each (docs/design/plugin-seams.md §3). Regenerate the table after a
 // DSH upgrade as the spec's appendix A describes; a slot the table does not
 // know is planned as [SeatPolicy.other].
@@ -6,7 +6,7 @@
 import 'package:flutter/foundation.dart';
 
 /// DSH release the table was extracted from.
-const slotCatalogRelease = '0.2.1-rc.4';
+const slotCatalogRelease = '0.2.2-rc.1';
 
 /// How many occupants a slot holds (`slots.zh.md`, Cardinality).
 enum SlotKind { single, list, keyed, chain }
@@ -229,6 +229,8 @@ SeatPolicy seatPolicyOf(String key) => slotCatalog[key]?.policy ?? SeatPolicy.ot
 
 /// Every slot of [slotCatalogRelease] plus the app's own surfaces.
 const Map<String, SlotInfo> slotCatalog = {
+  'contextMenu.content': SlotInfo('contextMenu.content', SlotKind.keyed, SlotScope.root, replacesShippedUi: true),
+  'contextMenu.icon': SlotInfo('contextMenu.icon', SlotKind.keyed, SlotScope.root, replacesShippedUi: true),
   'conversation.approval.detail': SlotInfo(
     'conversation.approval.detail',
     SlotKind.single,
@@ -271,12 +273,19 @@ const Map<String, SlotInfo> slotCatalog = {
     replacesShippedUi: true,
     policy: SeatPolicy.never,
   ),
+  'conversation.chat.text-interaction': SlotInfo(
+    'conversation.chat.text-interaction',
+    SlotKind.keyed,
+    SlotScope.session,
+    replacesShippedUi: true,
+  ),
   'conversation.chat.turnTail': SlotInfo(
     'conversation.chat.turnTail',
     SlotKind.list,
     SlotScope.session,
     policy: SeatPolicy.message,
   ),
+  'conversation.chat.user.before': SlotInfo('conversation.chat.user.before', SlotKind.chain, SlotScope.session),
   'conversation.chat.user.images': SlotInfo(
     'conversation.chat.user.images',
     SlotKind.single,
@@ -366,7 +375,6 @@ const Map<String, SlotInfo> slotCatalog = {
     'conversation.input.model.label',
     SlotKind.single,
     SlotScope.session,
-    replacesShippedUi: true,
     policy: SeatPolicy.never,
   ),
   'conversation.input.overlay': SlotInfo(
@@ -536,6 +544,7 @@ const Map<String, SlotInfo> slotCatalog = {
   'settings.onboarding': SlotInfo('settings.onboarding', SlotKind.list, SlotScope.root),
   'settings.plugins.tab': SlotInfo('settings.plugins.tab', SlotKind.list, SlotScope.root),
   'settings.section': SlotInfo('settings.section', SlotKind.list, SlotScope.root, policy: SeatPolicy.p0Page),
+  'settings.section.icon': SlotInfo('settings.section.icon', SlotKind.list, SlotScope.root),
   'settings.trigger': SlotInfo(
     'settings.trigger',
     SlotKind.single,
@@ -620,6 +629,7 @@ const Map<String, SlotInfo> slotCatalog = {
   'sidebar.right.tab.menu.item': SlotInfo('sidebar.right.tab.menu.item', SlotKind.list, SlotScope.session),
   'sidebar.session.row.hover': SlotInfo('sidebar.session.row.hover', SlotKind.list, SlotScope.root),
   'sidebar.session.row.leading': SlotInfo('sidebar.session.row.leading', SlotKind.list, SlotScope.root),
+  'sidebar.session.row.trailing': SlotInfo('sidebar.session.row.trailing', SlotKind.list, SlotScope.root),
   'sidebar.settings': SlotInfo(
     'sidebar.settings',
     SlotKind.single,

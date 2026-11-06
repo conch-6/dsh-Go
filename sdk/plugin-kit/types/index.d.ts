@@ -27,7 +27,7 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 export type { View, ViewNode, ViewBinding as Binding, Manifest, ContributionsIssue as Issue }
 export type Effect = InvokeEffect
 export type StaticEffect = InvokeStaticEffect
-export type Surface = 'composer.actions' | 'message.actions' | 'composer.strip' | 'panels'
+export type Surface = 'composer.actions' | 'message.actions' | 'composer.strip' | 'panels' | 'composer.tools' | 'session.actions' | 'turn.note'
 export type Component = ViewNode['type']
 export type Tone = Exclude<ViewTone, ViewBinding>
 export type Icon = Exclude<ViewIcon, ViewBinding>
@@ -37,9 +37,9 @@ export type Scope = InvokeScope
 
 /** What an invoke handler receives: the scope plus the content the manifest's `wants` asked for. */
 export interface InvokeScopeWithContext extends Scope {
-  /** composer.actions, with `wants: ["draft"]`: the composer text. */
+  /** composer.actions or composer.tools, with `wants: ["draft"]`: the composer text. */
   draft?: string
-  /** composer.actions, with `wants: ["clipboard"]`: the clipboard text. */
+  /** composer.actions or composer.tools, with `wants: ["clipboard"]`: the clipboard text. */
   clipboard?: string
   /** message.actions, with `wants: ["message"]`: the long-pressed reply's text. */
   message?: string
@@ -64,7 +64,7 @@ export interface Caps {
 export type FileSelection = InvokeFileSelection
 
 export interface InvokeEvent {
-  surface: 'composer.actions' | 'message.actions' | 'composer.strip' | 'panel'
+  surface: 'composer.actions' | 'message.actions' | 'composer.strip' | 'panel' | 'composer.tools' | 'session.actions'
   /** Contribution id (the panel id for taps inside a panel). */
   id: string
   /** Panel taps: the view's action id (button, list row, options, confirm). */
@@ -134,7 +134,13 @@ export interface DshGoService {
   onCapability(handler: (scope: Scope, event: CapabilityEvent) => void | Promise<void>): Cancel
   panel<D = Record<string, unknown>>(id: string, def: PanelDefinition<D>): Cancel
   strip(id: string, data: DataFunction<StreamStripData & {}> | { data: DataFunction<StreamStripData & {}> }): Cancel
+  /**
+   * Per-turn footnotes for a conversation: emit `{ [turnId]: { text, tone? } }` (≤ 16 characters each).
+   * Older bridges don't have this; to run on them, check `typeof ctx.dshGo.turnNote === 'function'` first.
+   */
+  turnNote(id: string, data: DataFunction<Record<string, { text: string; tone?: 'good' | 'warn' | 'bad' | 'info' | 'muted' }>>): Cancel
   on(id: string, handler: InvokeHandler): Cancel
+  /** A panel's view changed: the app reads it again. Strips and turn notes have no view. */
   refresh(id: string, scope?: Scope): void
   /** Read a copy of selected bytes during the awaited selection callback. Throws after completion/revocation. */
   readPickedFile(handle: string): Uint8Array

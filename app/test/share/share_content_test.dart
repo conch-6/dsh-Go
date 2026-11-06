@@ -133,7 +133,12 @@ void main() {
 
     test('a prompt\'s pictures count above its bubble', () {
       const bare = ShareQuestion('看看这张');
-      const withImages = ShareQuestion('看看这张', images: [ShareAttachmentImage('a', width: 1000, height: 1000)]);
+      const withImages = ShareQuestion(
+        '看看这张',
+        images: [
+          ShareAttachmentImage(ImageAttachment(attachmentId: 'a', mediaType: 'image/png', width: 1000, height: 1000)),
+        ],
+      );
       final plain =
           (layoutShareBlocks([bare, ShareAnswer(shareMarkdown(longAnswer()))]).blocks.last as ShareAnswer).markdown;
       final shorter =

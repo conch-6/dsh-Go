@@ -60,7 +60,9 @@
             "composer.actions",
             "message.actions",
             "composer.strip",
-            "panel"
+            "panel",
+            "composer.tools",
+            "session.actions"
           ]
         },
         "action": {

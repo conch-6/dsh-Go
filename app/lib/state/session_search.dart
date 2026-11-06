@@ -30,6 +30,16 @@ String foldForSearch(String text) {
   final out = List<int>.filled(units.length, 0);
   for (var i = 0; i < units.length; i++) {
     var c = units[i];
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < units.length) {
+      final next = units[i + 1];
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        // Cased letters above the BMP must be folded as a complete pair.
+        final lower = text.substring(i, i + 2).toLowerCase();
+        out[i] = lower.length == 2 ? lower.codeUnitAt(0) : c;
+        out[++i] = lower.length == 2 ? lower.codeUnitAt(1) : next;
+        continue;
+      }
+    }
     if (c >= 0xFF01 && c <= 0xFF5E) {
       c -= 0xFEE0;
     } else if (c == 0x3000) {
@@ -114,8 +124,12 @@ String? folderLabel(String? cwd) {
   return trimmed.substring(cut + 1);
 }
 
-/// Same search, ignoring case, width and whitespace runs.
-bool sameSearchQuery(String a, String b) => searchTerms(a).join(' ') == searchTerms(b).join(' ');
+/// Same Host phrase, ignoring case and whitespace runs. Unlike local matching,
+/// the Host distinguishes width and repeated words, so keep both in its key.
+bool sameSearchQuery(String a, String b) {
+  String key(String query) => query.toLowerCase().split(RegExp(r'\s+')).where((term) => term.isNotEmpty).join(' ');
+  return key(a) == key(b);
+}
 
 // ── Results ──────────────────────────────────────────────────────────────────
 
@@ -263,7 +277,11 @@ bool isContentSearchUnsupported(Object error) {
 }
 
 final sessionContentSearchProvider = Provider<SessionContentSearch?>((ref) {
-  final client = ref.watch(activeConnectionProvider.select((connection) => connection.value?.client));
+  final client = ref.watch(
+    activeConnectionProvider.select(
+      (connection) => connection.isLoading || connection.hasError ? null : connection.value?.client,
+    ),
+  );
   return client == null ? null : HostContentSearch(client);
 });
 

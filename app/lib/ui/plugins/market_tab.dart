@@ -130,7 +130,7 @@ class _MarketSliverState extends ConsumerState<MarketSliver> {
                   ),
                   for (final c in categories)
                     _CategoryChip(
-                      label: c.title.resolve('zh'),
+                      label: c.title.resolve(Localizations.localeOf(context).languageCode),
                       selected: filter.category == c.id,
                       onSelected: () =>
                           ref.read(marketFilterProvider.notifier).setCategory(filter.category == c.id ? null : c.id),

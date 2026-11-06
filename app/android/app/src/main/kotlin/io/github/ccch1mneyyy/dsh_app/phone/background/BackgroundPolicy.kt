@@ -22,24 +22,6 @@ object BackgroundPolicy {
         return intArrayOf(short, long)
     }
 
-    /** Runs [attempt] until it returns, [retry] refuses its failure, or [timeoutMs] has passed; then that failure is thrown. */
-    fun retryUntil(
-        timeoutMs: Long,
-        pauseMs: Long,
-        now: () -> Long,
-        pause: (Long) -> Unit,
-        retry: (Exception) -> Boolean,
-        attempt: () -> Unit,
-    ) {
-        val until = now() + timeoutMs
-        while (true) {
-            try { return attempt() } catch (e: Exception) {
-                if (!retry(e) || now() >= until) throw e
-            }
-            pause(pauseMs)
-        }
-    }
-
     /** True when this window must be handed back to the user rather than driven. */
     fun mustHandBack(secure: Boolean, locked: Boolean): Boolean = secure || locked
 

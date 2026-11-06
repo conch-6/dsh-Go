@@ -10,6 +10,7 @@ import '../../runtime/local_footprint.dart';
 import '../../state/engine_control.dart';
 import '../../state/safe_mode_state.dart';
 import '../../state/settings_state.dart';
+import '../common/app_dialog.dart';
 import '../common/page_hero.dart';
 import '../onboarding/local_install.dart';
 import '../safe_mode/engine_failure_card.dart';
@@ -189,7 +190,7 @@ class EngineActions extends ConsumerWidget {
   static const gap = 10.0;
 
   Future<void> _confirmStop(BuildContext context, WidgetRef ref) async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(context.l10n.phoneEngineStopTitle),
@@ -299,7 +300,7 @@ class _Capsule extends StatelessWidget {
             decoration: ShapeDecoration(color: bg, shape: const StadiumBorder()),
             child: InkWell(
               onTap: onTap,
-              splashFactory: NoSplash.splashFactory,
+              splashFactory: rowSplash(context),
               highlightColor: fg.withValues(alpha: 0.08),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -344,7 +345,7 @@ class _ResetRow extends ConsumerWidget {
 
   Future<void> _reset(BuildContext context, WidgetRef ref) async {
     final l10n = context.l10n;
-    final keep = await showDialog<ResetKeep>(context: context, builder: (_) => const _ResetDialog());
+    final keep = await showAppDialog<ResetKeep>(context: context, builder: (_) => const _ResetDialog());
     if (keep == null || !context.mounted) return;
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -410,6 +411,8 @@ class _ResetDialogState extends State<_ResetDialog> {
             (false, true) => l10n.phoneResetBodyWithUi,
             (false, false) => l10n.phoneResetBodyEverything,
           }),
+          const SizedBox(height: 8),
+          Text(l10n.phoneResetAlsoDeletes),
           const SizedBox(height: 12),
           _KeepOption(
             label: l10n.phoneEngineKeepUiSkills,

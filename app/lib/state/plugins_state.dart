@@ -83,7 +83,7 @@ Future<MarketFile> fetchMarketFile(Uri url, {String? etag}) async {
       return (text: null, etag: etag);
     }
     if (response.statusCode != HttpStatus.ok) {
-      await response.drain<void>();
+      // The error page is unused; finally closes this request's client.
       throw MarketFetchException(appL10n.stateMarketHttpError(response.statusCode), statusCode: response.statusCode);
     }
     final text = await response
@@ -119,7 +119,7 @@ final marketIndexFetcherProvider = Provider<MarketIndexFetcher>((ref) => fetchMa
 
 /// One market entry with what the list needs precomputed.
 class MarketEntry {
-  MarketEntry(this.plugin, {required this.webOnly, required this.categoryTitle, this.listing})
+  MarketEntry(this.plugin, {required this.webOnly, required this.categoryTitle, this.category, this.listing})
     : haystack = _haystack(plugin, listing),
       featured = plugin.labels.contains('featured');
 
@@ -129,6 +129,12 @@ class MarketEntry {
   final bool webOnly;
   final bool featured;
   final String? categoryTitle;
+
+  /// Keep the declaration so a cached entry can follow the current UI locale.
+  /// [categoryTitle] remains the fallback for callers with only a plain label.
+  final MarketDeclaration? category;
+
+  String? categoryTitleIn(String locale) => category?.title.resolve(locale) ?? categoryTitle;
 
   /// The official sidecar's word on the pinned version; null outside the
   /// official index (dshfind) or when the sidecar doesn't list it.
@@ -181,6 +187,7 @@ class MarketCatalog {
             plugin,
             webOnly: isWebOnlyPlugin(plugin, index),
             categoryTitle: index.categories[plugin.category]?.title.resolve('zh'),
+            category: index.categories[plugin.category],
             listing: listings[plugin.name]?.version == plugin.latest.version ? listings[plugin.name] : null,
           ),
       ];

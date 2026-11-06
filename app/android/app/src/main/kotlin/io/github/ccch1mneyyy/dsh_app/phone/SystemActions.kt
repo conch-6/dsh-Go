@@ -27,6 +27,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -373,11 +374,19 @@ class SystemActions(private val app: Context) : SystemApi {
         if (Looper.myLooper() == Looper.getMainLooper()) return runCatching(block).getOrNull()
         var out: T? = null
         val done = CountDownLatch(1)
-        main.post {
+        val task = FutureTask<Unit> {
             out = runCatching(block).getOrNull()
             done.countDown()
         }
-        done.await(3, TimeUnit.SECONDS)
+        main.post(task)
+        try {
+            if (!done.await(3, TimeUnit.SECONDS)) {
+                task.cancel(false) // Revoke queued work; an operation already running is not interrupted.
+            }
+        } catch (e: InterruptedException) {
+            task.cancel(false)
+            throw e
+        }
         return out
     }
 

@@ -41,8 +41,8 @@ class OverlayMachineTest {
         val d = m.decide(t0 + 20)
         assertEquals(Visibility.SHOWN, d.visibility)
         assertFalse(d.dimmed)
-        // Active: the only timer is the dim.
-        assertEquals(t0 + 20 + dim, d.wakeAt)
+        // Active work has no idle-dimming deadline.
+        assertNull(d.wakeAt)
     }
 
     @Test fun leavingTheAppWithNothingGoingOnShowsNothing() {
@@ -141,24 +141,22 @@ class OverlayMachineTest {
         }
     }
 
-    @Test fun dimsTenSecondsAfterTheLastTouchOrCall() {
-        val m = ready()
-        m.onPush(push("working"), t0)
+    @Test fun idleDimsTenSecondsAfterTheLastTouchOrCall() {
+        val m = ready().apply { alwaysShow = true }
         assertFalse(m.decide(t0).dimmed)
         assertFalse(m.decide(t0 + dim - 1).dimmed)
-        // Dimmed, it is still out (the overlay keeps it whole where it docks, at 60 %).
+        // Idle and dimmed, it is still out, whole where it docks at 60 %.
         val d = m.decide(t0 + dim)
         assertTrue(d.dimmed)
         assertEquals(Visibility.SHOWN, d.visibility)
         assertEquals(0.6f, OverlayMachine.DIM_ALPHA, 0f)
-        // A touch brings it back to full opacity.
         m.onTouch(t0 + dim + 100)
         assertFalse(m.decide(t0 + dim + 200).dimmed)
-        // A result or a request does too; a busy-state change doesn't.
+        // Repeating idle does not extend the deadline; a new call for attention does.
         assertTrue(m.decide(t0 + 3 * dim).dimmed)
-        m.onPush(push("thinking"), t0 + 3 * dim)
+        m.onPush(push("idle"), t0 + 3 * dim)
         assertTrue(m.decide(t0 + 3 * dim + 1).dimmed)
-        m.onPush(push("notification"), t0 + 3 * dim + 2)
+        m.onPush(push("attention", active = false), t0 + 3 * dim + 2)
         assertFalse(m.decide(t0 + 3 * dim + 3).dimmed)
         // So does a new bubble.
         assertTrue(m.decide(t0 + 5 * dim).dimmed)
@@ -210,8 +208,7 @@ class OverlayMachineTest {
     }
 
     @Test fun reappearingStartsLit() {
-        val m = ready()
-        m.onPush(push("working"), t0)
+        val m = ready().apply { alwaysShow = true }
         m.decide(t0)
         assertTrue(m.decide(t0 + dim).dimmed)
         m.onForeground(true, t0 + dim + 1)

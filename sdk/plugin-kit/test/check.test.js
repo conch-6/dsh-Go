@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -95,4 +96,27 @@ test('CLI: text, --json, stdin, exit codes', () => {
   assert.equal(stdin.status, 0)
   assert.match(stdin.stdout, /View - \(strip\): renders, 1 problem\(s\)/)
   assert.equal(cli(['/nonexistent/x.json']).status, 3)
+})
+
+test('--load waits for async data functions, and not for ever', async (t) => {
+  const plugin = (name, contributes, body) => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-go-check-async-'))
+    t.after(() => rmSync(dir, { recursive: true, force: true }))
+    mkdirSync(join(dir, 'lib'))
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, version: '1.0.0', type: 'module', main: 'lib/index.js', dshGo: { v: 1, contributes } }))
+    writeFileSync(join(dir, 'lib', 'index.js'), `export const name = '${name}'\nexport function apply(ctx) { ctx.inject(['dshGo'], (ctx) => { ${body} }) }\n`)
+    return dir
+  }
+  const failing = await checkPlugin(plugin('async-failing', { 'turn.note': [{ id: 'fails' }], 'composer.strip': [{ id: 'late' }] }, `
+    ctx.dshGo.turnNote('fails', async () => { await null; throw new Error('boom') })
+    ctx.dshGo.strip('late', async (scope, emit) => { await null; emit('not an object') })
+  `), { load: true })
+  const messages = failing.load.notes.map((n) => `${n.path} ${n.message}`).join('\n')
+  assert.match(messages, /\/runtime\/fails .*boom/)
+  assert.match(messages, /\/runtime\/late .*non-object/)
+  const stuck = await checkPlugin(plugin('async-stuck', { 'composer.strip': [{ id: 'never' }] }, `
+    ctx.dshGo.strip('never', () => new Promise(() => {}))
+  `), { load: true })
+  assert.equal(stuck.load.ok, true)
+  assert.deepEqual(stuck.load.notes, [])
 })

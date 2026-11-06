@@ -17,7 +17,22 @@ import 'transport.dart';
 /// for tests.
 typedef ControlSocketConnector = Future<WebSocket> Function(Uri url, Duration timeout);
 
-Future<WebSocket> _defaultConnector(Uri url, Duration timeout) => WebSocket.connect(url.toString()).timeout(timeout);
+Future<WebSocket> _defaultConnector(Uri url, Duration timeout) {
+  var expired = false;
+  // timeout does not cancel the opening Future. Keep ownership of a socket
+  // that arrives after the caller has already received the timeout.
+  final opening = WebSocket.connect(url.toString()).then((socket) {
+    if (expired) unawaited(socket.close(WebSocketStatus.normalClosure).catchError((Object _) {}));
+    return socket;
+  });
+  return opening.timeout(
+    timeout,
+    onTimeout: () {
+      expired = true;
+      throw TimeoutException('Future not completed', timeout);
+    },
+  );
+}
 
 /// Diagnostic hook: every Control frame in or out, and Relay data frames as
 /// `data-in` / `data-out` (tokens, tickets and ciphertext redacted).

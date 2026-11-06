@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.view.accessibility.AccessibilityManager
 import io.github.ccch1mneyyy.dsh_app.phone.AppVisibility
 import io.github.ccch1mneyyy.dsh_app.phone.ConfirmRequest
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneAction
@@ -34,7 +35,9 @@ import java.util.concurrent.Executors
  *        palette dark|light|auto (the overlay's palette against the system's, for contrast checks) |
  *        form ball|capsule|card (as the person's taps would) | press key=pause|stop|steer|done |
  *        unlocks none|system|secrets|all|real (lifted limits to show) | freeze true|false (no timer changes the form) |
- *        app [name] (the task's app for the card) | state (what the control shows)
+ *        app [name] (the task's app for the card) | state (what the control shows) | task (task lifetime) |
+ *        interrupt (requests feedback interruption from ALL bound accessibility services;
+ *        asynchronous: inspect the service callback log, then task; own test devices only)
  */
 internal class A11yProbe(private val service: PhoneA11yService, private val driver: MainScreenDriver, private val overlay: ControlOverlay) {
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "dsh-a11y-probe") }
@@ -93,6 +96,15 @@ internal class A11yProbe(private val service: PhoneA11yService, private val driv
                 "handoff" -> overlay.handoff(a.s("reason") ?: AppStrings.get(service, R.string.overlay_probe_password), (a.i("ms") ?: 60_000).toLong()).name
                 "injecttest" -> injectTest(a.b("relax"))
                 "guard" -> "lastGuardVerdict=${overlay.lastGuardVerdict}"
+                "task" -> PhoneControl.get(service).tasks.snapshot().toString()
+                "interrupt" -> {
+                    val before = PhoneControl.get(service).tasks.snapshot()
+                    val manager = service.getSystemService(AccessibilityManager::class.java)
+                    if (!manager.isEnabled) "requested=false accessibility-disabled before=$before" else {
+                        manager.interrupt()
+                        "requested=true callback=pending before=$before"
+                    }
+                }
                 "begin" -> PhoneControl.get(service).tasks.let { t -> t.begin(); t.snapshot().toMap().toString() }
                 "finish" -> finish(a.s("session"), a.s("host"), a.intent.getBooleanExtra("reopen", true))
                 "palette" -> {

@@ -237,6 +237,27 @@ class DshConnection {
     );
   }
 
+  /// The address to dial for [url] when it names this engine, by the address
+  /// this connection dials or the authority the engine knows itself by; null
+  /// for anything else. Only these may carry [cookie]. The result is always on
+  /// [baseUri], never the address in [url], and keeps [url]'s query as written.
+  /// Root-relative API paths inside this mount also name the engine; other
+  /// relative paths retain their workspace-file meaning in Markdown.
+  Uri? ownUri(String url) {
+    var uri = Uri.tryParse(url);
+    if (uri == null || uri.userInfo.isNotEmpty) return null;
+    if (!uri.hasScheme && !uri.hasAuthority) {
+      uri = uri.normalizePath();
+      if (!uri.path.startsWith('${baseUri.path}/api/')) return null;
+    } else {
+      if (uri.scheme != baseUri.scheme) return null;
+      final named = _authorityOf(uri);
+      if (named != authority && named != _authorityOf(baseUri)) return null;
+    }
+    if (!uri.path.startsWith('${baseUri.path}/')) return null;
+    return baseUri.replace(path: uri.path, query: uri.hasQuery ? uri.query : null);
+  }
+
   Uri webSocketUri(String path) {
     final http = resolve(path);
     return http.replace(scheme: http.scheme == 'https' ? 'wss' : 'ws');
@@ -349,9 +370,28 @@ class DshConnection {
     required int maxBytes,
     bool autoUncompress = false,
     Duration timeout = const Duration(seconds: 30),
+  }) => _getBounded(resolve(path, query), maxBytes: maxBytes, autoUncompress: autoUncompress, timeout: timeout);
+
+  /// [getBounded] for a whole [url] that [ownUri] accepts. Anything else is
+  /// refused here, before a socket opens, so the cookie can't leave this engine.
+  Future<DshHttpResponse> getBoundedOwn(
+    String url, {
+    required int maxBytes,
+    bool autoUncompress = false,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final uri = ownUri(url);
+    if (uri == null) throw ArgumentError.value(url, 'url', 'not this engine');
+    return _getBounded(uri, maxBytes: maxBytes, autoUncompress: autoUncompress, timeout: timeout);
+  }
+
+  Future<DshHttpResponse> _getBounded(
+    Uri uri, {
+    required int maxBytes,
+    required bool autoUncompress,
+    required Duration timeout,
   }) async {
     if (maxBytes < 1) throw ArgumentError.value(maxBytes, 'maxBytes');
-    final uri = resolve(path, query);
     final http = HttpClient()
       ..connectionTimeout = connectTimeout
       ..autoUncompress = autoUncompress;
@@ -470,9 +510,19 @@ class DshConnection {
     Duration? timeout,
   }) async {
     HttpClientRequest? request;
+    StreamIterator<List<int>>? responseBody;
+    TimeoutException? expired;
     Future<DshHttpResponse> run() async {
       request = await _http.openUrl(method, uri);
       final req = request!;
+      final deadlineError = expired;
+      if (deadlineError != null) {
+        // openUrl can finish after the exchange deadline (for example, while
+        // queued for a connection). Own the aborted request without sending it.
+        unawaited(req.done.then<void>((_) {}, onError: (Object _, StackTrace _) {}));
+        req.abort(deadlineError);
+        throw deadlineError;
+      }
       req.followRedirects = followRedirects;
       _applyHost(req.headers);
       if (cookie != null) req.headers.set(HttpHeaders.cookieHeader, cookie!.header);
@@ -485,9 +535,12 @@ class DshConnection {
       final response = await req.close();
       final setCookies = response.headers[HttpHeaders.setCookieHeader] ?? const <String>[];
       final builder = BytesBuilder(copy: false);
-      await for (final chunk in response) {
+      final chunks = responseBody = StreamIterator(response);
+      while (await chunks.moveNext()) {
+        final chunk = chunks.current;
         if (maxResponseBytes != null && builder.length + chunk.length > maxResponseBytes) {
           request?.abort();
+          await chunks.cancel();
           throw DshProtocolException('$method ${uri.path}: response exceeds $maxResponseBytes bytes');
         }
         builder.add(chunk);
@@ -505,6 +558,10 @@ class DshConnection {
     try {
       return await run().timeout(timeout ?? requestTimeout);
     } on TimeoutException catch (error) {
+      expired = error;
+      // Once headers arrived, request.abort no longer owns the response body.
+      // Start cancellation without extending the caller's total deadline.
+      unawaited(responseBody?.cancel().catchError((Object _) {}));
       request?.abort(error);
       throw DshTransportException('$method ${uri.path} timed out', error);
     } on SocketException catch (error) {

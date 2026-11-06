@@ -99,7 +99,16 @@ class PerformancePage extends ConsumerWidget {
               value: !defaults.reduceMotion,
               onChanged: (value) => unawaited(notifier.setAnimations(value)),
             ),
-            if (prefs.blur != null || prefs.animations != null)
+            // A finer choice inside animations: with them off there is nothing to choose.
+            if (!defaults.reduceMotion && !MediaQuery.disableAnimationsOf(context))
+              SettingsSwitchTile(
+                key: const ValueKey('performance-fluid'),
+                spot: Spots.fluidMotion,
+                subtitle: l10n.performanceFluidHint,
+                value: defaults.fluidMotion,
+                onChanged: (value) => unawaited(notifier.setFluid(value)),
+              ),
+            if (prefs.blur != null || prefs.animations != null || prefs.fluid != null)
               SettingsTile(
                 key: const ValueKey('performance-reset-effects'),
                 title: l10n.performanceFollowMode,

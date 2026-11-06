@@ -46,17 +46,29 @@ class _FlutterPeer implements remote.RemotePeerConnection {
   final remote.RemotePeerHandlers _handlers;
   RTCDataChannel? _channel;
   bool _closed = false;
+  Future<void>? _releasing;
 
   void _end(String reason) {
     if (_closed) return;
     _closed = true;
-    _handlers.onClosed(reason);
     unawaited(_release());
+    _handlers.onClosed(reason);
   }
 
   @override
   Future<String> createOffer(String channelLabel) async {
-    final channel = _channel = await _pc.createDataChannel(channelLabel, RTCDataChannelInit()..ordered = true);
+    _checkOpen();
+    final channel = await _pc.createDataChannel(channelLabel, RTCDataChannelInit()..ordered = true);
+    // Native creation can finish after dispose has already drained its channels.
+    if (_closed) {
+      try {
+        await channel.close();
+      } catch (_) {
+        // The peer may already be gone on the platform side.
+      }
+      _checkOpen();
+    }
+    _channel = channel;
     channel
       ..onDataChannelState = (state) {
         if (_closed) return;
@@ -67,8 +79,14 @@ class _FlutterPeer implements remote.RemotePeerConnection {
         if (!_closed) _handlers.onMessage(message.isBinary ? message.binary : utf8.encode(message.text));
       };
     final offer = await _pc.createOffer();
+    _checkOpen();
     await _pc.setLocalDescription(offer);
+    _checkOpen();
     return offer.sdp!;
+  }
+
+  void _checkOpen() {
+    if (_closed) throw StateError('The WebRTC peer is closed.');
   }
 
   @override
@@ -93,15 +111,21 @@ class _FlutterPeer implements remote.RemotePeerConnection {
   ];
 
   @override
-  Future<void> close() async {
-    if (_closed) return;
+  Future<void> close() {
     _closed = true;
-    await _release();
+    return _release();
   }
 
-  Future<void> _release() async {
+  Future<void> _release() => _releasing ??= _disposePeer();
+
+  Future<void> _disposePeer() async {
+    _channel = null;
     try {
       await _pc.close();
+    } catch (_) {
+      // A failed close must not skip disposal of the native event subscriptions.
+    }
+    try {
       await _pc.dispose();
     } catch (_) {
       // Already gone on the platform side.

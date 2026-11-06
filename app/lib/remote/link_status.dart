@@ -99,6 +99,10 @@ enum HostLinkErrorKind {
   other,
 }
 
+enum NetworkIpVersion { ipv4, ipv6 }
+
+enum NetworkIceProtocol { udp, tcp }
+
 /// Measured facts for one encrypted Remote connection. Missing values are unknown.
 class RemoteNetworkStatus {
   const RemoteNetworkStatus({
@@ -107,10 +111,16 @@ class RemoteNetworkStatus {
     this.roundTripTime,
     this.fallbackReason,
     this.observedAt,
+    this.localIpVersion,
+    this.remoteIpVersion,
+    this.iceProtocol,
   });
   final RelayPath? path;
   final Duration? connectDuration;
   final Duration? roundTripTime;
+  final NetworkIpVersion? localIpVersion;
+  final NetworkIpVersion? remoteIpVersion;
+  final NetworkIceProtocol? iceProtocol;
 
   /// A fixed code, never an arbitrary transport exception or candidate address.
   final String? fallbackReason;

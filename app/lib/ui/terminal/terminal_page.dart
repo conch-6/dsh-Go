@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/terminal_state.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/empty_view.dart';
 import '../common/feature_tile.dart';
@@ -101,7 +102,7 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
 
   Future<void> _rename(TerminalTab tab) async {
     final controller = TextEditingController(text: tab.title);
-    final next = await showDialog<String>(
+    final next = await showAppDialog<String>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(appL10n.botsTerminalRename),
@@ -126,7 +127,7 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
 
   Future<void> _close(TerminalTab tab) async {
     if (tab.phase == TerminalPhase.live && (tab.info?.running ?? false)) {
-      final ok = await showDialog<bool>(
+      final ok = await showAppDialog<bool>(
         context: context,
         builder: (dialog) => AlertDialog(
           title: Text(appL10n.botsTerminalCloseNamed(tab.title.isEmpty ? appL10n.botsTerminal : tab.title)),

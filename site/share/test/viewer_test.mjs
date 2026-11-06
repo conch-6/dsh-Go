@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
+import { runInNewContext } from 'node:vm';
 
 const here = dirname(fileURLToPath(import.meta.url));
 await import(join(here, '..', 'viewer.js'));
@@ -111,6 +112,46 @@ await test('newer files ask for an update', async () => {
   const body = { v: 2, kind: 'conversation', schema: 2, title: 'x', start: '2026-10-24T00:00:00Z', entries: [] };
   await assert.rejects(Promise.resolve().then(() => V.readConversation(body)), /newer/);
   assert.equal(V.errorText(new Error('newer')), '需要更新 dsh-go 才能打开');
+});
+
+
+function conversation(overrides = {}) {
+  return { v: 1, kind: 'conversation', schema: 1, title: 'Synthetic', start: '2026-10-24T00:00:00Z', entries: [], ...overrides };
+}
+
+await test('bounded conversation strings preserve Unicode pairs and their existing budgets', () => {
+  for (const [field, max] of [['title', 120], ['model', 80], ['app', 40]]) {
+    const split = 'a'.repeat(max - 2) + '😀x';
+    const actual = V.readConversation(conversation({ [field]: '  ' + split + '  ' }))[field];
+    assert.equal(actual, 'a'.repeat(max - 2) + '…', field);
+    assert.ok(actual.isWellFormed(), field);
+    assert.ok(actual.length <= max, field);
+    assert.equal(V.readConversation(conversation({ [field]: 'a'.repeat(max - 2) + '😀' }))[field], 'a'.repeat(max - 2) + '😀');
+    assert.equal(V.readConversation(conversation({ [field]: 'a'.repeat(max + 1) }))[field], 'a'.repeat(max - 1) + '…');
+  }
+  for (const [field, max] of [['text', 400000], ['source', 32]]) {
+    const actual = V.readConversation(conversation({ entries: [{ type: 'user', [field]: 'a'.repeat(max - 1) + '😀x' }] })).entries[0][field];
+    assert.equal(actual, 'a'.repeat(max - 1) + '…', field);
+    assert.ok(actual.isWellFormed(), field);
+    assert.ok(actual.length <= max + 1, field);
+  }
+  assert.equal(V.readConversation(conversation({ entries: [{ type: 'turn', end: 'a'.repeat(33) }] })).entries[0].end, 'a'.repeat(32) + '…');
+});
+
+await test('export filename keeps complete Unicode pairs after existing cleaning', () => {
+  // Expose the actual private function only in this VM, without a product API change.
+  const source = readFileSync(join(here, '..', 'viewer.js'), 'utf8');
+  const anchor = 'root.DshgoViewer = {';
+  assert.equal(source.split(anchor).length, 2);
+  const context = {};
+  runInNewContext(source.replace(anchor, anchor + '\n fileNameForTest: fileName,'), context);
+  const fileName = context.DshgoViewer.fileNameForTest;
+  assert.equal(fileName('a'.repeat(39) + '😀x'), 'a'.repeat(39) + '.dshgo');
+  assert.equal(fileName('a'.repeat(38) + '😀x'), 'a'.repeat(38) + '😀.dshgo');
+  assert.equal(fileName('a'.repeat(41)), 'a'.repeat(40) + '.dshgo');
+  assert.equal(fileName(' / ' + 'a'.repeat(39) + '😀x'), 'a'.repeat(39) + '.dshgo');
+  assert.equal(fileName(' /:*?"<>| '), '对话.dshgo');
+  assert.ok(fileName('a'.repeat(39) + '😀x').isWellFormed());
 });
 
 console.log(`${passed} passed`);

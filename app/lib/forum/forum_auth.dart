@@ -233,19 +233,24 @@ class ForumAuthController extends Notifier<ForumAuthState> {
 
   /// Re-reads the signed-in user (unread counts). A dead key signs out.
   Future<void> refreshUser() async {
+    final base = _base;
     final credentials = state.credentials;
     if (credentials == null || !state.signedIn) return;
     try {
       final user = await _api(credentials).currentUser();
-      if (ref.mounted && identical(state.credentials, credentials)) state = state.copyWith(user: user);
+      if (_isCurrent(base, credentials)) state = state.copyWith(user: user);
     } on ForumException catch (e) {
-      if (e.kind == ForumErrorKind.unauthorized ||
-          e.kind == ForumErrorKind.forbidden ||
-          e.kind == ForumErrorKind.notFound) {
+      if (_isCurrent(base, credentials) &&
+          (e.kind == ForumErrorKind.unauthorized ||
+              e.kind == ForumErrorKind.forbidden ||
+              e.kind == ForumErrorKind.notFound)) {
         await expire();
       }
     }
   }
+
+  bool _isCurrent(String base, ForumCredentials? credentials) =>
+      ref.mounted && base == _base && identical(state.credentials, credentials);
 
   /// The badge after reading notifications here.
   void setUnread(int count) {
@@ -255,8 +260,12 @@ class ForumAuthController extends Notifier<ForumAuthState> {
 
   /// The key stopped working (revoked on the web, expired): forget it.
   Future<void> expire() async {
-    await _store.delete(_Keys.session(_base));
-    if (ref.mounted) state = ForumAuthState(phase: ForumAuthPhase.signedOut, error: appL10n.stateSignInExpired);
+    final base = _base;
+    final credentials = state.credentials;
+    await _store.delete(_Keys.session(base));
+    if (_isCurrent(base, credentials)) {
+      state = ForumAuthState(phase: ForumAuthPhase.signedOut, error: appL10n.stateSignInExpired);
+    }
   }
 
   /// Revokes the key on the forum (best effort) and forgets it.

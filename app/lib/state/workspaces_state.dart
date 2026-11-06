@@ -474,6 +474,27 @@ int workspaceConversationCount(Workspace w, Iterable<String> visible) {
   return visible.where(members.contains).length;
 }
 
+/// The workspace used last: the one whose conversation moved most recently,
+/// else the one created last. The official client's `recentWorkspace`.
+Workspace? recentWorkspace(List<Workspace> workspaces, Iterable<SessionSummary> sessions) {
+  final updated = {for (final s in sessions) s.sessionId: s.updatedAt};
+  Workspace? recent;
+  DateTime? recentTime;
+  for (final w in workspaces) {
+    DateTime? latest;
+    for (final id in w.sessionIds) {
+      final at = updated[id];
+      if (at != null && (latest == null || at.isAfter(latest))) latest = at;
+    }
+    latest ??= w.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+    if (recentTime == null || latest.isAfter(recentTime)) {
+      recent = w;
+      recentTime = latest;
+    }
+  }
+  return recent;
+}
+
 /// The workspace a new conversation starts in: the drawer's selection,
 /// checked against the host's list once that has arrived.
 Future<String?> workspaceForNewSession(Ref ref) async {

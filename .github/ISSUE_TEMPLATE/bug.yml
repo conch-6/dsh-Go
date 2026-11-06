@@ -22,7 +22,7 @@ body:
     attributes:
       label: 机型 / 系统 / 引擎版本
       description: 引擎版本在 设置 › 本机引擎 里能看到
-      placeholder: 荣耀 Magic5 Pro / Android 16 / DSH 0.2.1-rc.4
+      placeholder: 荣耀 Magic5 Pro / Android 16 / DSH 0.2.2-rc.1
     validations:
       required: true
 

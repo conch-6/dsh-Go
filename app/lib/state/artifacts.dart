@@ -296,7 +296,7 @@ String? resolveWorkspaceLink(String url, {String? baseDir}) {
 /// Local file paths a reply links to (`[a](<out/a.pdf>)`, `![b](chart.png)`),
 /// in order, resolved against [cwd]; web links and anchors dropped.
 List<String> linkedPaths(String text, {String? cwd}) {
-  final out = <String>[];
+  final out = <String>{};
   for (final match in _linkTarget.allMatches(text)) {
     var target = (match.group(1) ?? match.group(2) ?? '').trim();
     final String? path;
@@ -317,9 +317,9 @@ List<String> linkedPaths(String text, {String? cwd}) {
     } else {
       path = resolveWorkspaceLink(target, baseDir: cwd);
     }
-    if (path != null && !out.contains(path)) out.add(path);
+    if (path != null) out.add(path);
   }
-  return out;
+  return out.toList();
 }
 
 class _TurnScan {

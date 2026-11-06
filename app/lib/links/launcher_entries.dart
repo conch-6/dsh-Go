@@ -1,6 +1,7 @@
 // The ways in from outside the app other than links and
 // shares — the launcher icon's long-press shortcuts (新对话, 语音输入, the
-// three latest conversations) and the Quick Settings tile (新对话). Native
+// three latest conversations), the Quick Settings tile (新对话), and a
+// screenshot taken explicitly from the floating pet. Native
 // side: android/.../shortcuts/ (EntryActivity, ShortcutsPlugin — MethodChannel
 // `dsh/shortcuts`) and tile/NewChatTileService.kt. Routed by
 // lib/ui/shell/system_entry_host.dart.
@@ -25,9 +26,11 @@ sealed class LauncherEntry {
     final sessionId = raw['sessionId'];
     final host = raw['host'];
     final text = raw['text'] is String ? raw['text'] as String : '';
+    final path = raw['path'];
     return switch (raw['kind']) {
       'new' => NewChatEntry(text: text),
       'voice' => NewChatEntry(voice: true, text: text),
+      'screenshot' when path is String && path.startsWith('/') && !path.contains('\u0000') => ScreenshotEntry(path),
       'chat' when sessionId is String && sessionId.isNotEmpty => OpenChatEntry(
         HostRef.decode(host is String ? host : null),
         sessionId,
@@ -44,6 +47,14 @@ class NewChatEntry extends LauncherEntry {
   final String text;
 
   final bool voice;
+}
+
+/// A pet screenshot in the app's private cache, authenticated by the native
+/// entry bridge. It is attached to a new-chat draft, never sent automatically.
+class ScreenshotEntry extends LauncherEntry {
+  const ScreenshotEntry(this.path);
+
+  final String path;
 }
 
 /// One of the recent conversations.

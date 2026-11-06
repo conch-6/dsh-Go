@@ -78,7 +78,7 @@ Future<List<DraftAttachment>> resendImages(
 /// thumbnails use ([sessionImageProvider]): an image on screen is not
 /// fetched again.
 Future<Uint8List> sessionImageBytes(WidgetRef ref, String sessionId, ImageAttachment image) async {
-  final provider = sessionImageProvider((sessionId, image.attachmentId));
+  final provider = sessionImageProvider((sessionId, image));
   // Held while it loads: a plain read of an auto-dispose provider could be
   // dropped before it answers.
   final hold = ref.listenManual(provider, (_, _) {});

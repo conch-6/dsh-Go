@@ -296,7 +296,7 @@ jq --arg base "${DL_BASE_URL}download/$VERSION/" '.assets |= with_entries(.value
 # Which page is live: /download answers once DOWNLOAD_ACCESS=public.
 MODE=unknown
 if [[ $DRY == 0 && $VERIFY == 1 && $LATEST == 1 ]]; then
-  case "$(curl -sS -o /dev/null -w '%{http_code}' "$ORIGIN/download" || echo 000)" in
+  case "$(curl -sS --retry 5 --retry-all-errors -o /dev/null -w '%{http_code}' "$ORIGIN/download" || echo 000)" in
     200) MODE=public ;;
     404) MODE=key ;;
     *) die "can't tell whether $ORIGIN/download is up" ;;
@@ -310,7 +310,7 @@ step "1/5 R2 $BUCKET/beta/$VERSION/$([[ $DL_ON == 1 ]] && echo ", $DL_BUCKET/dow
 # Already up? Same size: skip it (step 4 still checks the bytes). Another size: refuse.
 up() { # URL NAME [curl args…]
   local code length
-  read -r code length < <(curl -sS --retry 3 -o /dev/null -I "${@:3}" -w '%{http_code} %header{content-length}\n' "$1" || echo "000 -")
+  read -r code length < <(curl -sS --retry 5 --retry-all-errors -o /dev/null -I "${@:3}" -w '%{http_code} %header{content-length}\n' "$1" || echo "000 -")
   [[ "$code" == 200 ]] || return 1
   [[ "$length" == "${SIZE[$2]}" ]] || die "$1 is already up with another size; publish a new version"
   note "already there: $2"
@@ -470,12 +470,17 @@ check() { # LABEL NAME (curl args…) → dies unless the bytes match dist
   local label=$1 name=$2 got got_size attempt
   shift 2
   if [[ $DRY == 1 ]]; then plan "download $label $name, expect ${SIZE[$name]} bytes, sha256 ${SHA[$name]:0:12}…"; return; fi
-  # Whole downloads, retried here: curl's own --retry appends the retried body to what it
-  # already sent down the pipe, so a dropped connection looked like a wrong file.
-  for attempt in 1 2 3 4; do
-    read -r got got_size < <(curl -fsS "$@" | hash_stream || echo "- -")
+  # To a file that resumes: on a line that drops connections, a 194 MB file never made it
+  # in one go. HTTP/1.1 because the HTTP/2 stream resets came with the same drops.
+  local part="$TMP/check.part"
+  rm -f "$part"
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    curl -fsS --http1.1 -C - --speed-time 60 --speed-limit 1000 -o "$part" "$@" || true
+    read -r got got_size < <(hash_stream <"$part" 2>/dev/null || echo "- -")
     [[ "$got" == "${SHA[$name]}" && "$got_size" == "${SIZE[$name]}" ]] && break
-    [[ $attempt == 4 ]] && die "$label $name doesn't match ($got_size bytes, sha256 $got)"
+    [[ $attempt == 10 ]] && die "$label $name doesn't match ($got_size bytes, sha256 $got)"
+    # All of it and still wrong: resuming can't help.
+    [[ "$got_size" =~ ^[0-9]+$ ]] && ((got_size >= SIZE[$name])) && rm -f "$part"
     echo "  $label $name: got $got_size bytes, downloading again"
     sleep 5
   done

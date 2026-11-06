@@ -243,7 +243,7 @@ class _VendorRowState extends State<_VendorRow> {
           expanded: _open,
           child: InkWell(
             onTap: () => setState(() => _open = !_open),
-            splashFactory: NoSplash.splashFactory,
+            splashFactory: rowSplash(context),
             highlightColor: scheme.onSurface.withValues(alpha: 0.05),
             child: ConstrainedBox(
               constraints: const BoxConstraints(minHeight: SettingsMetrics.rowHeight),

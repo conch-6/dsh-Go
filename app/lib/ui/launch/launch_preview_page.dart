@@ -14,6 +14,7 @@ import 'launch_overlay.dart';
 /// Shows the launch screen once; [custom] null previews the default.
 Future<void> showLaunchPreview(BuildContext context, {CustomLaunch? custom, LaunchChannel? channel}) async {
   final navigator = Navigator.of(context);
+  final fadeIn = AppMotion.of(context, AppMotion.quick);
   final size = MediaQuery.sizeOf(context);
   final dpr = MediaQuery.devicePixelRatioOf(context);
   final snapshot =
@@ -45,7 +46,7 @@ Future<void> showLaunchPreview(BuildContext context, {CustomLaunch? custom, Laun
   await navigator.push(
     PageRouteBuilder<void>(
       opaque: true,
-      transitionDuration: AppMotion.quick,
+      transitionDuration: fadeIn,
       reverseTransitionDuration: Duration.zero,
       pageBuilder: (context, _, _) => LaunchPreviewPage(controller: controller),
       transitionsBuilder: (context, animation, _, child) => FadeTransition(opacity: animation, child: child),

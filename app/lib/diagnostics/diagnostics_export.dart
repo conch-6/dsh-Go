@@ -38,16 +38,20 @@ class DiagnosticsExporter {
 
   /// Builds the bundle into the app cache (`diagnostics/`, older bundles
   /// replaced) and returns it.
-  Future<File> build({void Function(DiagnosticsStep step)? onStep}) async {
+  Future<File> build({void Function(DiagnosticsStep step)? onStep}) => _build(onStep: onStep);
+
+  Future<File> _build({Directory? target, void Function(DiagnosticsStep step)? onStep}) async {
     final at = _clock();
     onStep?.call(DiagnosticsStep.collecting);
     final snapshot = await collect(at);
     onStep?.call(DiagnosticsStep.packing);
     final bytes = DiagnosticsBundle.build(snapshot);
-    final dir = Directory('${(await _cacheRoot()).path}/diagnostics');
+    final dir = target ?? Directory('${(await _cacheRoot()).path}/diagnostics');
     await dir.create(recursive: true);
-    for (final old in dir.listSync().whereType<File>()) {
-      if (old.path.endsWith('.zip')) old.deleteSync();
+    if (target == null) {
+      for (final old in dir.listSync().whereType<File>()) {
+        if (old.path.endsWith('.zip')) old.deleteSync();
+      }
     }
     final file = File('${dir.path}/${DiagnosticsBundle.fileName(at)}');
     await file.writeAsBytes(bytes, flush: true);
@@ -73,9 +77,21 @@ class DiagnosticsExporter {
   /// A fresh bundle in the phone's Downloads; returns where
   /// (`Download/DSH-Go/dsh-go-diagnostics-….zip`).
   Future<String> saveToDownloads({void Function(DiagnosticsStep step)? onStep}) async {
-    final file = await build(onStep: onStep);
-    onStep?.call(DiagnosticsStep.saving);
-    return files.saveToDownloads(file.path, name: file.uri.pathSegments.last, mime: DiagnosticsBundle.mime);
+    final dir = await Directory('${(await _cacheRoot()).path}/diagnostics').create(recursive: true);
+    // Another widget may build a bundle while the native worker still reads ours.
+    final operation = await dir.createTemp('save-');
+    try {
+      final file = await _build(target: operation, onStep: onStep);
+      onStep?.call(DiagnosticsStep.saving);
+      return await files.saveToDownloads(file.path, name: file.uri.pathSegments.last, mime: DiagnosticsBundle.mime);
+    } finally {
+      // The native reply follows the copy; cleanup cannot replace its outcome.
+      try {
+        await operation.delete(recursive: true);
+      } catch (_) {
+        // Failed cleanup leaves this operation in the temporary cache.
+      }
+    }
   }
 }
 

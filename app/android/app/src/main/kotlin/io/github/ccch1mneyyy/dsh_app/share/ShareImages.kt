@@ -17,7 +17,7 @@ import kotlin.math.roundToInt
  * Shared photos, sized like the composer's own picker (lib/state/attachments.dart
  * `DeviceAttachmentPicker`): phone photos are 12–50 MP, the model gains nothing past ~2.5k on
  * the long side, and the upload shrinks tenfold. Re-encoding also turns HEIC into JPEG and
- * applies the EXIF rotation.
+ * applies the EXIF orientation.
  *
  * PNG / JPEG / WebP that already fit are left as they are (screenshots stay lossless); GIFs
  * are never touched (animation).
@@ -81,7 +81,7 @@ internal object ShareImages {
         }
     }
 
-    /** API 26–27: BitmapFactory with sampling, then the EXIF rotation by hand. */
+    /** API 26–27: BitmapFactory with sampling, then the EXIF orientation by hand. */
     private fun decodeLegacy(resolver: ContentResolver, uri: Uri): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         // Bounds only: decodeStream returns null here by design.
@@ -91,11 +91,15 @@ internal object ShareImages {
         val height = bounds.outHeight
         if (width <= 0 || height <= 0) return null
         val (w, h) = fit(width, height)
-        val rotation = try {
-            resolver.openInputStream(uri)?.use { exifRotation(ExifInterface(it)) } ?: 0
+        val orientation = try {
+            resolver.openInputStream(uri)?.use {
+                ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            } ?: ExifInterface.ORIENTATION_NORMAL
         } catch (_: Exception) {
-            0
+            ExifInterface.ORIENTATION_NORMAL
         }
+        val rotation = exifRotation(orientation)
+        // Keep the existing passthrough: a copied original retains its mirror tag.
         if (bounds.outMimeType in keepAsIs && w == width && h == height && rotation == 0) return null
         var sample = 1
         while (max(width, height) / (sample * 2) >= MAX_SIDE) sample *= 2
@@ -105,6 +109,19 @@ internal object ShareImages {
             val (fw, fh) = fit(decoded.width, decoded.height)
             postScale(fw.toFloat() / decoded.width, fh.toFloat() / decoded.height)
             if (rotation != 0) postRotate(rotation.toFloat())
+            when (orientation) {
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> postScale(-1f, 1f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> postScale(1f, -1f)
+                ExifInterface.ORIENTATION_TRANSPOSE -> {
+                    postRotate(90f)
+                    postScale(-1f, 1f)
+                }
+                ExifInterface.ORIENTATION_TRANSVERSE -> {
+                    postRotate(270f)
+                    postScale(-1f, 1f)
+                }
+                else -> Unit
+            }
         }
         if (matrix.isIdentity) return decoded
         val transformed = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
@@ -112,8 +129,8 @@ internal object ShareImages {
         return transformed
     }
 
-    private fun exifRotation(exif: ExifInterface): Int =
-        when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+    private fun exifRotation(orientation: Int): Int =
+        when (orientation) {
             ExifInterface.ORIENTATION_ROTATE_90 -> 90
             ExifInterface.ORIENTATION_ROTATE_180 -> 180
             ExifInterface.ORIENTATION_ROTATE_270 -> 270

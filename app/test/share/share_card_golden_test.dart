@@ -12,6 +12,7 @@ import 'package:dsh_app/ui/share/qr_code.dart';
 import 'package:dsh_app/ui/share/share_card.dart';
 import 'package:dsh_app/ui/share/share_content.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
+import 'package:dsh_client/dsh_client.dart' show ImageAttachment;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';
@@ -100,8 +101,12 @@ void main() {
             ShareQuestion(
               '这两张拍得有点灰，帮我调一下',
               images: [
-                ShareAttachmentImage('p0', width: 1200, height: 900),
-                ShareAttachmentImage('p1', width: 900, height: 1200),
+                ShareAttachmentImage(
+                  ImageAttachment(attachmentId: 'p0', mediaType: 'image/png', width: 1200, height: 900),
+                ),
+                ShareAttachmentImage(
+                  ImageAttachment(attachmentId: 'p1', mediaType: 'image/png', width: 900, height: 1200),
+                ),
               ],
             ),
             ShareAnswer(shareMarkdown(answer, images: true)),
@@ -129,7 +134,14 @@ void main() {
           title: '旅行照片挑选',
           sessionId: 's1',
           blocks: [
-            const ShareQuestion('挑几张适合做封面的', images: [ShareAttachmentImage('p3', width: 1000, height: 1000)]),
+            const ShareQuestion(
+              '挑几张适合做封面的',
+              images: [
+                ShareAttachmentImage(
+                  ImageAttachment(attachmentId: 'p3', mediaType: 'image/png', width: 1000, height: 1000),
+                ),
+              ],
+            ),
             ShareAnswer(shareMarkdown('这几张构图最稳：\n\n${[for (final b in p) dataImage(b)].join('\n')}', images: true)),
           ],
           model: 'deepseek-v4-pro',
@@ -151,7 +163,14 @@ void main() {
           title: '远程主机上的截图',
           sessionId: 's1',
           blocks: [
-            const ShareQuestion('这个报错什么意思', images: [ShareAttachmentImage('gone', width: 1080, height: 2340)]),
+            const ShareQuestion(
+              '这个报错什么意思',
+              images: [
+                ShareAttachmentImage(
+                  ImageAttachment(attachmentId: 'gone', mediaType: 'image/png', width: 1080, height: 2340),
+                ),
+              ],
+            ),
             ShareAnswer(
               shareMarkdown(
                 '截图里是权限错误：\n\n![](javascript:alert(1))\n\n两张都已过期：\n\n${dataImage(p[0])}\n![](data:image/png;base64,AAAA)',
@@ -185,7 +204,14 @@ void main() {
                 images: true,
               ),
             ),
-            const ShareQuestion('拍了一张断桥的，帮我看看构图', images: [ShareAttachmentImage('p0', width: 1200, height: 900)]),
+            const ShareQuestion(
+              '拍了一张断桥的，帮我看看构图',
+              images: [
+                ShareAttachmentImage(
+                  ImageAttachment(attachmentId: 'p0', mediaType: 'image/png', width: 1200, height: 900),
+                ),
+              ],
+            ),
             ShareAnswer(shareMarkdown('地平线压在三分线上，很稳。右侧的树枝可以裁掉一点，让桥成为唯一的主体：\n\n${dataImage(p[2])}', images: true)),
             const ShareQuestion('晚上住哪儿方便？'),
             const ShareAnswer('住**龙翔桥**附近：地铁一号线直达，步行到湖边十分钟，晚上吃饭的选择也多。'),

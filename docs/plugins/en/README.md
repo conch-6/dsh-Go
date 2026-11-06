@@ -2,6 +2,8 @@
 
 Create, validate, install and publish a plugin from an empty directory: [From zero to the market](from-zero.md).
 
+**Not sure where to start?** Read [Choose a path](choose-path.md): an existing plugin, an existing web interface, or writing for dsh-go from scratch. For what you can rely on, read the [stability promises](stability.md).
+
 [中文](../README.md)
 
 The dsh-go app can show a DSH plugin's content with native UI: tool results as cards, capsules above the composer, items in a reply's menu, a status strip and panels. The plugin stays an ordinary DSH plugin (an npm package whose logic runs in the engine); it only hands the app a **declaration** and some **JSON views**. The app draws them with its own components and never runs plugin code.
@@ -11,6 +13,7 @@ The dsh-go app can show a DSH plugin's content with native UI: tool results as c
 | A tool's result as a native card | A view in the tool's `presentationMeta` — 5 minutes | [Quick start](quickstart.md) |
 | To see what is native already | Commands, skills, settings forms, dsh-ui cards — no app code | [Native for free](native-for-free.md) |
 | Capsules, reply menu items, a strip, panels | The `dshGo` manifest in `package.json` + `ctx.dshGo` | [Slots](slots.md) |
+| Plus panel tools, chat actions, turn notes | The same manifest, newer places | [Slot reference](slots.md#newer-places) |
 | What a view can hold | v1 / v2 components, bindings, limits | [Components](components.md) |
 | Native inputs and forms | v2 inputs, structured content, two-way binding, bounded formulas | [Inputs and forms](inputs.md) |
 | What a tap can do | 8 effects, the 3 s window, deferred results | [Actions and effects](actions.md) |

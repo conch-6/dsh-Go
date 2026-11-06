@@ -141,14 +141,14 @@ void main() {
   });
 
   /// The composer's keys as end caps (the rule of `composer_geometry_test.dart`):
-  /// the left key mirrors send, same 40 circle, same gap to every edge.
+  /// the left key mirrors send, same 36 circle, same gap to every edge.
   void expectEndCaps(WidgetTester tester, Rect left) {
     final capsule = tester.getRect(find.byType(Composer));
     final send = tester.getRect(
       find.ancestor(of: find.byIcon(AppIcons.send), matching: find.byType(AnimatedContainer)).first,
     );
     final side = left.left - capsule.left;
-    expect(left.size, const Size(40, 40));
+    expect(left.size, const Size(36, 36));
     expect(send.size, left.size);
     near(capsule.right - send.right, side, 'right gap vs left gap');
     for (final key in [left, send]) {
@@ -177,10 +177,10 @@ void main() {
     final send = tester.getRect(
       find.ancestor(of: find.byIcon(AppIcons.send), matching: find.byType(AnimatedContainer)).first,
     );
-    expect(send.size, const Size(40, 40));
-    near(capsule.right - send.right, 8, 'send right');
-    near(send.top - capsule.top, 8, 'send top');
-    near(capsule.bottom - send.bottom, 8, 'send bottom');
+    expect(send.size, const Size(36, 36));
+    near(capsule.right - send.right, 6, 'send right');
+    near(send.top - capsule.top, 6, 'send top');
+    near(capsule.bottom - send.bottom, 6, 'send bottom');
   });
 
   testWidgets('new rows align with the avatar rows', (tester) async {

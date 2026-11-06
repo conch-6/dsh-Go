@@ -41,7 +41,7 @@ export class FakeBucket {
       if (r.suffix !== undefined) bytes = bytes.slice(Math.max(0, bytes.byteLength - r.suffix));
       else {
         const start = r.offset ?? 0;
-        if (start >= o.bytes.byteLength) throw new Error('range not satisfiable');
+        if (start >= o.bytes.byteLength) throw new Error('get: The requested range is not satisfiable. (10039)');
         bytes = bytes.slice(start, r.length !== undefined ? start + r.length : undefined);
       }
     }
@@ -56,7 +56,9 @@ export class FakeBucket {
     };
   }
 
-  async put(key: string, value: Uint8Array | string, options: { customMetadata?: Record<string, string>; httpMetadata?: { contentType?: string; cacheControl?: string } }) {
+  async put(key: string, value: Uint8Array | string, options: { onlyIf?: Headers; customMetadata?: Record<string, string>; httpMetadata?: { contentType?: string; cacheControl?: string } }) {
+    // The create-once condition used by uploads; other R2 conditions are not modeled.
+    if (options.onlyIf?.get('If-None-Match') === '*' && this.objects.has(key)) return null;
     const stored: Stored = {
       bytes: typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value),
       uploaded: this.now(),

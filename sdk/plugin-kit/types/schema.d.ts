@@ -542,10 +542,24 @@ export interface ManifestPanel {
   /** <= 16 characters */
   title: ManifestText
   icon?: ManifestIconName
-  placement?: Array<"session.tab" | "features" | "chat.panel">
+  placement?: Array<"session.tab" | "features" | "chat.panel" | "plugin">
   /** Static view JSON file (<= 32 KiB, view.schema.json). */
   view?: ManifestRelativePath
   micro?: ManifestId
+  /** How the panel opens: a pushed page (default) or a sheet. */
+  presentation?: "page" | "sheet"
+}
+
+export interface ManifestTool {
+  id: ManifestId
+  /** <= 8 characters */
+  label: ManifestText
+  icon?: ManifestIconName
+  /** Static effect(s) executed by the app without invoke. */
+  effect?: InvokeStaticEffect | InvokeStaticEffect[]
+  requires?: Array<"audio" | "voice" | "micro" | "overlay" | "files">
+  /** Opens this plugin's panel. Write panel or effect, not both. */
+  panel?: ManifestId
 }
 
 /** dsh-go native plugin manifest (package.json "dshGo"), protocol v1 */
@@ -557,7 +571,7 @@ export interface Manifest {
   /** Display name, <= 24 characters after locale resolution. */
   title?: ManifestText
   icon?: ManifestIconName
-  /** Content attached to taps: draft/clipboard on composer.actions, message on message.actions. */
+  /** Content attached to taps: draft/clipboard on composer.actions and composer.tools, message on message.actions. */
   wants?: Array<"draft" | "clipboard" | "message">
   /** Image directory served by GET /dsh-go/v1/assets/<pkg>/<path>. */
   assets?: ManifestRelativePath
@@ -573,6 +587,11 @@ export interface Manifest {
       id: ManifestId
     }[]
     overlays?: Record<string, unknown>[]
+    "composer.tools"?: ManifestTool[]
+    "session.actions"?: ManifestAction[]
+    "turn.note"?: {
+      id: ManifestId
+    }[]
   }
   capabilities?: Array<"audio" | "voice" | "micro" | "overlay" | "files">
 }
@@ -596,7 +615,7 @@ export interface InvokeRequest {
   v: 1
   pkg: InvokePkg
   id: InvokeId
-  surface: "composer.actions" | "message.actions" | "composer.strip" | "panel"
+  surface: "composer.actions" | "message.actions" | "composer.strip" | "panel" | "composer.tools" | "session.actions"
   /** panel only */
   action?: string
   /** panel only; any JSON, <= 4 KiB serialized */
@@ -813,6 +832,12 @@ export interface ContributionsPlugin {
       channel?: ManifestId
       text?: string
     }[]
+    "composer.tools"?: ContributionsAction[]
+    "session.actions"?: ContributionsAction[]
+    "turn.note"?: {
+      id: ContributionsId
+      ready: boolean
+    }[]
   }
   issues: ContributionsIssue[]
   capabilities?: Array<"audio" | "voice" | "micro" | "overlay" | "files">
@@ -844,10 +869,11 @@ export interface ContributionsPanel {
   id: ContributionsId
   title: string
   icon?: ContributionsIconName
-  placement: Array<"session.tab" | "features" | "chat.panel">
+  placement: Array<"session.tab" | "features" | "chat.panel" | "plugin">
   ready: boolean
   live: boolean
   micro?: ManifestId
+  presentation?: "page" | "sheet"
 }
 
 export interface ContributionsIssue {
@@ -894,6 +920,9 @@ export interface ContributionsLimits {
     "message.actions"?: 2
     "composer.strip"?: 1
     panels?: 4
+    "composer.tools"?: 2
+    "session.actions"?: 2
+    "turn.note"?: 1
   }
   textChars?: {
     pluginTitle?: 24
@@ -902,6 +931,9 @@ export interface ContributionsLimits {
     panelTitle?: 16
     stripText?: 24
     toast?: 40
+    composerTool?: 8
+    sessionAction?: 12
+    turnNote?: 16
   }
   viewBytes?: 32768
   viewNodes?: 120
@@ -949,6 +981,7 @@ export interface ContributionsLimits {
   pendingMaxMs?: 60000
   pendingLabelChars?: 16
   pendingEarlyResultMs?: 5000
+  turnNotesPerFeed?: 64
 }
 
 /** GET /dsh-go/v1/contributions response, protocol v1 */

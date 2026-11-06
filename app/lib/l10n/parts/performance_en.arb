@@ -12,6 +12,8 @@
   "performanceBlur": "Glass blur",
   "performanceAnimations": "Interface animation",
   "performanceSystemMotion": "Also follows the system's remove animations setting",
+  "performanceFluid": "Fluid motion",
+  "performanceFluidHint": "Springy releases, a soft glow under your finger, cards that open into pages. Costs almost no battery",
   "performanceFollowMode": "Follow the performance mode",
   "performanceRemoteHint": "Connect to a computer or server to reduce work on this phone",
   "performanceRefresh": "Refresh rate",

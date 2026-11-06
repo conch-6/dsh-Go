@@ -149,8 +149,6 @@ class MentionPickerController extends ChangeNotifier {
     }
     if (previous == null || previous.start != next.start) {
       _dismissedAt = null;
-      _sections = const [];
-      _highlight = -1;
     }
     if (previous != null &&
         previous.start == next.start &&
@@ -161,6 +159,10 @@ class MentionPickerController extends ChangeNotifier {
     }
     // Closed with Esc: nothing to look up until the next `@`.
     if (_dismissedAt == next.start) return;
+    // The old rows belong to the previous query, including while typing
+    // is debounced or the next lookup is still pending.
+    _sections = const [];
+    _highlight = -1;
     _loading = true;
     _timer?.cancel();
     final generation = ++_generation;
@@ -176,28 +178,32 @@ class MentionPickerController extends ChangeNotifier {
   Future<void> _fetch(MentionQuery q, int generation) async {
     final src = source();
     final sid = sessionId();
-    List<MentionSection> sections;
+    ({List<MentionSection> sections, String? cwd}) result;
     try {
-      sections = await _lookup(src, sid, q);
+      result = await _lookup(src, sid, q);
     } catch (_) {
-      sections = const [];
+      result = (sections: const <MentionSection>[], cwd: null);
     }
     if (generation != _generation) return;
-    _sections = sections;
+    _sections = result.sections;
+    _lastCwd = result.cwd;
     _loading = false;
     final count = items.length;
     _highlight = q.query.isEmpty || count == 0 ? -1 : 0;
     notifyListeners();
   }
 
-  Future<List<MentionSection>> _lookup(MentionSource? src, String? sid, MentionQuery q) async {
+  Future<({List<MentionSection> sections, String? cwd})> _lookup(
+    MentionSource? src,
+    String? sid,
+    MentionQuery q,
+  ) async {
     final now = _clock();
-    if (src == null) return const [];
+    if (src == null) return (sections: const <MentionSection>[], cwd: null);
     if (sid == null) {
-      _lastCwd = null;
       // A new chat has no workspace yet: other conversations only, built
       // from the local list.
-      if (q.pathOnly) return const [];
+      if (q.pathOnly) return (sections: const <MentionSection>[], cwd: null);
       final rows = <(MentionItem, double, DateTime)>[];
       for (final s in await _local()) {
         final title = _titleOf(s);
@@ -218,7 +224,17 @@ class MentionPickerController extends ChangeNotifier {
       }
       final conversations = _rank(rows, q.query.isEmpty);
       MentionLabels.addAll(conversations.map((i) => i.label));
-      return _assemble(q, files: const [], subagents: const [], conversations: conversations, cwd: null, sid: null);
+      return (
+        sections: _assemble(
+          q,
+          files: const [],
+          subagents: const [],
+          conversations: conversations,
+          cwd: null,
+          sid: null,
+        ),
+        cwd: null,
+      );
     }
 
     if (_cacheFor != sid) {
@@ -237,7 +253,6 @@ class MentionPickerController extends ChangeNotifier {
 
     final byId = {for (final s in all) s.sessionId: s};
     final cwd = byId[sid]?.cwd;
-    _lastCwd = cwd;
     final visible = {for (final s in await _local()) s.sessionId};
 
     final fileItems = <MentionItem>[
@@ -288,13 +303,16 @@ class MentionPickerController extends ChangeNotifier {
     MentionLabels.addAll([
       for (final i in [...subagents, ...conversations]) i.label,
     ]);
-    return _assemble(
-      q,
-      files: _boost(fileItems),
-      subagents: subagents,
-      conversations: conversations,
+    return (
+      sections: _assemble(
+        q,
+        files: _boost(fileItems),
+        subagents: subagents,
+        conversations: conversations,
+        cwd: cwd,
+        sid: sid,
+      ),
       cwd: cwd,
-      sid: sid,
     );
   }
 
@@ -375,8 +393,8 @@ class MentionPickerController extends ChangeNotifier {
 
   /// Puts [item] into the draft as a reference chip.
   void pick(MentionItem item) {
-    final q = _query;
-    if (q == null) return;
+    if (!_canSelect(item)) return;
+    final q = _query!;
     HapticFeedback.selectionClick();
     final sid = sessionId();
     recents.record(
@@ -393,8 +411,8 @@ class MentionPickerController extends ChangeNotifier {
 
   /// Opens [item] (a folder) in the picker instead of picking it.
   void drill(MentionItem item) {
-    final q = _query;
-    if (q == null || !item.drillable) return;
+    if (!item.drillable || !_canSelect(item)) return;
+    final q = _query!;
     HapticFeedback.selectionClick();
     final text = input.text;
     final next = text.replaceRange(q.start, q.end, item.mention);
@@ -404,6 +422,11 @@ class MentionPickerController extends ChangeNotifier {
       selection: TextSelection.collapsed(offset: caret),
     );
   }
+
+  // A row callback can outlive its rendered batch, even when a new batch
+  // contains an item with the same path or session key.
+  bool _canSelect(MentionItem item) =>
+      isOpen && _sections.any((section) => section.items.any((current) => identical(current, item)));
 
   /// Sending while the picker shows a typed query picks the marked row.
   bool pickHighlighted() {

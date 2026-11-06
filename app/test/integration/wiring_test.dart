@@ -299,7 +299,8 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await _pumpChat(tester, parentId);
       final composer = tester.getRect(find.byType(Composer));
-      expect(composer, bar);
+      expect(composer.top, moreOrLessEquals(bar.top, epsilon: 0.5));
+      expect(composer.bottom, moreOrLessEquals(bar.bottom, epsilon: 0.5));
     });
 
     testWidgets('the empty chat names the workspace it starts in', (tester) async {

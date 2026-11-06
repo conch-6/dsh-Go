@@ -112,6 +112,7 @@ class LaunchClipPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             player.setOnCompletionListener { methods.invokeMethod("done", mapOf("texture" to id)) }
             player.setOnErrorListener { _, _, _ ->
+                if (!clip.prepared) close(id)
                 methods.invokeMethod("done", mapOf("texture" to id))
                 answer(null)
                 true

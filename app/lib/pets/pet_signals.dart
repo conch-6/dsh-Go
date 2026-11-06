@@ -426,6 +426,7 @@ PetFocus petFocusOf(HostRef host, String sessionId, ChatState s, {bool compactin
   return PetFocus(
     host: host,
     sessionId: sessionId,
+    title: s.title,
     activity: petActivityOf(runActivityOf(s)?.kind),
     compacting: compacting,
     waitingKey: approval?.eventId ?? question?.eventId,

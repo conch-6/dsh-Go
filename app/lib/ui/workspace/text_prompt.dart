@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/l10n.dart';
+import '../common/app_dialog.dart';
 import '../theme/theme.dart';
 
 /// Asks for one line of text; resolves to it trimmed, or null when
@@ -22,7 +23,7 @@ Future<String?> showTextPrompt(
   String? Function(String text)? validate,
 }) {
   final l10n = context.l10n;
-  return showDialog<String>(
+  return showAppDialog<String>(
     context: context,
     builder: (_) => _TextPrompt(
       title: title,

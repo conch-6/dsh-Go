@@ -85,7 +85,7 @@ class ContextRing extends StatelessWidget {
         onTap: onTap,
         radius: 26,
         child: SizedBox(
-          height: 40,
+          height: 36,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6),
             child: Row(

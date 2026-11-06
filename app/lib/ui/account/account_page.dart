@@ -7,6 +7,7 @@ import '../../l10n/l10n.dart';
 import '../../state/account_state.dart';
 import '../../state/settings_state.dart';
 import '../chat/balance_widgets.dart' show BalanceSettingsLine;
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/overview_card.dart';
 import '../onboarding/api_key_page.dart';
@@ -81,7 +82,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
     final running = await account.hasRunningAccountTasks();
     if (!mounted) return;
     final colors = DshColors.of(context);
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(context.l10n.engineAccountSignOutTitle),
@@ -493,7 +494,7 @@ Future<void> manageApiKey(BuildContext context, WidgetRef ref) async {
     case 'replace':
       push(const ApiKeyPage(onboarding: false));
     case 'clear':
-      final ok = await showDialog<bool>(
+      final ok = await showAppDialog<bool>(
         context: context,
         builder: (dialog) => AlertDialog(
           title: Text(l10n.engineAccountClearKeyTitle),

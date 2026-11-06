@@ -437,5 +437,13 @@
   "remoteNetworkFallbackTurnTimeout": "TURN timed out; using Relay.",
   "remoteNetworkFallbackPathUnverified": "The WebRTC route type hasn’t been confirmed.",
   "remoteNetworkSnapshotHint": "Shows the last confirmed route and latency. Refresh to check again.",
-  "remoteNetworkObservedAt": "Last checked"
+  "remoteNetworkObservedAt": "Last checked",
+  "remoteNetworkLocalIpVersion": "Phone ICE IP version",
+  "remoteNetworkRemoteIpVersion": "Host ICE IP version",
+  "remoteNetworkIceProtocol": "ICE protocol",
+  "remoteTransferSettings": "Remote transfer",
+  "remoteCompactHistory": "Compact history",
+  "remoteErrHistoryModeChanged": "The Host no longer supports compact history. Switch to another host and back, or restart the app, to reload history.",
+  "remoteCompactHistoryHint": "Reduces historical tool details on supporting DSH Remote Hosts; live replies and approvals stay unchanged. Switch hosts or restart the app to apply. Older Hosts keep full history.",
+  "searchKwRemoteCompactHistory": "compact slim lite history tools transfer bandwidth remote"
 }

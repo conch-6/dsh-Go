@@ -1,5 +1,4 @@
-// `schedule/list`: one conversation's active tasks, read the way the official
-// session header's clock reads them.
+// Read active conversation tasks from the catalog shared by old and new Hosts.
 
 import 'package:dsh_client/dsh_client.dart';
 import 'package:test/test.dart';
@@ -43,12 +42,13 @@ void main() {
     return client;
   }
 
-  test('asks for one session and binds each record to it', () async {
-    host.handlers['schedule/list'] = (args) {
-      expect(args, {
-        'request': {'sessionId': 'session-1'},
-      });
-      return ok([_daily, _every]);
+  test('reads the catalog and selects records owned by one session', () async {
+    host.handlers['schedule/catalog'] = (args) {
+      expect(args, isEmpty);
+      return ok([
+        {..._daily, 'sessionId': 'session-1', 'status': 'active'},
+        {..._every, 'sessionId': 'session-1', 'status': 'active'},
+      ]);
     };
     final tasks = await (await connect()).sessionSchedules('session-1');
     expect(tasks.map((t) => t.id), ['sch-daily', 'sch-every']);
@@ -65,7 +65,9 @@ void main() {
   });
 
   test('keeps the stored record as the update baseline', () async {
-    host.handlers['schedule/list'] = (_) => ok([_daily]);
+    host.handlers['schedule/catalog'] = (_) => ok([
+      {..._daily, 'sessionId': 'session-1', 'status': 'active'},
+    ]);
     final task = (await (await connect()).sessionSchedules('session-1')).single;
     expect(task.record, _daily);
     expect(task.record.containsKey('sessionId'), isFalse);
@@ -73,20 +75,20 @@ void main() {
   });
 
   test('skips unusable entries and reads a non-list as empty', () async {
-    host.handlers['schedule/list'] = (_) => ok([
-      _daily,
+    host.handlers['schedule/catalog'] = (_) => ok([
+      {..._daily, 'sessionId': 'session-1', 'status': 'active'},
       {'kind': 'daily'},
       'nonsense',
     ]);
     final client = await connect();
     expect((await client.sessionSchedules('session-1')).single.id, 'sch-daily');
 
-    host.handlers['schedule/list'] = (_) => ok({'code': 'internal_error', 'message': 'nope'});
+    host.handlers['schedule/catalog'] = (_) => ok({'code': 'internal_error', 'message': 'nope'});
     expect(await client.sessionSchedules('session-1'), isEmpty);
   });
 
   test('a Host failure surfaces as the remote error', () async {
-    host.handlers['schedule/list'] = (_) => {
+    host.handlers['schedule/catalog'] = (_) => {
       'ok': false,
       'error': {'code': 'gateway/method-not-found', 'message': 'no schedule'},
     };

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import worker from '../src/index';
 import { ALPHABET, ID_LENGTH, TIERS, newId, objectKey, parseTtl, tierOfId } from '../src/ids';
-import { clientKey } from '../src/limits';
+import { clientKey, uploadQuota } from '../src/limits';
 import { makeEnv, serve, workerFirst } from './fakes';
 
 const ORIGIN = 'https://go.dshtui.com';
@@ -153,6 +153,49 @@ describe('upload', () => {
     expect([...ctx.kv.values.keys()].join()).not.toContain('203.0.113.7');
   });
 
+  for (const storage of ['available', 'missing', 'failing']) {
+    it(`pauses uploads at zero even when quota storage is ${storage}`, async () => {
+      const ctx = makeEnv({ UPLOADS_PER_HOUR: '0' });
+      if (storage === 'missing') ctx.env.QUOTA = undefined;
+      if (storage === 'failing') ctx.kv.failReads = ctx.kv.failWrites = true;
+      let writes = 0;
+      const put = ctx.bucket.put.bind(ctx.bucket);
+      ctx.bucket.put = async (...args) => { writes++; return put(...args); };
+      const response = await worker.fetch(post(blob()), ctx.env);
+      expect(response.status).toBe(429);
+      expect(await response.json()).toEqual({ error: 'rate_limited' });
+      expect(Number(response.headers.get('Retry-After'))).toBeGreaterThan(0);
+      expect(writes).toBe(0);
+      expect(ctx.kv.values.size).toBe(0);
+    });
+  }
+
+  it('keeps reads and authorized deletion available while uploads are paused', async () => {
+    const ctx = makeEnv();
+    const link = await uploadOne(ctx, 'forever');
+    ctx.env.UPLOADS_PER_HOUR = '0';
+    expect((await worker.fetch(post(blob()), ctx.env)).status).toBe(429);
+    const response = await worker.fetch(get(`/api/v1/c/${link.id}`), ctx.env);
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(blob());
+    expect((await worker.fetch(del(link.id, { Authorization: `Bearer ${link.deleteToken}` }), ctx.env)).status).toBe(204);
+  });
+
+  it('preserves existing default and invalid quota configuration behavior', async () => {
+    for (const setting of [undefined, '', '  ', 'not-a-number']) {
+      const ctx = makeEnv({ UPLOADS_PER_HOUR: setting });
+      ctx.kv.get = async () => '19';
+      expect((await uploadQuota(ctx.env, 'synthetic', 0)).allowed, String(setting)).toBe(true);
+      ctx.kv.get = async () => '20';
+      expect((await uploadQuota(ctx.env, 'synthetic', 0)).allowed, String(setting)).toBe(false);
+    }
+    const negative = makeEnv({ UPLOADS_PER_HOUR: '-1' });
+    expect((await uploadQuota(negative.env, 'synthetic', 0)).allowed).toBe(false);
+    const infinite = makeEnv({ UPLOADS_PER_HOUR: 'Infinity' });
+    infinite.kv.get = async () => '20';
+    expect((await uploadQuota(infinite.env, 'synthetic', 0)).allowed).toBe(true);
+  });
+
   it('does not count rejected uploads', async () => {
     const ctx = makeEnv({ UPLOADS_PER_HOUR: '1' });
     expect((await worker.fetch(post(blob(8)), ctx.env)).status).toBe(400);
@@ -209,6 +252,63 @@ describe('read', () => {
 });
 
 describe('delete', () => {
+  it('limits invalid admin headers before reading R2 metadata', async () => {
+    for (const config of [{}, { ADMIN_KEY: undefined }, { ADMIN_KEY: 'short' }]) {
+      for (const header of ['', 'wrong-admin-key']) {
+        const ctx = makeEnv(config);
+        const link = await uploadOne(ctx);
+        ctx.readLimit.allow = 0;
+        let heads = 0;
+        const head = ctx.bucket.head.bind(ctx.bucket);
+        ctx.bucket.head = async (key) => { heads++; return head(key); };
+        const res = await worker.fetch(del(link.id, { 'X-Admin-Key': header }), ctx.env);
+        expect(res.status).toBe(429);
+        expect(await res.json()).toEqual({ error: 'rate_limited' });
+        expect(res.headers.get('Retry-After')).toBe('60');
+        expect(ctx.readLimit.keys).toEqual(['198.51.100.1']);
+        expect(heads).toBe(0);
+        expect(ctx.bucket.objects.size).toBe(1);
+      }
+    }
+  });
+
+  it('keeps invalid admin priority over a valid owner token when quota is available', async () => {
+    const ctx = makeEnv();
+    const link = await uploadOne(ctx);
+    const headers = { 'X-Admin-Key': 'wrong', Authorization: `Bearer ${link.deleteToken}` };
+    const res = await worker.fetch(del(link.id, headers), ctx.env);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'forbidden' });
+    expect(ctx.readLimit.keys).toEqual(['198.51.100.1']);
+    expect(ctx.bucket.objects.size).toBe(1);
+    expect((await worker.fetch(del('eZZZZZZZZZ', headers), ctx.env)).status).toBe(404);
+  });
+
+  it('exempts authenticated admins without calling the limiter or quota KV', async () => {
+    const ctx = makeEnv();
+    const link = await uploadOne(ctx);
+    ctx.readLimit.allow = 0;
+    let kvReads = 0;
+    ctx.kv.get = async () => { kvReads++; throw new Error('unused'); };
+    const headers = { 'X-Admin-Key': ctx.env.ADMIN_KEY! };
+    expect((await worker.fetch(del(link.id, headers), ctx.env)).status).toBe(204);
+    expect((await worker.fetch(del(link.id, headers), ctx.env)).status).toBe(404);
+    expect(ctx.readLimit.keys).toEqual([]);
+    expect(kvReads).toBe(0);
+  });
+
+  it('retains missing credentials and owner-token rate limiting', async () => {
+    const ctx = makeEnv();
+    const link = await uploadOne(ctx);
+    ctx.readLimit.allow = 0;
+    const missing = await worker.fetch(del(link.id, {}), ctx.env);
+    expect(missing.status).toBe(401);
+    expect(await missing.json()).toEqual({ error: 'unauthorized' });
+    expect(ctx.readLimit.keys).toEqual([]);
+    expect((await worker.fetch(del(link.id, { Authorization: `Bearer ${link.deleteToken}` }), ctx.env)).status).toBe(429);
+    expect(ctx.bucket.objects.size).toBe(1);
+  });
+
   it('needs the link\'s own token', async () => {
     const ctx = makeEnv();
     const a = await uploadOne(ctx);
@@ -328,7 +428,7 @@ describe('home page', () => {
     const ctx = makeEnv();
     for (const [path, type] of [
       ['/assets/features/01-local-engine.webp', 'image/webp'],
-      ['/assets/author/download-qr.png', 'image/png'],
+      ['/assets/author/download-qr-v2.png', 'image/png'],
       ['/assets/dsh-go.svg', 'image/svg+xml'],
       ['/app.js', 'text/javascript'],
       ['/site-config.js', 'text/javascript'],
@@ -361,7 +461,7 @@ describe('home page', () => {
     expect(page).toContain('href="https://dshtui.com/"');
     expect(page).toContain('href="https://github.com/ccch1mneyyy/dsh-TUI"');
     const images = [...site('site-config.js').matchAll(/(?:avatar|qrImage):\s*"([^"]+)"/g)].map((m) => m[1]!);
-    expect(images).toEqual(['assets/dsh-go.svg', 'assets/author/download-qr.png']);
+    expect(images).toEqual(['assets/dsh-go.svg', 'assets/author/download-qr-v2.png']);
     const ctx = makeEnv();
     for (const ref of new Set([...refs, ...images])) {
       expect((await serve(get('/' + ref), ctx.env)).status, ref).toBe(200);

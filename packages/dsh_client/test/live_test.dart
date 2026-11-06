@@ -180,7 +180,7 @@ void main() {
       expect(file.bytes, 12);
       final image = parts.whereType<ImagePart>().single.attachment;
 
-      final fetched = await client.attachment(sid, image.attachmentId);
+      final fetched = await client.attachment(sid, image);
       expect(fetched.bytes, png);
       await client.cancel(sid);
     });

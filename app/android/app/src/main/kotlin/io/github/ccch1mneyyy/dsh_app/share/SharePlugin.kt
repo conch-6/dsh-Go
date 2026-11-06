@@ -16,6 +16,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.Executors
 
 /**
@@ -140,12 +141,13 @@ class SharePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                     skipped += skip(item.name, item.problem ?: "unreadable")
                     continue
                 }
-                total += item.file.length()
-                if (total > MAX_TOTAL_BYTES) {
+                val nextTotal = total + item.file.length()
+                if (nextTotal > MAX_TOTAL_BYTES) {
                     item.file.delete()
                     skipped += skip(item.name, "too_large")
                     continue
                 }
+                total = nextTotal
                 files += mapOf(
                     "path" to item.file.absolutePath,
                     "name" to item.file.name,
@@ -200,22 +202,27 @@ class SharePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         } catch (_: Exception) {
             null
         } ?: return Item(null, shown, mime, "unreadable")
-        input.use { stream ->
-            target.outputStream().use { out ->
-                val buffer = ByteArray(64 * 1024)
-                var copied = 0L
-                while (true) {
-                    val read = stream.read(buffer)
-                    if (read < 0) break
-                    copied += read
-                    if (copied > MAX_FILE_BYTES) {
-                        out.close()
-                        target.delete()
-                        return Item(null, shown, mime, "too_large")
+        try {
+            input.use { stream ->
+                target.outputStream().use { out ->
+                    val buffer = ByteArray(64 * 1024)
+                    var copied = 0L
+                    while (true) {
+                        val read = stream.read(buffer)
+                        if (read < 0) break
+                        copied += read
+                        if (copied > MAX_FILE_BYTES) {
+                            out.close()
+                            target.delete()
+                            return Item(null, shown, mime, "too_large")
+                        }
+                        out.write(buffer, 0, read)
                     }
-                    out.write(buffer, 0, read)
                 }
             }
+        } catch (_: IOException) {
+            target.delete()
+            return Item(null, shown, mime, "unreadable")
         }
         return Item(target, shown, mime)
     }

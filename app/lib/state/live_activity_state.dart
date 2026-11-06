@@ -12,7 +12,7 @@ import 'notify_state.dart';
 
 export '../notify/live_activity.dart';
 
-/// Titles of conversations seen running, so a finished one keeps its name.
+/// Titles seen running or focused, so a finished conversation keeps its name.
 final _liveTitlesProvider = Provider<Map<PetTarget, String>>((ref) => <PetTarget, String>{});
 
 /// What the live activity shows now; null: nothing. Reads the pet's own
@@ -20,12 +20,13 @@ final _liveTitlesProvider = Provider<Map<PetTarget, String>>((ref) => <PetTarget
 final liveActivityProvider = Provider<LiveActivity?>((ref) {
   final signals = ref.watch(petSignalsProvider);
   final titles = ref.watch(_liveTitlesProvider);
-  learnLiveTitles(titles, signals.runs);
+  learnLiveTitles(titles, signals.runs, focus: signals.focus);
   final prefs = ref.watch(notifyPrefsProvider);
   return liveActivityOf(
     pet: ref.watch(petStateProvider),
     runs: signals.runs,
     pending: signals.pending,
+    focus: signals.focus,
     titles: titles,
     showDone: prefs.done,
     showFailed: prefs.failed,

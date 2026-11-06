@@ -4,6 +4,7 @@
 
 import 'package:dsh_app/state/chat_state.dart';
 import 'package:dsh_app/ui/chat/dock/dock_pill.dart';
+import 'package:dsh_app/ui/chat/dock/dock_stack.dart';
 import 'package:dsh_app/ui/chat/dock/goal_bar.dart';
 import 'package:dsh_app/ui/chat/dock/todo_bar.dart';
 import 'package:dsh_app/ui/chat/run_info.dart';
@@ -13,6 +14,7 @@ import 'package:dsh_app/ui/theme/app_icons.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/harness.dart';
 import 'support/dock_harness.dart';
@@ -79,6 +81,57 @@ void main() {
       final current = tester.getRect(find.text('正在做的这一项'));
       expect(current.top, greaterThan(card.top + DockMetrics.height));
       expect(current.bottom, lessThan(card.bottom));
+      final scrollable = find.descendant(of: find.byType(TodoBar), matching: find.byType(Scrollable));
+      final position = tester.state<ScrollableState>(scrollable).position;
+      final start = position.pixels;
+      await tester.drag(scrollable, const Offset(0, -100));
+      await pumpFrames(tester);
+      expect(position.pixels, greaterThan(start));
+      final end = position.pixels;
+      await tester.drag(scrollable, const Offset(0, 100));
+      await pumpFrames(tester);
+      expect(position.pixels, lessThan(end));
+      expect(tester.getRect(find.byType(TodoBar)), card);
+    });
+
+    testWidgets('wrapped todos in the spread deck can be dragged to the last row and stay there', (tester) async {
+      SharedPreferences.setMockInitialValues({DockFoldController.key: false});
+      final long = [
+        for (var i = 0; i < 20; i++)
+          TodoItem('Item $i: verify the entire checklist can scroll', i == 0 ? 'in_progress' : 'pending'),
+      ];
+      await DockHarness(
+        state: _state(todos: long, goal: goalOf()),
+      ).pump(tester, deck: true, strip: true);
+      await tester.tap(find.byType(TodoBar));
+      await pumpFrames(tester);
+      final scrollable = find.descendant(of: find.byType(TodoBar), matching: find.byType(Scrollable));
+      final position = tester.state<ScrollableState>(scrollable).position;
+      final card = tester.getRect(find.byType(TodoBar));
+      expect(position.maxScrollExtent, greaterThan(0));
+      final start = position.pixels;
+      await tester.drag(scrollable, const Offset(0, -100));
+      await pumpFrames(tester);
+      expect(position.pixels, greaterThan(start));
+      for (var i = 0; i < 12; i++) {
+        await tester.drag(scrollable, const Offset(0, -140));
+        await pumpFrames(tester, 2);
+      }
+      // The activity strip or composer can relayout the whole deck while it runs.
+      final deckLayout = find.byElementPredicate((e) => e is RenderObjectElement && e.renderObject is RenderDockStack);
+      tester.renderObject<RenderDockStack>(deckLayout).markNeedsLayout();
+      await pumpFrames(tester);
+      expect(position.pixels, closeTo(position.maxScrollExtent, 0.5));
+      final viewport = tester.getRect(scrollable);
+      final last = tester.getRect(find.text(long.last.content));
+      expect(last.top, greaterThanOrEqualTo(viewport.top));
+      expect(last.bottom, lessThanOrEqualTo(viewport.bottom));
+      expect(tester.getRect(find.byType(TodoBar)), card);
+      final end = position.pixels;
+      await tester.drag(scrollable, const Offset(0, 100));
+      await pumpFrames(tester);
+      expect(position.pixels, lessThan(end));
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('all done: stays after the turn ends', (tester) async {

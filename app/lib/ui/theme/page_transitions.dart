@@ -2,11 +2,14 @@
 // Flutter's CupertinoPageTransition; the back gesture reuses the framework's
 // public PredictiveBackRoute hooks on TransitionRoute.
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart' show PredictiveBackEvent;
 
 import 'motion.dart';
+import 'shapes.dart';
 
 /// Secondary pages push in from the right, iOS style: the new page slides over
 /// with a soft shadow on its leading edge while the page underneath drifts a
@@ -21,13 +24,30 @@ import 'motion.dart';
 ///   navigation, tablets, desktop).
 ///
 /// Release past the middle, or fling right, and the page leaves; otherwise it
-/// settles back. Everything goes through [AppMotion.of], so "remove
-/// animations" makes it instant.
+/// settles back. The in-app swipe hands its speed to a spring for either.
+///
+/// The fluid tier ([AppMotion.fluid]) adds two things:
+///
+/// - the page underneath is drawn from a snapshot while it moves, so its glass
+///   doesn't re-sample the backdrop every frame (the transition gets cheaper);
+/// - a page pushed from a card ([CardOrigin]) grows out of that card, and shrinks
+///   back into it on the way out.
 class AppPageTransitionsBuilder extends PageTransitionsBuilder {
-  const AppPageTransitionsBuilder();
+  const AppPageTransitionsBuilder() : _duration = AppMotion.push;
+
+  /// The same transition taking no time, for [AppMotion.reduced]. A builder has
+  /// no context to ask, and the route reads this duration from the theme at
+  /// every push and pop, so the theme picks this one (lib/app.dart).
+  const AppPageTransitionsBuilder.instant() : _duration = Duration.zero;
+
+  /// A little more time on the fluid tier: a page growing out of a card has further
+  /// to go than one sliding in, and the route reads one duration for both.
+  const AppPageTransitionsBuilder.fluid() : _duration = AppMotion.pushFluid;
+
+  final Duration _duration;
 
   @override
-  Duration get transitionDuration => AppMotion.push;
+  Duration get transitionDuration => _duration;
 
   @override
   DelegatedTransitionBuilder? get delegatedTransition =>
@@ -43,15 +63,183 @@ class AppPageTransitionsBuilder extends PageTransitionsBuilder {
     Widget child,
   ) {
     final linear = route.popGestureInProgress;
+    final origin = CardOrigin._claim(route);
     return _BackGesture(
       route: route,
       child: _Recede(
         animation: secondaryAnimation,
         linear: linear,
-        child: _PushIn(animation: animation, linear: linear, child: child),
+        route: route,
+        child: origin == null
+            ? _PushIn(animation: animation, linear: linear, child: child)
+            : _CardMorph(animation: animation, linear: linear, origin: origin, child: child),
       ),
     );
   }
+}
+
+/// Where the page about to be pushed comes from: a card just tapped.
+///
+/// The card calls [remember] right before its `onTap`. If that tap pushes a page
+/// with this theme's transition in the same frame, the page takes the card as its
+/// origin; a tap that opens a sheet, or pushes after waiting for something, leaves
+/// it unused and gets the normal push. Only in the fluid tier.
+class CardOrigin {
+  CardOrigin._(this.rect, this.radius, this.source);
+
+  /// In the navigator's coordinates.
+  final Rect rect;
+  final double radius;
+
+  /// The page holding the card. It stays put while the card grows over it.
+  final Route<dynamic>? source;
+
+  static CardOrigin? _pending;
+  static final _claims = Expando<_Claim>('CardOrigin.claims');
+  static final _covers = Expando<int>('CardOrigin.covers');
+
+  /// [card]'s render box is the card's outline.
+  static void remember(BuildContext card, {double radius = AppShape.lg}) {
+    if (!AppMotion.fluid(card)) return;
+    final box = card.findRenderObject();
+    final frame = Navigator.maybeOf(card)?.context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize || frame is! RenderBox) return;
+    _pending = CardOrigin._(box.localToGlobal(Offset.zero, ancestor: frame) & box.size, radius, ModalRoute.of(card));
+    // Gone after the next frame, whether or not anything took it.
+    SchedulerBinding.instance
+      ..addPostFrameCallback((_) => _pending = null)
+      ..ensureVisualUpdate();
+  }
+
+  /// The origin of [route], fixed the first time the route is built.
+  static CardOrigin? _claim(PageRoute<dynamic> route) {
+    final known = _claims[route];
+    if (known != null) return known.origin;
+    final pending = _pending;
+    final origin = pending != null && route.isCurrent && !identical(route, pending.source) ? pending : null;
+    _claims[route] = _Claim(origin);
+    if (origin != null) {
+      _pending = null;
+      final source = origin.source;
+      if (source != null) {
+        _covers[source] = (_covers[source] ?? 0) + 1;
+        route.completed.whenComplete(() => _covers[source] = (_covers[source] ?? 1) - 1);
+      }
+    }
+    return origin;
+  }
+
+  static bool _covered(Route<dynamic>? route) => route != null && (_covers[route] ?? 0) > 0;
+}
+
+/// Expando can't hold null: "looked, no origin" needs a value of its own.
+class _Claim {
+  const _Claim(this.origin);
+  final CardOrigin? origin;
+}
+
+/// A page growing out of its card: laid out at full size, drawn scaled to the
+/// card's width and cut to the card's height, until both reach the whole window.
+/// Linear (finger-driven) while a back gesture is in progress.
+class _CardMorph extends StatefulWidget {
+  const _CardMorph({required this.animation, required this.linear, required this.origin, required this.child});
+
+  final Animation<double> animation;
+  final bool linear;
+  final CardOrigin origin;
+  final Widget child;
+
+  @override
+  State<_CardMorph> createState() => _CardMorphState();
+}
+
+class _CardMorphState extends State<_CardMorph> {
+  /// The page has faded in by this far along: the card is still small, so the
+  /// page seems to be the card from early on.
+  static const _fadeBy = 0.3;
+
+  late CurvedAnimation _curved;
+
+  @override
+  void initState() {
+    super.initState();
+    _curved = _curve();
+  }
+
+  CurvedAnimation _curve() => CurvedAnimation(
+    parent: widget.animation,
+    // Not the push's glide: most of that happens in the first 100ms, too quick to
+    // see where the page came from.
+    curve: widget.linear ? Curves.linear : AppMotion.std,
+    reverseCurve: widget.linear ? Curves.linear : AppMotion.std.flipped,
+  );
+
+  @override
+  void didUpdateWidget(_CardMorph old) {
+    super.didUpdateWidget(old);
+    if (old.animation != widget.animation || old.linear != widget.linear) {
+      _curved.dispose();
+      _curved = _curve();
+    }
+  }
+
+  @override
+  void dispose() {
+    _curved.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dim = Theme.of(context).brightness == Brightness.dark ? 0.32 : 0.10;
+    final origin = widget.origin;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = constraints.biggest;
+        return AnimatedBuilder(
+          animation: _curved,
+          child: widget.child,
+          builder: (context, child) {
+            final t = _curved.value.clamp(0.0, 1.0);
+            final rect = Rect.lerp(origin.rect, Offset.zero & size, t)!;
+            final scale = rect.width / size.width;
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                IgnorePointer(
+                  child: ColoredBox(color: Colors.black.withValues(alpha: dim * t)),
+                ),
+                Transform(
+                  transform: Matrix4.identity()
+                    ..translateByDouble(rect.left, rect.top, 0, 1)
+                    ..scaleByDouble(scale, scale, 1, 1),
+                  child: ClipRRect(
+                    clipBehavior: t < 1 ? Clip.antiAlias : Clip.none,
+                    clipper: _PageCut(height: rect.height / scale, radius: origin.radius * (1 - t) / scale),
+                    child: Opacity(opacity: (t / _fadeBy).clamp(0.0, 1.0), alwaysIncludeSemantics: true, child: child),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// The top [height] of the page, rounded.
+class _PageCut extends CustomClipper<RRect> {
+  const _PageCut({required this.height, required this.radius});
+
+  final double height;
+  final double radius;
+
+  @override
+  RRect getClip(Size size) => RRect.fromRectAndRadius(Offset.zero & Size(size.width, height), Radius.circular(radius));
+
+  @override
+  bool shouldReclip(_PageCut old) => old.height != height || old.radius != radius;
 }
 
 /// The incoming page: slides in from the right with a shadow on its leading
@@ -139,13 +327,15 @@ class _PushInState extends State<_PushIn> {
 }
 
 /// The page underneath while another is pushed over it: drifts a quarter to the
-/// left and dims slightly.
+/// left and dims slightly. Under a page growing out of one of its cards it stays
+/// where it is, and that page does the dimming.
 class _Recede extends StatefulWidget {
-  const _Recede({required this.animation, required this.linear, required this.child});
+  const _Recede({required this.animation, required this.linear, required this.child, this.route});
 
   final Animation<double> animation;
   final bool linear;
   final Widget child;
+  final PageRoute<dynamic>? route;
 
   @override
   State<_Recede> createState() => _RecedeState();
@@ -154,10 +344,28 @@ class _Recede extends StatefulWidget {
 class _RecedeState extends State<_Recede> {
   late CurvedAnimation _curved;
 
+  /// Only while the page moves: it would otherwise hold a full-screen image for
+  /// as long as it is covered.
+  final _snapshot = SnapshotController();
+  bool _fluid = false;
+
   @override
   void initState() {
     super.initState();
     _curved = _curve();
+    widget.animation.addStatusListener(_syncSnapshot);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _fluid = AppMotion.fluid(context);
+    _syncSnapshot(widget.animation.status);
+  }
+
+  void _syncSnapshot(AnimationStatus status) {
+    // CanvasKit renders on the UI thread: no gain there (see SnapshotWidget).
+    _snapshot.allowSnapshotting = !kIsWeb && _fluid && status.isAnimating && (widget.route?.allowSnapshotting ?? true);
   }
 
   CurvedAnimation _curve() => CurvedAnimation(
@@ -169,6 +377,11 @@ class _RecedeState extends State<_Recede> {
   @override
   void didUpdateWidget(_Recede old) {
     super.didUpdateWidget(old);
+    if (old.animation != widget.animation) {
+      old.animation.removeStatusListener(_syncSnapshot);
+      widget.animation.addStatusListener(_syncSnapshot);
+      _syncSnapshot(widget.animation.status);
+    }
     if (old.animation != widget.animation || old.linear != widget.linear) {
       _curved.dispose();
       _curved = _curve();
@@ -177,6 +390,8 @@ class _RecedeState extends State<_Recede> {
 
   @override
   void dispose() {
+    widget.animation.removeStatusListener(_syncSnapshot);
+    _snapshot.dispose();
     _curved.dispose();
     super.dispose();
   }
@@ -184,18 +399,19 @@ class _RecedeState extends State<_Recede> {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final Animation<double> motion = CardOrigin._covered(widget.route) ? kAlwaysDismissedAnimation : _curved;
     return SlideTransition(
-      position: Tween<Offset>(begin: Offset.zero, end: const Offset(-0.25, 0)).animate(_curved),
+      position: Tween<Offset>(begin: Offset.zero, end: const Offset(-0.25, 0)).animate(motion),
       textDirection: Directionality.of(context),
       transformHitTests: false,
       child: Stack(
         fit: StackFit.passthrough,
         children: [
-          widget.child,
+          SnapshotWidget(controller: _snapshot, mode: SnapshotMode.permissive, autoresize: true, child: widget.child),
           Positioned.fill(
             child: IgnorePointer(
               child: FadeTransition(
-                opacity: _curved,
+                opacity: motion,
                 child: ColoredBox(color: Colors.black.withValues(alpha: dark ? 0.32 : 0.10)),
               ),
             ),
@@ -240,6 +456,8 @@ class _BackGestureState extends State<_BackGesture> with WidgetsBindingObserver,
       if (_route.isCurrent) {
         _route.handleUpdateBackGestureProgress(progress: _settle.value);
       }
+      // Off screen: the rest of the spring has nothing to show, so don't wait.
+      if (_settle.value == 0 && _settle.isAnimating) _settle.stop();
     });
   }
 
@@ -308,7 +526,7 @@ class _BackGestureState extends State<_BackGesture> with WidgetsBindingObserver,
     if (progress == null) return;
     final velocity = _sign() * details.velocity.pixelsPerSecond.dx / _width;
     final leave = velocity.abs() >= _minFlingVelocity ? velocity > 0 : progress < 0.5;
-    _finish(from: progress, leave: leave);
+    _finish(from: progress, leave: leave, velocity: -velocity);
   }
 
   void _onCancel() {
@@ -316,10 +534,9 @@ class _BackGestureState extends State<_BackGesture> with WidgetsBindingObserver,
     if (progress != null) _finish(from: progress, leave: false);
   }
 
-  void _finish({required double from, required bool leave}) {
+  /// [velocity]: route values a second.
+  void _finish({required double from, required bool leave, double velocity = 0}) {
     final target = leave ? 0.0 : 1.0;
-    final distance = (target - from).abs();
-    final duration = AppMotion.of(context, AppMotion.push * distance);
     _settle.value = from;
     void done() {
       _progress = null;
@@ -331,15 +548,16 @@ class _BackGestureState extends State<_BackGesture> with WidgetsBindingObserver,
       }
     }
 
-    if (duration == Duration.zero || distance == 0) {
+    if (AppMotion.reduced(context) || from == target) {
       if (_route.isCurrent) {
         _route.handleUpdateBackGestureProgress(progress: target);
       }
       done();
       return;
     }
-    _settle.duration = duration;
-    _settle.animateTo(target, curve: AppMotion.glide).whenCompleteOrCancel(done);
+    _settle
+        .animateWith(AppMotion.settle(AppMotion.sheetSpring, from, target, velocity, landing: !leave))
+        .whenCompleteOrCancel(done);
   }
 
   @override

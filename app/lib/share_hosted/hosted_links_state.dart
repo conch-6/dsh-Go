@@ -25,12 +25,7 @@ class SecureHostedLinkStore implements HostedLinkStore {
 
   @override
   Future<List<HostedLink>> load() async {
-    String? raw;
-    try {
-      raw = await _storage.read(key: storageKey);
-    } catch (_) {
-      return const [];
-    }
+    final raw = await _storage.read(key: storageKey);
     if (raw == null || raw.isEmpty) return const [];
     try {
       final list = jsonDecode(raw);
@@ -88,9 +83,11 @@ class HostedLinksController extends Notifier<HostedLinksState> {
 
   final _timers = <String, Timer>{};
   late Future<void> _ready;
+  bool _canSave = false;
 
   @override
   HostedLinksState build() {
+    _canSave = false;
     ref.onDispose(() {
       for (final t in _timers.values) {
         t.cancel();
@@ -105,8 +102,15 @@ class HostedLinksController extends Notifier<HostedLinksState> {
   Future<void> get ready => _ready;
 
   Future<void> _load() async {
-    final saved = await ref.read(hostedLinkStoreProvider).load();
+    final List<HostedLink> saved;
+    try {
+      saved = await ref.read(hostedLinkStoreProvider).load();
+    } catch (_) {
+      if (ref.mounted) state = state.copyWith(loaded: true);
+      return;
+    }
     if (!ref.mounted) return;
+    _canSave = true;
     final cutoff = DateTime.now().subtract(keepExpired);
     final links = [
       for (final l in saved)
@@ -121,7 +125,8 @@ class HostedLinksController extends Notifier<HostedLinksState> {
   }
 
   Future<void> _save() async {
-    if (!ref.mounted) return;
+    // Keep this run usable without replacing a collection we never read.
+    if (!ref.mounted || !_canSave) return;
     try {
       await ref.read(hostedLinkStoreProvider).save(state.links);
     } catch (_) {

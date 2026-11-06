@@ -134,7 +134,11 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
   bool get available => _caps.recognizer || engineReady;
 
   bool _current(int operation) => !_disposed && active && operation == _operation;
-  bool get _hostCurrent => identical(_runClient, client()) && identical(_runGeneration, _runClient?.mux.generation);
+  // Phone recognition does not use the Host transport. A different client
+  // still changes the draft's owner; engine recording/fallback keeps its generation.
+  bool get _hostCurrent =>
+      identical(_runClient, client()) &&
+      (_engine == VoiceEngine.system || identical(_runGeneration, _runClient?.mux.generation));
 
   Future<void> refresh() {
     if (_disposed) return Future.value();

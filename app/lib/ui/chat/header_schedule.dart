@@ -160,7 +160,7 @@ class _HeaderScheduleCapState extends ConsumerState<HeaderScheduleCap> with _Ret
             key: const ValueKey('chat-schedule'),
             onTap: open,
             onHighlightChanged: (on) => setState(() => _pressed = on),
-            splashFactory: NoSplash.splashFactory,
+            splashFactory: rowSplash(context),
             overlayColor: const WidgetStatePropertyAll(Colors.transparent),
             child: Padding(
               padding: EdgeInsets.fromLTRB(HeaderScheduleCap.gap, inset, inset, inset),

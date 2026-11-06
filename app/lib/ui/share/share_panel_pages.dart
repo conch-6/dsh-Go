@@ -16,6 +16,7 @@ import 'package:flutter/services.dart';
 
 import '../../l10n/l10n.dart';
 import '../../share_code/conversation_share.dart' show DecodedConversation, maxConversationFileBytes;
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/list_page_row.dart';
 import '../common/segmented_pill.dart';
@@ -363,7 +364,7 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
   Future<void> _stop(SharePanelModel model) async {
     final l10n = context.l10n;
     final title = model.built?.share.title ?? '';
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(l10n.viewShareStopTitle),

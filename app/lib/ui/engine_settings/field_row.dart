@@ -207,7 +207,7 @@ class EngineFieldRow extends StatelessWidget {
     );
     final row = InkWell(
       onTap: enabled ? onTap : null,
-      splashFactory: NoSplash.splashFactory,
+      splashFactory: rowSplash(context),
       highlightColor: scheme.onSurface.withValues(alpha: 0.05),
       child: ConstrainedBox(
         constraints: BoxConstraints(minHeight: two ? SettingsMetrics.rowHeightTwoLine : SettingsMetrics.rowHeight),

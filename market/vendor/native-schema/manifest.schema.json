@@ -34,7 +34,7 @@
           "message"
         ]
       },
-      "description": "Content attached to taps: draft/clipboard on composer.actions, message on message.actions."
+      "description": "Content attached to taps: draft/clipboard on composer.actions and composer.tools, message on message.actions."
     },
     "assets": {
       "$ref": "#/$defs/relativePath",
@@ -145,6 +145,42 @@
                 "maxLength": 240
               }
             }
+          }
+        },
+        "composer.tools": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/tool"
+          }
+        },
+        "session.actions": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/action",
+            "properties": {
+              "label": {
+                "$ref": "#/$defs/text",
+                "description": "<= 12 characters"
+              }
+            }
+          }
+        },
+        "turn.note": {
+          "type": "array",
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              }
+            },
+            "additionalProperties": false
           }
         }
       }
@@ -297,7 +333,8 @@
             "enum": [
               "session.tab",
               "features",
-              "chat.panel"
+              "chat.panel",
+              "plugin"
             ]
           },
           "default": [
@@ -310,6 +347,75 @@
         },
         "micro": {
           "$ref": "manifest.schema.json#/$defs/id"
+        },
+        "presentation": {
+          "enum": [
+            "page",
+            "sheet"
+          ],
+          "description": "How the panel opens: a pushed page (default) or a sheet."
+        }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "required": [
+        "id",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/text",
+          "description": "<= 8 characters"
+        },
+        "icon": {
+          "$ref": "#/$defs/iconName"
+        },
+        "effect": {
+          "description": "Static effect(s) executed by the app without invoke.",
+          "oneOf": [
+            {
+              "$ref": "invoke.schema.json#/$defs/staticEffect"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4,
+              "items": {
+                "$ref": "invoke.schema.json#/$defs/staticEffect"
+              }
+            }
+          ]
+        },
+        "requires": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "audio",
+              "voice",
+              "micro",
+              "overlay",
+              "files"
+            ]
+          }
+        },
+        "panel": {
+          "$ref": "#/$defs/id",
+          "description": "Opens this plugin's panel. Write panel or effect, not both."
+        }
+      },
+      "if": {
+        "required": [
+          "panel"
+        ]
+      },
+      "then": {
+        "properties": {
+          "effect": false
         }
       }
     }

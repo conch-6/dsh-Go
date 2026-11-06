@@ -187,7 +187,12 @@ class FeatureCard extends StatelessWidget {
               clipBehavior: Clip.antiAlias,
               shape: const RoundedSuperellipseBorder(borderRadius: AppShape.radiusLg),
               child: InkWell(
-                onTap: enabled ? onTap : null,
+                onTap: enabled && onTap != null
+                    ? () {
+                        CardOrigin.remember(context);
+                        onTap!();
+                      }
+                    : null,
                 child: ConstrainedBox(constraints: const BoxConstraints(minHeight: 112), child: body),
               ),
             ),

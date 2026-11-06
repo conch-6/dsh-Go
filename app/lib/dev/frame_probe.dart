@@ -7,6 +7,9 @@ import 'package:flutter/widgets.dart';
 
 /// Opt-in diagnostics only. Neither collection nor reporting requests frames.
 const _enabled = !kReleaseMode && bool.fromEnvironment('DSH_FRAME_PROBE');
+
+/// The probe brings its own binding, created before the app starts.
+const frameProbeEnabled = _enabled;
 const _requestedSampleEvery = int.fromEnvironment('DSH_FRAME_PROBE_SAMPLE_EVERY', defaultValue: 60);
 const _sampleEvery = _requestedSampleEvery > 0 ? _requestedSampleEvery : 60;
 

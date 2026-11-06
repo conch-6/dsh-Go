@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/phone_state.dart';
+import '../common/app_dialog.dart';
 import '../common/brief_notice.dart';
 import '../common/expand_reveal.dart';
 import '../common/list_page_row.dart';
@@ -158,14 +159,14 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
 
   Future<void> _manualPair() async {
     final l10n = context.l10n;
-    final entered = await showDialog<(String, int?)>(context: context, builder: (_) => const _PairDialog());
+    final entered = await showAppDialog<(String, int?)>(context: context, builder: (_) => const _PairDialog());
     if (entered == null) return;
     await _run(() => _phone.adbPair(entered.$1, port: entered.$2), done: l10n.phoneDndPairedConnect);
   }
 
   Future<void> _manualConnect() async {
     final l10n = context.l10n;
-    final port = await showDialog<int>(context: context, builder: (_) => const _ConnectDialog());
+    final port = await showAppDialog<int>(context: context, builder: (_) => const _ConnectDialog());
     if (port == null || !mounted) return;
     await _run(() => _phone.adbConnect(port: port), done: l10n.phoneDndConnected);
   }

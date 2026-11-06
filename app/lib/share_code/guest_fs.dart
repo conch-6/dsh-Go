@@ -181,8 +181,76 @@ class GuestFs {
     return null;
   }
 
+  /// Complete, bounded bytes for a destructive import. Unlike [readSkill],
+  /// this never silently drops files that cannot travel in a share code.
+  /// Null means absent; an unsafe or unreadable existing skill throws.
+  Map<String, List<int>>? readSkillForImport(String name) {
+    if (!_validName(name)) throw const FormatException('invalid skill name');
+    final root = dir(skillsRoot);
+    final List<FileSystemEntity> entries;
+    try {
+      entries = root.listSync(followLinks: false);
+    } on FileSystemException catch (error) {
+      if (error.osError?.errorCode == 2) return null; // Missing skills root.
+      rethrow;
+    }
+    final folderPath = '${root.path}/$name';
+    final flatPath = '${root.path}/$name.md';
+    final matches = entries.where((entry) => entry.path == folderPath || entry.path == flatPath).toList();
+    if (matches.isEmpty) return null;
+    if (matches.length != 1) throw const FormatException('ambiguous skill files');
+    final files = <String, List<int>>{};
+    var entriesRead = 0;
+    void read(File source, String relative) {
+      if (FileSystemEntity.typeSync(source.path, followLinks: false) != FileSystemEntityType.file) {
+        throw const FormatException('unsupported skill entry');
+      }
+      if (!SharedSkill.isSafePath(relative) || files.length >= SharedSkill.maxFiles) {
+        throw const FormatException('skill cannot be backed up completely');
+      }
+      final input = source.openSync();
+      try {
+        final bytes = input.readSync(SharedSkill.maxFileChars + 1);
+        if (bytes.length > SharedSkill.maxFileChars) throw const FormatException('skill file too large');
+        utf8.decode(bytes); // Validate text, but preserve the original bytes (including BOM).
+        files[relative] = bytes;
+      } finally {
+        input.closeSync();
+      }
+    }
+
+    void walk(Directory directory, String prefix) {
+      for (final entry in directory.listSync(followLinks: false)) {
+        if (++entriesRead > SharedSkill.maxFiles * 4) throw const FormatException('too many skill entries');
+        final relative = '$prefix${entry.path.substring(directory.path.length + 1)}';
+        if (!SharedSkill.isSafePath(relative)) throw const FormatException('unsupported skill entry');
+        if (entry is File) {
+          read(entry, relative);
+        } else if (entry is Directory &&
+            FileSystemEntity.typeSync(entry.path, followLinks: false) == FileSystemEntityType.directory &&
+            relative.split('/').length < 4) {
+          walk(entry, '$relative/');
+        } else {
+          throw const FormatException('unsupported skill entry');
+        }
+      }
+    }
+
+    final entry = matches.single;
+    if (entry is Directory &&
+        entry.path == folderPath &&
+        FileSystemEntity.typeSync(entry.path, followLinks: false) == FileSystemEntityType.directory) {
+      walk(entry, '');
+    } else if (entry is File && entry.path == flatPath) {
+      read(entry, 'SKILL.md');
+    } else {
+      throw const FormatException('unsupported skill entry');
+    }
+    return files;
+  }
+
   /// Writes [skill] as `skills/<name>/…`, replacing what was there.
-  Future<void> writeSkill(SharedSkill skill) async {
+  void writeSkill(SharedSkill skill) {
     final folder = dir('$skillsRoot/${skill.name}');
     final flat = file('$skillsRoot/${skill.name}.md');
     if (flat.existsSync()) flat.deleteSync();

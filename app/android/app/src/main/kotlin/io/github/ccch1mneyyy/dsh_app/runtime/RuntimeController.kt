@@ -240,7 +240,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     fun publishDiagnostics(markdown: String): Map<String, Any?>? = try {
         if (!installer.isCurrent()) null
         else {
-            val file = GuestSetup.writeDiagnostics(installer.rootfs, markdown)
+            val file = GuestSetup.writeDiagnostics(installer.rootfs, markdown, safe = currentModeSafe())
             mapOf("path" to file.absolutePath, "bytes" to file.length())
         }
     } catch (_: Exception) {
@@ -350,7 +350,8 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 timeline.spawned()
                 val direct = directEngine()
                 p.start(env, if (storage) PhoneStorage.binds() else emptyList(), safe, phone, direct.requested, direct.failed) { actualDirect ->
-                    GuestSetup.writeAgentsMd(installer.rootfs, storage, phone, pendingVisualReplies, actualDirect)
+                    // SafeMode.prepare writes its own briefing; leave the original home untouched.
+                    if (!safe) GuestSetup.writeAgentsMd(installer.rootfs, storage, phone, pendingVisualReplies, actualDirect)
                 }
                 if (phone) PhoneControl.get(app).launched(p.phoneMounted)
             } catch (e: Throwable) {

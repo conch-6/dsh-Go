@@ -22,6 +22,8 @@ Future<void> _pump(
   required double scale,
   String title = '修复登录重复提交',
   String status = '连接已断开',
+  String? detail,
+  bool chip = true,
   bool agents = false,
 }) async {
   tester.view.devicePixelRatio = 1;
@@ -38,7 +40,10 @@ Future<void> _pump(
               child: ChatHeader(
                 title: title,
                 status: HeaderStatus(StatusTone.ok, status),
-                trailing: ModelChip(selection: testCatalog.defaultSelection, onSelected: (_) {}, grouped: true),
+                detail: detail,
+                trailing: chip
+                    ? ModelChip(selection: testCatalog.defaultSelection, onSelected: (_) {}, grouped: true)
+                    : null,
                 onOpenDrawer: () {},
                 onNewChat: () {},
               ),
@@ -72,6 +77,31 @@ RenderParagraph _paragraph(WidgetTester tester, String text) =>
     tester.renderObject<RenderParagraph>(find.descendant(of: find.byType(ChatHeader), matching: find.text(text)));
 
 void main() {
+  group('the line under the title', () {
+    bool cut(WidgetTester tester, Pattern text) =>
+        tester.renderObject<RenderParagraph>(find.textContaining(text).first).didExceedMaxLines;
+
+    testWidgets('a long workspace shortens, the status does not', (tester) async {
+      await _pump(tester, width: 360, scale: 1, chip: false, detail: '一个名字特别特别特别特别特别特别特别特别特别长的工作区');
+      expect(cut(tester, '连接已断开'), isFalse);
+      expect(cut(tester, '工作区'), isTrue);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a short workspace leaves the status all the room', (tester) async {
+      await _pump(tester, width: 360, scale: 1, chip: false, status: '正在重新连接到远程主机', detail: 'dsh');
+      expect(cut(tester, '正在重新连接到远程主机'), isFalse);
+      expect(cut(tester, 'dsh'), isFalse);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a status wider than the bar shortens itself, nothing overflows', (tester) async {
+      await _pump(tester, width: 320, scale: 1, chip: false, status: '正在重新连接' * 10, detail: 'dsh');
+      expect(cut(tester, '正在重新连接'), isTrue);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   setUpAll(loadTestFonts);
 
   for (final width in [360.0, 390.0]) {

@@ -102,15 +102,16 @@ sealed class ShareImage {
 
 /// A picture the person attached to a prompt (`session/attachment`).
 final class ShareAttachmentImage extends ShareImage {
-  const ShareAttachmentImage(this.attachmentId, {this.width, this.height});
+  const ShareAttachmentImage(this.attachment);
 
-  final String attachmentId;
-  final int? width;
-  final int? height;
+  /// The whole reference: a 0.2.2 engine checks all of it when asked for the bytes.
+  final ImageAttachment attachment;
+
+  String get attachmentId => attachment.attachmentId;
 
   @override
   double? get aspect {
-    final w = width, h = height;
+    final w = attachment.width, h = attachment.height;
     return w != null && h != null && w > 0 && h > 0 ? w / h : null;
   }
 }
@@ -822,8 +823,7 @@ ShareQuestion shareQuestionOf(UserChatItem item, {bool images = true}) => ShareQ
   images: [
     if (images)
       for (final image in item.images)
-        if (image.attachmentId.isNotEmpty)
-          ShareAttachmentImage(image.attachmentId, width: image.width, height: image.height),
+        if (image.attachmentId.isNotEmpty) ShareAttachmentImage(image),
   ],
 );
 

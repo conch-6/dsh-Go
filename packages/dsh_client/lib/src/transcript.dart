@@ -56,6 +56,7 @@ final class AssistantChatItem extends ChatItem {
     this.time,
     this.streaming = false,
     this.interrupted = false,
+    this.isFinalAnswer = false,
     this.usage,
     this.model,
     this.rowKey,
@@ -76,6 +77,9 @@ final class AssistantChatItem extends ChatItem {
 
   /// The turn was cancelled mid-stream; [text] is the delivered prefix.
   final bool interrupted;
+
+  /// The committed message contains explicitly marked final-answer text.
+  final bool isFinalAnswer;
   final TokenUsage? usage;
   final String? model;
 
@@ -169,6 +173,7 @@ class ChatTranscript {
   bool? _derivedRunning;
   List<TurnTrace>? _traces;
   List<TurnTrace> _previousTraces = const [];
+  List<TurnTrace>? _completedTracePrefix;
   ({List<TodoItem>? todos})? _todos;
   ({GoalProjection? goal})? _goal;
   bool? _runningOverride;
@@ -216,7 +221,26 @@ class ChatTranscript {
 
   /// Where each loaded turn's time went ([traceTurns] over the merged log).
   /// Finished turns keep their [TurnTrace] instance across later events.
-  List<TurnTrace> get turns => _traces ??= traceTurns(_log.values, reuse: _previousTraces);
+  List<TurnTrace> get turns => _traces ??= _buildTraces();
+
+  List<TurnTrace> _buildTraces() {
+    final prefix = _completedTracePrefix;
+    final traces = prefix == null || prefix.isEmpty
+        ? traceTurns(_log.values, reuse: _previousTraces)
+        : [...prefix, ...traceTurns(_traceEventsAfter(prefix.last.endSeq!), reuse: _previousTraces)];
+    // Own this list: callers may mutate the growable result returned by turns.
+    // An implicit interrupted turn has no endSeq and cannot bound a prefix.
+    _completedTracePrefix = traces.takeWhile((trace) => trace.endSeq != null).toList(growable: false);
+    return traces;
+  }
+
+  Iterable<SessionLogEvent> _traceEventsAfter(int boundary) sync* {
+    var seq = _log.firstKeyAfter(boundary);
+    while (seq != null) {
+      yield _log[seq]!;
+      seq = _log.firstKeyAfter(seq);
+    }
+  }
 
   /// The session's current todo list, as the Host's `todos` projection has
   /// it ([foldTodos]): the latest `todo/write`, cleared when the next turn
@@ -241,6 +265,7 @@ class ChatTranscript {
 
   void _logChanged({SessionLogEvent? appended}) {
     if (appended == null) {
+      _completedTracePrefix = null;
       _durableFold = null;
       _durableTail.clear();
       _derivedRunning = null;
@@ -254,8 +279,10 @@ class ChatTranscript {
     _durable = null;
     if (_traces case final traces?) _previousTraces = traces;
     _traces = null;
-    _todos = null;
-    _goal = null;
+    // Only these appended events change the two projections. Snapshots,
+    // history and replacements still invalidate both through appended == null.
+    if (appended == null || appended is TodoWriteEvent || appended is TurnStartedEvent) _todos = null;
+    if (appended == null || appended.type == 'goal/change' || appended.type == 'user/message') _goal = null;
   }
 
   List<ChatItem> get items {
@@ -470,6 +497,7 @@ class _DurableFold {
               text: message.text,
               reasoning: message.reasoning,
               interrupted: event.interrupted,
+              isFinalAnswer: message.isFinalAnswer,
               usage: event.usage,
               model: message.source.model,
             ),

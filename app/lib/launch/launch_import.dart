@@ -157,8 +157,8 @@ class LaunchImport {
       final file = files.first;
       if ((file.length ?? 0) > maxBytes) return (null, _over);
       return await keep(file.openRead(), previous: previous);
-    } on PlatformException {
-      return (null, _over);
+    } on PlatformException catch (e) {
+      return (null, e.code == 'too-large' ? _over : LaunchImportProblem.unreadable);
     } catch (_) {
       return (null, LaunchImportProblem.unreadable);
     } finally {

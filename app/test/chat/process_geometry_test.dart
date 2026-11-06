@@ -2,7 +2,9 @@ import 'package:dsh_app/ui/chat/render/code_block.dart';
 import 'package:dsh_app/ui/chat/widgets/stream_row.dart';
 import 'package:dsh_app/ui/chat/widgets/thinking_pill.dart';
 import 'package:dsh_app/ui/chat/widgets/tool_row.dart';
+import 'package:dsh_app/ui/common/think_glyph.dart';
 import 'package:dsh_client/dsh_client.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -95,6 +97,30 @@ void main() {
     await tester.tap(find.text('思考中'));
     await tester.pump();
     expect(find.byType(AnimatedSize), findsOneWidget);
+  });
+
+  testWidgets('the live window keeps no text painter from one publish to the next', (tester) async {
+    var live = 0;
+    void track(ObjectEvent event) {
+      if (event.object is! TextPainter) return;
+      live += event is ObjectCreated ? 1 : -1;
+    }
+
+    FlutterMemoryAllocations.instance.addListener(track);
+    addTearDown(() => FlutterMemoryAllocations.instance.removeListener(track));
+    Widget window(String text) => testApp(Scaffold(body: ThinkingTicker(text: text)));
+    await tester.pumpWidget(window('第一段'));
+    final settled = live;
+    for (var i = 0; i < 20; i++) {
+      await tester.pumpWidget(window('第一段${'写' * i}'));
+    }
+    expect(live, settled);
+  });
+
+  testWidgets('the spinning glyph paints in its own layer', (tester) async {
+    await tester.pumpWidget(testApp(const Scaffold(body: ThinkingPill(reasoning: '嗯', active: true))));
+    final boundary = find.ancestor(of: find.byType(ThinkGlyph), matching: find.byType(RepaintBoundary)).first;
+    expect(tester.widget<RepaintBoundary>(boundary).child, isA<ThinkGlyph>());
   });
 
   testWidgets('dense code and ANSI output align with section titles and use 18px lines', (tester) async {

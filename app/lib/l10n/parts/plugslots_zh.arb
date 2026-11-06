@@ -1,4 +1,7 @@
 {
+  "plugslotsSurfaceComposerTools": "加号面板",
+  "plugslotsSurfaceSessionActions": "对话操作",
+  "plugslotsSurfaceTurnNote": "回合尾注",
   "plugslotsSurfaceComposerActions": "输入框按钮",
   "plugslotsSurfaceMessageActions": "消息菜单",
   "plugslotsSurfaceComposerStrip": "状态条",

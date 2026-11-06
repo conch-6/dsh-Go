@@ -1,6 +1,6 @@
 // Counting downloads, update checks and the app's usage reports, and what is
 // (not) kept: src/stats.ts, src/usage.ts.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import worker from '../src/index';
 import { CHANNEL_PREFIX, channelId, resetChannelMemo } from '../src/beta-auth';
@@ -11,6 +11,8 @@ import { COUNT_LIMITS, resetUsageMemo, validateReport } from '../src/usage';
 import { FakeCache, makeCtx, makeEnv } from './fakes';
 
 const ORIGIN = 'https://go.dshtui.com';
+// Keep requests, per-day keys, and expected dates on the same test day.
+const testNow = Date.parse('2026-10-30T04:00:00Z');
 const VERSION = '0.9.8';
 const APK = `dsh-go-${VERSION}-arm64.apk`;
 const CN = 'https://dshgo-cn.oss-cn-hongkong.aliyuncs.com/';
@@ -30,6 +32,7 @@ const manifest = {
 };
 
 beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(testNow);
   resetBetaCache();
   resetChannelMemo();
   resetStatsMemo();
@@ -38,6 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   delete (globalThis as { caches?: unknown }).caches;
 });
 
@@ -210,7 +214,7 @@ describe('daily device codes', () => {
 // ── The app's usage report ───────────────────────────────────────────────
 
 const IID = 'q1w2e3r4t5y6u7i8o9p0aQ';
-const today = statsDay();
+const today = statsDay(testNow);
 function report(over: Record<string, unknown> = {}) {
   return {
     v: 1, iid: IID, day: today, app: '0.9.9', build: 10301000, sdk: 34, abi: 'arm64-v8a', maker: 'vivo', lang: 'zh', engine: 'proot',

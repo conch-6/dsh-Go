@@ -175,7 +175,13 @@ void main() {
         ],
         'pluginManager/setBundleEnabled': (args) {
           enabled = args['enabled'] == true;
-          return {'stage': 'enable', 'target': voiceInputBundle, 'enabled': enabled, 'changed': true, 'application': 'applied'};
+          return {
+            'stage': 'enable',
+            'target': voiceInputBundle,
+            'enabled': enabled,
+            'changed': true,
+            'application': 'applied',
+          };
         },
         'speech/catalog': (_) => {
           'providers': [
@@ -204,21 +210,36 @@ void main() {
     return c;
   }
 
-  test('a download still writing after the stop wait (the real 10 s): nothing is deleted, no success; '
-      'once it stopped, delete goes through', () async {
-    final platform = _HeldWriter(root);
-    final c = container(platform);
-    await c.read(localConnectionProvider.future);
-    final controller = c.read(voiceModelProvider.notifier);
-    final downloading = controller.download();
-    await platform.started.future;
-    await Future<void>.delayed(Duration.zero);
+  testWidgets('a download still writing at the 10 s stop deadline: nothing is deleted; '
+      'once it stopped, delete goes through', (tester) async {
+    late _HeldWriter platform;
+    late ProviderContainer c;
+    late VoiceModelController controller;
+    late Future<void> downloading;
+    // File setup and the real writer run outside the test clock. Only the
+    // controller's stop deadline below is advanced; the writer stays held.
+    await tester.runAsync(() async {
+      platform = _HeldWriter(root);
+      c = container(platform);
+      await c.read(localConnectionProvider.future);
+      controller = c.read(voiceModelProvider.notifier);
+      downloading = controller.download();
+      await platform.started.future;
+      await Future<void>.delayed(Duration.zero);
+    });
     expect(models.existsSync(), isTrue);
+    expect(VoiceModelController.downloadStopWait, const Duration(seconds: 10));
 
-    final deleting = controller.delete();
-    await platform.cancelled.future;
-    // The cancel reached the download; it has not stopped writing, and does not within the wait.
-    final deleted = await deleting.timeout(const Duration(seconds: 14));
+    bool? deleted;
+    final deleting = controller.delete().then((value) => deleted = value);
+    await tester.pump();
+    expect(platform.cancelled.isCompleted, isTrue);
+    expect(deleted, isNull);
+    await tester.pump(const Duration(milliseconds: 9999));
+    expect(deleted, isNull, reason: 'the stop deadline has not elapsed');
+    expect(platform.stopped.isCompleted, isFalse);
+    await tester.pump(const Duration(milliseconds: 1));
+    await deleting;
     expect(platform.stopped.isCompleted, isFalse);
     expect(deleted, isFalse, reason: 'no success without the download having stopped');
     expect(models.existsSync(), isTrue);
@@ -226,15 +247,21 @@ void main() {
     expect(enabled, isTrue, reason: 'nothing changed on the engine either');
     expect(controller.downloadStopping, isTrue);
 
-    // The download stops (its last write lands); the delete can be retried and now goes through.
-    platform.release.complete();
-    await platform.worker;
-    await downloading;
-    expect(controller.downloadStopping, isFalse);
-    expect(File(platform.job.path).lengthSync(), 1000);
-    expect(await controller.delete(), isTrue);
-    expect(models.existsSync(), isFalse);
-    expect(enabled, isFalse);
+    // Advancing the stop timer did not complete the writer. Release it for
+    // real, then require the actual file deletion to succeed.
+    await tester.runAsync(() async {
+      platform.release.complete();
+      await platform.worker;
+      await downloading;
+      expect(controller.downloadStopping, isFalse);
+      expect(File(platform.job.path).lengthSync(), 1000);
+      expect(await controller.delete(), isTrue);
+      expect(models.existsSync(), isFalse);
+      expect(enabled, isFalse);
+    });
+    // cancel also queued the notification coalescer's ordinary window.
+    // Drain that test-zone timer before the widget binding checks cleanup.
+    await tester.pump(VoiceModelController.noticeEvery);
   }, timeout: const Timeout(Duration(seconds: 30)));
 
   test('a delete while the download is still being started (no handle yet) waits for it, not for the clock', () async {

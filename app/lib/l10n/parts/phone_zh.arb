@@ -38,6 +38,7 @@
   "phoneEngineReset": "重置运行环境",
   "phoneEngineResetHint": "删除对话和文件后重新解压",
   "phoneEngineResetTitle": "重置运行环境？",
+  "phoneResetAlsoDeletes": "家目录（/root）里没有保留的内容也会一起删除，包括工作区里的文件、AGENTS.md，以及插件自己存的数据（比如记忆）。",
   "phoneEngineKeepUiSkills": "保留界面配置和技能",
   "phoneEngineKeepPluginsSettings": "保留已装插件和设置",
   "phoneEngineDeleteReset": "删除并重置",

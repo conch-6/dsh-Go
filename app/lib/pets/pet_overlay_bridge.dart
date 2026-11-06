@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/live_activity_state.dart';
+import '../ui/common/app_dialog.dart';
 import 'overlay_channel.dart';
 import 'pet_overlay_actions.dart';
 import 'pet_signals.dart';
@@ -55,7 +56,7 @@ class _PetOverlayBridgeState extends ConsumerState<PetOverlayBridge> {
       if (!mounted || _voiceOpen) return text;
       _voiceOpen = true;
       try {
-        return await showDialog<String>(
+        return await showAppDialog<String>(
               context: context,
               barrierDismissible: false,
               builder: (_) => PetVoiceDialog(text: text),
@@ -75,7 +76,7 @@ class _PetOverlayBridgeState extends ConsumerState<PetOverlayBridge> {
 
   @override
   Widget build(BuildContext context) {
-    ref.watch(petOverlayBridgeProvider);
+    ref.listen<void>(petOverlayBridgeProvider, (_, _) {});
     return const SizedBox.shrink();
   }
 }

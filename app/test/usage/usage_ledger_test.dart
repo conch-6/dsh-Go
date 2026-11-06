@@ -7,7 +7,8 @@ import 'dart:math';
 import 'package:dsh_app/usage/usage_ledger.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-DateTime _at(int day, [int hour = 12]) => DateTime(2026, 10, day, hour);
+// Fixed UTC fixtures keep the host retention boundary independent of the test machine's zone.
+DateTime _at(int day, [int hour = 12]) => DateTime.utc(2026, 10, day, hour);
 
 void main() {
   test('a day is the local date, zero-padded', () {

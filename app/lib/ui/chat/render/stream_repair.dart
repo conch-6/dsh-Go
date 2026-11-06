@@ -62,13 +62,15 @@ String _repairWithScan(String text, _BlockScan scan) {
     return text.indexOf('\n', opener) == -1 ? text.substring(0, opener).trimRight() : text;
   }
   final start = scan.lastBlockStart;
-  final head = text.substring(0, start);
-  var tail = text.substring(start);
+  final originalTail = text.substring(start);
+  var tail = originalTail;
   final table = _unfinishedTableAt(tail);
   if (table != -1) tail = tail.substring(0, table).trimRight();
   tail = _dropPartialLastLine(tail);
   tail = _repairInline(tail);
-  return tail.trim().isEmpty ? head.trimRight() : head + tail;
+  if (tail.trim().isEmpty) return text.substring(0, start).trimRight();
+  if (identical(tail, originalTail)) return text;
+  return text.substring(0, start) + tail;
 }
 
 /// Where the last block starts and whether the text ends inside a fence.
@@ -186,12 +188,13 @@ class _InlineScan {
     final brackets = <int>[];
     var i = 0;
     while (i < n) {
-      final c = text[i];
-      if (c == r'\' && i + 1 < n) {
-        final next = text[i + 1];
+      // ASCII markers need no one-character String; indices stay UTF-16.
+      final c = text.codeUnitAt(i);
+      if (c == _backslash && i + 1 < n) {
+        final next = text.codeUnitAt(i + 1);
         // Maths is opaque: its `_` and `*` are not emphasis.
-        if (next == '(' || next == '[') {
-          final close = text.indexOf(next == '(' ? r'\)' : r'\]', i + 2);
+        if (next == _openParen || next == _openBracket) {
+          final close = text.indexOf(next == _openParen ? r'\)' : r'\]', i + 2);
           if (close == -1) break;
           i = close + 2;
           continue;
@@ -199,9 +202,9 @@ class _InlineScan {
         i += 2;
         continue;
       }
-      if (c == '`') {
+      if (c == _backtick) {
         var run = 0;
-        while (i + run < n && text[i + run] == '`') {
+        while (i + run < n && text.codeUnitAt(i + run) == _backtick) {
           run += 1;
         }
         final close = _closingRun(text, i + run, run);
@@ -213,18 +216,17 @@ class _InlineScan {
         i = close + run;
         continue;
       }
-      if (c == '*' || c == '_' || c == '~') {
-        i = _delimiterRun(i, c);
+      if (c == _asterisk || c == _underscore || c == _tilde) {
+        i = _delimiterRun(i, String.fromCharCode(c));
         continue;
       }
-      if (c == '[') {
+      if (c == _openBracket) {
         brackets.add(i);
-      } else if (c == ']' && brackets.isNotEmpty) {
+      } else if (c == _closeBracket && brackets.isNotEmpty) {
         final label = brackets.removeLast();
-        if (i + 1 < n && text[i + 1] == '(') {
-          final close = text.indexOf(')', i + 2);
-          final newline = text.indexOf('\n', i + 2);
-          if (close == -1 || (newline != -1 && newline < close)) {
+        if (i + 1 < n && text.codeUnitAt(i + 1) == _openParen) {
+          final close = text.indexOf(_linkTargetEnd, i + 2);
+          if (close == -1 || text[close] == '\n') {
             if (label > 0 && text[label - 1] == '!') {
               openImage = label - 1;
             } else {
@@ -246,12 +248,25 @@ class _InlineScan {
     }
   }
 
+  static const _backslash = 0x5c;
+  static const _backtick = 0x60;
+  static const _asterisk = 0x2a;
+  static const _underscore = 0x5f;
+  static const _tilde = 0x7e;
+  static const _openParen = 0x28;
+  static const _openBracket = 0x5b;
+  static const _closeBracket = 0x5d;
+
   final String text;
   final openers = <_Opener>[];
   int? openCode;
   int codeRun = 0;
   int? openLinkTarget;
   int? openImage;
+
+  // Stop at the first terminator instead of searching every link's entire
+  // remaining suffix for a newline after its closing parenthesis was found.
+  static final _linkTargetEnd = RegExp(r'[)\n]');
 
   /// A marker run at the very end that neither opened nor closed anything
   /// (`这是 **`, `然后 *`): it waits for the next character.

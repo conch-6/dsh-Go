@@ -13,6 +13,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
 import java.io.File
+import java.nio.file.Files
 import kotlin.concurrent.thread
 
 /**
@@ -140,7 +141,7 @@ class LinksPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         val dir = File(context.cacheDir, "links").apply { mkdirs() }
         prune(dir)
         // One folder per arrival so two files with the same name don't collide.
-        val slot = File(dir, System.currentTimeMillis().toString(36)).apply { mkdirs() }
+        val slot = Files.createTempDirectory(dir.toPath(), "arrival-").toFile()
         val target = File(slot, shown)
         val input = resolver.openInputStream(source) ?: return mapOf("error" to "unreadable", "name" to shown)
         input.use { stream ->

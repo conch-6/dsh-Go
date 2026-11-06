@@ -34,7 +34,7 @@ Deletes data on this phone and reinstalls the runtime, to fix a runtime that won
 - **Keep interface settings and skills**: on by default.
 - **Keep installed plugins and settings**: off by default.
 
-With the defaults, chats, workspaces, plugins and settings are deleted, including custom model providers; the DeepSeek key saved in the app is filled back in. The dialog spells out what will go; tap **Delete and reset** and the app reinstalls the runtime. A reset can't be undone, so export chats you need first with `/export` or **Export chat log** in All features.
+With the defaults, chats, workspaces, plugins and settings are deleted, including custom model providers; the DeepSeek key saved in the app is filled back in. Anything else in the home folder (`/root`) goes too, including files in your workspaces, `AGENTS.md` and data that plugins store themselves, such as memories. The dialog spells out what will go; tap **Delete and reset** and the app reinstalls the runtime. A reset can't be undone, so export chats you need first with `/export` or **Export chat log** in All features.
 
 ## Uninstall the runtime
 
@@ -45,7 +45,9 @@ Frees up storage. Chats, workspaces, plugins, settings, interface settings and s
 
 ## Switch hosts
 
-Open the chat list and tap the current host at the bottom to open **Switch host**, then choose **This phone** or a remote host. With no remote hosts yet, tap **Connect a computer or server**; otherwise tap **Manage remote hosts**.
+Open the chat list and tap the current host's name at the bottom to open **Switch host**, then choose **This phone** or a remote host. With no remote hosts yet, tap **Connect a computer or server**; otherwise tap **Manage remote hosts**.
+
+Tap the icon to the left of the host name for details: remote hosts show their name, connection status and current network path, with an on-demand latency measurement where supported. For this phone, it opens **Local engine**. The host name and dropdown arrow still switch hosts.
 
 <!-- nav: remoteSwitchHost,remoteManageHosts -->
 `Switch host › Manage remote hosts` · [Open](dshgo://open/remote)
@@ -78,6 +80,11 @@ No network setup, end-to-end encrypted. Good for computers on another network.
 2. On the remote hosts page, choose the same sign-in provider you used on that host, for example “Continue with GitHub”, and sign in with the same account. If the page lists no providers and shows only **Sign in in browser**, tap that button.
 3. Select an online host. On first connection, check that the identity fingerprint matches the one the host's remote plugin shows, then tap **Trust and connect**.
 
-Connections automatically try LAN / P2P, then TURN, and finally Relay without a direct-connection switch. Each path requires compatible server and Host support. Tap the route label on the connection card or beside a Host to see the actual route, connection time, available round-trip latency and fallback reason. Unmeasured values are not shown as zero.
+Connections automatically try LAN / P2P, then TURN, and finally Relay without a direct-connection switch. Each path requires compatible server and Host support. Tap the route label on the connection card or beside a Host to see the actual route, connection time, available round-trip latency and fallback reason. WebRTC routes also show the selected ICE candidates' phone/Host IPv4 or IPv6 and UDP or TCP, never raw IP addresses. Unmeasured or unconfirmed values are not presented as known results.
+
+<!-- nav: commonSettings,commonRemoteHost,remoteCompactHistory -->
+`Settings › Remote host › Compact history`
+
+**Compact history** is off by default. Supporting DSH Remote Hosts summarize historical tool arguments and output to reduce history transfer; message text, live replies, approvals and original Host records stay unchanged. Switch to another host (or this phone) and back, or restart the app, to apply. The current client and its automatic reconnects retain their original mode to avoid mixing cached history. After turning it off, select the host again and reopen the chat to load full history. Older Hosts continue sending full history; SSH is unaffected.
 
 DSH Remote connects to one host at a time; switching disconnects the previous one. Over DSH Remote: you can send images only, DSH Web doesn't open in the app, plugins can only be turned on or off, and DS Bot and chat log export aren't available.

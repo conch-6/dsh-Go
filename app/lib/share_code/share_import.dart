@@ -3,6 +3,8 @@
 // restore point, plugins, settings, skills, AGENTS.md.
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:dsh_client/dsh_client.dart';
 
@@ -453,7 +455,25 @@ Future<ImportPlan> planImport(SharePayload payload, ImportTarget target, {requir
         );
         continue;
       }
-      final current = files.readSkill(skill.name);
+      Map<String, String>? current;
+      try {
+        final bytes = files.readSkillForImport(skill.name);
+        current = bytes?.map((path, value) => MapEntry(path, utf8.decode(value)));
+      } on Object catch (error) {
+        if (error is! FileSystemException && error is! FormatException) rethrow;
+        changes.add(
+          ImportChange(
+            id: id,
+            section: ImportSection.skills,
+            title: skill.name,
+            kind: ChangeKind.unavailable,
+            blocked: appL10n.pluginsFileWriteFailed,
+            defaultOn: false,
+            skill: skill,
+          ),
+        );
+        continue;
+      }
       if (current != null && _sameFiles(current, skill.files)) continue;
       changes.add(
         ImportChange(
@@ -723,8 +743,7 @@ Future<ImportResult> applyImport(
     try {
       final point = RestorePoint(files);
       if (step.section == ImportSection.skills) {
-        await point.backupSkill(backup, step.skill!.name);
-        await files.writeSkill(step.skill!);
+        point.replaceSkill(backup, step.skill!);
       } else {
         await point.backupAgentsMd(backup);
         await files.writeImportedAgentsMd(step.text!);

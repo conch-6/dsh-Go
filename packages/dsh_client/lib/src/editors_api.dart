@@ -167,6 +167,9 @@ extension EditorsApi on DshClient {
     String? prompt,
     ScheduleTiming? timing,
   }) async {
+    if (task.usesTargetProtocol) {
+      return updateTargetSchedule(task, {'title': ?title, 'prompt': ?prompt, 'timing': ?timing?.toChange()});
+    }
     final value = asMapOrEmpty(
       await rpc.call('schedule/update', {
         'request': {

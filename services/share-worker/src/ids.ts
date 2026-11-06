@@ -52,18 +52,22 @@ export function objectKey(id: string): string | null {
   return tier ? tier.prefix + id : null;
 }
 
-/** A uniform index in [0, n) from crypto randomness (rejection sampling). */
-function randomBelow(n: number): number {
-  const limit = 256 - (256 % n);
-  const buf = new Uint8Array(16);
-  for (;;) {
-    crypto.getRandomValues(buf);
-    for (const b of buf) if (b < limit) return b % n;
-  }
-}
-
 export function newId(ttl: Ttl): string {
   const tier = tierOfTtl(ttl);
+  // Consume a fresh block within this ID, instead of discarding it after each character.
+  const buf = new Uint8Array(16);
+  let at = buf.length;
+  function randomBelow(n: number): number {
+    const limit = 256 - (256 % n);
+    for (;;) {
+      if (at === buf.length) {
+        crypto.getRandomValues(buf);
+        at = 0;
+      }
+      const b = buf[at++]!;
+      if (b < limit) return b % n;
+    }
+  }
   let id = ALPHABET[tier.from + randomBelow(tier.to - tier.from)]!;
   while (id.length < ID_LENGTH) id += ALPHABET[randomBelow(ALPHABET.length)]!;
   return id;

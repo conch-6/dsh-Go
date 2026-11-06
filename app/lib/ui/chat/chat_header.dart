@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../l10n/l10n.dart';
 import '../../state/header_schedule_state.dart';
 import '../agents/header_agents.dart';
+import '../common/fluid_bits.dart';
 import '../common/smooth_size.dart';
 import '../common/status_dot.dart';
 import '../shell/adaptive/adaptive_scaffold.dart' show AdaptiveChrome;
@@ -50,7 +51,8 @@ class ChatHeader extends ConsumerStatefulWidget {
     super.key,
     required this.title,
     required this.status,
-    required this.trailing,
+    this.detail,
+    this.trailing,
     this.onOpenDrawer,
     this.onTitleTap,
     this.onNewChat,
@@ -60,9 +62,13 @@ class ChatHeader extends ConsumerStatefulWidget {
   final String title;
   final HeaderStatus status;
 
+  /// What follows the status under the title (a phone: the workspace). Shortens first.
+  final String? detail;
+
   /// 右侧件(模型胶囊 [ModelChip])。需要传 `grouped: true` 与顶栏共享一次
   /// 背景采样。顶栏按它的固有宽度(带不带「· 高」)和标题胶囊分地方。
-  final Widget trailing;
+  /// Null: the title has the room.
+  final Widget? trailing;
   final VoidCallback? onOpenDrawer;
   final VoidCallback? onTitleTap;
   final VoidCallback? onNewChat;
@@ -209,22 +215,36 @@ class _ChatHeaderState extends ConsumerState<ChatHeader> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     HeaderTitleText(widget.title, style: titleStyle),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        StatusDot(tone: widget.status.tone, size: _dot),
-                                        const SizedBox(width: _dotGap),
-                                        Flexible(
-                                          child: _StatusLabel(
-                                            status: widget.status,
-                                            style: statusStyle?.copyWith(
-                                              color: widget.status.tone == StatusTone.warn
-                                                  ? dsh.warning
-                                                  : dsh.textTertiary,
+                                    _StatusLine(
+                                      status: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          StatusDot(tone: widget.status.tone, size: _dot),
+                                          const SizedBox(width: _dotGap),
+                                          Flexible(
+                                            child: _StatusLabel(
+                                              status: widget.status,
+                                              style: statusStyle?.copyWith(
+                                                color: widget.status.tone == StatusTone.warn
+                                                    ? dsh.warning
+                                                    : dsh.textTertiary,
+                                              ),
                                             ),
                                           ),
+                                        ],
+                                      ),
+                                      detail: switch (widget.detail) {
+                                        final detail? => FluidTextSwap(
+                                          value: detail,
+                                          child: Text(
+                                            ' · $detail',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: statusStyle?.copyWith(color: dsh.textTertiary),
+                                          ),
                                         ),
-                                      ],
+                                        null => const SizedBox.shrink(),
+                                      },
                                     ),
                                   ],
                                 ),
@@ -240,7 +260,10 @@ class _ChatHeaderState extends ConsumerState<ChatHeader> {
                   // conversation has no model chip). Flexible: the chip
                   // takes the width this row gives it.
                   HeaderTrailingSlot(
-                    trailing: Flexible(child: _ChipSlot(child: widget.trailing)),
+                    trailing: switch (widget.trailing) {
+                      final trailing? => Flexible(child: _ChipSlot(child: trailing)),
+                      null => null,
+                    },
                   ),
                   // Mirrors the menu key; gone on the new-chat screen. On a
                   // wide window the key that unfolds 对话详情 follows it.
@@ -598,6 +621,77 @@ class _RenderPillContent extends RenderBox
 }
 
 /// 状态文字;读屏的实时区域,变了就播报 [HeaderStatus.spoken] 或文字本身。
+/// The line under the title: the status first, whatever it needs, and the detail in what
+/// is left. A flex would hold back a share for each, cutting one with room beside it.
+class _StatusLine extends MultiChildRenderObjectWidget {
+  _StatusLine({required Widget status, required Widget detail}) : super(children: [status, detail]);
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderStatusLine();
+}
+
+class _StatusLineParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderStatusLine extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _StatusLineParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _StatusLineParentData> {
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _StatusLineParentData) child.parentData = _StatusLineParentData();
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) =>
+      getChildrenAsList().fold(0.0, (sum, child) => sum + child.getMinIntrinsicWidth(height));
+
+  @override
+  double computeMaxIntrinsicWidth(double height) =>
+      getChildrenAsList().fold(0.0, (sum, child) => sum + child.getMaxIntrinsicWidth(height));
+
+  @override
+  double computeMinIntrinsicHeight(double width) =>
+      getChildrenAsList().fold(0.0, (most, child) => math.max(most, child.getMinIntrinsicHeight(width)));
+
+  @override
+  double computeMaxIntrinsicHeight(double width) =>
+      getChildrenAsList().fold(0.0, (most, child) => math.max(most, child.getMaxIntrinsicHeight(width)));
+
+  (Size, Size) _measure(BoxConstraints constraints, ChildLayouter layoutChild) {
+    final width = constraints.maxWidth;
+    final status = layoutChild(firstChild!, BoxConstraints(maxWidth: width));
+    final detail = layoutChild(lastChild!, BoxConstraints(maxWidth: math.max(0.0, width - status.width)));
+    return (status, detail);
+  }
+
+  Size _sizeOf(BoxConstraints constraints, Size status, Size detail) =>
+      constraints.constrain(Size(status.width + detail.width, math.max(status.height, detail.height)));
+
+  @override
+  Size computeDryLayout(covariant BoxConstraints constraints) {
+    final (status, detail) = _measure(constraints, ChildLayoutHelper.dryLayoutChild);
+    return _sizeOf(constraints, status, detail);
+  }
+
+  @override
+  void performLayout() {
+    final (status, detail) = _measure(constraints, ChildLayoutHelper.layoutChild);
+    size = _sizeOf(constraints, status, detail);
+    (firstChild!.parentData! as _StatusLineParentData).offset = Offset(0, (size.height - status.height) / 2);
+    (lastChild!.parentData! as _StatusLineParentData).offset = Offset(
+      status.width,
+      (size.height - detail.height) / 2,
+    );
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) => defaultPaint(context, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position);
+}
+
 class _StatusLabel extends StatelessWidget {
   const _StatusLabel({required this.status, required this.style});
 
@@ -610,6 +704,9 @@ class _StatusLabel extends StatelessWidget {
     liveRegion: true,
     label: status.spoken ?? status.label,
     excludeSemantics: true,
-    child: Text(status.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+    child: FluidTextSwap(
+      value: status.label,
+      child: Text(status.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+    ),
   );
 }

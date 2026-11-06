@@ -34,15 +34,21 @@ Uri normalizeServerUrl(Object input) {
 }
 
 bool _isPrivateHost(String host) {
-  if (host == 'localhost' || host == '127.0.0.1' || host == '::1' || host == '[::1]' || host == '10.0.2.2') {
-    return true;
+  // Uri.host keeps brackets around IPv6 literals; parse bytes rather than
+  // prefixes so expanded, compressed and uppercase spellings agree.
+  final literal = host.startsWith('[') && host.endsWith(']') ? host.substring(1, host.length - 1) : host;
+  final address = InternetAddress.tryParse(literal);
+  if (address == null) {
+    return host == 'localhost' || host.endsWith('.local') || host.endsWith('.test') || host.endsWith('.localhost');
   }
-  final m = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$').firstMatch(host);
-  if (m == null) {
-    return host.endsWith('.local') || host.endsWith('.test') || host.endsWith('.localhost');
+  final bytes = address.rawAddress;
+  if (address.type == InternetAddressType.IPv6) {
+    return (bytes[0] & 0xfe) == 0xfc ||
+        (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80) ||
+        (bytes.last == 1 && bytes.take(15).every((byte) => byte == 0));
   }
-  final a = int.parse(m.group(1)!);
-  final b = int.parse(m.group(2)!);
+  final a = bytes[0];
+  final b = bytes[1];
   return a == 10 ||
       a == 127 ||
       (a == 172 && b >= 16 && b <= 31) ||
@@ -556,9 +562,16 @@ class RemoteServerApi {
       throw const RemoteApiException('INVALID_MESSAGE', 'Refusing a cross-origin Server request.');
     }
     HttpClientRequest? request;
+    TimeoutException? expired;
     Future<(int, String)> run() async {
       request = await _http.openUrl(method, uri);
       final req = request!;
+      final deadline = expired;
+      if (deadline != null) {
+        req.done.ignore();
+        req.abort(deadline);
+        throw deadline;
+      }
       req.followRedirects = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       if (bearer != null) req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $bearer');
@@ -569,7 +582,17 @@ class RemoteServerApi {
         req.add(bytes);
       }
       final response = await req.close();
-      final text = await utf8.decodeStream(response);
+      final String text;
+      try {
+        text = await utf8.decodeStream(response);
+      } on FormatException {
+        if (response.statusCode >= 300) return (response.statusCode, '');
+        throw RemoteApiException(
+          'INVALID_MESSAGE',
+          'The server returned an invalid response body.',
+          status: response.statusCode,
+        );
+      }
       return (response.statusCode, text);
     }
 
@@ -577,7 +600,8 @@ class RemoteServerApi {
     final String text;
     try {
       (status, text) = await run().timeout(timeout);
-    } on TimeoutException {
+    } on TimeoutException catch (error) {
+      expired = error;
       request?.abort();
       throw const RemoteApiException('CONNECTION_FAILED', 'The server request timed out.', retryable: true);
     } on SocketException catch (error) {

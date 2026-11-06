@@ -9,6 +9,7 @@ import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.github.ccch1mneyyy.dsh_app.voice.VoiceDiagnostics
+import io.github.ccch1mneyyy.dsh_app.phone.PhoneControl
 import io.github.ccch1mneyyy.dsh_app.runtime.RuntimeManifest
 import io.github.ccch1mneyyy.dsh_app.update.ApkInstaller
 import org.json.JSONObject
@@ -83,6 +84,10 @@ class DiagnosticsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val memory = ActivityManager.MemoryInfo()
         runCatching { (context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(memory) }
         return mapOf(
+            // Existing Dart device maps reach summary.json unchanged. These are the last accepted
+            // probe facts in this process, not a live self-test or a hardware capability promise.
+            "backgroundInputProbe" to (PhoneControl.peek()?.backgroundProbeDiagnostics()
+                ?: mapOf("v" to 1, "observed" to false, "connectionFailure" to false)),
             "manufacturer" to Build.MANUFACTURER,
             "brand" to Build.BRAND,
             "model" to Build.MODEL,
@@ -118,7 +123,7 @@ class DiagnosticsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val current = File(dir, "dsh.log")
         val rotated = File(dir, "dsh.log.1")
         val fromCurrent = tail(current, maxBytes)
-        val room = maxBytes - fromCurrent.sumOf { it.length + 1 }
+        val room = maxBytes - fromCurrent.sumOf { it.toByteArray(Charsets.UTF_8).size + 1 }
         val fromRotated = if (room > 1024) tail(rotated, room) else emptyList()
         return fromRotated + fromCurrent
     }

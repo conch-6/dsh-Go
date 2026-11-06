@@ -24,6 +24,19 @@ import 'webrtc_transport.dart' show WebRtcTransport;
 /// Data plane in use; mirrors the `transport.selected` vocabulary.
 enum RemoteTransportMode { lan, p2p, turn, relay }
 
+enum RemoteIpVersion { ipv4, ipv6 }
+
+enum RemoteIceProtocol { udp, tcp }
+
+/// Selected ICE pair metadata only; never retains candidate addresses or URLs.
+class RemotePeerNetworkInfo {
+  const RemotePeerNetworkInfo({this.localIpVersion, this.remoteIpVersion, this.protocol});
+
+  final RemoteIpVersion? localIpVersion;
+  final RemoteIpVersion? remoteIpVersion;
+  final RemoteIceProtocol? protocol;
+}
+
 /// Payload-free reasons for trying a less preferred data plane.
 enum RemoteNetworkFallbackReason {
   webrtcUnavailable,
@@ -45,12 +58,14 @@ class RemoteNetworkDiagnostics {
     this.connectionDuration,
     this.roundTripTime,
     this.fallbackReason,
+    this.peerNetwork,
   });
 
   final RemoteTransportMode? transportMode;
   final Duration? connectionDuration;
   final Duration? roundTripTime;
   final RemoteNetworkFallbackReason? fallbackReason;
+  final RemotePeerNetworkInfo? peerNetwork;
   final DateTime observedAt;
 }
 

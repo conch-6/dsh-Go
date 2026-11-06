@@ -16,7 +16,11 @@ import java.util.concurrent.TimeUnit
 import rikka.shizuku.Shizuku
 import rikka.sui.Sui
 
-class ShizukuStarter(private val context: Context, private val onChanged: () -> Unit) {
+class ShizukuStarter(
+    private val context: Context,
+    private val onAccessChanged: () -> Unit,
+    private val onChanged: () -> Unit,
+) {
     companion object {
         const val PACKAGE = "moe.shizuku.privileged.api"
         private const val PERMISSION_REQUEST_CODE = 4601
@@ -77,9 +81,12 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
         if (listenersAdded) return
         listenersAdded = true
         runCatching {
-            Shizuku.addBinderReceivedListenerSticky { onChanged() }
-            Shizuku.addBinderDeadListener { disconnect(); onChanged() }
-            Shizuku.addRequestPermissionResultListener { _, _ -> onChanged() }
+            // An already-present binder is only an initial status refresh, not a
+            // new access generation that could retire the first pending probe.
+            Shizuku.addBinderReceivedListener { onAccessChanged(); onChanged() }
+            Shizuku.addBinderDeadListener { disconnect(); onAccessChanged(); onChanged() }
+            Shizuku.addRequestPermissionResultListener { _, _ -> onAccessChanged(); onChanged() }
+            onChanged()
         }
     }
 

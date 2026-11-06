@@ -150,7 +150,7 @@ class MarketPluginSheet extends ConsumerWidget {
               PluginHero(
                 avatar: PluginAvatar(name: plugin.name, title: title, icon: plugin.icon, size: 64),
                 title: title,
-                subtitle: [?plugin.author, ?entry.categoryTitle].join(' · '),
+                subtitle: [?plugin.author, ?entry.categoryTitleIn(locale)].join(' · '),
                 badges: [
                   ...marketEntryBadges(context, entry),
                   if (status == MarketInstallStatus.updateAvailable)
@@ -402,8 +402,7 @@ class BundleSheet extends ConsumerWidget {
     final market = shareable ? ref.watch(marketCatalogProvider.select((c) => c.value?.byName[bundle.name])) : null;
     // The official market's entry: a newer pinned version, or this one withdrawn.
     final listed = gone ? null : ref.watch(officialMarketProvider.select((c) => c.value?.byName[bundle.name]));
-    final update =
-        listed != null && marketInstallStatus(listed.plugin, [bundle]) == MarketInstallStatus.updateAvailable
+    final update = listed != null && marketInstallStatus(listed.plugin, [bundle]) == MarketInstallStatus.updateAvailable
         ? listed
         : null;
     final blocked = listed != null && marketBlockedInstall(listed, bundle);
@@ -416,8 +415,7 @@ class BundleSheet extends ConsumerWidget {
         SheetHeader(
           title ?? l10n.hubPluginDetails,
           actions: [
-            if (shareable)
-              _ShareKey(onPressed: () => unawaited(shareInstalledPlugin(context, bundle, card: market))),
+            if (shareable) _ShareKey(onPressed: () => unawaited(shareInstalledPlugin(context, bundle, card: market))),
           ],
         ),
         Expanded(
@@ -554,7 +552,11 @@ class BundleSheet extends ConsumerWidget {
               ],
               // Loader evidence, then native UI switches and diagnostics.
               if (!gone) PluginLoadStatus(bundle: bundle),
-              if (!gone) NativePluginSection(package: bundle.name),
+              if (!gone)
+                for (final package in nativePackagesOf(bundle)) ...[
+                  NativePluginSection(package: package, named: package != bundle.name),
+                  NativePluginPanels(package: package),
+                ],
               if (!gone) PluginWebPlacesSection(package: bundle.name, pluginNames: [...?bundle.meta?.title?.all]),
               if (job != null && job.isActive) ...[
                 const SizedBox(height: 16),

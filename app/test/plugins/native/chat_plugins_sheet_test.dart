@@ -13,6 +13,7 @@ import 'dart:io';
 
 import 'package:dsh_app/plugins/seams/seams.dart';
 import 'package:dsh_app/state/hosts_state.dart';
+import 'package:dsh_app/ui/common/list_page_row.dart';
 import 'package:dsh_app/ui/plugins/islands/islands.dart';
 import 'package:dsh_app/ui/plugins/native/chat_plugins_sheet.dart';
 import 'package:dsh_app/ui/plugins/native/composer_capsules.dart';
@@ -309,6 +310,45 @@ void main() {
       await tester.pumpWidget(_bar(_overrides(_bridge(panels: false), web: _web)));
       await pumpFrames(tester);
       expect(_capsules(tester), ['插件']);
+    });
+  });
+
+  group('the side panel\'s pane', () {
+    Finder otherPages() => find.widgetWithText(ListPageRow, '插件');
+
+    Future<void> pane(WidgetTester tester, Map<String, List<SlotOccupant>> web) async {
+      usePhoneView(tester);
+      await tester.pumpWidget(
+        testApp(
+          Scaffold(
+            body: ChatWebPluginsPane(sessionId: 's1', onOtherPages: () {}),
+          ),
+          overrides: _overrides(_bridge(panels: false), web: web),
+        ),
+      );
+      await pumpFrames(tester);
+    }
+
+    testWidgets('no pages, no way on', (tester) async {
+      await pane(tester, _web);
+      expect(otherPages(), findsNothing);
+    });
+
+    testWidgets('global pages have a way on, even of a plugin with parts here', (tester) async {
+      await pane(tester, {
+        ..._web,
+        Slots.main: [seats.occupant(Slots.main, seats.probe, 'k4-panel')],
+      });
+      expect(otherPages(), findsOneWidget);
+    });
+
+    testWidgets('a conversation page of a plugin with parts is its own row, not the way on', (tester) async {
+      await pane(tester, {
+        ..._web,
+        Slots.rightPaneTab: [seats.occupant(Slots.rightPaneTab, seats.probe, 'k4-tab')],
+      });
+      expect(find.byKey(ValueKey('chat-plugins-page|${seats.probe}|k4-tab')), findsOneWidget);
+      expect(otherPages(), findsNothing);
     });
   });
 

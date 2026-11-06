@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -15,11 +16,13 @@ class _Server {
   final Map<String, Uint8List> files;
   bool ranges = true;
   int? stallAfter;
+  Future<void> Function()? beforeReply;
   final hang = <String, int>{};
   final requests = <(String, String?)>[];
   late HttpServer _server;
   final _stalled = <HttpResponse>[];
   final _hung = <Socket>[];
+  var _closed = false;
 
   Uri url(String path) => Uri.parse('http://127.0.0.1:${_server.port}$path');
 
@@ -28,6 +31,7 @@ class _Server {
     _server.listen((request) async {
       final range = request.headers.value(HttpHeaders.rangeHeader);
       requests.add((request.uri.path, range));
+      await beforeReply?.call();
       final body = files[request.uri.path];
       final response = request.response;
       if (hang[request.uri.path] case final status?) {
@@ -64,6 +68,8 @@ class _Server {
   }
 
   Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
     for (final r in _stalled) {
       unawaited(r.close().catchError((_) {}));
     }
@@ -72,6 +78,46 @@ class _Server {
     }
     await _server.close(force: true);
   }
+}
+
+class _NoSpaceConsumer implements StreamConsumer<List<int>> {
+  final entered = Completer<void>();
+  final terminal = Completer<void>();
+  final error = const FileSystemException('write failed', '', OSError('No space left', 28));
+  var receivedBytes = 0;
+  var closeCalled = false;
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {
+    try {
+      await for (final chunk in stream) {
+        receivedBytes += chunk.length;
+        if (!entered.isCompleted) entered.complete();
+        throw error;
+      }
+    } finally {
+      if (!terminal.isCompleted) terminal.complete();
+    }
+  }
+
+  @override
+  Future<void> close() async {
+    closeCalled = true;
+  }
+}
+
+class _NoSpacePart implements File {
+  _NoSpacePart(this.file, this.consumer);
+  final File file;
+  final _NoSpaceConsumer consumer;
+
+  @override
+  Directory get parent => file.parent;
+  @override
+  bool existsSync() => file.existsSync();
+  @override
+  IOSink openWrite({FileMode mode = FileMode.write, Encoding encoding = utf8}) => IOSink(consumer);
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 Uint8List _bytes(int n, int seed) => Uint8List.fromList([for (var i = 0; i < n; i++) (i * 31 + seed) & 0xff]);
@@ -100,6 +146,94 @@ void main() {
     bytes: body.length,
     sha256: sha ?? _sha(body),
   );
+
+  Future<(String, Object?)> failureChannel(
+    Future<void> Function() download, {
+    void Function()? verifyFailureStage,
+  }) async {
+    final observed = Completer<(String, Object?)>();
+    final zoneErrors = <Object>[];
+    void report(String channel, Object? error) {
+      if (!observed.isCompleted) observed.complete((channel, error));
+    }
+
+    final running = runZonedGuarded(
+      () async {
+        try {
+          await download();
+          report('success', null);
+        } catch (error) {
+          report('future', error);
+        }
+      },
+      (error, _) {
+        zoneErrors.add(error);
+        report('zone', error);
+      },
+    );
+    final result = await observed.future;
+    // Release the held HTTP body after observing either the old error or the fixed future.
+    await server.close();
+    await running;
+    verifyFailureStage?.call();
+    expect(zoneErrors, isEmpty, reason: 'No download or cleanup error may escape its future');
+    return result;
+  }
+
+  test('an asynchronous file open error completes the download without an unhandled zone error', () async {
+    server.stallAfter = 1;
+    server.beforeReply = () async => Directory('${dir.path}/models').delete(recursive: true);
+    final (channel, error) = await failureChannel(
+      () => downloadVoiceFiles([job('model.onnx', model)], onProgress: (_) {}),
+    );
+    expect(channel, 'future');
+    expect(error, isA<VoiceDownloadException>().having((e) => e.kind, 'kind', VoiceDownloadError.unknown));
+    expect(File('${dir.path}/models/model.onnx').existsSync(), isFalse);
+  });
+
+  test('an asynchronous full-disk write reports storage and does not try another mirror', () async {
+    server.stallAfter = 50000;
+    final downloadJob = job('model.onnx', model, urls: [server.url('/model.onnx'), server.url('/vad.onnx')]);
+    final target = File(downloadJob.path);
+    final consumer = _NoSpaceConsumer();
+    final part = _NoSpacePart(File(downloadJob.partPath), consumer);
+    final (channel, error) = await failureChannel(
+      () => IOOverrides.runZoned(
+        () => downloadVoiceFiles([downloadJob], onProgress: (_) {}),
+        createFile: (path) {
+          if (path == downloadJob.partPath) return part;
+          if (path == downloadJob.path) return target;
+          fail('Unexpected file path: $path');
+        },
+      ),
+      verifyFailureStage: () {
+        final stage =
+            'bytes=${consumer.receivedBytes}, entered=${consumer.entered.isCompleted}, '
+            'terminal=${consumer.terminal.isCompleted}, close=${consumer.closeCalled}';
+        expect(consumer.entered.isCompleted, isTrue, reason: 'HTTP must reach the failing consumer: $stage');
+        expect(consumer.receivedBytes, greaterThan(0), reason: stage);
+        expect(consumer.terminal.isCompleted, isTrue, reason: 'The throwing consumer must settle: $stage');
+      },
+    );
+    expect(channel, 'future');
+    expect(error, isA<VoiceDownloadException>().having((e) => e.kind, 'kind', VoiceDownloadError.storage));
+    expect(server.requests.map((r) => r.$1), ['/model.onnx']);
+    expect(target.existsSync(), isFalse);
+  });
+
+  test('the isolate task settles after an asynchronous file open error', () async {
+    server.stallAfter = 1;
+    server.beforeReply = () async => Directory('${dir.path}/models').delete(recursive: true);
+    final task = await VoiceDownloadTask.start([job('model.onnx', model)]);
+    final closed = Completer<void>();
+    task.progress.listen((_) {}, onDone: closed.complete);
+    await expectLater(
+      task.done,
+      throwsA(isA<VoiceDownloadException>().having((e) => e.kind, 'kind', VoiceDownloadError.unknown)),
+    );
+    await closed.future;
+    expect(File('${dir.path}/models/model.onnx').existsSync(), isFalse);
+  });
 
   test('downloads every file, checks it and gives it its final name', () async {
     final progress = <int>[];

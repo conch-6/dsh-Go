@@ -121,7 +121,8 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
     private var pendingHandoff: Pending<HandoffResult>? = null
     @Volatile private var sharedPrompt: PromptPresentation? = null
     private var passThrough = false
-    private var captureHidden = false
+    private val captureVisibility = CaptureVisibility()
+    private val captureHidden: Boolean get() = captureVisibility.hidden
     private var darkBuilt: Boolean? = null
 
     // The form: FoldClock decides, the morphs follow.
@@ -266,23 +267,43 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
 
     /** Makes every overlay window untouchable (true) so an injected stroke reaches the app below. */
     fun setPassThrough(on: Boolean) {
+        // Cleanup must survive a busy main thread or an interrupted gesture worker.
+        // Gesture calls are serialized; this stays ahead of the next queued enable.
+        if (!on) { main.post { applyPassThrough(false) }; return }
         if (Looper.myLooper() == Looper.getMainLooper()) { applyPassThrough(on); return }
         val changed = onMain(500) { applyPassThrough(on) } == true
-        if (on && changed) SystemClock.sleep(80) // input windows update a frame after the layout
+        if (changed) SystemClock.sleep(80) // input windows update a frame after the layout
     }
 
-    /** Hides the overlay for a full-display screenshot (API 30–33). */
+    /** Paired hides for full-display screenshots; captures may overlap. */
     fun hideForCapture(hide: Boolean) {
-        val changed = onMain(500) {
-            if (captureHidden == hide) return@onMain false
-            captureHidden = hide
-            val v = if (hide) View.INVISIBLE else View.VISIBLE
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            // The main-thread pet caller schedules its own delay before it shoots.
+            applyCaptureHidden(hide)
+            return
+        }
+        // Both halves run on the main queue in the order they were asked for and are never
+        // cancelled: a release can't overtake its own hide, and recovery still runs if the
+        // screenshot worker times out or is interrupted.
+        val applied = CountDownLatch(1)
+        var settle = false
+        main.post {
+            try { settle = applyCaptureHidden(hide) }
+            catch (e: Exception) { Log.w(TAG, "overlay main-thread call failed", e) }
+            finally { applied.countDown() }
+        }
+        // Blocking agent captures wait for the windows to go; a busy main thread costs only the wait.
+        if (hide && applied.await(500, TimeUnit.MILLISECONDS) && settle) SystemClock.sleep(120)
+    }
+
+    private fun applyCaptureHidden(hide: Boolean): Boolean {
+        if (captureVisibility.update(hide)) {
+            val v = if (captureHidden) View.INVISIBLE else View.VISIBLE
             syncWindows()
             confirmCard?.root?.visibility = v
             handoffCard?.root?.visibility = v
-            pill != null || confirmCard != null || handoffCard != null
-        } == true
-        if (hide && changed) SystemClock.sleep(120)
+        }
+        return hide && (pill != null || confirmCard != null || handoffCard != null)
     }
 
     /** Screen off, lock, 停止 elsewhere, service going away: answer everything pending with STOP. */

@@ -367,6 +367,15 @@ class TerminalAttachment {
   bool write(String data) {
     if (!writable || data.isEmpty) return false;
     final limit = _environment.maxInputBytes < chunkBytes ? _environment.maxInputBytes : chunkBytes;
+    if (limit < 4) {
+      final maxRune = limit == 1 ? 0x7f : (limit == 2 ? 0x7ff : 0xffff);
+      // Reject the whole write before enqueueing any prefix: a code point
+      // larger than the Host's budget cannot be split into valid text frames.
+      if (data.runes.any((rune) => rune > maxRune)) {
+        _fail(const TerminalStreamException('inputFull', 'terminal input buffer is full'));
+        return false;
+      }
+    }
     for (final chunk in _chunks(data, limit)) {
       if (!_enqueue({'type': 'write', 'sequence': _sequence + 1, 'data': chunk})) return false;
     }

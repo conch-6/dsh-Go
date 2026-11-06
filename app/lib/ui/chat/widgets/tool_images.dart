@@ -25,7 +25,7 @@ class ToolImages extends ConsumerWidget {
     for (final attachment in view.images) {
       ImageProvider? image;
       if (sessionId != null && attachment.attachmentId.isNotEmpty && (attachment.bytes ?? 0) <= maxThumbnailBytes) {
-        final bytes = ref.watch(sessionImageProvider((sessionId, attachment.attachmentId))).value;
+        final bytes = ref.watch(sessionImageProvider((sessionId, attachment))).value;
         if (bytes != null && bytes.length <= maxThumbnailBytes) image = MemoryImage(bytes);
       }
       sources.add((name: attachment.name ?? context.l10n.chatFile, image: image));

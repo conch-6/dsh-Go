@@ -39,7 +39,13 @@ class UpdateHttpResponse {
   /// Drops the body (frees the connection).
   Future<void> discard() async {
     try {
-      await body.drain<void>().timeout(const Duration(seconds: 5));
+      final subscription = body.listen(null, cancelOnError: true);
+      await subscription.asFuture<void>().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          unawaited(subscription.cancel().catchError((Object _) {}));
+        },
+      );
     } catch (_) {}
   }
 }
@@ -76,7 +82,13 @@ class IoUpdateHttp implements UpdateHttp {
   }) async {
     final request = await _client.getUrl(url).timeout(timeout);
     headers.forEach(request.headers.set);
-    final response = await request.close().timeout(timeout);
+    final response = await request.close().timeout(
+      timeout,
+      onTimeout: () {
+        request.abort();
+        throw TimeoutException('Update response headers timed out', timeout);
+      },
+    );
     final names = <String, String>{};
     response.headers.forEach((name, values) => names[name.toLowerCase()] = values.join(', '));
     return UpdateHttpResponse(

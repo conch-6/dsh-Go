@@ -180,7 +180,8 @@ Future<List<Uint8List>> photos(WidgetTester tester) async => (await tester.runAs
 
 /// Attachments `p0`… of conversation `s1`, served from [bytes].
 Override attachmentsFrom(List<Uint8List> bytes) => sessionImageProvider.overrideWith((ref, key) async {
-  final (sessionId, id) = key;
+  final (sessionId, attachment) = key;
+  final id = attachment.attachmentId;
   if (sessionId != 's1' || !id.startsWith('p')) throw StateError('gone');
   return bytes[int.parse(id.substring(1))];
 });

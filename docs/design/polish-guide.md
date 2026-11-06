@@ -69,6 +69,22 @@
 - 不要：弹跳 / 回弹曲线、持续循环的装饰动画（进度指示除外）、视差、大面积闪光。
 - 任何动画都不能让布局抖动；会改变别人位置的动画（插入、展开）要么平滑过渡，要么让被挤的内容也一起平滑移动。
 
+### 灵动档
+
+设置 → 性能 → **灵动动效**（`AppMotion.fluid`）。默认打开，低端机和发热时默认关闭，界面动效关掉时一定关闭；关掉后界面和没有这一档时完全一样。上面的「不要回弹」说的是标准档，灵动档允许一点回弹，规矩是：
+
+- **只加便宜的效果**：位移、缩放、按压光晕。不加模糊，不加持续的离屏层，不加循环动画。
+- **回弹只给位移和缩放**，透明度永远不越过 1；回弹量用 `AppMotion` 里的弹簧，不手写。跟手之后的落位用 `AppMotion.settle` 接住手指速度。
+- **两档都要成立**：新效果先判断 `AppMotion.fluid(context)`，标准档走原来的路径；树结构两档保持一致，切换时子树状态不丢。
+- **效果都有对应的省电手段**：防跳帧时钟（`FrameClock`）让卡顿后的动画接着走而不是跳到半路；被盖住的页面移动时画快照（`_Recede`），玻璃不用每帧重新采样。
+- 聊天列表不回弹：回弹不发 `OverscrollNotification`，`OverscrollForwarder` 依赖它。
+
+现有效果：按压光晕（`AppInkGlow`，`rowSplash`）、松手回弹（`Pressable`）、对话框弹出（`showAppDialog`，新对话框都走它）、卡片展开成页面（`CardOrigin`，`FeatureCard` / `OverviewCard` 已接）、深浅色从手指处揭开（`ThemeRevealHost`）、气泡从输入框升起（`StreamFadeIn.rise`）、列表回弹（`AppMotion.scrollPhysics`）、分段滑块回弹、长按抬起（`HoldLift`）、对勾一笔画出（`DrawnCheck`）、数字滚动（`RollingCount`）、发送键飞出、列表弹性入场（`FadeSlideIn`）、抽屉视差（只平移，不缩放）。
+
+流式输出：正文走 gpt_markdown 自带的 reveal（`MarkdownBody.reveal`：匀速、新字淡入、只重建尾部；没有光标，停顿时下方出现呼吸小点），列表跟随是滑过去而不是跳过去（`_ChatListState._startGlide`，上翻、按住立刻交还），思考窗口连续上滑（`_FluidTicker`），工具运行中是细圆弧（`QuietArc`），刚成功时画一个对勾再归于安静。不做逐字弹跳、模糊、扫光和庆祝动画。
+
+思路参考 [Mochi Compose](https://github.com/feice11/mochi-compose)（Apache-2.0，只借鉴做法，没有拷代码）。[KhatKit](https://github.com/KhatKit/Android) 是 AGPL-3.0，只能看效果，不能抄代码。
+
 ## 3. 文案
 
 | 规则 | 例子 |

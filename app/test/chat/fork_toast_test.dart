@@ -79,6 +79,19 @@ void main() {
     expect(_container(tester).read(currentSessionProvider), 'fork-session');
   });
 
+  testWidgets('a conversation left before the toast shows takes the toast with it', (tester) async {
+    await _pump(tester);
+    await tester.tap(find.byTooltip('重新回答'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(_container(tester).read(currentSessionProvider), 'fork-session');
+    expect(find.text('已在新对话中重新回答'), findsNothing, reason: 'still waiting for the composer');
+
+    _container(tester).read(currentSessionProvider.notifier).select('s1');
+    await pumpFrames(tester);
+    expect(find.text('已在新对话中重新回答'), findsNothing);
+  });
+
   testWidgets('返回原对话 goes back to the source conversation', (tester) async {
     await _pump(tester);
     await tester.tap(find.byTooltip('重新回答'));

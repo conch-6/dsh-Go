@@ -5,7 +5,7 @@
 //    count over 10 or 60 seconds. KV is eventually consistent, so the hourly
 //    cap is approximate across colos; a client normally stays on one.
 //
-// Both fail open: a missing binding or a KV error never blocks a request.
+// Counter failures fail open. An explicit zero hourly quota still pauses uploads.
 
 import type { Env } from './env';
 
@@ -54,9 +54,11 @@ export interface HourlyQuota {
 }
 
 export async function uploadQuota(env: Env, key: string, now = Date.now()): Promise<HourlyQuota> {
-  const perHour = Number(env.UPLOADS_PER_HOUR ?? '20') || 20;
+  const configured = Number(env.UPLOADS_PER_HOUR?.trim() || '20');
+  const perHour = Number.isNaN(configured) ? 20 : configured;
   const hour = Math.floor(now / 3_600_000);
   const retryAfter = Math.max(1, Math.ceil(((hour + 1) * 3_600_000 - now) / 1000));
+  if (perHour === 0) return { allowed: false, retryAfter, commit: async () => {} };
   const kv = env.QUOTA;
   if (!kv) return { allowed: true, retryAfter, commit: async () => {} };
   const kvKey = `up:${hour}:${await hashKey(key)}`;

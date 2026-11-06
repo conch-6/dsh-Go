@@ -2,6 +2,7 @@
 // tablet upright) — a bottom sheet wider than the app's other sheets, with
 // two heights: half (the chat stays in sight above it) and full.
 
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
@@ -102,6 +103,17 @@ class _DetailSheetRoute extends PopupRoute<void> {
   final Duration outDuration;
   final VoidCallback? onWide;
 
+  /// Set by a drag that closes the sheet, in route values a second: the pop
+  /// leaves at the finger's speed instead of taking [outDuration].
+  double? fallVelocity;
+
+  @override
+  Simulation? createSimulation({required bool forward}) {
+    final velocity = fallVelocity;
+    if (forward || velocity == null) return super.createSimulation(forward: forward);
+    return AppMotion.settle(AppMotion.sheetSpring, controller!.value, 0, velocity, landing: false);
+  }
+
   @override
   Color? get barrierColor => barrier;
 
@@ -142,12 +154,10 @@ class _DetailSheet extends StatefulWidget {
   State<_DetailSheet> createState() => _DetailSheetState();
 }
 
-class _DetailSheetState extends State<_DetailSheet> with TickerProviderStateMixin {
-  /// 0 = half, 1 = full.
-  late final AnimationController _snap = AnimationController(vsync: this);
-
-  /// How far below the half height a drag has pulled the sheet (to close it).
-  late final AnimationController _drop = AnimationController.unbounded(vsync: this);
+class _DetailSheetState extends State<_DetailSheet> with SingleTickerProviderStateMixin {
+  /// 0 = half, 1 = full. A drag goes on past both: below 0 it pulls the sheet
+  /// down towards closing, above 1 it stretches the sheet on a rubber band.
+  late final AnimationController _snap = AnimationController.unbounded(vsync: this);
 
   late final CurvedAnimation _enter = CurvedAnimation(
     parent: widget.route.animation!,
@@ -178,57 +188,52 @@ class _DetailSheetState extends State<_DetailSheet> with TickerProviderStateMixi
   void dispose() {
     _enter.dispose();
     _snap.dispose();
-    _drop.dispose();
     super.dispose();
   }
 
-  Duration get _settle => AppMotion.of(context, AppMotion.standard);
+  /// [_snap]'s one unit, in logical pixels.
+  double get _range => math.max(_metrics.full - _metrics.half, 1);
+
+  void _settleTo(double target, double velocity, SpringDescription spring) {
+    if (AppMotion.reduced(context)) {
+      _snap.value = target;
+    } else {
+      _snap.animateWith(AppMotion.settle(spring, _snap.value, target, velocity));
+    }
+  }
 
   void _toggle() {
     HapticFeedback.selectionClick();
-    _snap.animateTo(_snap.value >= 0.5 ? 0 : 1, duration: _settle, curve: AppMotion.std);
+    _settleTo(_snap.value >= 0.5 ? 0 : 1, _snap.velocity, AppMotion.layoutSpring);
   }
 
-  void _onDragStart(DragStartDetails _) {
-    _snap.stop();
-    _drop.stop();
-  }
+  void _onDragStart(DragStartDetails _) => _snap.stop();
 
   void _onDragUpdate(DragUpdateDetails details) {
-    var dy = details.primaryDelta ?? details.delta.dy;
-    final range = _metrics.full - _metrics.half;
-    // Below the half height the sheet follows the finger towards closing.
-    if (_drop.value > 0 || (_snap.value == 0 && dy > 0)) {
-      final next = _drop.value + dy;
-      if (next >= 0) {
-        _drop.value = next;
-        return;
-      }
-      _drop.value = 0;
-      dy = next;
-    }
-    if (range <= 0) return;
-    final next = _snap.value - dy / range;
-    if (next < 0) {
-      _snap.value = 0;
-      _drop.value = -next * range;
-    } else {
-      _snap.value = next.clamp(0.0, 1.0);
-    }
+    _snap.value -= (details.primaryDelta ?? details.delta.dy) / _range;
   }
 
   void _onDragEnd(DragEndDetails details) {
     final velocity = details.primaryVelocity ?? 0;
-    if (_drop.value > 0) {
-      if (velocity > _fling || _drop.value > _metrics.half * 0.25) {
-        Navigator.of(context).maybePop();
-      } else {
-        _drop.animateTo(0, duration: _settle, curve: AppMotion.std);
-      }
+    final pulled = -_snap.value * _range;
+    if (pulled > 0 && (velocity > _fling || (velocity >= -_fling && pulled > _metrics.half * 0.25))) {
+      unawaited(_close(velocity));
       return;
     }
-    final target = velocity.abs() > _fling ? (velocity < 0 ? 1.0 : 0.0) : (_snap.value >= 0.5 ? 1.0 : 0.0);
-    _snap.animateTo(target, duration: _settle, curve: AppMotion.std);
+    final target = pulled > 0 || velocity > _fling ? 0.0 : (velocity < -_fling || _snap.value >= 0.5 ? 1.0 : 0.0);
+    _settleTo(target, -velocity / _range, AppMotion.sheetSpring);
+  }
+
+  Future<void> _close(double velocity) async {
+    final route = widget.route;
+    // Still rising, the route's value isn't the position yet: leave as a tap would.
+    if (!AppMotion.reduced(context) && route.animation!.isCompleted) route.fallVelocity = -velocity / _metrics.half;
+    await Navigator.of(context).maybePop();
+    // Still here: the content's PopScope said no.
+    if (mounted && route.isActive) {
+      route.fallVelocity = null;
+      _settleTo(0, 0, AppMotion.sheetSpring);
+    }
   }
 
   Widget _dragArea(Widget child) => GestureDetector(
@@ -245,10 +250,14 @@ class _DetailSheetState extends State<_DetailSheet> with TickerProviderStateMixi
     _metrics = DetailSheetMetrics.of(media.size, media.padding);
     final metrics = _metrics;
     return AnimatedBuilder(
-      animation: Listenable.merge([_snap, _drop, _enter]),
+      animation: Listenable.merge([_snap, _enter]),
       builder: (context, child) {
-        final height = lerpDouble(metrics.half, metrics.full, _snap.value)!;
-        final down = _drop.value + (1 - _enter.value) * height;
+        final snap = _snap.value;
+        final stretch = AppMotion.rubberBand(math.max(0, snap - 1) * _range);
+        final height = lerpDouble(metrics.half, metrics.full, snap.clamp(0.0, 1.0))! + stretch;
+        // Leaving at the finger's speed, the route's value is the position as it is.
+        final shown = widget.route.fallVelocity == null ? _enter.value : widget.route.animation!.value;
+        final down = math.max(0, -snap * _range) + (1 - shown) * height;
         return Align(
           alignment: Alignment.bottomCenter,
           child: Transform.translate(

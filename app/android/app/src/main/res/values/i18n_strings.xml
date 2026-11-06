@@ -18,6 +18,11 @@
     <string name="background_not_ready">Privileged connection isn’t ready</string>
     <string name="background_no_response">Privileged connection isn’t responding</string>
     <string name="background_injection_denied">Could not confirm background input. Check channel permission and device support.</string>
+    <string name="background_input_window_not_ready">The input test window was not ready. No test tap was sent.</string>
+    <string name="background_input_unconfirmed">The input test did not receive both touch events in time.</string>
+    <string name="background_input_cancelled">The input test was cancelled.</string>
+    <string name="background_input_probe_busy">The background screen is in use. Retry the input test after the task ends.</string>
+    <string name="background_input_cleanup_failed">Input test cleanup was not confirmed. Reconnect the privileged channel before retrying.</string>
     <string name="background_input_api_unavailable">This system has no background input API the App can use. Update the App, or report your device and system version.</string>
     <string name="background_input_permission_denied">The system refused background input. Check the channel’s permission; on Xiaomi/Redmi, turn on “USB debugging (Security settings)”.</string>
     <!-- notify -->
@@ -126,6 +131,19 @@
     <string name="pet_probe_public">A turn finished</string>
     <string name="pet_ask">Ask</string>
     <string name="pet_new_chat">New chat</string>
+    <string name="pet_screenshot">Screenshot &amp; ask DSH-Go</string>
+    <string name="pet_wheel_screenshot">Screenshot</string>
+    <string name="pet_wheel_hint">Drag to choose\nRelease to act</string>
+    <string name="pet_wheel_stop">Stop</string>
+    <string name="pet_wheel_hosts">Hosts</string>
+    <string name="pet_wheel_snooze">Hide today</string>
+    <string name="pet_wheel_settings">Settings</string>
+    <string name="pet_screenshot_unsupported">Screenshots need Android 11 or later.</string>
+    <string name="pet_screenshot_accessibility">Enable DSH-Go accessibility in the App’s phone control settings first.</string>
+    <string name="pet_screenshot_secure">This screen blocks screenshots. DSH-Go won’t bypass its protection.</string>
+    <string name="pet_screenshot_busy">Another screenshot is in progress. Try again shortly.</string>
+    <string name="pet_screenshot_timeout">The screenshot timed out. Try again.</string>
+    <string name="pet_screenshot_failed">Couldn’t capture this screen. Try again.</string>
     <string name="pet_stop">Stop current task</string>
     <string name="pet_switch_host">Switch host</string>
     <string name="pet_ask_hint">Ask something</string>
@@ -271,8 +289,8 @@
     <string name="service_running">Local DSH is running</string>
     <string name="service_stopping">Stopping…</string>
     <string name="service_title">Local DSH</string>
-    <string name="service_stop_phone">Stop actions</string>
-    <string name="service_stop">Stop</string>
+    <string name="service_stop_phone">Stop phone control</string>
+    <string name="service_stop">Stop engine</string>
     <string name="service_package_checksum_failed">Runtime verification failed (SHA-256 mismatch). Reinstall the app</string>
     <string name="service_storage_insufficient">Not enough storage: about %1$s MB needed, %2$s MB available</string>
     <!-- share -->
@@ -284,6 +302,9 @@
     <!-- tile -->
     <string name="tile_new_chat_label">New chat</string>
     <string name="a11y_keeper_grant_failed">Authorization failed. You can use the computer command instead.</string>
+    <string name="a11y_keeper_grant_unavailable">The authorization request could not be completed. Check the authorization channel status.</string>
+    <string name="a11y_keeper_grant_denied">The system denied this request to grant the permission needed to restore accessibility automatically.</string>
+    <string name="a11y_keeper_grant_not_acquired">The authorization request was acknowledged, but the permission needed to restore accessibility automatically is still not granted.</string>
     <string name="a11y_keeper_needs_setup">Set up Shizuku or wireless debugging first.</string>
     <string name="background_root_legacy_client">Root was selected. Use an updated interface to manage it, or turn phone control off.</string>
     <string name="background_root_starting">Waiting for root authorization</string>

@@ -12,12 +12,20 @@ import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Color
+import android.view.HapticFeedbackConstants
+import android.widget.FrameLayout
+import android.widget.ScrollView
+import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.roundToInt
+import kotlin.math.cos
+import kotlin.math.sin
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.InsetDrawable
-import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
 import android.os.SystemClock
 import android.text.TextUtils
@@ -385,61 +393,248 @@ internal class DismissTargetView(context: Context) : View(context) {
     }
 }
 
-/**
- * Long-press menu ([PetMenuItem]): 「问一句」 first, the shortcuts that apply, 「今天不再显示」,
- * 「宠物设置」; 切换主机 swaps the rows for the hosts ([setRows]). A touch outside closes it.
- */
+/** A native semicircle of accessible buttons; the pet forwards its still-owned pointer stream. */
 @SuppressLint("ViewConstructor")
 internal class PetMenuView(
     context: Context,
     rows: List<Row>,
     private val onOutside: () -> Unit,
-) : LinearLayout(context) {
-    /** One row; [muted]: the host already in use. */
-    class Row(val label: String, val muted: Boolean = false, val action: () -> Unit)
+    private val motion: () -> Boolean,
+) : FrameLayout(context) {
+    class Row(val label: String, val muted: Boolean = false, val item: PetMenuItem? = null, val shortLabel: String = label, val action: () -> Unit)
 
     private val palette = OverlayPalette.of(context)
+    private var rows = rows
+    private val buttons = ArrayList<TextView>()
+    private val fills = ArrayList<GradientDrawable>()
+    private var geometry: PetWheelGeometry? = null
+    private var gesture: PetWheelGesture? = null
+    private var selection: Int? = null
+    private var caption: TextView? = null
+    private var amounts = FloatArray(rows.size)
+    private var reveal = 0f
+    private var lastFrame = 0L
+    private var ticking = false
+    private var closing = false
+    private var closed: (() -> Unit)? = null
+    var hosts = false
+        private set
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val arc = RectF()
+    private val visibleRect = Rect()
 
     init {
-        orientation = VERTICAL
-        val pad = context.dp(4f)
-        setPadding(0, pad, 0, pad)
-        background = GradientDrawable().apply {
-            cornerRadius = context.dp(16f).toFloat()
+        clipChildren = false
+        clipToPadding = false
+        isClickable = true
+        setWillNotDraw(false)
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
+    fun setRows(next: List<Row>) {
+        gesture = null
+        selection = null
+        hosts = true
+        rows = next
+        amounts = FloatArray(next.size)
+        geometry = null
+    }
+
+    fun place(g: PetWheelGeometry) {
+        geometry = g
+        alpha = if (g.list) reveal else 1f
+        caption = null
+        removeAllViews()
+        buttons.clear()
+        fills.clear()
+        val list = if (g.list) LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(context.dp(6f), context.dp(6f), context.dp(6f), context.dp(6f))
+        } else null
+        background = if (g.list) GradientDrawable().apply {
+            cornerRadius = context.dp(20f).toFloat()
             setColor(palette.fill)
             setStroke(context.dp(1f).coerceAtLeast(1), palette.stroke)
+        } else null
+        if (list != null) addView(ScrollView(context).apply {
+            isFillViewport = false
+            addView(list)
+        }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        for ((i, row) in rows.withIndex()) {
+            val fill = GradientDrawable().apply {
+                cornerRadius = context.dp(if (g.list) 14f else 20f).toFloat()
+                setColor(palette.fill)
+                setStroke(context.dp(1f).coerceAtLeast(1), palette.stroke)
+            }
+            val button = TextView(context).apply {
+                alpha = if (g.list) 1f else reveal
+                text = if (g.list) row.label else row.shortLabel
+                contentDescription = row.label
+                textSize = if (g.list) 15f else 11f
+                gravity = if (g.list) Gravity.CENTER_VERTICAL else Gravity.CENTER
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                setTextColor(if (row.muted) palette.muted else palette.ink)
+                maxLines = if (g.list) Int.MAX_VALUE else 2
+                setPadding(context.dp(if (g.list) 14f else 3f), context.dp(4f), context.dp(if (g.list) 14f else 3f), context.dp(4f))
+                minHeight = context.dp(52f)
+                background = fill
+                if (!g.list && row.item != null) {
+                    val icon = PetWheelIcon(row.item, palette.accent, context.dp(21f))
+                    setCompoundDrawables(null, icon, null, null)
+                    compoundDrawablePadding = context.dp(3f)
+                }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { if (!closing) row.action() }
+            }
+            buttons += button
+            fills += fill
+            if (list != null) list.addView(button, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+            else addView(button, LayoutParams(g.buttonWidth, g.buttonHeight).apply {
+                leftMargin = (g.centers[i].first - g.bounds.left - g.buttonWidth / 2f).roundToInt()
+                topMargin = (g.centers[i].second - g.bounds.top - g.buttonHeight / 2f).roundToInt()
+            })
         }
-        setRows(rows)
+        if (!g.list) {
+            caption = TextView(context).apply {
+                text = AppStrings.get(context, R.string.pet_wheel_hint)
+                contentDescription = AppStrings.get(context, android.R.string.cancel)
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTextColor(palette.muted)
+                setPadding(context.dp(8f), context.dp(4f), context.dp(8f), context.dp(4f))
+                alpha = reveal
+                background = GradientDrawable().apply {
+                    cornerRadius = context.dp(18f).toFloat()
+                    setColor(palette.fill)
+                    setStroke(context.dp(1f).coerceAtLeast(1), palette.stroke)
+                }
+                setOnClickListener { if (!closing) onOutside() }
+            }.also { label ->
+                addView(label, LayoutParams(context.dp(128f), context.dp(80f)).apply {
+                    leftMargin = (g.centerX - g.bounds.left + g.direction * g.radius * 0.43f - context.dp(64f)).roundToInt()
+                    topMargin = (g.centerY - g.bounds.top - context.dp(40f)).roundToInt()
+                })
+            }
+        }
+        wake()
     }
 
-    fun setRows(rows: List<Row>) {
-        removeAllViews()
-        for (r in rows) addView(row(r.label, r.muted, r.action))
+    fun beginPointer(x: Float, y: Float) {
+        selection = null
+        gesture = PetWheelGesture(x, y, context.dp(10f).toFloat())
+        wake()
     }
 
-    private fun row(label: String, muted: Boolean, action: () -> Unit) = TextView(context).apply {
-        text = label
-        textSize = 15f
-        setTextColor(if (muted) palette.muted else palette.ink)
-        maxLines = 1
-        ellipsize = TextUtils.TruncateAt.END
-        maxWidth = context.dp(240f)
-        gravity = Gravity.CENTER_VERTICAL
-        minHeight = context.dp(44f)
-        minWidth = context.dp(168f)
-        // A rounded highlight inset from the card's edge: software windows can't clip to the card.
-        // Set before the padding: a background with insets would replace it.
-        val inset = context.dp(4f)
-        background = StateListDrawable().apply {
-            addState(
-                intArrayOf(android.R.attr.state_pressed),
-                InsetDrawable(GradientDrawable().apply { cornerRadius = context.dp(12f).toFloat(); setColor(palette.pressed) }, inset, 0, inset, 0),
-            )
+    fun movePointer(x: Float, y: Float) {
+        if (closing) return
+        val g = geometry ?: return
+        val selected = gesture?.move(x, y) {
+            if (!g.list) g.hit(x, y, selection) else buttons.indexOfFirst {
+                it.getGlobalVisibleRect(visibleRect) && g.hitsVisibleRow(x, y, visibleRect.left, visibleRect.top, visibleRect.right, visibleRect.bottom)
+            }.takeIf { it >= 0 }
         }
-        setPadding(context.dp(16f), 0, context.dp(16f), 0)
-        isClickable = true
-        isFocusable = true
-        setOnClickListener { action() }
+        if (selection == selected) return
+        selection = selected
+        caption?.text = selected?.let { rows[it].label } ?: AppStrings.get(context, R.string.pet_wheel_hint)
+        caption?.setTextColor(if (selected != null) palette.onTonal else palette.muted)
+        if (selected != null) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        wake()
+    }
+
+    fun endPointer(x: Float, y: Float, cancelled: Boolean) {
+        val active = gesture ?: return
+        movePointer(x, y)
+        gesture = null
+        val keepList = geometry?.list == true && active.keepListOpen(cancelled)
+        val index = active.finish(cancelled)
+        // The compact fallback may need native scrolling to reach its last rows. A stationary
+        // release hands it a new touch stream; returning after a drag still cancels normally.
+        if (keepList && !closing) return
+        if (!closing && index != null) rows.getOrNull(index)?.action?.invoke() else onOutside()
+    }
+
+    fun close(then: () -> Unit) {
+        if (closing) return
+        closing = true
+        gesture = null
+        closed = then
+        wake()
+    }
+
+    private fun wake() {
+        if (!ticking) {
+            ticking = true
+            lastFrame = SystemClock.uptimeMillis()
+            postOnAnimation(tick)
+        }
+    }
+
+    // One frame loop owns enter, lift and return. Pointer moves only change targets: no layout,
+    // Animator allocation or repeated animator cancellation at touch-sampling frequency.
+    private val tick = object : Runnable {
+        override fun run() {
+            val now = SystemClock.uptimeMillis()
+            val dt = (now - lastFrame).coerceIn(1, 40)
+            lastFrame = now
+            val fraction = if (motion()) 1f - exp(-dt / (if (closing) 28f else 42f)) else 1f
+            val goal = if (closing) 0f else 1f
+            reveal += (goal - reveal) * fraction
+            if (abs(goal - reveal) < 0.01f) reveal = goal
+            var settling = reveal != goal
+            val g = geometry
+            if (g?.list == true) alpha = reveal
+            caption?.alpha = reveal
+            for ((i, b) in buttons.withIndex()) {
+                val target = if (selection == i && !closing) 1f else 0f
+                amounts[i] += (target - amounts[i]) * fraction
+                if (abs(target - amounts[i]) < 0.005f) amounts[i] = target
+                settling = settling || amounts[i] != target
+                val amount = amounts[i]
+                b.scaleX = 1f + 0.1f * amount
+                b.scaleY = b.scaleX
+                b.alpha = if (g?.list == true) 1f else reveal
+                if (g != null && !g.list) {
+                    val dx = (g.centers[i].first - g.centerX) / g.radius
+                    val dy = (g.centers[i].second - g.centerY) / g.radius
+                    val lift = context.dp(9f) * amount - context.dp(14f) * (1f - reveal)
+                    b.translationX = dx * lift
+                    b.translationY = dy * lift
+                }
+                fills[i].setColor(blend(palette.fill, palette.tonal, amount))
+                fills[i].setStroke(context.dp(1f).coerceAtLeast(1), blend(palette.stroke, palette.accent, amount))
+                b.isSelected = selection == i
+            }
+            invalidate()
+            if (closing && reveal == 0f) {
+                ticking = false
+                val done = closed
+                closed = null
+                done?.invoke()
+            } else if (settling) postOnAnimation(this) else ticking = false
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val g = geometry ?: return
+        if (g.list) return
+        val cx = g.centerX - g.bounds.left
+        val cy = g.centerY - g.bounds.top
+        val r = g.radius
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = context.dp(1f).coerceAtLeast(1).toFloat()
+        paint.color = palette.stroke
+        paint.alpha = (155 * reveal).toInt()
+        arc.set(cx - r, cy - r, cx + r, cy + r)
+        canvas.drawArc(arc, if (g.side == Side.LEFT) -90f else 90f, 180f, false, paint)
+        val inner = context.dp(43f).toFloat()
+        arc.set(cx - inner, cy - inner, cx + inner, cy + inner)
+        paint.color = palette.accent
+        paint.alpha = (110 * reveal).toInt()
+        canvas.drawArc(arc, if (g.side == Side.LEFT) -70f else 110f, 140f, false, paint)
+        paint.style = Paint.Style.FILL
+        paint.alpha = 255
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -447,14 +642,71 @@ internal class PetMenuView(
             onOutside()
             return true
         }
-        return super.dispatchTouchEvent(event)
+        return if (closing) true else super.dispatchTouchEvent(event)
     }
 
-    fun measureFor(): Pair<Int, Int> {
-        measure(
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-        )
-        return measuredWidth to measuredHeight
+    override fun onDetachedFromWindow() {
+        removeCallbacks(tick)
+        ticking = false
+        closed = null
+        gesture = null
+        super.onDetachedFromWindow()
     }
+
+    private fun blend(a: Int, b: Int, t: Float): Int = Color.rgb(
+        (Color.red(a) + (Color.red(b) - Color.red(a)) * t).roundToInt(),
+        (Color.green(a) + (Color.green(b) - Color.green(a)) * t).roundToInt(),
+        (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).roundToInt(),
+    )
+}
+
+/** Small, consistent stroke icons; no font glyphs or third-party UI dependency. */
+private class PetWheelIcon(private val item: PetMenuItem, color: Int, size: Int) : Drawable() {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color; style = Paint.Style.STROKE; strokeWidth = 1.7f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+    }
+    private val box = RectF()
+    init { setBounds(0, 0, size, size) }
+    override fun draw(canvas: Canvas) {
+        val save = canvas.save()
+        canvas.scale(bounds.width() / 24f, bounds.height() / 24f)
+        when (item) {
+            PetMenuItem.ASK, PetMenuItem.NEW_CHAT -> {
+                box.set(3f, 4f, 21f, 18f); canvas.drawRoundRect(box, 4f, 4f, paint)
+                canvas.drawLine(7f, 18f, 5f, 21f, paint)
+                if (item == PetMenuItem.NEW_CHAT) {
+                    canvas.drawLine(8f, 11f, 16f, 11f, paint)
+                    canvas.drawLine(12f, 7f, 12f, 15f, paint)
+                }
+                else { canvas.drawPoint(8f, 11f, paint); canvas.drawPoint(12f, 11f, paint); canvas.drawPoint(16f, 11f, paint) }
+            }
+            PetMenuItem.SCREENSHOT -> {
+                box.set(3f, 6f, 21f, 21f); canvas.drawRoundRect(box, 3f, 3f, paint)
+                canvas.drawCircle(12f, 13f, 4f, paint)
+                canvas.drawLine(8f, 3f, 16f, 3f, paint)
+            }
+            PetMenuItem.STOP -> { box.set(5f, 5f, 19f, 19f); canvas.drawRoundRect(box, 3f, 3f, paint) }
+            PetMenuItem.SWITCH_HOST -> {
+                box.set(3f, 4f, 21f, 10f); canvas.drawRoundRect(box, 2f, 2f, paint)
+                box.set(3f, 14f, 21f, 20f); canvas.drawRoundRect(box, 2f, 2f, paint)
+                canvas.drawPoint(7f, 7f, paint); canvas.drawPoint(7f, 17f, paint)
+            }
+            PetMenuItem.SNOOZE -> {
+                canvas.drawArc(4f, 3f, 21f, 20f, 35f, 280f, false, paint)
+                canvas.drawArc(10f, 0f, 24f, 15f, 100f, 150f, false, paint)
+            }
+            PetMenuItem.SETTINGS -> {
+                canvas.drawCircle(12f, 12f, 6f, paint); canvas.drawCircle(12f, 12f, 2f, paint)
+                for (i in 0..7) {
+                    val a = i * Math.PI / 4
+                    canvas.drawLine(12 + 7 * cos(a).toFloat(), 12 + 7 * sin(a).toFloat(), 12 + 9 * cos(a).toFloat(), 12 + 9 * sin(a).toFloat(), paint)
+                }
+            }
+        }
+        canvas.restoreToCount(save)
+    }
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+    override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }

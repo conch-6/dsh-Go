@@ -3,6 +3,7 @@
 // several. Regenerate with
 // `flutter test --update-goldens test/chat/header_schedule_golden_test.dart`.
 
+import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/header_schedule_state.dart';
 import 'package:dsh_app/state/models_state.dart';
@@ -87,6 +88,9 @@ Future<void> _pump(WidgetTester tester, Widget body, List<ScheduleTask> tasks, B
       brightness: brightness,
       overrides: [
         activeConnectionProvider.overrideWithValue(AsyncData<HostConnection?>(fakeConnection)),
+        // The model list follows the host, which reads the on-device engine: no native runtime in tests.
+        localConnectionProvider.overrideWith(NoLocalEngine.new),
+        localRuntimeProvider.overrideWith(StaticRuntime.new),
         sessionsProvider.overrideWith(FakeSessions.new),
         currentSessionProvider.overrideWith(() => FixedSession('s1')),
         modelCatalogProvider.overrideWith((ref) async => testCatalog),

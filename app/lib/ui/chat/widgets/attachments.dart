@@ -46,14 +46,14 @@ class AttachButton extends StatelessWidget {
                   HapticFeedback.selectionClick();
                   onPressed!();
                 },
-          radius: 22,
+          radius: 20,
           child: Container(
-            width: 40,
-            height: 40,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(color: scheme.onSurface.withValues(alpha: 0.06), shape: BoxShape.circle),
             child: Icon(
               AppIcons.add,
-              size: 24,
+              size: 22,
               color: enabled ? scheme.onSurface : scheme.onSurface.withValues(alpha: 0.38),
             ),
           ),
@@ -277,7 +277,7 @@ class _SessionImage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final bytes = ref.watch(sessionImageProvider((sessionId, attachment.attachmentId)));
+    final bytes = ref.watch(sessionImageProvider((sessionId, attachment)));
     final w = attachment.width, h = attachment.height;
     final aspect = (w != null && h != null && h > 0) ? w / h : 1.0;
     final box = single ? null : const Size.square(88);

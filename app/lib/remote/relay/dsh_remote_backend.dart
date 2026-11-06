@@ -28,6 +28,7 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend {
     this.peerConnector,
     bool direct = true,
     Future<RemoteNetworkRoute> Function()? resolveNetworkRoute,
+    this._loadCompactHistory,
   }) : _resolveNetworkRoute = resolveNetworkRoute ?? resolveRemoteNetworkRoute,
        account =
            account ??
@@ -50,6 +51,7 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend {
   }
 
   final remote.RemoteAccount account;
+  final Future<bool> Function()? _loadCompactHistory;
   final Future<RemoteNetworkRoute> Function() _resolveNetworkRoute;
   RemoteNetworkRoute _networkRoute = RemoteNetworkRoute.unknown;
   final _sessionRoutes = Expando<RemoteNetworkRoute>('remote route');
@@ -61,6 +63,9 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend {
 
   /// Applies from the next (re)connect.
   set direct(bool enabled) => account.peerConnector = enabled ? peerConnector : null;
+
+  /// Applies to the next client, without disturbing live streams or its reconnects.
+  set compactHistory(bool enabled) => account.compactHistory = enabled;
 
   /// Reconnects back off to a minute: a sleeping computer isn't polled every
   /// few seconds (network changes and 重试 still connect at once).
@@ -257,6 +262,21 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend {
     roundTripTime: snapshot.roundTripTime,
     fallbackReason: snapshot.fallbackReason?.name,
     observedAt: snapshot.observedAt,
+    localIpVersion: switch (snapshot.peerNetwork?.localIpVersion) {
+      remote.RemoteIpVersion.ipv4 => NetworkIpVersion.ipv4,
+      remote.RemoteIpVersion.ipv6 => NetworkIpVersion.ipv6,
+      null => null,
+    },
+    remoteIpVersion: switch (snapshot.peerNetwork?.remoteIpVersion) {
+      remote.RemoteIpVersion.ipv4 => NetworkIpVersion.ipv4,
+      remote.RemoteIpVersion.ipv6 => NetworkIpVersion.ipv6,
+      null => null,
+    },
+    iceProtocol: switch (snapshot.peerNetwork?.protocol) {
+      remote.RemoteIceProtocol.udp => NetworkIceProtocol.udp,
+      remote.RemoteIceProtocol.tcp => NetworkIceProtocol.tcp,
+      null => null,
+    },
   );
 
   @override
@@ -269,6 +289,8 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend {
     if (target == null) {
       throw HostLinkError(HostLinkErrorKind.notLoggedIn, appL10n.remoteErrHostNotInAccount);
     }
+    final loadCompactHistory = _loadCompactHistory;
+    if (loadCompactHistory != null) account.compactHistory = await loadCompactHistory();
     return account.connectHost(
       target,
       muxOptions: _muxOptions,
@@ -335,6 +357,7 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend {
       'PEER_IDENTITY_MISMATCH' => e(HostLinkErrorKind.hostKeyMismatch, appL10n.remoteErrIdentityKeyChanged),
       'HOST_NOT_TRUSTED' => e(HostLinkErrorKind.hostKeyUnverified, appL10n.remoteErrIdentityUnconfirmed),
       'CONNECTION_REPLACED' => e(HostLinkErrorKind.other, appL10n.remoteErrConnectionReplaced),
+      'HISTORY_MODE_CHANGED' => e(HostLinkErrorKind.other, appL10n.remoteErrHistoryModeChanged, retryable: false),
       'CONNECTION_REJECTED' => e(HostLinkErrorKind.other, appL10n.remoteErrHostRejected),
       'MEMBERSHIP_REQUIRED' => e(HostLinkErrorKind.other, appL10n.remoteErrHostNotOwned),
       // Version and protocol mismatches fail the same way on every attempt:

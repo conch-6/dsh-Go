@@ -16,8 +16,8 @@ Future<void> showRemoteNetworkDetails(BuildContext context, HostRef host) => sho
   builder: (_) => RemoteNetworkDetailsSheet(host: host),
 );
 
-/// Only route names and measured timings reach this surface. Candidate
-/// addresses, credentials and raw transport errors never belong in this sheet.
+/// Only route names, timings and IP/protocol enums reach this surface.
+/// Candidate addresses, credentials and raw errors never belong in this sheet.
 class RemoteNetworkDetailsSheet extends ConsumerStatefulWidget {
   const RemoteNetworkDetailsSheet({super.key, required this.host});
 
@@ -60,9 +60,11 @@ class _RemoteNetworkDetailsSheetState extends ConsumerState<RemoteNetworkDetails
     final l10n = context.l10n;
     final colors = DshColors.of(context);
     final status = ref.watch(hostLinkStatusProvider(widget.host)).value ?? HostLinkStatus.idle;
+    final name = ref.watch(hostNameProvider(widget.host)) ?? l10n.commonRemoteHost;
+    final relay = widget.host.kind == HostKind.relay;
     final connected = status.isConnected;
-    final network = connected ? status.network : null;
-    final path = connected ? network?.path ?? status.path : null;
+    final network = connected && relay ? status.network : null;
+    final path = connected && relay ? network?.path ?? status.path : null;
     final observedAt = network?.observedAt?.toLocal();
     final material = MaterialLocalizations.of(context);
     final observedLabel = observedAt == null
@@ -70,6 +72,11 @@ class _RemoteNetworkDetailsSheetState extends ConsumerState<RemoteNetworkDetails
         : '${material.formatCompactDate(observedAt)} ${material.formatTimeOfDay(TimeOfDay.fromDateTime(observedAt), alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context))}';
     String timing(Duration? value) =>
         value == null ? l10n.remoteNetworkUnmeasured : l10n.remoteNetworkMilliseconds(value.inMilliseconds);
+    String ipVersion(NetworkIpVersion? value) => switch (value) {
+      NetworkIpVersion.ipv4 => 'IPv4',
+      NetworkIpVersion.ipv6 => 'IPv6',
+      null => l10n.remoteNetworkUnknownPath,
+    };
     return SafeArea(
       top: false,
       child: SingleChildScrollView(
@@ -81,18 +88,33 @@ class _RemoteNetworkDetailsSheetState extends ConsumerState<RemoteNetworkDetails
             Padding(
               padding: const EdgeInsets.fromLTRB(kSheetGutter, 0, kSheetGutter, 12),
               child: Text(
-                '${l10n.remoteNetworkAutomatic}\n${l10n.remoteNetworkSnapshotHint}',
+                relay
+                    ? '${l10n.remoteNetworkAutomatic}\n${l10n.remoteNetworkSnapshotHint}'
+                    : l10n.hostDetailsSshNetworkHint,
                 style: TextStyle(color: colors.textTertiary),
               ),
             ),
             SheetGroup(
               children: [
+                _NetworkValue(label: l10n.remoteHost, value: name),
+                _NetworkValue(label: l10n.hostDetailsConnectionType, value: relay ? 'DSH Remote' : 'SSH'),
+                _NetworkValue(label: l10n.commonStatus, value: status.summary),
                 _NetworkValue(
                   label: l10n.remoteNetworkCurrentPath,
-                  value: path?.label ?? l10n.remoteNetworkUnknownPath,
+                  value: connected && widget.host.kind == HostKind.ssh
+                      ? 'SSH'
+                      : path?.label ?? l10n.remoteNetworkUnknownPath,
                 ),
                 _NetworkValue(label: l10n.remoteNetworkConnectDuration, value: timing(network?.connectDuration)),
                 _NetworkValue(label: l10n.remoteNetworkRoundTripTime, value: timing(network?.roundTripTime)),
+                if (relay && connected && path != null && path != RelayPath.relay) ...[
+                  _NetworkValue(label: l10n.remoteNetworkLocalIpVersion, value: ipVersion(network?.localIpVersion)),
+                  _NetworkValue(label: l10n.remoteNetworkRemoteIpVersion, value: ipVersion(network?.remoteIpVersion)),
+                  _NetworkValue(
+                    label: l10n.remoteNetworkIceProtocol,
+                    value: network?.iceProtocol?.name.toUpperCase() ?? l10n.remoteNetworkUnknownPath,
+                  ),
+                ],
                 if (observedLabel != null) _NetworkValue(label: l10n.remoteNetworkObservedAt, value: observedLabel),
                 if (network?.fallbackReason != null)
                   _NetworkValue(
@@ -101,28 +123,29 @@ class _RemoteNetworkDetailsSheetState extends ConsumerState<RemoteNetworkDetails
                   ),
               ],
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(kSheetGutter, 8, kSheetGutter, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (!connected || _failed) ...[
-                    Text(
-                      connected ? l10n.remoteNetworkMeasureFailed : l10n.remoteNetworkDisconnected,
-                      style: TextStyle(color: colors.textTertiary),
+            if (relay)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(kSheetGutter, 8, kSheetGutter, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (!connected || _failed) ...[
+                      Text(
+                        connected ? l10n.remoteNetworkMeasureFailed : l10n.remoteNetworkDisconnected,
+                        style: TextStyle(color: colors.textTertiary),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    FilledButton.icon(
+                      onPressed: connected && !_measuring ? _measure : null,
+                      icon: _measuring
+                          ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(AppIcons.refresh, size: 18),
+                      label: Text(_measuring ? l10n.remoteNetworkMeasuring : l10n.remoteNetworkMeasure),
                     ),
-                    const SizedBox(height: 10),
                   ],
-                  FilledButton.icon(
-                    onPressed: connected && !_measuring ? _measure : null,
-                    icon: _measuring
-                        ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(AppIcons.refresh, size: 18),
-                    label: Text(_measuring ? l10n.remoteNetworkMeasuring : l10n.remoteNetworkMeasure),
-                  ),
-                ],
+                ),
               ),
-            ),
           ],
         ),
       ),

@@ -10,6 +10,7 @@ import '../../../l10n/l10n.dart';
 import '../../../plugins/native/native_capabilities.dart';
 import '../../../plugins/native/native_state.dart';
 import '../../../state/hosts_state.dart';
+import '../../common/app_dialog.dart';
 
 /// True when [package] may listen: allowed before, or allowed now. A
 /// dismissed question is no answer (asked again next time).
@@ -21,7 +22,7 @@ Future<bool> askNativeVoiceConsent(BuildContext context, WidgetRef ref, String p
   if (!context.mounted) return false;
   final l10n = context.l10n;
   final title = ref.read(nativePluginTitleProvider(package));
-  final answer = await showDialog<bool>(
+  final answer = await showAppDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
       title: Text(l10n.plugslotsVoiceAsk(title)),

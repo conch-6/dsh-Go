@@ -210,7 +210,7 @@ class _PetHostState extends ConsumerState<_PetHost> {
 
   @override
   Widget build(BuildContext context) {
-    ref.watch(petOverlayBridgeProvider);
+    ref.listen<void>(petOverlayBridgeProvider, (_, _) {});
     return const SizedBox.shrink();
   }
 }
@@ -300,6 +300,12 @@ class _WebEntryHostState extends ConsumerState<WebEntryHost> {
       case NewChatEntry():
         // Dictation is the native composer's; the page starts a conversation.
         if (mounted) await _compose(null);
+      case ScreenshotEntry(:final path):
+        await _onShare(
+          IncomingShare(
+            files: [SharedFile(path: path, name: path.split('/').last)],
+          ),
+        );
       case OpenChatEntry(:final host, :final sessionId):
         if (!mounted || !await DiscardGuard.confirmLeave(context) || !mounted) return;
         final hosts = ref.read(hostsProvider);

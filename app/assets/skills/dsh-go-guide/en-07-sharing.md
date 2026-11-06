@@ -52,4 +52,4 @@ Open a `.dshgo` file or DSH Go share link with DSH Go to replay it:
 - Tap **Full chat** to see the whole conversation at once.
 - Tap **Continue chat** to start a new chat with this replay attached as a Markdown transcript (one summary line per tool call, without thinking or tool output) and a line ready in the composer. Check it, then send. Files and tool state from the original chat aren't restored.
 
-**Continue chat** isn't shown in the preview of your own share. On a host connected through DSH Remote, only images can be sent, so the transcript is dropped.
+**Continue chat** isn't shown in the preview of your own share. If the current DSH Remote host does not support file uploads, the transcript is dropped. Otherwise it is uploaded to the current workspace when you send, subject to the normal attachment limit and the host's actual limits.

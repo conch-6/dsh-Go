@@ -153,7 +153,11 @@ class RemoteDshBootstrap {
   }
 
   Future<RemoteDshEndpoint> start({bool force = false}) async {
-    final result = await shell.run(startScript(force: force), timeout: startTimeout + const Duration(seconds: 20));
+    final runner = shell;
+    final timeout = startTimeout + const Duration(seconds: 20);
+    final result = runner is RemoteBootstrapShell
+        ? await runner.runBootstrap(startScript(force: force), timeout: timeout)
+        : await runner.run(startScript(force: force), timeout: timeout);
     if (_missingShell(result)) throw _noShell(result);
     return parseStart(result, customCommand: !_defaultCommand, command: launchCommand);
   }
@@ -551,7 +555,7 @@ printf 'DSHAPP dsh %s\n' "$(command -v dsh)"
       HostLinkError(HostLinkErrorKind.noShell, appL10n.remoteErrNoShell, detail: result.stderr.trim());
 
   /// `token=…` values replaced, so a log tail can be shown or copied safely.
-  static String redactTokens(String text) => text.replaceAll(RegExp(r'token=[A-Za-z0-9._~%-]+'), 'token=•••');
+  static String redactTokens(String text) => redactRemoteTokens(text);
 
   /// Shell expression for a remote path with `~` expanded by the remote shell.
   static String remotePathExpr(String path) {

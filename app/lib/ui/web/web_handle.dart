@@ -19,7 +19,6 @@ import '../../state/connection_state.dart';
 import '../../state/hosts_state.dart';
 import '../common/app_sheet.dart';
 import '../common/sheet_title_bar.dart';
-import '../common/pressable.dart';
 import '../remote/host_status.dart';
 import '../remote/host_switcher.dart';
 import '../remote/remote_screen.dart';
@@ -52,19 +51,17 @@ class WebHandleButton extends StatelessWidget {
       label: tooltip,
       child: Tooltip(
         message: tooltip,
-        child: Pressable(
-          child: SizedBox.square(
-            dimension: size,
-            child: GlassSurface(
-              tier: GlassTier.chrome,
-              circle: true,
-              grouped: true,
-              onTap: () => unawaited(showWebHandleSheet(context, onNative: onNative)),
-              child: Center(
-                child: Transform.translate(
-                  offset: BrandMark.opticalShift(mark),
-                  child: BrandMark(size: mark, color: scheme.onSurface),
-                ),
+        child: SizedBox.square(
+          dimension: size,
+          child: GlassSurface(
+            tier: GlassTier.chrome,
+            circle: true,
+            grouped: true,
+            onTap: () => unawaited(showWebHandleSheet(context, onNative: onNative)),
+            child: Center(
+              child: Transform.translate(
+                offset: BrandMark.opticalShift(mark),
+                child: BrandMark(size: mark, color: scheme.onSurface),
               ),
             ),
           ),

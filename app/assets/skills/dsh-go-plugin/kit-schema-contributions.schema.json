@@ -185,6 +185,39 @@
                   }
                 }
               }
+            },
+            "composer.tools": {
+              "type": "array",
+              "maxItems": 2,
+              "items": {
+                "$ref": "#/$defs/action"
+              }
+            },
+            "session.actions": {
+              "type": "array",
+              "maxItems": 2,
+              "items": {
+                "$ref": "#/$defs/action"
+              }
+            },
+            "turn.note": {
+              "type": "array",
+              "maxItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "ready"
+                ],
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/id"
+                  },
+                  "ready": {
+                    "type": "boolean"
+                  }
+                }
+              }
             }
           }
         },
@@ -316,7 +349,8 @@
             "enum": [
               "session.tab",
               "features",
-              "chat.panel"
+              "chat.panel",
+              "plugin"
             ]
           }
         },
@@ -328,6 +362,12 @@
         },
         "micro": {
           "$ref": "manifest.schema.json#/$defs/id"
+        },
+        "presentation": {
+          "enum": [
+            "page",
+            "sheet"
+          ]
         }
       }
     },
@@ -512,6 +552,15 @@
             },
             "panels": {
               "const": 4
+            },
+            "composer.tools": {
+              "const": 2
+            },
+            "session.actions": {
+              "const": 2
+            },
+            "turn.note": {
+              "const": 1
             }
           }
         },
@@ -535,6 +584,15 @@
             },
             "toast": {
               "const": 40
+            },
+            "composerTool": {
+              "const": 8
+            },
+            "sessionAction": {
+              "const": 12
+            },
+            "turnNote": {
+              "const": 16
             }
           }
         },
@@ -675,6 +733,9 @@
         },
         "pendingEarlyResultMs": {
           "const": 5000
+        },
+        "turnNotesPerFeed": {
+          "const": 64
         }
       }
     }

@@ -109,7 +109,10 @@ Future<ChatHarness> _openSheet(
   mockClipboard(tester);
   await tester.pumpWidget(testApp(const ChatScreen(), brightness: brightness, overrides: harness.overrides));
   await pumpFrames(tester, 6);
-  await tester.tap(find.byType(ModelChip));
+  await tester.tap(find.byType(TextField));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 500));
+  await tester.tap(find.byKey(const ValueKey('composer-model')));
   await pumpFrames(tester, 8);
   return harness;
 }
@@ -155,20 +158,20 @@ void main() {
     chatClock = () => DateTime(2026, 10, 23, 15, 20);
   });
 
-  testWidgets('narrow model chip keeps complete actionable speech', (tester) async {
+  testWidgets('a phone\'s model row keeps complete actionable speech', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(360, 800);
     addTearDown(tester.view.reset);
     final semantics = tester.ensureSemantics();
-    // A long title: the chip gives up its depth before the title is cut.
     final harness = ChatHarness(
       session: 's1',
       states: {'s1': const ChatState(loading: false, title: '修复登录页重复提交并补上连点测试')},
     );
     await tester.pumpWidget(testApp(const ChatScreen(), overrides: harness.overrides));
     await pumpFrames(tester);
-    expect(find.text('V4 Pro'), findsOneWidget);
-    expect(find.text('V4 Pro · 高'), findsNothing);
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(
       tester.getSemantics(find.bySemanticsLabel('模型：V4 Pro，思考深度高')),
       isSemantics(isButton: true, hasTapAction: true),
@@ -289,7 +292,7 @@ void main() {
       expect(find.text('思考深度'), findsOneWidget, reason: 'thumb first');
       await pumpFrames(tester, 8);
       expect(find.text('思考深度'), findsNothing);
-      expect(find.text('V4 Pro · 最高'), findsOneWidget);
+      expect(find.text('V4 Pro 最高'), findsOneWidget);
     });
 
     testWidgets('cards read as selectable buttons to a screen reader', (tester) async {

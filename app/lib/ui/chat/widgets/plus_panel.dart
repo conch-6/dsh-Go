@@ -22,9 +22,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../l10n/l10n.dart';
+import '../../../plugins/native/native_model.dart';
+import '../../../plugins/native/native_state.dart';
 import '../../../state/chat_state.dart';
 import '../../../state/connection_state.dart';
 import '../../../state/features_state.dart';
+import '../../../state/hosts_state.dart';
 import '../../../state/phone_state.dart';
 import '../../../state/session_modes.dart';
 import '../../common/app_sheet.dart';
@@ -55,6 +58,12 @@ final class AttachChoice extends PlusChoice {
 /// 「生成」: into generation mode.
 final class GenerateChoice extends PlusChoice {
   const GenerateChoice();
+}
+
+/// A plugin's tool: the caller runs it, in front of the composer.
+final class NativeToolChoice extends PlusChoice {
+  const NativeToolChoice(this.action);
+  final NativeAction action;
 }
 
 /// The panel's measured geometry; `test/chat/plus_panel_test.dart` checks it.
@@ -135,10 +144,51 @@ class _PlusRoot extends ConsumerWidget {
             ],
           ),
         ),
+        const _PluginTools(),
         if (sessionId != null) ...[const SizedBox(height: 16), _ThisChatCard(sessionId: sessionId)],
         if (phoneOn) ...[const SizedBox(height: 24), const _PhoneCard()],
         const SizedBox(height: 20),
       ],
+    );
+  }
+}
+
+/// Plugins' tools on the attachment tiles' grid, four to a row; nothing without any.
+class _PluginTools extends ConsumerWidget {
+  const _PluginTools();
+
+  static const _perRow = 4;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tools = ref.watch(nativeComposerToolsProvider);
+    if (tools.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      key: const ValueKey('plus-plugin-tools'),
+      padding: const EdgeInsets.fromLTRB(PlusPanelMetrics.side, 16, PlusPanelMetrics.side, 0),
+      child: Column(
+        spacing: PlusPanelMetrics.gap,
+        children: [
+          for (var start = 0; start < tools.length; start += _perRow)
+            Row(
+              spacing: PlusPanelMetrics.gap,
+              children: [
+                for (var i = start; i < start + _perRow; i++)
+                  Expanded(
+                    child: i < tools.length
+                        ? PlusTile(
+                            key: ValueKey('plus-tool|${tools[i].package}|${tools[i].id}'),
+                            icon: tools[i].icon ?? AppIcons.plugin,
+                            label: tools[i].label,
+                            tint: 1,
+                            onTap: () => Navigator.pop(context, NativeToolChoice(tools[i])),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }
@@ -305,9 +355,10 @@ class _SessionPermissionPageState extends ConsumerState<SessionPermissionPage> {
   }
 
   Future<void> _makeDefault(String value, int revision) async {
+    final owner = ref.read(activeHostProvider);
     final client = ref.read(activeConnectionProvider).value?.client;
     if (client == null || _busy) return;
-    if (!await confirmPermission(context, value) || !mounted) return;
+    if (!await confirmPermission(context, value) || !mounted || ref.read(activeHostProvider) != owner) return;
     setState(() => _busy = true);
     final problem = await writePermissionDefault(ref, client, value, revision);
     if (!mounted) return;

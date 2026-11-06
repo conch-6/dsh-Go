@@ -63,4 +63,5 @@ AssistantChatItem replyWithText(AssistantChatItem item, String text) => Assistan
   interrupted: item.interrupted,
   usage: item.usage,
   model: item.model,
+  isFinalAnswer: item.isFinalAnswer,
 );

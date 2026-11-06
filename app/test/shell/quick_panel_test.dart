@@ -36,6 +36,10 @@ import 'adaptive/support.dart';
 const _phone = Size(390, 844);
 const _wide = Size(1280, 800);
 
+/// The panel on [_phone], with the conversation these tests have open: all it can have
+/// short of the 56 left for the chat.
+const _panelWidth = 334.0;
+
 /// At [_wide] the sidebar fits while 对话详情 is folded away.
 const _foldedDetail = LayoutPrefs(loaded: true, panelOpen: false);
 
@@ -93,9 +97,9 @@ Finder _row(DrawerDestination d) => find.byKey(ValueKey('quick-panel-${d.name}')
 double _panelIn(WidgetTester tester) => tester.view.physicalSize.width / 2 - tester.getTopLeft(_panel).dx;
 
 /// [_panelIn] with the finger [pulled] pixels along: the panel starts 24 past
-/// the edge and arrives with the finger [QuickPanel.width] along, as the
+/// the edge and arrives with the finger [_panelWidth] along, as the
 /// drawer does.
-double _inAfter(double pulled) => pulled / QuickPanel.width * (QuickPanel.width + 24) - 24;
+double _inAfter(double pulled) => pulled / _panelWidth * (_panelWidth + 24) - 24;
 
 ProviderContainer _container(WidgetTester tester) =>
     ProviderScope.containerOf(tester.element(find.byType(HomeShell, skipOffstage: false)));
@@ -159,7 +163,7 @@ void main() {
       await _swipeOpen(tester);
       expect(_panel, findsOneWidget);
       expect(tester.getTopRight(_panel).dx, 390);
-      expect(tester.getSize(_panel).width, QuickPanel.width);
+      expect(tester.getSize(_panel).width, _panelWidth);
 
       await _back(tester);
       await tester.fling(find.byType(HomeShell), const Offset(-80, 0), 1500);
@@ -167,12 +171,26 @@ void main() {
       expect(_panel, findsOneWidget);
     });
 
+    testWidgets('a fling settles it on the edge and never past', (tester) async {
+      await _pump(tester);
+      await tester.fling(find.byType(HomeShell), const Offset(-80, 0), 3000);
+      await tester.pump();
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(_panelIn(tester), lessThanOrEqualTo(_panelWidth));
+      }
+      expect(_panelIn(tester), _panelWidth);
+      await tester.fling(find.byType(HomeShell), const Offset(80, 0), 3000);
+      await pumpFrames(tester, 8);
+      expect(_panel, findsNothing);
+    });
+
     testWidgets('open: right pushes it back, left keeps it, and the drawer stays out of it', (tester) async {
       await _pump(tester);
       await _swipeOpen(tester);
 
       await _swipe(tester, const Offset(300, 420), const Offset(-4, 0), steps: 10);
-      expect(_panelIn(tester), QuickPanel.width);
+      expect(_panelIn(tester), _panelWidth);
 
       await _swipe(tester, const Offset(300, 420), const Offset(8, 0));
       expect(_panel, findsNothing);
@@ -199,7 +217,7 @@ void main() {
       expect(_panel, findsNothing);
 
       await pull(8);
-      expect(_panelIn(tester), QuickPanel.width);
+      expect(_panelIn(tester), _panelWidth);
     });
 
     testWidgets('a tap on the scrim closes it', (tester) async {
@@ -440,7 +458,7 @@ void main() {
       await tester.pumpWidget(homeApp());
       await pumpFrames(tester, 8);
       await _swipe(tester, const Offset(400, 200), const Offset(-8, 0));
-      expect(tester.getSize(_panel).width, QuickPanel.width + 40);
+      expect(tester.getSize(_panel).width, QuickPanel.conversationWidth + 40);
       expect(tester.getTopRight(_panel).dx, 780);
       expect(tester.getTopRight(_row(DrawerDestination.plugins)).dx, lessThanOrEqualTo(740));
       expect(tester.takeException(), isNull);
@@ -469,11 +487,11 @@ void main() {
       for (final row in rows) {
         expect(row, findsOneWidget);
       }
-      expect(tester.getTopLeft(rows[0]).dy, lessThan(tester.getTopLeft(rows[1]).dy));
-      expect(tester.getTopLeft(rows[1]).dy, lessThan(tester.getTopLeft(rows[2]).dy));
-      expect(find.text('插件'), findsOneWidget);
-      expect(find.text('本机引擎'), findsOneWidget);
-      expect(find.text('设置'), findsOneWidget);
+      expect(tester.getTopLeft(rows[0]).dx, lessThan(tester.getTopLeft(rows[1]).dx));
+      expect(tester.getTopLeft(rows[1]).dx, lessThan(tester.getTopLeft(rows[2]).dx));
+      expect(find.byTooltip('插件'), findsOneWidget);
+      expect(find.byTooltip('本机引擎'), findsOneWidget);
+      expect(find.byTooltip('设置'), findsOneWidget);
       for (final other in [
         DrawerDestination.web,
         DrawerDestination.remote,
@@ -519,7 +537,14 @@ void main() {
       await _pump(tester);
       await _swipeOpen(tester);
       final rows = tester
-          .widgetList<InkWell>(find.descendant(of: _panel, matching: find.byType(InkWell)))
+          .widgetList(
+            find.descendant(
+              of: _panel,
+              matching: find.byWidgetPredicate(
+                (w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('quick-panel-'),
+              ),
+            ),
+          )
           .map((w) => (w.key! as ValueKey<String>).value)
           .toList();
       expect(rows, ['quick-panel-settings', 'quick-panel-web']);
@@ -540,10 +565,14 @@ void main() {
       await leftAndRight(tester);
     });
 
-    testWidgets('with nothing chosen: there is no empty panel to pull', (tester) async {
+    testWidgets('with nothing chosen: the conversation is still there to show, without shortcuts', (tester) async {
       SharedPreferences.setMockInitialValues({QuickPanelController.itemsKey: <String>[]});
       await _pump(tester);
-      await leftAndRight(tester);
+      await _swipeOpen(tester);
+      expect(_panel, findsOneWidget);
+      for (final destination in DrawerDestination.values) {
+        expect(_row(destination), findsNothing);
+      }
     });
 
     testWidgets('while it is open: it goes at once', (tester) async {

@@ -61,8 +61,23 @@ class AdbKeyStore(context: Context) {
         )
         val signer = JcaContentSignerBuilder("SHA256withRSA").build(keyPair.private)
         val cert = JcaX509CertificateConverter().getCertificate(builder.build(signer))
-        keyFile.writeBytes(PKCS8EncodedKeySpec(keyPair.private.encoded).encoded)
-        certFile.writeBytes(cert.encoded)
+        val keyBytes = PKCS8EncodedKeySpec(keyPair.private.encoded).encoded
+        val certBytes = cert.encoded
+        var createdKey = false
+        var createdCert = false
+        try {
+            // A failed write can leave two regular files, which load() would
+            // thereafter treat as a complete identity. Roll back only names
+            // created by this attempt; existing files retain the old policy.
+            createdKey = keyFile.createNewFile()
+            keyFile.writeBytes(keyBytes)
+            createdCert = certFile.createNewFile()
+            certFile.writeBytes(certBytes)
+        } catch (e: Exception) {
+            if (createdKey) runCatching { keyFile.delete() }
+            if (createdCert) runCatching { certFile.delete() }
+            throw e
+        }
         runCatching {
             android.system.Os.chmod(keyFile.path, "600".toInt(8))
             android.system.Os.chmod(certFile.path, "600".toInt(8))

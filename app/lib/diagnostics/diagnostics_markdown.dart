@@ -2,6 +2,8 @@
 // inside the engine's rootfs (`$DSH_HOME/dsh-app/diagnostics.md`) so the
 // agent there can read it by itself when the person reports a problem.
 
+import 'dart:convert';
+
 import '../state/app_info.dart';
 import 'diagnostics_bundle.dart';
 import 'redact.dart';
@@ -16,7 +18,7 @@ const diagnosticsErrorLines = 10;
 const diagnosticsMarkdownBytes = 16 * 1024;
 
 /// Renders [s]. Pure: tests build a snapshot and compare, secrets go through
-/// [redactDiagnostics] on the way out.
+/// [redactDiagnostics] on the way out. The UTF-8 budget includes the notice.
 String diagnosticsMarkdown(DiagnosticsSnapshot s, {int maxBytes = diagnosticsMarkdownBytes}) {
   final b = StringBuffer()
     ..writeln('# DSH Go 本机诊断')
@@ -25,13 +27,29 @@ String diagnosticsMarkdown(DiagnosticsSnapshot s, {int maxBytes = diagnosticsMar
     ..writeln();
   _environment(b, s);
   _connection(b, s);
+  _phone(b, s);
   _performance(b, s);
   _errors(b, s);
   _log(b, '引擎日志（尾部）', s.engineLog, diagnosticsEngineLines);
   _log(b, '失败前后的日志（尾部）', s.failureLog, diagnosticsFailureLines);
   final text = redactDiagnostics(b.toString());
-  if (text.length <= maxBytes) return text;
-  return '${text.substring(0, maxBytes)}\n…（诊断文件过长，已截断；完整内容用 设置 → 诊断 的导出包）\n';
+  final bytes = utf8.encode(text);
+  if (bytes.length <= maxBytes) return text;
+  const notice = '\n…（诊断文件过长，已截断；完整内容用 设置 → 诊断 的导出包）\n';
+  final noticeBytes = utf8.encode(notice);
+  final contentBudget = maxBytes - noticeBytes.length;
+  if (contentBudget < 0) return _utf8Prefix(noticeBytes, maxBytes);
+  return '${_utf8Prefix(bytes, contentBudget)}$notice';
+}
+
+String _utf8Prefix(List<int> bytes, int budget) {
+  var end = budget;
+  // Both callers pass a budget below the encoded length. Back up to the
+  // start of a scalar when the cut would keep only some of its bytes.
+  while (end > 0 && (bytes[end] & 0xc0) == 0x80) {
+    end--;
+  }
+  return utf8.decode(bytes.sublist(0, end));
 }
 
 void _environment(StringBuffer b, DiagnosticsSnapshot s) {
@@ -98,6 +116,19 @@ void _connection(StringBuffer b, DiagnosticsSnapshot s) {
     for (final e in entries) {
       b.writeln('- ${e.key}：${e.value}');
     }
+  }
+  b.writeln();
+}
+
+void _phone(StringBuffer b, DiagnosticsSnapshot s) {
+  b.writeln('## 手机操控（本机）');
+  final phone = s.phone;
+  if (!phone.ready) {
+    b.writeln('- 手机状态不可用');
+  } else {
+    b
+      ..writeln('- 手机操控开关：${phone.enabled} · 桥接监听：${phone.bridgeListening}')
+      ..writeln('- 无障碍开关：${phone.a11y.enabled} · 服务已连接：${phone.a11y.serviceConnected}');
   }
   b.writeln();
 }

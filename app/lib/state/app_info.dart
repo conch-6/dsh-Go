@@ -23,11 +23,19 @@ abstract final class AppInfo {
   static const wordmark = 'DSH';
 
   /// Required wording: the app is built on DSH but is not an official DeepSeek product.
-  /// Shown where legal text lives (the licence page).
+  /// Shown on the About and licence pages.
   static String get disclaimer => appL10n.stateAppDisclaimer;
 
   /// The line under the brand mark (welcome page, 关于 dsh-go).
   static String get slogan => appL10n.appSlogan;
+
+  /// The original DSH Go author and their personal profiles, not project pages.
+  static const author = 'ccch1mneyyy';
+  static const authorBilibiliName = 'ccchimneyyy';
+  static const authorBilibiliUrl = 'https://b23.tv/9WBns6Y';
+  static const authorXHandle = '@cccch1mneyyyy';
+  static const authorXUrl = 'https://x.com/cccch1mneyyyy';
+  static const authorGithubUrl = 'https://github.com/ccch1mneyyy';
 
   static const deepseekPlatform = 'https://platform.deepseek.com/api_keys';
   static const remoteConsole = 'https://dsh.r2049.cn/app';

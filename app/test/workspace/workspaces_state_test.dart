@@ -307,4 +307,43 @@ void main() {
       expect(workspaceErrorText(StateError('x'), fallback: '没能添加工作区'), '没能添加工作区');
     });
   });
+
+  group('recentWorkspace', () {
+    final at = DateTime.utc(2026, 11, 5);
+    SessionSummary session(String id, Duration ago) =>
+        SessionSummary(sessionId: id, updatedAt: at.subtract(ago), running: false, blank: false, agentAvailable: true);
+    Workspace workspace(String id, {List<String> sessions = const [], DateTime? createdAt}) =>
+        Workspace(workspaceId: id, path: '/$id', title: id, sessionIds: sessions, createdAt: createdAt);
+
+    test('the one whose conversation moved last', () {
+      final recent = recentWorkspace(
+        [
+          workspace('old', sessions: ['a', 'b']),
+          workspace('new', sessions: ['c']),
+        ],
+        [
+          session('a', const Duration(days: 3)),
+          session('b', const Duration(days: 2)),
+          session('c', const Duration(hours: 1)),
+        ],
+      );
+      expect(recent?.workspaceId, 'new');
+    });
+
+    test('a workspace with no known conversation counts from its creation', () {
+      final recent = recentWorkspace(
+        [
+          workspace('used', sessions: ['a']),
+          workspace('fresh', sessions: ['gone'], createdAt: at),
+        ],
+        [session('a', const Duration(days: 1))],
+      );
+      expect(recent?.workspaceId, 'fresh');
+    });
+
+    test('nothing to tell them apart: the first on the list; none: null', () {
+      expect(recentWorkspace([workspace('a'), workspace('b')], const [])?.workspaceId, 'a');
+      expect(recentWorkspace(const [], const []), isNull);
+    });
+  });
 }

@@ -264,6 +264,7 @@ class RemoteAccount {
     this.peerConnector,
     this.preferredTransports,
     this.onDirectFallback,
+    this.compactHistory = false,
     this.directTimeout = const Duration(seconds: 8),
     this.iceServersTimeout = const Duration(seconds: 10),
   }) : serverUrl = normalizeServerUrl(serverUrl ?? defaultRemoteServer),
@@ -297,6 +298,13 @@ class RemoteAccount {
   /// raw native exception text, SDP or candidate addresses.
   void Function(String reason)? onDirectFallback;
 
+  /// Requests bounded history summaries from supporting Hosts. Captured by
+  /// [connectHost] for that client's lifetime, including automatic reconnects.
+  /// Changing it only affects the next [connectHost], not live streams or
+  /// cached history. The first successful session fixes the effective mode:
+  /// an unsupported Host stays full even if it gains support on reconnect.
+  bool compactHistory;
+
   /// How long a direct attempt may take to open its DataChannel before the
   /// next path is tried (the Server's larger deadline is capped at 15 s).
   final Duration directTimeout;
@@ -314,8 +322,9 @@ class RemoteAccount {
   _Credentials? _credentials;
   Future<void> _credentialWrites = Future<void>.value();
   bool _restored = false;
+  Future<void>? _restoring;
   Map<String, _Pin>? _pins;
-  Future<String>? _refreshing;
+  ({_Credentials owner, Future<String> result})? _refreshing;
   _ActiveConnection? _active;
   final Map<String, DateTime> _directCooldown = {};
   final Map<String, DateTime> _turnCooldown = {};
@@ -346,9 +355,12 @@ class RemoteAccount {
     );
   }
 
-  Future<void> _restore() async {
-    if (_restored) return;
-    _restored = true;
+  Future<void> _restore() {
+    if (_restored) return Future<void>.value();
+    return _restoring ??= _readStoredAccount().whenComplete(() => _restoring = null);
+  }
+
+  Future<void> _readStoredAccount() async {
     final identity = asMap(tryDecodeJson(await _secrets.read(_identityKey) ?? ''));
     try {
       if (identity != null) _identity = _Identity.fromJson(identity);
@@ -364,6 +376,7 @@ class RemoteAccount {
     } on Object {
       _credentials = null;
     }
+    _restored = true;
   }
 
   /// QR-capable sign-in providers of this Server (empty on a self-hosted
@@ -529,8 +542,7 @@ class RemoteAccount {
     );
     await _secrets.write(_identityKey, jsonEncode(identity.toJson()));
     _identity = identity;
-    _credentials = null;
-    await _secrets.delete(_credentialsKey);
+    await _dropCredentials();
     return identity;
   }
 
@@ -560,8 +572,7 @@ class RemoteAccount {
         // Offline or already revoked: still sign out locally.
       }
     }
-    _credentials = null;
-    await _secrets.delete(_credentialsKey);
+    await _dropCredentials();
     if (revokeDevice) {
       _identity = null;
       await _secrets.delete(_identityKey);
@@ -586,12 +597,19 @@ class RemoteAccount {
     if (!forceRefresh && credentials.accessTokenExpiresAt.isAfter(DateTime.now().add(const Duration(seconds: 60)))) {
       return credentials.accessToken;
     }
-    return _refreshing ??= _rotate(credentials).whenComplete(() => _refreshing = null);
+    final refreshing = _refreshing;
+    if (refreshing != null && identical(refreshing.owner, credentials)) return refreshing.result;
+    late final Future<String> result;
+    result = _rotate(credentials).whenComplete(() {
+      if (identical(_refreshing?.result, result)) _refreshing = null;
+    });
+    _refreshing = (owner: credentials, result: result);
+    return result;
   }
 
   Future<String> _rotate(_Credentials credentials) async {
     if (!credentials.refreshTokenExpiresAt.isAfter(DateTime.now())) {
-      await _dropCredentials();
+      await _dropCredentials(credentials);
       throw const RemoteConnectException(
         RemoteFailure('ACCOUNT_AUTH_REQUIRED', 'The device sign-in expired; sign in again.', retryable: false),
       );
@@ -600,13 +618,20 @@ class RemoteAccount {
       final tokens = await api.refresh(credentials.deviceId, credentials.refreshToken);
       await _saveCredentials(
         _Credentials.fromTokens(credentials.deviceId, credentials.account, tokens, provider: credentials.provider),
+        beforeWrite: () {
+          if (!identical(_credentials, credentials)) {
+            throw const RemoteConnectException(
+              RemoteFailure('ACCOUNT_AUTH_REQUIRED', 'The device sign-in changed during refresh.', retryable: false),
+            );
+          }
+        },
       );
       return tokens.accessToken;
     } on RemoteApiException catch (error) {
       if (error.retryable || error.code == 'CONNECTION_FAILED' || error.code == 'RATE_LIMITED') {
         throw RemoteConnectException(RemoteFailure(error.code, error.message, retryable: true));
       }
-      await _dropCredentials();
+      await _dropCredentials(credentials);
       throw RemoteConnectException(
         RemoteFailure(
           'ACCOUNT_AUTH_REQUIRED',
@@ -617,9 +642,15 @@ class RemoteAccount {
     }
   }
 
-  Future<void> _dropCredentials() async {
-    _credentials = null;
-    await _secrets.delete(_credentialsKey);
+  Future<void> _dropCredentials([_Credentials? owner]) {
+    // Deletes share the commit queue; retired refreshes recheck their owner here.
+    final write = _credentialWrites.then((_) async {
+      if (owner != null && !identical(_credentials, owner)) return;
+      _credentials = null;
+      await _secrets.delete(_credentialsKey);
+    });
+    _credentialWrites = write.catchError((Object _) {});
+    return write;
   }
 
   // ---------------------------------------------------------------------------
@@ -744,13 +775,14 @@ class RemoteAccount {
     Duration healthTimeout = const Duration(seconds: 10),
     DshTracer? tracer,
   }) async {
+    final historyMode = _HistoryMode(compactHistory);
     await _restore();
     final previous = _active;
     _active = null;
     await previous?.close();
     final carrier = RemoteTunnelCarrier(
       hostId: host.id,
-      open: (last) => _openHostSession(host, last, confirmNewHost),
+      open: (last) => _openHostSession(host, last, confirmNewHost, historyMode),
       healthInterval: healthInterval,
       healthTimeout: healthTimeout,
       tracer: tracer,
@@ -793,9 +825,14 @@ class RemoteAccount {
     }
   }
 
-  Future<RemoteHostSession> _openHostSession(RemoteHost host, RemoteFailure? previous, HostTrustPrompt? confirm) async {
+  Future<RemoteHostSession> _openHostSession(
+    RemoteHost host,
+    RemoteFailure? previous,
+    HostTrustPrompt? confirm,
+    _HistoryMode historyMode,
+  ) async {
     try {
-      return await _openHostSessionOnce(host, previous, confirm);
+      return await _openHostSessionOnce(host, previous, confirm, historyMode);
     } on RemoteConnectException {
       rethrow;
     } on Object catch (error) {
@@ -807,6 +844,7 @@ class RemoteAccount {
     RemoteHost host,
     RemoteFailure? previous,
     HostTrustPrompt? confirm,
+    _HistoryMode historyMode,
   ) async {
     final identity = _identity;
     if (identity == null || _credentials == null) {
@@ -879,10 +917,12 @@ class RemoteAccount {
     );
 
     // 4. Capability probe: the first RPC must be harness.transport.describe.
+    var probingCapabilities = true;
     try {
       final description = asMap(
         await rpc.call('harness.transport.describe', const <String, Object?>{}, timeout: const Duration(seconds: 10)),
       );
+      probingCapabilities = false;
       final raw = description?['capabilities'];
       if (raw is! List ||
           raw.length > maxRemoteCapabilityEntries ||
@@ -915,11 +955,34 @@ class RemoteAccount {
           ),
         );
       }
+      final supportsCompact = capabilities.contains('remote.history.compact.v1');
+      final compact = historyMode.negotiated ?? (supportsCompact && historyMode.requested);
+      if (compact && !supportsCompact) {
+        throw const RemoteConnectException(
+          RemoteFailure(
+            'HISTORY_MODE_CHANGED',
+            'The Host no longer supports compact history; create a new client to load full history.',
+            retryable: false,
+          ),
+        );
+      }
+      if (supportsCompact) {
+        final result = asMap(
+          await rpc.call('remote.history.configure', {'compact': compact}, timeout: const Duration(seconds: 10)),
+        );
+        if (result == null || result.length != 1 || result['compact'] is! bool || result['compact'] != compact) {
+          throw const RemoteConnectException(
+            RemoteFailure('INVALID_MESSAGE', 'The Host returned an invalid history configuration.', retryable: false),
+          );
+        }
+      }
+      historyMode.negotiated = compact;
       setup.stop();
       RemoteNetworkDiagnostics snapshot() => RemoteNetworkDiagnostics(
         transportMode: transport is WebRtcTransport ? transport.actualMode : transport.mode,
         connectionDuration: setup.elapsed,
         roundTripTime: transport is WebRtcTransport ? transport.roundTripTime : null,
+        peerNetwork: transport is WebRtcTransport ? transport.peerNetwork : null,
         fallbackReason:
             selection.fallbackReason ??
             (transport is WebRtcTransport && transport.actualMode == null
@@ -943,7 +1006,7 @@ class RemoteAccount {
       );
     } on RemoteRpcException catch (error) {
       await rpc.close();
-      if (error.code == 'METHOD_NOT_FOUND') {
+      if (probingCapabilities && error.code == 'METHOD_NOT_FOUND') {
         throw const RemoteConnectException(
           RemoteFailure(
             'HARNESS_VERSION_INCOMPATIBLE',
@@ -1169,6 +1232,14 @@ const Set<String> _terminalCodes = {
   'UNSUPPORTED_VERSION',
   'ACCOUNT_AUTH_REQUIRED',
 };
+
+// A client's transcript cache must not mix compact and full baselines.
+class _HistoryMode {
+  _HistoryMode(this.requested);
+
+  final bool requested;
+  bool? negotiated;
+}
 
 class _ActiveConnection {
   _ActiveConnection(this.client, this.carrier);

@@ -87,7 +87,7 @@ Rect _rect(WidgetTester tester, String key) => tester.getRect(find.byKey(ValueKe
 
 /// Where the bar can't keep the title's four characters beside the clock
 /// even with the model chip down to ✦ ⌄: the clock gives way.
-final _clockGoes = {(360.0, 1.5), (360.0, 2.0), (390.0, 2.0), (412.0, 2.0)};
+final _clockGoes = {(360.0, 2.0), (390.0, 2.0)};
 
 /// How many of [text]'s characters are on screen (before the ellipsis).
 int _titleChars(WidgetTester tester, String text) {
@@ -195,7 +195,7 @@ void main() {
   testWidgets('the model chip makes the room for the clock', (tester) async {
     final scheduled = _Scheduled(false);
     // The narrowest phone: with real glyphs a 390 bar has room to spare.
-    await _pump(tester, width: 360, scale: 1, scheduled: scheduled);
+    await _pump(tester, width: 320, scale: 1, scheduled: scheduled);
     final plainChip = tester.getRect(find.byType(ModelChip));
     final plainPill = _rect(tester, 'chat-title-pill');
     final menu = _rect(tester, 'chat-menu');

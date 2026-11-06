@@ -12,12 +12,13 @@
 // in step with LastKnownGood.kt (`load` / `save`).
 //
 // Skills and AGENTS.md aren't part of that record: what an import replaces is
-// copied to `/root/.dsh/backups/share-import-<stamp>/` (not a skill root).
+// copied under `/root/.dsh/backups/` (not a skill root).
 
 import 'dart:convert';
 import 'dart:io';
 
 import 'guest_fs.dart';
+import 'share_models.dart';
 
 class RestorePoint {
   RestorePoint(this.fs);
@@ -85,23 +86,37 @@ class RestorePoint {
     return '${GuestFs.dshHome}/backups/share-import-$stamp';
   }
 
-  /// Copies skill [name]'s current files (if any) into [backup].
-  Future<void> backupSkill(String backup, String name) async {
-    final files = fs.readSkill(name);
-    if (files == null) return;
-    for (final MapEntry(key: rel, value: text) in files.entries) {
-      final target = fs.file('$backup/skills/$name/$rel');
-      target.parent.createSync(recursive: true);
-      target.writeAsStringSync(text);
+  /// Rechecks, backs up and replaces a skill without an async handoff.
+  /// A rejected or failed backup must never reach the destructive write.
+  void replaceSkill(String backup, SharedSkill skill) {
+    final files = fs.readSkillForImport(skill.name);
+    if (files != null) {
+      final parent = fs.dir('$backup/skills');
+      parent.createSync(recursive: true);
+      final slot = fs.dir('$backup/skills/${skill.name}');
+      if (parent.listSync(followLinks: false).any((entry) => entry.path == slot.path)) {
+        throw const FileSystemException('skill backup already exists');
+      }
+      slot.createSync();
+      for (final MapEntry(key: rel, value: bytes) in files.entries) {
+        final target = File('${slot.path}/$rel');
+        target.parent.createSync(recursive: true);
+        target.writeAsBytesSync(bytes, flush: true);
+      }
     }
+    fs.writeSkill(skill);
   }
 
-  /// Copies the imported-AGENTS.md slot's current text (if any) into [backup].
+  /// Copies the original AGENTS.md bytes into a new directory beside [backup].
   Future<void> backupAgentsMd(String backup) async {
-    final text = await fs.readImportedAgentsMd();
-    if (text == null) return;
-    final target = fs.file('$backup/AGENTS.md');
-    target.parent.createSync(recursive: true);
-    target.writeAsStringSync(text);
+    final source = fs.file(GuestFs.importedAgentsMd);
+    if (!source.existsSync()) return;
+    final parent = fs.dir(backup).parent;
+    parent.createSync(recursive: true);
+    // Two imports may share the timestamp; each copy owns a fresh directory.
+    final prefix = backup.substring(backup.lastIndexOf('/') + 1);
+    final saved = parent.createTempSync('$prefix-');
+    final target = File('${saved.path}/AGENTS.md');
+    source.copySync(target.path);
   }
 }

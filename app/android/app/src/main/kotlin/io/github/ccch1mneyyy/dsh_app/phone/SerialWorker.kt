@@ -44,7 +44,7 @@ class SerialWorker(private val name: String) {
     sealed interface Outcome<out T> {
         class Done<T>(val value: T) : Outcome<T>
         class Failed(val error: Throwable) : Outcome<Nothing>
-        /** Ran past its budget ([queued]: never got to start). */
+        /** Ran past its budget, or left a retired queue ([queued]: never got to start). */
         class TimedOut(val queued: Boolean) : Outcome<Nothing>
         /** Interrupted by [interruptCurrent] (stop). */
         object Interrupted : Outcome<Nothing>
@@ -110,7 +110,9 @@ class SerialWorker(private val name: String) {
                 val cause = e.cause ?: e
                 return if (cause is InterruptedException) Outcome.Interrupted else Outcome.Failed(cause)
             } catch (_: CancellationException) {
-                return Outcome.Interrupted
+                // A retired executor removes queued Futures without running their Callables.
+                // This is an unexecuted call, not a user stop of a running operation.
+                return if (startedAt.get() == 0L) Outcome.TimedOut(queued = true) else Outcome.Interrupted
             } catch (e: InterruptedException) {
                 future.cancel(true)
                 Thread.currentThread().interrupt()
@@ -131,7 +133,15 @@ class SerialWorker(private val name: String) {
     }
 
     fun shutdown() {
-        executor.shutdownNow()
+        shutdown(executor)
+    }
+
+    private fun shutdown(exec: ExecutorService) {
+        // run() submits Futures. Complete only those shutdownNow actually removed;
+        // a running job still follows the existing interruption and budget rules.
+        for (task in exec.shutdownNow()) {
+            (task as Future<*>).cancel(false)
+        }
     }
 
     /** A cancelled future reports done at once; the thread is free only once [current] clears. */
@@ -142,7 +152,7 @@ class SerialWorker(private val name: String) {
         if (current.get() === stuck && executor === exec) {
             current.compareAndSet(stuck, null)
             executor = newExecutor()
-            exec.shutdownNow()
+            shutdown(exec)
         }
     }
 

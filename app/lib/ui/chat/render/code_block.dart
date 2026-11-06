@@ -64,6 +64,7 @@ import 'package:re_highlight/re_highlight.dart';
 
 import '../../../l10n/l10n.dart';
 import '../../common/edge_fade.dart';
+import '../../common/fluid_bits.dart';
 import '../../common/overscroll_forwarder.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
@@ -698,7 +699,10 @@ class _CopyButton extends StatelessWidget {
                   key: ValueKey(copied),
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(copied ? AppIcons.done : AppIcons.copy, size: 14, color: color),
+                    if (copied && AppMotion.fluid(context))
+                      DrawnCheck(size: 14, color: color)
+                    else
+                      Icon(copied ? AppIcons.done : AppIcons.copy, size: 14, color: color),
                     const SizedBox(width: 4),
                     Text(
                       copied ? l10n.commonCopied : l10n.commonCopy,

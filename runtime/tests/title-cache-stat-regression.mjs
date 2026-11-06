@@ -6,6 +6,7 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const prefix = resolve(process.argv[2]);
 const load = name => import(pathToFileURL(`${prefix}/node_modules/${name}/lib/index.js`));
+const { Context } = await load('@deepseek-ai/cordis');
 const { DomainFacility, defineDomain, domainTable } = await load('@deepseek-ai/dsh-storage-domain');
 const { JsonStorageBackend } = await load('@deepseek-ai/dsh-storage-json');
 const { z } = await import(pathToFileURL(`${prefix}/node_modules/zod/index.js`));
@@ -14,10 +15,11 @@ let passed = 0;
 async function check(name, run) {
   const disk = await mkdtemp(join(tmpdir(), 'title-stat-'));
   let domain;
+  const owner = new Context();
   try {
     const backend = new JsonStorageBackend(disk);
     let unit, reads = 0, parses = 0;
-    const context = { emit() {}, logger: { warn() {}, error() {} }, storage: { backend: { get: () => ({ kv: {
+    const context = { fiber: owner.fiber, emit() {}, logger: { warn() {}, error() {} }, storage: { backend: { get: () => ({ kv: {
       async open(descriptor) {
         unit = await backend.kv.open(descriptor);
         const read = unit.readRecord.bind(unit);
@@ -40,6 +42,7 @@ async function check(name, run) {
     passed++; console.log('PASS ' + name);
   } finally {
     await domain?.close();
+    await owner.fiber.dispose();
     await rm(disk, { recursive: true, force: true });
   }
 }
@@ -111,5 +114,17 @@ await check('late refresh cannot overwrite later queued local mutation', async (
   const put = table.put('s', { title: 'local' }); release.release(); await Promise.all([refresh, put]);
   assert.equal(table.get('s').title, 'local'); unit.readRecord = read;
   assert.equal((await table.refresh('s')).title, 'local');
+});
+await check('rc.1 batch deletion serializes refresh and permits later external recreation', async ({ unit, table, external, counts }) => {
+  await external('old'); await table.refresh('s');
+  const original = unit.deleteRecords.bind(unit), entered = gate(), release = gate();
+  unit.deleteRecords = async (...args) => { entered.release(); await release.promise; return original(...args); };
+  const removal = table.deleteMany(['s', 's', 'missing']);
+  await entered.promise;
+  const before = counts().reads, refresh = table.refresh('s');
+  await new Promise(r => setImmediate(r)); assert.equal(counts().reads, before);
+  release.release(); assert.equal(await removal, 1); assert.equal(await refresh, undefined);
+  assert.equal(counts().reads, before + 1);
+  await external('recreated'); assert.equal((await table.refresh('s')).title, 'recreated');
 });
 console.log(JSON.stringify({ suite: 'title-cache-stat-regression', passed }));

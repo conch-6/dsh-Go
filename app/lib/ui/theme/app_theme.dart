@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'accent.dart';
 import 'app_icons.dart';
+import 'ink_glow.dart';
 import 'page_transitions.dart';
 import 'palette.dart';
 import 'semantic_colors.dart';
@@ -21,21 +22,41 @@ import 'typography.dart';
 ///
 /// [glyphLocale] pins the locale CJK glyphs are picked by (the English UI
 /// passes zh_CN so Chinese content keeps Chinese shapes).
-ThemeData buildLightTheme({AppAccent accent = AppAccent.mist, bool glassBlur = true, Locale? glyphLocale}) => _build(
+///
+/// [instantPages] 让二级页的推入 / 退出不花时间(动画开关关掉时)。
+///
+/// [fluid] 灵动档:默认水波换成按压光晕([AppInkGlow])。
+ThemeData buildLightTheme({
+  AppAccent accent = AppAccent.mist,
+  bool glassBlur = true,
+  Locale? glyphLocale,
+  bool instantPages = false,
+  bool fluid = false,
+}) => _build(
   DshPalette.lightScheme(accent),
   DshColors.forAccent(Brightness.light, accent),
   DshSurfaces.light(accent, blurEnabled: glassBlur),
   accent,
   glyphLocale,
+  instantPages,
+  fluid,
 );
 
 /// 深色主题。
-ThemeData buildDarkTheme({AppAccent accent = AppAccent.mist, bool glassBlur = true, Locale? glyphLocale}) => _build(
+ThemeData buildDarkTheme({
+  AppAccent accent = AppAccent.mist,
+  bool glassBlur = true,
+  Locale? glyphLocale,
+  bool instantPages = false,
+  bool fluid = false,
+}) => _build(
   DshPalette.darkScheme(accent),
   DshColors.forAccent(Brightness.dark, accent),
   DshSurfaces.dark(accent, blurEnabled: glassBlur),
   accent,
   glyphLocale,
+  instantPages,
+  fluid,
 );
 
 /// 边到边(edge-to-edge)的系统栏样式:状态栏、导航栏全透明,图标随明暗。
@@ -65,19 +86,23 @@ SystemUiOverlayStyle dshSystemOverlay(Brightness brightness) {
 /// 2. **细线是骨架。** 卡片、Chip、输入框、对话框都有 0.5–1px 的线;
 ///    它比阴影安静,在浅色雾蓝底上又比纯色块清楚。
 /// 3. **连续圆角。** 全部走 `AppShape` 的五档 + 胶囊,不手写半径。
-ThemeData _build(ColorScheme scheme, DshColors colors, DshSurfaces surfaces, AppAccent accent, [Locale? glyphLocale]) {
+ThemeData _build(
+  ColorScheme scheme,
+  DshColors colors,
+  DshSurfaces surfaces,
+  AppAccent accent,
+  Locale? glyphLocale,
+  bool instantPages,
+  bool fluid,
+) {
   // iOS 式水平推入,上一页左移变暗;系统预测返回与边缘右滑都跟手
   // (见 page_transitions.dart)。全平台同一套,二级页的观感只此一处。
-  const transitions = PageTransitionsTheme(
-    builders: {
-      TargetPlatform.android: AppPageTransitionsBuilder(),
-      TargetPlatform.iOS: AppPageTransitionsBuilder(),
-      TargetPlatform.macOS: AppPageTransitionsBuilder(),
-      TargetPlatform.linux: AppPageTransitionsBuilder(),
-      TargetPlatform.windows: AppPageTransitionsBuilder(),
-      TargetPlatform.fuchsia: AppPageTransitionsBuilder(),
-    },
-  );
+  final pages = instantPages
+      ? const AppPageTransitionsBuilder.instant()
+      : fluid
+      ? const AppPageTransitionsBuilder.fluid()
+      : const AppPageTransitionsBuilder();
+  final transitions = PageTransitionsTheme(builders: {for (final platform in TargetPlatform.values) platform: pages});
 
   final isDark = scheme.brightness == Brightness.dark;
   final hairline = scheme.outlineVariant;
@@ -106,6 +131,7 @@ ThemeData _build(ColorScheme scheme, DshColors colors, DshSurfaces surfaces, App
     pageTransitionsTheme: transitions,
     visualDensity: VisualDensity.standard,
     // 水波保留但更含蓄。
+    splashFactory: fluid ? AppInkGlow.splashFactory : null,
     splashColor: scheme.primary.withValues(alpha: 0.08),
     highlightColor: scheme.primary.withValues(alpha: 0.04),
     hoverColor: scheme.onSurface.withValues(alpha: 0.04),

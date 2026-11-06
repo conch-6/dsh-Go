@@ -13,6 +13,7 @@ import '../../../plugins/native/native_capabilities.dart';
 import '../../../plugins/native/native_state.dart';
 import '../../../plugins/native/native_surface.dart';
 import '../../../state/hosts_state.dart';
+import '../../common/app_sheet.dart';
 import '../../common/empty_view.dart';
 import '../../chat/dsh_ui/dsh_ui_plugin_controls.dart' show DshUiControlButton;
 import '../../shell/page_frame.dart';
@@ -130,6 +131,27 @@ class NativePanelView extends ConsumerWidget {
 
 /// A panel as a page of its own: its title in the bar, the signed panel
 /// under it.
+/// Opens [panel] the way it asked: a sheet over what the person was doing, or a page.
+Future<void> openNativePanel(BuildContext context, NativePanel panel, {String? sessionId}) {
+  if (!panel.sheet) return Navigator.of(context).push(NativePanelPage.route(panel: panel, sessionId: sessionId));
+  return showAppSheet<void>(
+    context,
+    isScrollControlled: true,
+    builder: (sheet) => Padding(
+      // A v2 panel can have fields: the sheet rises with the keyboard.
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(sheet).bottom),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          key: ValueKey('native-panel-sheet|${panel.package}|${panel.id}'),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          child: NativePanelView(panel: panel, sessionId: sessionId),
+        ),
+      ),
+    ),
+  );
+}
+
 class NativePanelPage extends StatelessWidget {
   const NativePanelPage({super.key, required this.panel, this.sessionId});
 

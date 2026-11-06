@@ -2,8 +2,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../common/pressable.dart';
 import '../common/ui_trace.dart';
 
+import 'motion.dart';
 import 'shapes.dart';
 import 'surfaces.dart';
 
@@ -45,6 +47,7 @@ class GlassSurface extends StatelessWidget {
     this.padding,
     this.blur,
     this.grouped = false,
+    this.settled,
     this.style,
     this.onTap,
     this.onLongPress,
@@ -71,6 +74,12 @@ class GlassSurface extends StatelessWidget {
 
   /// 与同一 `BackdropGroup` 下的其他玻璃共享一次背景采样。
   final bool grouped;
+
+  /// 会动的玻璃(升起、被拖动的弹层)。0 = 在动:不采样背景,用不透明填充。
+  /// 停稳后走向 1:模糊立刻开,藏在近乎不透明的填充后面,填充渐变回玻璃,所以
+  /// 模糊出现时不跳。和 `blur: false` 不同,切换时模糊层留在树里,子树不重建。
+  /// null = 一直是玻璃。
+  final double? settled;
 
   /// 覆盖主题给的材质(极少用;例如审批卡要换警示色描边)。
   final GlassStyle? style;
@@ -105,16 +114,25 @@ class GlassSurface extends StatelessWidget {
     if (uiTraceEnabled) {
       uiTrace('glass', 'build', {'tier': tier.name, 'blur': useBlur, 'grouped': grouped});
     }
-    final fill = useBlur ? s.fill : (reduce || s.blurs ? s.fallbackFill : s.fill);
+    final fill = useBlur
+        ? Color.lerp(s.fallbackFill, s.fill, settled ?? 1)!
+        : (reduce || s.blurs ? s.fallbackFill : s.fill);
     final shape = _shape;
     final textDirection = Directionality.maybeOf(context);
 
     Widget content = child ?? const SizedBox.shrink();
     if (padding != null) content = Padding(padding: padding!, child: content);
     if (onTap != null || onLongPress != null) {
+      // Press feedback on the content, not the glass: scaling a surface that
+      // blurs would re-sample what is behind it at a new size every frame.
       content = Material(
         type: MaterialType.transparency,
-        child: InkWell(customBorder: shape, onTap: onTap, onLongPress: onLongPress, child: content),
+        child: InkWell(
+          customBorder: shape,
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: Pressable(behavior: HitTestBehavior.translucent, child: content),
+        ),
       );
     }
 
@@ -134,9 +152,10 @@ class GlassSurface extends StatelessWidget {
 
     if (useBlur) {
       final config = _filterFor(s.blurs ? s.blurSigma : 14, s.saturation);
+      final sampling = settled != 0;
       content = grouped
-          ? BackdropFilter.grouped(filterConfig: config, child: content)
-          : BackdropFilter(filterConfig: config, child: content);
+          ? BackdropFilter.grouped(filterConfig: config, enabled: sampling, child: content)
+          : BackdropFilter(filterConfig: config, enabled: sampling, child: content);
       content = _clip(content);
     }
 
@@ -273,5 +292,100 @@ class _GlassShadowPainter extends CustomPainter {
       if (a[i] != b[i]) return false;
     }
     return true;
+  }
+}
+
+/// The glass of a panel that slides in and out on [motion] (0..1): an opaque fill while it
+/// moves, since a moving blur re-samples what is behind it every frame, and glass at rest.
+/// Between the two it fades over [AppMotion.glassIn]: the fill and the glass differ, most in
+/// a light theme, and a cut between them flashes. The blur stays in the tree throughout, so
+/// the panel's content is not rebuilt either.
+class SlidingGlass extends StatefulWidget {
+  const SlidingGlass({super.key, required this.motion, required this.tier, required this.borderRadius, this.child});
+
+  final Animation<double> motion;
+  final GlassTier tier;
+  final BorderRadiusGeometry borderRadius;
+  final Widget? child;
+
+  @override
+  State<SlidingGlass> createState() => _SlidingGlassState();
+}
+
+class _SlidingGlassState extends State<SlidingGlass> with SingleTickerProviderStateMixin {
+  late final AnimationController _settled = AnimationController(
+    vsync: this,
+    duration: AppMotion.glassIn,
+    value: widget.motion.value == 1 ? 1 : 0,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    widget.motion.addListener(_sync);
+  }
+
+  @override
+  void didUpdateWidget(SlidingGlass old) {
+    super.didUpdateWidget(old);
+    if (identical(old.motion, widget.motion)) return;
+    old.motion.removeListener(_sync);
+    widget.motion.addListener(_sync);
+    _sync();
+  }
+
+  @override
+  void dispose() {
+    widget.motion.removeListener(_sync);
+    _settled.dispose();
+    super.dispose();
+  }
+
+  void _sync() {
+    final value = widget.motion.value;
+    if (value == 0) {
+      // Out of sight: nothing to fade, and no reason to keep sampling.
+      if (_settled.value != 0) _settled.value = 0;
+    } else if (AppMotion.reduced(context)) {
+      _settled.value = value == 1 ? 1 : 0;
+    } else if (value == 1) {
+      if (!_settled.isForwardOrCompleted) _settled.forward();
+    } else if (_settled.isForwardOrCompleted) {
+      _settled.reverse();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _settled,
+    builder: (context, child) =>
+        GlassSurface(tier: widget.tier, borderRadius: widget.borderRadius, settled: _settled.value, child: child),
+    child: widget.child,
+  );
+}
+
+/// [child]'s glass without its blur, for chrome floating over a web page: the page is a
+/// native view, which a backdrop filter can't see. It would blur whatever Flutter drew
+/// underneath instead, and show it through the key as a band.
+class GlassOverNativeView extends StatelessWidget {
+  const GlassOverNativeView({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final surfaces = DshSurfaces.of(context);
+    if (!surfaces.blurEnabled) return child;
+    return Theme(
+      data: theme.copyWith(
+        extensions: [
+          for (final e in theme.extensions.values)
+            if (e is! DshSurfaces) e,
+          surfaces.copyWith(blurEnabled: false),
+        ],
+      ),
+      child: child,
+    );
   }
 }

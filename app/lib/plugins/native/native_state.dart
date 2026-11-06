@@ -69,6 +69,7 @@ final nativeCapsProvider = Provider<DshGoCaps>(
   (ref) => DshGoCaps(
     app: AppInfo.version.split('+').first,
     locale: ref.watch(nativeLocaleProvider),
+    surfaces: DshGoSurfaces.all,
     components: ref.watch(nativeViewComponentsProvider),
     // v1.2: empty (nothing sent) until a plugin declares a capability.
     features: ref.watch(nativeFeatureStateProvider),
@@ -394,6 +395,24 @@ final nativeStripsProvider = Provider<List<NativeStrip>>((ref) {
   return [
     for (final p in plugins)
       if (ref.watch(nativeSurfaceOnProvider((p.package, NativeSurface.composerStrip)))) ...p.strips,
+  ];
+});
+
+/// The ＋ panel's tools, switched-on ones, every plugin's, up to what the panel holds.
+final nativeComposerToolsProvider = Provider<List<NativeAction>>((ref) {
+  final plugins = ref.watch(nativeContributionsProvider).plugins;
+  return [
+    for (final p in plugins)
+      if (ref.watch(nativeSurfaceOnProvider((p.package, NativeSurface.composerTools)))) ...p.composerTools,
+  ].take(NativeLimits.toolsTotal).toList();
+});
+
+/// What plugins can do to a whole conversation, switched-on ones.
+final nativeSessionActionsProvider = Provider<List<NativeAction>>((ref) {
+  final plugins = ref.watch(nativeContributionsProvider).plugins;
+  return [
+    for (final p in plugins)
+      if (ref.watch(nativeSurfaceOnProvider((p.package, NativeSurface.sessionActions)))) ...p.sessionActions,
   ];
 });
 

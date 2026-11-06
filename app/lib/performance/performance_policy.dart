@@ -60,6 +60,7 @@ class PerformancePrefs {
     this.mode = PerformanceMode.auto,
     this.blur,
     this.animations,
+    this.fluid,
     this.refreshRate = RefreshRateMode.auto,
     this.loaded = false,
   });
@@ -67,6 +68,9 @@ class PerformancePrefs {
   final PerformanceMode mode;
   final bool? blur;
   final bool? animations;
+
+  /// 灵动动效(见 `AppMotion.fluid`)。
+  final bool? fluid;
   final RefreshRateMode refreshRate;
   final bool loaded;
 
@@ -74,6 +78,7 @@ class PerformancePrefs {
     PerformanceMode? mode,
     bool? blur,
     bool? animations,
+    bool? fluid,
     RefreshRateMode? refreshRate,
     bool? loaded,
     bool resetEffects = false,
@@ -81,6 +86,7 @@ class PerformancePrefs {
     mode: mode ?? this.mode,
     blur: resetEffects ? null : blur ?? this.blur,
     animations: resetEffects ? null : animations ?? this.animations,
+    fluid: resetEffects ? null : fluid ?? this.fluid,
     refreshRate: refreshRate ?? this.refreshRate,
     loaded: loaded ?? this.loaded,
   );
@@ -91,6 +97,7 @@ class PerformanceDefaults {
     required this.lightweight,
     required this.blur,
     required this.reduceMotion,
+    required this.fluidMotion,
     required this.petEnabled,
     required this.autoStartLocal,
     required this.recommendRemote,
@@ -104,10 +111,12 @@ class PerformanceDefaults {
           PerformanceMode.full => false,
           PerformanceMode.light => true,
         };
+    final reduceMotion = !(prefs.animations ?? !light);
     return PerformanceDefaults(
       lightweight: light,
       blur: prefs.blur ?? !light,
-      reduceMotion: !(prefs.animations ?? !light),
+      reduceMotion: reduceMotion,
+      fluidMotion: !reduceMotion && (prefs.fluid ?? !light),
       petEnabled: !light,
       autoStartLocal: !light,
       recommendRemote: light || snapshot.tier == DeviceTier.low,
@@ -117,6 +126,9 @@ class PerformanceDefaults {
   final bool lightweight;
   final bool blur;
   final bool reduceMotion;
+
+  /// 灵动档:动效没关,且用户选了或当前档位默认开(低端机、发热时默认关)。
+  final bool fluidMotion;
   final bool petEnabled;
   final bool autoStartLocal;
   final bool recommendRemote;
@@ -128,6 +140,7 @@ class PerformanceDefaults {
     'lightweight': lightweight,
     'blur': blur,
     'reduceMotion': reduceMotion,
+    'fluidMotion': fluidMotion,
     'petEnabledDefault': petEnabled,
     'autoStartLocalDefault': autoStartLocal,
     'recommendRemote': recommendRemote,

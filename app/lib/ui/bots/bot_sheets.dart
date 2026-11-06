@@ -5,6 +5,7 @@ import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 
 import '../../l10n/l10n.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/sheet_title_bar.dart';
 import '../theme/app_icons.dart';
@@ -241,7 +242,7 @@ class _BotPickerSheetState extends State<_BotPickerSheet> {
 
 /// 「删除…？」 with a red confirm; true when confirmed.
 Future<bool> confirmDelete(BuildContext context, {required String title, required String body}) async {
-  final ok = await showDialog<bool>(
+  final ok = await showAppDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
       title: Text(title),

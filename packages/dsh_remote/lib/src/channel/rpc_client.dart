@@ -61,6 +61,7 @@ class RemoteRpcClient {
   final Map<String, _Pending> _pending = {};
   final StreamController<RemoteEvent> _events = StreamController.broadcast(sync: true);
   final Completer<SecureChannelClosed> _done = Completer();
+  int _eventDispatchDepth = 0;
   final Stopwatch _sinceInbound = Stopwatch()..start();
 
   /// Events in arrival order (synchronous broadcast: subscribe before the
@@ -103,9 +104,19 @@ class RemoteRpcClient {
       );
     });
     _pending[request.id] = _Pending(method, completer, timer);
+    final Uint8List encoded;
+    try {
+      encoded = request.encode();
+    } on Object {
+      // No Future was returned to the caller: retire only this reservation.
+      _take(request.id);
+      rethrow;
+    }
     // Do not await the write: a deadline or close must settle the RPC even
     // when the send never completes.
-    _channel.send(request.encode()).catchError((Object error) {
+    // An earlier send can keep this request queued beyond its deadline.
+    // Retire it before encoding its first Noise fragment, never between them.
+    _channel.send(encoded, canSend: () => _pending.containsKey(request.id)).catchError((Object error) {
       _reject(
         request.id,
         error is SecureChannelException && error.code == 'FRAME_TOO_LARGE'
@@ -123,8 +134,9 @@ class RemoteRpcClient {
       message = RemoteMessage.decode(bytes);
     } on Object catch (error) {
       // Fail closed on malformed plaintext.
-      unawaited(_channel.close());
-      _onClosed(SecureChannelClosed('SECURE_CHANNEL_FAILED', 'Invalid Remote message: $error'));
+      final reason = SecureChannelClosed('SECURE_CHANNEL_FAILED', 'Invalid Remote message: $error');
+      unawaited(_channel.close(reason: reason));
+      _onClosed(reason);
       return;
     }
     switch (message.type) {
@@ -148,7 +160,13 @@ class RemoteRpcClient {
         final payload = asMap(message.payload);
         final name = asString(payload?['event']);
         if (name == null || _events.isClosed) return;
-        _events.add(RemoteEvent(name, payload!['data'], seq: asInt(payload['seq'])));
+        _eventDispatchDepth++;
+        try {
+          _events.add(RemoteEvent(name, payload!['data'], seq: asInt(payload['seq'])));
+        } finally {
+          _eventDispatchDepth--;
+          if (_eventDispatchDepth == 0 && _done.isCompleted) unawaited(_events.close());
+        }
       default:
         // rpc.request from the Host is not part of the client contract.
         break;
@@ -182,7 +200,9 @@ class RemoteRpcClient {
         ),
       );
     }
-    unawaited(_events.close());
+    // Synchronous listeners may close the RPC while an event is firing.
+    // The outermost dispatch closes the stream as soon as add returns.
+    if (_eventDispatchDepth == 0) unawaited(_events.close());
   }
 
   Future<void> close() async {

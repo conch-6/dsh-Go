@@ -4,6 +4,7 @@
 // rtc-data-channel.ts (inspectSelectedPath) and rtc-adapter.ts.
 library;
 
+import 'dart:io';
 import 'dart:typed_data';
 
 import '../util/bytes.dart';
@@ -105,59 +106,93 @@ typedef RemotePeerConnector =
 /// pair on the local network, else [RemoteTransportMode.p2p]; `null` while no
 /// pair is selected.
 RemoteTransportMode? selectedPeerPath(List<JsonMap> stats) {
-  final candidates = <String, JsonMap>{};
-  final pairs = <String, JsonMap>{};
-  final flagged = <JsonMap>[];
-  final selectedIds = <String>[];
-  for (final entry in stats) {
-    final id = entry['id'];
-    switch (entry['type']) {
-      case 'local-candidate' || 'remote-candidate':
-        if (entry['candidateType'] is String && id != null) candidates['$id'] = entry;
-      case 'candidate-pair':
-        if (id != null) pairs['$id'] = entry;
-        if (entry['selected'] == true || entry['nominated'] == true) flagged.add(entry);
-      case 'transport':
-        if (entry['selectedCandidatePairId'] case final String pairId) selectedIds.add(pairId);
-    }
-  }
-  for (final pair in selectedIds.isNotEmpty ? selectedIds.map((id) => pairs[id]).nonNulls : flagged) {
-    if (pair['state'] == 'failed') continue;
-    final local = candidates['${pair['localCandidateId']}'];
-    final remote = candidates['${pair['remoteCandidateId']}'];
-    if (local == null && remote == null) continue;
-    final localType = local?['candidateType'];
-    final remoteType = remote?['candidateType'];
-    if (localType == 'relay' || remoteType == 'relay') return RemoteTransportMode.turn;
-    final lan = _isLanPair(localType, remoteType, _scope(local), _scope(remote));
-    return lan ? RemoteTransportMode.lan : RemoteTransportMode.p2p;
+  final pair = _selectedPeerPair(stats);
+  if (pair == null) return null;
+  final candidates = {
+    for (final e in stats)
+      if (e['type'] == 'local-candidate' || e['type'] == 'remote-candidate') e['id']: e,
+  };
+  final local = candidates[pair['localCandidateId']];
+  final remote = candidates[pair['remoteCandidateId']];
+  if (local == null && remote == null) return null;
+  final localType = local?['candidateType'];
+  final remoteType = remote?['candidateType'];
+  if (localType == 'relay' || remoteType == 'relay') return RemoteTransportMode.turn;
+  final lan = _isLanPair(localType, remoteType, _scope(local), _scope(remote));
+  return lan ? RemoteTransportMode.lan : RemoteTransportMode.p2p;
+}
+
+/// RTT from the selected candidate pair only, in the WebRTC stats unit
+/// (seconds). Ambiguous or stale selected pairs remain unknown.
+Duration? selectedPeerRoundTripTime(List<JsonMap> stats) {
+  final rtt = _selectedPeerPair(stats)?['currentRoundTripTime'];
+  if (rtt is num && rtt.isFinite && rtt >= 0 && rtt <= 3600) {
+    return Duration(microseconds: (rtt * Duration.microsecondsPerSecond).round());
   }
   return null;
 }
 
-/// RTT from the selected candidate pair only, in the WebRTC stats unit
-/// (seconds). Never substitute a previous or merely nominated pair.
-Duration? selectedPeerRoundTripTime(List<JsonMap> stats) {
+/// IP versions and ICE protocol of the current selected pair. An mDNS name,
+/// missing address or unknown protocol stays unknown; addresses are discarded.
+RemotePeerNetworkInfo? selectedPeerNetworkInfo(List<JsonMap> stats) {
+  final pair = _selectedPeerPair(stats);
+  if (pair == null) return null;
+  final candidates = {
+    for (final e in stats)
+      if (e['type'] == 'local-candidate' || e['type'] == 'remote-candidate') e['id']: e,
+  };
+  final local = candidates[pair['localCandidateId']];
+  final remote = candidates[pair['remoteCandidateId']];
+  if (local == null && remote == null) return null;
+  final localProtocol = _iceProtocol(local?['protocol']);
+  final remoteProtocol = _iceProtocol(remote?['protocol']);
+  return RemotePeerNetworkInfo(
+    localIpVersion: _ipVersion(local),
+    remoteIpVersion: _ipVersion(remote),
+    protocol: localProtocol != null && remoteProtocol != null && localProtocol != remoteProtocol
+        ? null
+        : localProtocol ?? remoteProtocol,
+  );
+}
+
+JsonMap? _selectedPeerPair(List<JsonMap> stats) {
   final pairs = {
     for (final e in stats)
       if (e['type'] == 'candidate-pair') e['id']: e,
   };
-  final ids = [
+  final ids = {
     for (final e in stats)
       if (e['type'] == 'transport' && e['selectedCandidatePairId'] is String) e['selectedCandidatePairId'],
-  ];
-  final selected = ids.isNotEmpty
-      ? ids.map((id) => pairs[id]).nonNulls
-      : pairs.values.where((e) => e['selected'] == true || (e['nominated'] == true && e['state'] == 'succeeded'));
-  for (final pair in selected) {
-    if (pair['state'] == 'failed') continue;
-    final rtt = pair['currentRoundTripTime'];
-    if (rtt is num && rtt.isFinite && rtt >= 0 && rtt <= 3600) {
-      return Duration(microseconds: (rtt * Duration.microsecondsPerSecond).round());
-    }
+  };
+  if (ids.isNotEmpty) {
+    // A missing current pair must not be replaced by an old nominated one.
+    if (ids.length != 1) return null;
+    final pair = pairs[ids.single];
+    return pair?['state'] == 'failed' ? null : pair;
   }
-  return null;
+  final selected = pairs.values.where((e) => e['selected'] == true && e['state'] != 'failed').toList();
+  if (selected.isNotEmpty) return selected.length == 1 ? selected.single : null;
+  // Some native stacks omit transport stats. Only an unambiguous successful
+  // nomination can stand in; old and new nominated pairs may coexist.
+  final nominated = pairs.values.where((e) => e['nominated'] == true && e['state'] == 'succeeded').toList();
+  return nominated.length == 1 ? nominated.single : null;
 }
+
+RemoteIpVersion? _ipVersion(JsonMap? candidate) {
+  final address = asString(candidate?['address']) ?? asString(candidate?['ip']);
+  if (address == null) return null;
+  return switch (InternetAddress.tryParse(address)?.type) {
+    InternetAddressType.IPv4 => RemoteIpVersion.ipv4,
+    InternetAddressType.IPv6 => RemoteIpVersion.ipv6,
+    _ => null,
+  };
+}
+
+RemoteIceProtocol? _iceProtocol(Object? value) => switch (value) {
+  'udp' || 'UDP' => RemoteIceProtocol.udp,
+  'tcp' || 'TCP' => RemoteIceProtocol.tcp,
+  _ => null,
+};
 
 enum _Scope { loopback, linkLocal, private, cgnat, reserved, public, unknown }
 
@@ -165,13 +200,21 @@ _Scope _scope(JsonMap? candidate) {
   final address = asString(candidate?['address']) ?? asString(candidate?['ip']);
   if (address == null || address.isEmpty) return _Scope.unknown;
   if (address.contains(':')) {
-    final value = address.toLowerCase();
-    if (value == '::1') return _Scope.loopback;
-    if (value.startsWith('fe80:')) return _Scope.linkLocal;
-    // Tailscale's overlay range is ULA-shaped but not a physical LAN.
-    if (value.startsWith('fd7a:115c:a1e0:')) return _Scope.cgnat;
-    if (value.startsWith('fc') || value.startsWith('fd')) return _Scope.private;
-    if (value.startsWith('ff')) return _Scope.reserved;
+    final bytes = InternetAddress.tryParse(address)?.rawAddress;
+    if (bytes == null || bytes.length != 16) return _Scope.unknown;
+    if (bytes.take(15).every((b) => b == 0) && bytes.last == 1) return _Scope.loopback;
+    if (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80) return _Scope.linkLocal;
+    // Tailscale's fd7a:115c:a1e0::/48 overlay is not a physical LAN.
+    if (bytes[0] == 0xfd &&
+        bytes[1] == 0x7a &&
+        bytes[2] == 0x11 &&
+        bytes[3] == 0x5c &&
+        bytes[4] == 0xa1 &&
+        bytes[5] == 0xe0) {
+      return _Scope.cgnat;
+    }
+    if ((bytes[0] & 0xfe) == 0xfc) return _Scope.private;
+    if (bytes[0] == 0xff || bytes.every((b) => b == 0)) return _Scope.reserved;
     return _Scope.public;
   }
   final parts = address.split('.').map(int.tryParse).toList();

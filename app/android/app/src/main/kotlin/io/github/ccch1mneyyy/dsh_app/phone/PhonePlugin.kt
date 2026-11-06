@@ -121,7 +121,7 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                     when {
                         !live() -> cancelledSelection()
                         control.background.rootGrantSelected() -> control.background.grantRootSecureSettings()
-                        else -> control.grantSecureSettings()
+                        else -> control.grantSecureSettings(live)
                     }
                 }
             }

@@ -81,22 +81,22 @@
  //#endregion
 --- a/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
-@@ -787,9 +787,9 @@
+@@ -698,9 +698,9 @@
  		};
  	}
  	/**
--	* Validate and install one Session-local model selection; save the default in the background.
-+	* Validate and install one Session-local model selection, then report default persistence.
+-	* Validate and record one Session model selection; save the default in the background.
++	* Validate and record one Session model selection, then report default persistence.
  	* @param request - Session identity and requested model selection.
--	* @returns the normalized selection installed for the Session, without waiting for default persistence.
-+	* @returns the installed Session selection and a separate default-save receipt.
+-	* @returns the normalized selection recorded for the Session, without waiting for default persistence.
++	* @returns the recorded Session selection and a separate default-save receipt.
  	*/
  	async selectModel(request) {
  		const agent = await this.resolveAgent(request.sessionId);
-@@ -807,10 +807,14 @@
- 					...resolved.reasoningEffort === void 0 ? {} : { reasoningEffort: resolved.reasoningEffort }
+@@ -714,10 +714,14 @@
  				};
- 				this.agents.selectForNextRequest(agent, selected);
+ 				await this.ctx.llm.resolveCallConfig(selected);
+ 				agent.model.select(selected);
 -				this.ctx.agentDefaultModel.saveSelection(selected).catch((error) => {
 -					this.ctx.logger.warn(`session-controller: model selection changed for the Session but the default was not saved: ${String(error)}`);
 -				});
@@ -112,7 +112,7 @@
  			} catch (error) {
  				if (remoteErrorOf(error) !== void 0) throw error;
  				throw new RemoteError("session/model-unavailable", error instanceof Error ? error.message : String(error), {
-@@ -3135,9 +3139,9 @@
+@@ -3965,9 +3969,9 @@
  			return this.commands.create(request);
  		}
  		/**
@@ -124,7 +124,7 @@
  		*/
  		selectModel(request) {
  			return this.commands.selectModel(request);
-@@ -3147,16 +3151,28 @@
+@@ -3977,16 +3981,28 @@
  		* @returns after saving the first available model or retaining the existing default.
  		*/
  		async initializeDefaultModel() {

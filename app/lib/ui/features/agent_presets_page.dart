@@ -14,6 +14,7 @@ import '../../l10n/l10n.dart';
 import '../../state/connection_state.dart';
 import '../../state/features_state.dart';
 import '../../state/preset_editor_state.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../plugins/plugin_widgets.dart';
 import '../common/list_page_row.dart';
@@ -55,7 +56,7 @@ class AgentPresetsPage extends ConsumerWidget {
   Future<void> _delete(BuildContext context, WidgetRef ref, AgentPresetInfo preset, PluginBundle bundle) async {
     final l10n = context.l10n;
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(l10n.featuresPresetDeleteTitle(agentPresetName(preset))),

@@ -81,22 +81,23 @@ List<ReasoningFragment> reasoningFragments(String text, {required bool running, 
   final matches = _paragraphBreak.allMatches(text).toList();
   for (var i = 0; ; i++) {
     final match = i < matches.length ? matches[i] : null;
-    var remaining = text.substring(start, match?.start ?? text.length);
-    while (remaining.length > limit) {
-      var cut = limit;
-      final unit = remaining.codeUnitAt(cut - 1);
+    final paragraph = text.substring(start, match?.start ?? text.length);
+    // Keep the paragraph instead of copying its shrinking remainder per piece.
+    var offset = 0;
+    while (paragraph.length - offset > limit) {
+      var cut = offset + limit;
+      final unit = paragraph.codeUnitAt(cut - 1);
       if (unit >= 0xD800 && unit <= 0xDBFF) cut -= 1;
-      final head = remaining.substring(0, cut);
+      final head = paragraph.substring(offset, cut);
       final ws = RegExp(r'\s+\S*$').firstMatch(head);
-      if (ws != null && ws.start > 0) cut = ws.start;
-      final source = remaining.substring(0, cut);
-      remaining = remaining.substring(cut);
-      final lead = RegExp(r'^\s+').firstMatch(remaining);
+      if (ws != null && ws.start > 0) cut = offset + ws.start;
+      final source = paragraph.substring(offset, cut);
+      final lead = RegExp(r'\s+').matchAsPrefix(paragraph, cut);
       final suffix = lead?.group(0) ?? '';
-      remaining = remaining.substring(suffix.length);
+      offset = cut + suffix.length;
       out.add(ReasoningFragment(source, suffix, complete: true));
     }
-    out.add(ReasoningFragment(remaining, match?.group(0) ?? '', complete: match != null || !running));
+    out.add(ReasoningFragment(paragraph.substring(offset), match?.group(0) ?? '', complete: match != null || !running));
     if (match == null) return out;
     start = match.end;
   }

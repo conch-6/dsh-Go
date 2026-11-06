@@ -73,6 +73,39 @@ class GuestAgentsModeTest {
         } finally { root.deleteRecursively() }
     }
 
+    @Test fun safeDiagnosticsLeaveOriginalHomeUntouchedAndNormalDiagnosticsReturnToIt() {
+        val root = kotlin.io.path.createTempDirectory("diagnostics-safe").toFile()
+        try {
+            val original = GuestSetup.writeDiagnostics(root, "# original\n")
+            val originalBytes = original.readBytes()
+            val safeFile = GuestSetup.writeDiagnostics(root, "# rescue\n", safe = true)
+            assertEquals(
+                File(root, "var/lib/dsh-app/safe-mode/home/dsh-app/diagnostics.md").absoluteFile,
+                safeFile.absoluteFile,
+            )
+            assertEquals("# rescue\n", safeFile.readText())
+            assertArrayEquals(originalBytes, original.readBytes())
+            val normalFile = GuestSetup.writeDiagnostics(root, "# normal again\n")
+            assertEquals(original.absoluteFile, normalFile.absoluteFile)
+            assertEquals("# normal again\n", original.readText())
+            assertEquals("# rescue\n", safeFile.readText())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun safeDiagnosticsDoNotNeedTheOriginalHomeToBeADirectory() {
+        val root = kotlin.io.path.createTempDirectory("diagnostics-broken-home").toFile()
+        try {
+            val originalHome = File(root, "root/.dsh")
+            originalHome.parentFile.mkdirs()
+            val originalBytes = "original path is not a directory\n".toByteArray()
+            originalHome.writeBytes(originalBytes)
+            val safeFile = GuestSetup.writeDiagnostics(root, "# rescue\n", safe = true)
+            assertEquals("# rescue\n", safeFile.readText())
+            assertArrayEquals(originalBytes, originalHome.readBytes())
+            assertEquals(0, safeFile.parentFile!!.listFiles()!!.count { it.name.startsWith(".diagnostics") })
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun unchangedDefaultStartupDoesNotRewriteAnExistingManagedFile() {
         val root = kotlin.io.path.createTempDirectory("agents-unchanged").toFile()
         try {

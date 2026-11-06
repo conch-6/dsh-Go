@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 
 /// 思考的图标:官方 Web 的"原子"(两道交叉轨道 + 中心点),与官方界面一致。
 ///
-/// [spinning] 时轨道慢慢转(思考中);系统关了动画就静止。
+/// [spinning] 时轨道慢慢转(思考中),慢到不和标签上的扫光抢眼,只表示还活着;
+/// 系统关了动画就静止。
 class ThinkGlyph extends StatefulWidget {
   const ThinkGlyph({super.key, this.size = 16, this.color, this.spinning = false, this.strokeWidth = 1.25});
 
@@ -26,7 +27,7 @@ class _ThinkGlyphState extends State<ThinkGlyph> with SingleTickerProviderStateM
 
   void _sync(bool animate) {
     if (animate) {
-      (_spin ??= AnimationController(vsync: this, duration: const Duration(milliseconds: 2400))).repeat();
+      (_spin ??= AnimationController(vsync: this, duration: const Duration(milliseconds: 7200))).repeat();
     } else {
       _spin?.stop();
       _spin?.value = 0;

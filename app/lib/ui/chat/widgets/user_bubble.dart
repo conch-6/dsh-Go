@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../l10n/l10n.dart';
 import '../../../state/composer_quote.dart' show splitQuote;
 import '../../common/expand_reveal.dart';
+import '../../common/fluid_bits.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 import '../media/generate_header.dart';
@@ -113,7 +114,7 @@ class UserBubble extends StatelessWidget {
       container: true,
       header: true,
       label: l10n.chatMe,
-      child: GestureDetector(
+      child: HoldLift(
         onLongPress: () => _menu(context),
         child: DecoratedBox(
           decoration: ShapeDecoration(color: surfaces.userBubble, shape: AppShape.bubble),

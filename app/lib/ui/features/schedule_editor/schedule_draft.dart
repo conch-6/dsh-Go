@@ -449,9 +449,14 @@ String ruleText(ScheduleDraft d) {
   }
 }
 
+/// A rule the builder can't state: `rrule`, what the 0.2.2 assistant tool
+/// writes. Named 「自定义」 as on the official page, and left as stored.
+bool isCustomRule(ScheduleTask task) => task.kind == 'rrule';
+
 /// [ruleText] of a stored task.
-String taskRuleText(ScheduleTask task) =>
-    ruleText(ScheduleDraft.fromTask(task, deviceZone: task.timeZone ?? 'UTC', now: DateTime.now()));
+String taskRuleText(ScheduleTask task) => isCustomRule(task)
+    ? appL10n.featuresRepeatCustom
+    : ruleText(ScheduleDraft.fromTask(task, deviceZone: task.timeZone ?? 'UTC', now: DateTime.now()));
 
 /// A run time in [zone]'s wall clock, relative to [now]: `今天 09:00`,
 /// `明天 09:00`, `10月27日 周一 09:00`, `2027年1月4日 周一 09:00`.

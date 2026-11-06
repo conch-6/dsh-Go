@@ -29,8 +29,10 @@ class _FakeClient extends DshClient {
   /// Refuse inline images like DSH does for a text-only model (V4 Pro).
   bool textOnlyModel = false;
 
-  /// False like DSH Remote, which stages no files.
+  /// Receipt uploads are unavailable on DSH Remote.
   bool uploadsAllowed = true;
+  bool workspaceUploadsAllowed = false;
+  Object? uploadError;
   Object? promptError;
   Object? cancelError;
   Object? responseError;
@@ -40,6 +42,16 @@ class _FakeClient extends DshClient {
 
   @override
   bool supportsEndpoint(String endpoint) => endpoint != 'fileUploads/upload' || uploadsAllowed;
+
+  @override
+  bool get supportsFileUpload => super.supportsFileUpload || workspaceUploadsAllowed;
+
+  @override
+  Future<WorkspaceUploadedFile> uploadWorkspaceFile(String sessionId, List<int> bytes, {required String name}) async {
+    calls.add('workspace:$name');
+    if (uploadError case final error?) throw error;
+    return WorkspaceUploadedFile(name: name, path: './$name', bytes: bytes.length);
+  }
 
   @override
   Stream<DshEvent> watch(String sessionId, {WatchOptions options = const WatchOptions()}) => events.stream;
@@ -120,6 +132,7 @@ void main() {
   Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 60));
 
   setUp(() async {
+    SharedPreferences.setMockInitialValues({});
     client = _FakeClient();
     container = ProviderContainer(
       overrides: [
@@ -148,6 +161,32 @@ void main() {
     container.dispose();
     await client.events.close();
   });
+
+  Future<void> inTestClock(WidgetTester tester) async {
+    // Build the event subscription inside this test's fake clock, so the
+    // normal 32ms publish timer is advanced by pump, never a wall wait.
+    container.dispose();
+    await client.events.close();
+    client = _FakeClient();
+    container = ProviderContainer(
+      overrides: [
+        activeConnectionProvider.overrideWithValue(
+          AsyncData<HostConnection?>(HostConnection(client: client, label: '本机', isLocal: true)),
+        ),
+      ],
+    );
+    container.listen(chatProvider('s1'), (_, _) {});
+    client.events.add(
+      SessionSnapshotEvent.fromJson('s1', {
+        'header': {'id': 's1'},
+        'cursor': -1,
+        'records': <Object?>[],
+        'projections': {'asOfSeq': -1, 'values': <String, Object?>{}},
+      }),
+    );
+    await tester.pump();
+    expect(state().controlReady, isTrue);
+  }
 
   final image = DraftAttachment.sniff('cat.png', tinyPng);
   final file = DraftAttachment.sniff('notes.md', Uint8List.fromList('hi'.codeUnits));
@@ -184,6 +223,47 @@ void main() {
       expect(client.prompts, hasLength(1));
       expect(state().error, '发送失败：AI 正忙，稍后再试');
       expect(state().pending, isEmpty);
+    });
+  });
+
+  group('Remote workspace uploads', () {
+    setUp(() {
+      client.uploadsAllowed = false;
+      client.workspaceUploadsAllowed = true;
+    });
+
+    test('files supply workspace paths, never fictitious receipt IDs', () async {
+      expect(await chat().send('read this', attachments: [file]), isTrue);
+      expect(client.calls.first, 'workspace:notes.md');
+      expect(client.calls.last, contains('"./notes.md"'));
+      expect(client.prompts.single.receipts, isEmpty);
+      expect(client.uploads, isEmpty);
+    });
+
+    test('file-only prompts still name the uploaded file', () async {
+      expect(await chat().send('', attachments: [file]), isTrue);
+      expect(client.calls.last, contains('"./notes.md"'));
+      expect(client.prompts.single.receipts, isEmpty);
+    });
+
+    test('text-only fallback keeps file paths and the same prompt ID', () async {
+      client.textOnlyModel = true;
+      expect(await chat().send('read these', attachments: [file, image]), isTrue);
+      expect(client.calls.where((call) => call.startsWith('workspace:')), ['workspace:notes.md', 'workspace:cat.png']);
+      expect(client.prompts, hasLength(2));
+      expect(client.prompts.last.images, 0);
+      expect(client.prompts.last.receipts, isEmpty);
+      expect(client.prompts.last.requestId, client.prompts.first.requestId);
+      expect(client.calls.last, contains('"./notes.md"'));
+      expect(client.calls.last, contains('"./cat.png"'));
+    });
+
+    test('Host upload refusal prevents the prompt and preserves its reason', () async {
+      client.uploadError = const DshRemoteException('UPLOAD_LIMIT', 'Host refused');
+      expect(await chat().send('read this', attachments: [file]), isFalse);
+      expect(client.prompts, isEmpty);
+      expect(state().pending, isEmpty);
+      expect(state().error, contains('主机拒绝了上传'));
     });
   });
 
@@ -325,6 +405,74 @@ void main() {
   });
 
   group('unknown outcome', () {
+    test('retry identity keeps an unchanged file selection across list copies', () async {
+      final selected = [file];
+      client.promptError = const DshCarrierLostException('gone');
+      expect(await chat().send('分析', attachments: selected), isFalse);
+      final requestId = client.prompts.single.requestId;
+
+      client.promptError = null;
+      expect(await chat().send('分析', attachments: List.of(selected)), isTrue);
+
+      expect(client.prompts.last.requestId, requestId);
+    });
+
+    test('retry identity distinguishes replacing a file with the same name', () async {
+      final original = DraftAttachment.sniff('notes.md', Uint8List.fromList('old'.codeUnits));
+      final replacement = DraftAttachment.sniff('notes.md', Uint8List.fromList('new'.codeUnits));
+      expect(replacement.id, isNot(original.id));
+      client.promptError = const DshTransportException('gone');
+      expect(await chat().send('分析', attachments: [original]), isFalse);
+      final requestId = client.prompts.single.requestId;
+
+      client.promptError = null;
+      expect(await chat().send('分析', attachments: [replacement]), isTrue);
+
+      expect(client.uploads, ['notes.md', 'notes.md']);
+      expect(client.prompts.last.requestId, isNot(requestId));
+    });
+
+    test('retry identity distinguishes a newly selected image with the same name', () async {
+      final original = DraftAttachment.sniff('cat.png', tinyPng);
+      final replacement = DraftAttachment.sniff('cat.png', Uint8List.fromList(tinyPng));
+      expect(original.isImage, isTrue);
+      expect(replacement.id, isNot(original.id));
+      client.promptError = const DshCarrierLostException('gone');
+      expect(await chat().send('看看', attachments: [original]), isFalse);
+      final requestId = client.prompts.single.requestId;
+
+      client.promptError = null;
+      expect(await chat().send('看看', attachments: [replacement]), isTrue);
+
+      expect(client.prompts.last.images, 1);
+      expect(client.prompts.last.requestId, isNot(requestId));
+    });
+
+    test('retry identity separates text lines from attachment names', () async {
+      client.promptError = const DshCarrierLostException('gone');
+      expect(await chat().send('分析\nnotes.md'), isFalse);
+      final requestId = client.prompts.single.requestId;
+
+      client.promptError = null;
+      expect(await chat().send('分析', attachments: [file]), isTrue);
+
+      expect(client.uploads, ['notes.md']);
+      expect(client.prompts.last.requestId, isNot(requestId));
+    });
+
+    test('retry identity preserves the order of same-named selections', () async {
+      final first = DraftAttachment.sniff('notes.md', Uint8List.fromList([1]));
+      final second = DraftAttachment.sniff('notes.md', Uint8List.fromList([2]));
+      client.promptError = const DshCarrierLostException('gone');
+      expect(await chat().send('按顺序分析', attachments: [first, second]), isFalse);
+      final requestId = client.prompts.single.requestId;
+
+      client.promptError = null;
+      expect(await chat().send('按顺序分析', attachments: [second, first]), isTrue);
+
+      expect(client.prompts.last.requestId, isNot(requestId));
+    });
+
     test('sending the same content again reuses the request id', () async {
       client.promptError = const DshCarrierLostException('gone');
       expect(await chat().send('  你好  ', attachments: [image]), isFalse);
@@ -533,6 +681,139 @@ void main() {
         });
       }
     }
+
+    for (final delivery in ['live', 'snapshot']) {
+      for (final ending in ['running', 'error', 'completed']) {
+        testWidgets('batch echoes settle all 13 local requests: $delivery/$ending', (tester) async {
+          await inTestClock(tester);
+          var seq = 0;
+          Map<String, Object?> event(String type, Map<String, Object?> data) => {
+            'seq': ++seq,
+            'time': 1792700000000 + seq,
+            'type': type,
+            'data': data,
+          };
+          final start = event('turn/start', {'turn': 1});
+          client.events.add(SessionLogEvent.fromJson(start));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 32));
+          expect(state().running, isTrue);
+          for (var i = 0; i < 13; i++) {
+            expect(await chat().send('steer $i', mode: SendMode.steer), isTrue);
+          }
+          final ids = [for (final prompt in client.prompts) prompt.requestId!];
+          expect(await chat().send('unclaimed input', mode: SendMode.steer), isTrue);
+          final unclaimed = client.prompts.last.requestId!;
+          final messages = [for (var i = 0; i < ids.length; i++) msg('u$i', 'steer $i', ids[i])];
+          final events = [
+            for (var i = 0; i < messages.length; i++)
+              event('agent/inbox/spliced', {
+                'target': 'next-step',
+                'start': i,
+                'removedCount': 0,
+                'inserted': [messages[i]],
+              }),
+            event('agent/inbox/spliced', {
+              'target': 'next-step',
+              'start': 0,
+              'removedCount': messages.length,
+              'inserted': <Object?>[],
+            }),
+            for (final message in messages) event('user/message', message),
+            if (ending != 'running')
+              event('turn/end', {
+                'turn': 1,
+                'reason': {
+                  'kind': ending,
+                  if (ending == 'error') 'error': {'message': 'synthetic model failure', 'code': 'UNKNOWN'},
+                },
+              }),
+          ];
+          if (delivery == 'snapshot') {
+            client.events.add(
+              SessionSnapshotEvent.fromJson('s1', {
+                'cursor': seq,
+                'records': [
+                  for (final entry in [start, ...events]) {'type': 'event', 'event': entry},
+                ],
+              }, isResync: true),
+            );
+          } else {
+            for (final entry in events) {
+              client.events.add(SessionLogEvent.fromJson(entry));
+            }
+          }
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 32));
+          expect(state().items.whereType<UserChatItem>().map((item) => item.requestId), ids);
+          expect(state().pending.map((prompt) => prompt.requestId), [unclaimed]);
+          expect(state().pending.single.failed, isFalse);
+          expect(state().running, ending == 'running');
+          expect(client.prompts, hasLength(14), reason: 'Echo reconciliation must never resend a request.');
+        });
+      }
+    }
+
+    testWidgets('an idempotent retry reconciles an echo received while no pending input existed', (tester) async {
+      await inTestClock(tester);
+      client.promptError = const DshCarrierLostException('reply lost');
+      expect(await chat().send('retry accepted input'), isFalse);
+      final id = client.prompts.single.requestId!;
+      expect(state().pending, isEmpty);
+      client.promptError = null;
+      client.events.add(
+        SessionLogEvent.fromJson({
+          'seq': 1,
+          'time': 1792700000001,
+          'type': 'user/message',
+          'data': msg('accepted', 'retry accepted input', id),
+        }),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(state().items.whereType<UserChatItem>().single.requestId, id);
+      expect(await chat().send('retry accepted input'), isTrue);
+      expect(client.prompts.map((prompt) => prompt.requestId), [id, id]);
+      // The real Host's idempotent response does not append a second echo.
+      client.events.add(const SessionStatusEvent('s1', false));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(state().pending, isEmpty);
+    });
+
+    testWidgets('moving a captured prompt reconciles an echo that already removed it', (tester) async {
+      await inTestClock(tester);
+      var seq = 0;
+      void emit(String type, Map<String, Object?> data) => client.events.add(
+        SessionLogEvent.fromJson({'seq': ++seq, 'time': 1792700000000 + seq, 'type': type, 'data': data}),
+      );
+      emit('turn/start', {'turn': 1});
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(await chat().send('captured steer', mode: SendMode.steer), isTrue);
+      final id = client.prompts.single.requestId!;
+      final input = msg('captured', 'captured steer', id);
+      emit('agent/inbox/spliced', {
+        'target': 'next-step',
+        'start': 0,
+        'removedCount': 0,
+        'inserted': [input],
+      });
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      final captured = state().pending.single;
+      expect(captured.inboxId, 'captured');
+      emit('agent/inbox/spliced', {'target': 'next-step', 'start': 0, 'removedCount': 1, 'inserted': <Object?>[]});
+      emit('user/message', input);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(state().pending, isEmpty);
+      client.gone.add('captured');
+      expect(await chat().sendNow(captured), isEmpty);
+      expect(state().pending, isEmpty);
+      expect(client.prompts, hasLength(1));
+      expect(client.cancels, 0);
+    });
 
     for (final fate in ['claimed', 'canceled', 'echoed', 'restored']) {
       test('a snapshot reconstructs an entirely missed request outcome: $fate', () async {
@@ -998,11 +1279,17 @@ void main() {
       expect(client.prompts.last.requestId, ids.single);
     });
 
-    test('plain text from elsewhere can go now; attachments cannot', () async {
+    testWidgets('plain text from elsewhere can go now; attachments cannot', (tester) async {
+      await inTestClock(tester);
+      Future<void> publish() async {
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 32));
+      }
+
       client.events.add(const SessionStatusEvent('s1', true));
-      await settle();
+      await publish();
       splice('next-turn', inserted: [msg('i1', '电脑上发的', 'other'), msg('i2', '带附件的', 'other-file', file: true)]);
-      await settle();
+      await publish();
       expect(bubble('电脑上发的').resendable, isTrue);
       expect(bubble('带附件的').resendable, isFalse);
       expect(await chat().sendNow(bubble('带附件的')), isEmpty);
@@ -1010,15 +1297,17 @@ void main() {
 
       client.promptResult = Completer<String>();
       final sending = chat().sendNow(bubble('电脑上发的'));
-      await settle();
+      await publish();
       splice('next-turn', removed: 1, canceled: true);
-      await settle();
+      await publish();
       // Ours while it is out: the bubble stays.
       expect(bubble('电脑上发的').requestId, 'other');
       client.promptResult!.complete('other');
       await sending;
       expect(client.calls, ['remove:i1', 'cancel', 'prompt:queue:电脑上发的']);
       expect(client.prompts.last.requestId, 'other');
+      // testWidgets checks pending timers before the outer tearDown runs.
+      container.dispose();
     });
 
     test('发送 with no turn running wakes it without a stop', () async {

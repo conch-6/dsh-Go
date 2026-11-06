@@ -7,6 +7,7 @@ import '../../runtime/runtime_state.dart';
 import '../../state/hosts_state.dart';
 import '../../state/plugin_reload.dart';
 import '../../state/plugins_state.dart';
+import '../common/app_dialog.dart';
 import '../common/brief_notice.dart';
 import '../common/list_page_row.dart';
 import '../theme/app_icons.dart';
@@ -61,7 +62,7 @@ class PluginReloadAction extends ConsumerWidget {
         bundle,
         confirm: () async =>
             context.mounted &&
-            await showDialog<bool>(
+            await showAppDialog<bool>(
                   context: context,
                   builder: (dialog) => AlertDialog(
                     title: Text(l10n.pluginsReloadConfirm(title)),

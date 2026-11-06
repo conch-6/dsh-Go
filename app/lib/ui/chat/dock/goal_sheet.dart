@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../l10n/l10n.dart';
 import '../../../state/goal_dock_state.dart';
+import '../../common/app_dialog.dart';
 import '../../common/app_sheet.dart';
 import '../../common/sheet_title_bar.dart';
 import '../../settings/settings_widgets.dart' show SettingsTile;
@@ -136,7 +137,7 @@ class GoalSheet extends ConsumerWidget {
 
 /// 「编辑目标」:多行输入,保留换行;空的或没改时不能保存。Resolves to the
 /// new text (trimmed), or null.
-Future<String?> showGoalEditor(BuildContext context, {required String initial}) => showDialog<String>(
+Future<String?> showGoalEditor(BuildContext context, {required String initial}) => showAppDialog<String>(
   context: context,
   builder: (_) => _GoalEditor(initial: initial),
 );
@@ -194,7 +195,7 @@ class _GoalEditorState extends State<_GoalEditor> {
 /// 「清除目标？」,目标文字作正文;确认键是危险色。
 Future<bool> confirmClearGoal(BuildContext context, String objective) async {
   final l10n = context.l10n;
-  final ok = await showDialog<bool>(
+  final ok = await showAppDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
       title: Text(l10n.chatClearGoalTitle),

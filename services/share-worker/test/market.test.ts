@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 import { packageFromPath, validateCatalog } from '../src/market';
 import { makeEnv, makeCtx } from './fakes';
@@ -37,6 +37,10 @@ function upstream(data = docs()) {
       Response.json(String(input).endsWith('index.json') ? data.index : data.sidecar),
     );
 }
+// A request and its freshness assertion share one reference time.
+beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-30T04:00:00Z'));
+});
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -174,6 +178,71 @@ describe('market routes', () => {
     e.sidecar.plugins['@scope/plugin'].integrity = 'tampered';
     expect(validateCatalog(e.index, e.sidecar)).toBe(false);
   });
+  it.each([
+    { label: 'install scripts', flags: ['install-scripts'], level: 'high' },
+    { label: 'native code', flags: ['native-code'], level: 'high' },
+    { label: 'shell', flags: ['shell'], level: 'medium' },
+    { label: 'filesystem', flags: ['filesystem'], level: 'medium' },
+    { label: 'obfuscated', flags: ['obfuscated'], level: 'medium' },
+    { label: 'network', flags: ['network'], level: 'low' },
+    { label: 'not adapted', flags: ['not-adapted'], level: 'low' },
+    { label: 'no flags', flags: [], level: 'low' },
+    { label: 'highest mixed flag', flags: ['network', 'shell', 'native-code'], level: 'high' },
+  ])('serves correctly typed risk flags: $label', async ({ flags, level }) => {
+    const c = setup(), d = docs();
+    d.sidecar.plugins['@scope/plugin'].risk = { level, flags };
+    upstream(d);
+    const r = await worker.fetch(request('/market/dsh-go.json'), c.env, c.ctx);
+    expect(r.status).toBe(200);
+    expect((await r.json()).plugins['@scope/plugin'].risk).toEqual({ level, flags });
+    expect(c.kv.values.size).toBe(1);
+  });
+  it('still rejects a low declared level for a string high-risk flag', async () => {
+    const c = setup(), d = docs();
+    d.sidecar.plugins['@scope/plugin'].risk = { level: 'low', flags: ['install-scripts'] };
+    upstream(d);
+    expect((await worker.fetch(request('/market/dsh-go.json'), c.env, c.ctx)).status).toBe(503);
+    expect(c.kv.values.size).toBe(0);
+  });
+  it.each(['install-scripts', 'shell'])('rejects a JSON array masquerading as the %s risk flag', async (flag) => {
+    const c = setup(), d = docs();
+    // Upstream JSON is untrusted: an array also stringifies to a known flag.
+    Object.assign(d.sidecar.plugins['@scope/plugin'].risk, { level: 'low', flags: [[flag]] });
+    upstream(d);
+    const r = await worker.fetch(request('/market/dsh-go.json'), c.env, c.ctx);
+    expect(r.status).toBe(503);
+    expect(r.headers.get('cache-control')).toBe('no-store');
+    expect(c.kv.values.size).toBe(0);
+  });
+  it('keeps the last valid snapshot when a refresh contains a non-string risk flag', async () => {
+    const now = Date.parse('2026-10-30T04:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const c = setup(), f = upstream();
+    await worker.fetch(request('/market/dsh-go.json'), c.env, c.ctx);
+    const before = [...c.kv.values];
+    const d = docs();
+    Object.assign(d.sidecar.plugins['@scope/plugin'].risk, { level: 'low', flags: [['install-scripts']] });
+    f.mockImplementation(async (input) => Response.json(String(input).endsWith('index.json') ? d.index : d.sidecar));
+    clock.mockReturnValue(now + 601000);
+    const r = await worker.fetch(request('/market/dsh-go.json'), c.env, c.ctx);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('x-market-stale')).toBe('true');
+    expect(await r.json()).toEqual(docs().sidecar);
+    expect([...c.kv.values]).toEqual(before);
+  });
+  it('does not use a durable snapshot with a non-string risk flag during an outage', async () => {
+    const c = setup(), d = docs();
+    Object.assign(d.sidecar.plugins['@scope/plugin'].risk, { level: 'low', flags: [['install-scripts']] });
+    await c.kv.put(
+      'market:v1:' + c.env.MARKET_SOURCE_URL,
+      JSON.stringify({ at: Date.now(), index: JSON.stringify(d.index), sidecar: JSON.stringify(d.sidecar) }),
+    );
+    const f = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
+    const r = await worker.fetch(request('/market/dsh-go.json'), c.env, c.ctx);
+    expect(r.status).toBe(503);
+    expect(r.headers.get('cache-control')).toBe('no-store');
+    expect(f).toHaveBeenCalledTimes(2);
+  });
 });
 describe('market cron', () => {
   const scheduled = (c: ReturnType<typeof setup>) => worker.scheduled({} as ScheduledController, c.env, c.ctx);
@@ -209,5 +278,18 @@ describe('market cron', () => {
     await scheduled(c);
     expect([...c.dl.objects]).toEqual(before);
     expect(JSON.stringify([...c.kv.values.values()])).not.toContain('9.0.0');
+  });
+  it('does not publish a catalog with a non-string risk flag over the valid pair', async () => {
+    const c = setup(), f = upstream();
+    await scheduled(c);
+    const before = structuredClone([...c.dl.objects]), saved = [...c.kv.values];
+    const d = docs();
+    Object.assign(d.sidecar.plugins['@scope/plugin'].risk, { level: 'low', flags: [['install-scripts']] });
+    f.mockImplementation(async (input) => Response.json(String(input).endsWith('index.json') ? d.index : d.sidecar));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await scheduled(c);
+    expect([...c.dl.objects]).toEqual(before);
+    expect([...c.kv.values]).toEqual(saved);
+    expect(log).toHaveBeenLastCalledWith('market publish failed', 'invalid-catalog', null);
   });
 });

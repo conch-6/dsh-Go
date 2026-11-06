@@ -590,7 +590,7 @@ int? _int(Object? v) => v is int && v >= 0 ? v : (v is double && v.isFinite && v
 /// or empty.
 String? _str(Object? v, int max) {
   if (v is! String || v.isEmpty) return null;
-  return v.length <= max ? v : '${v.substring(0, max)}…';
+  return v.length <= max ? v : '${prefixKeepingPairs(v, max)}…';
 }
 
 /// One line of display text.
@@ -598,5 +598,14 @@ String? _line(Object? v, int max) {
   if (v is! String) return null;
   final t = v.replaceAll(RegExp(r'\s+'), ' ').trim();
   if (t.isEmpty) return null;
-  return t.length <= max ? t : '${t.substring(0, max - 1)}…';
+  return t.length <= max ? t : '${prefixKeepingPairs(t, max - 1)}…';
+}
+
+/// The first [end] code units of [text], one fewer if that would split a
+/// surrogate pair. For truncation only: [end] must be inside [text].
+String prefixKeepingPairs(String text, int end) {
+  final lead = text.codeUnitAt(end - 1);
+  final trail = text.codeUnitAt(end);
+  if (lead >= 0xd800 && lead <= 0xdbff && trail >= 0xdc00 && trail <= 0xdfff) end--;
+  return text.substring(0, end);
 }

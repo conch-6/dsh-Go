@@ -263,8 +263,9 @@ void main() {
     test('agent presets: ordered list, read, default via settings/update', () async {
       host.handlers['agentPresets/list'] = (_) => ok({
         'presets': [
-          {'id': 'ptc', 'order': 2, 'isDefault': false},
+          // The actual Host already returns its authoritative order.
           {'id': 'standard', 'order': 1, 'isDefault': true},
+          {'id': 'ptc', 'order': 2, 'isDefault': false},
           {'id': 'mine', 'name': '我的', 'broken': 'bad yaml'},
         ],
       });

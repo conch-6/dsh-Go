@@ -3,6 +3,8 @@
 // stay on the engine they were typed for. Geometry: equal insets around the
 // fields, the protocol capsule, the pinned button and the picker.
 
+import 'dart:async';
+
 import 'package:dsh_app/state/providers_state.dart';
 import 'package:dsh_app/ui/common/segmented_pill.dart';
 import 'package:dsh_app/ui/common/sheet_title_bar.dart';
@@ -12,6 +14,7 @@ import 'package:dsh_app/ui/theme/app_icons.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../shell/golden_harness.dart' show goldenApp, loadGoldenFonts;
 import 'support.dart';
@@ -56,6 +59,7 @@ Future<void> _open(
   CustomProvider? existing,
   MemoryProviderKeyVault? vault,
   double height = 1400,
+  FakeProviderBackend? Function()? backendFor,
 }) async {
   // Real glyph widths: the capsule's fit depends on them.
   await tester.runAsync(loadGoldenFonts);
@@ -68,7 +72,13 @@ Future<void> _open(
     goldenApp(
       home: _Opener(existing: existing),
       brightness: Brightness.light,
-      overrides: providerOverrides(backend, vault: vault),
+      overrides: backendFor == null
+          ? providerOverrides(backend, vault: vault)
+          : [
+              // The support helper's first override is the backend being switched.
+              ...providerOverrides(backend, vault: vault).skip(1),
+              providerBackendProvider.overrideWith((ref) => backendFor()),
+            ],
     ),
   );
   await tester.tap(find.text('open'));
@@ -85,7 +95,85 @@ Future<void> _type(WidgetTester tester, String label, String text) async {
   await tester.pump();
 }
 
+class _DelayedDiscovery extends FakeProviderBackend {
+  final response = Completer<List<DiscoveredModel>>();
+
+  @override
+  Future<List<DiscoveredModel>> discover({String? provider, String? baseUrl, ProviderApi? api, String? apiKey}) {
+    calls.add(('discover', {'baseURL': ?baseUrl}));
+    return response.future;
+  }
+}
+
 void main() {
+  testWidgets('late discovery preserves an endpoint edited while loading', (tester) async {
+    final backend = _DelayedDiscovery();
+    await _open(tester, backend);
+    await _type(tester, 'Base URL', 'https://old.example.com/v1');
+    await _type(tester, 'API Key', 'sk-old');
+    await tester.tap(find.text('获取模型'));
+    await tester.pump();
+    expect(backend.callNames, contains('discover'));
+    await _type(tester, 'Base URL', 'https://new.example.com/v1');
+    backend.response.complete(discovered);
+    await settle(tester);
+    expect(tester.widget<TextField>(_field('Base URL')).controller!.text, 'https://new.example.com/v1');
+    expect(find.byType(ModelPickerSheet), findsNothing);
+    expect(find.text('获取模型'), findsOneWidget);
+  });
+
+  testWidgets('late discovery failure does not blame an edited credential', (tester) async {
+    final backend = _DelayedDiscovery();
+    await _open(tester, backend);
+    await _type(tester, 'Base URL', 'https://gw.example.com/v1');
+    await _type(tester, 'API Key', 'sk-old');
+    await tester.tap(find.text('获取模型'));
+    await tester.pump();
+    await _type(tester, 'API Key', 'sk-new');
+    backend.response.completeError(listingRefused('https://gw.example.com/v1', 401));
+    await settle(tester);
+    expect(find.text('API Key 无效或没有权限'), findsNothing);
+    expect(tester.widget<TextField>(_field('API Key')).controller!.text, 'sk-new');
+    expect(find.text('获取模型'), findsOneWidget);
+  });
+
+  testWidgets('late discovery ignores a response after the active backend changes', (tester) async {
+    final original = _DelayedDiscovery();
+    FakeProviderBackend active = original;
+    await _open(tester, original, backendFor: () => active);
+    await _type(tester, 'Base URL', 'https://gw.example.com/v1');
+    await _type(tester, 'API Key', 'sk-old');
+    await tester.tap(find.text('获取模型'));
+    await tester.pump();
+    final container = ProviderScope.containerOf(tester.element(find.byType(ProviderFormPage)));
+    active = FakeProviderBackend();
+    container.invalidate(providerBackendProvider);
+    await tester.pump();
+    original.response.complete(discovered);
+    await settle(tester);
+    expect(find.byType(ModelPickerSheet), findsNothing);
+    expect(find.text('DeepSeek V4 Pro'), findsNothing);
+  });
+
+  testWidgets('late discovery picker cannot add models after the active backend changes', (tester) async {
+    final original = FakeProviderBackend(discoverResult: discovered);
+    FakeProviderBackend active = original;
+    await _open(tester, original, backendFor: () => active);
+    await _type(tester, 'Base URL', 'https://gw.example.com/v1');
+    await _type(tester, 'API Key', 'sk-old');
+    await tester.tap(find.text('获取模型'));
+    await settle(tester);
+    expect(find.byType(ModelPickerSheet), findsOneWidget);
+    final container = ProviderScope.containerOf(tester.element(find.byType(ProviderFormPage)));
+    active = FakeProviderBackend();
+    container.invalidate(providerBackendProvider);
+    await tester.pump();
+    await tester.tap(find.text('添加 3 个模型'));
+    await settle(tester);
+    expect(find.text('DeepSeek V4 Pro'), findsNothing);
+    expect(find.text('模型 · 3'), findsNothing);
+  });
+
   group('validation', () {
     testWidgets('an empty save names every missing field and writes nothing', (tester) async {
       final backend = FakeProviderBackend();

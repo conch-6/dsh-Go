@@ -156,17 +156,19 @@ class ForumTopicsController extends AsyncNotifier<ForumTopicList> {
     return ForumTopicList(topics: page.topics, hasMore: page.hasMore, canCreateTopic: page.canCreateTopic);
   }
 
+  bool _isCurrent(ForumApi api) => ref.mounted && identical(api, ref.read(forumApiProvider));
+
   /// Pull to refresh: the first page again, replacing the list.
   Future<void> refresh() async {
     final api = ref.read(forumApiProvider);
     try {
       final page = await api.topics(feed);
-      if (!ref.mounted) return;
+      if (!_isCurrent(api)) return;
       state = AsyncData(
         ForumTopicList(topics: page.topics, hasMore: page.hasMore, canCreateTopic: page.canCreateTopic),
       );
     } on ForumException catch (e, stack) {
-      if (!ref.mounted) return;
+      if (!_isCurrent(api)) return;
       if (state.hasValue) {
         state = AsyncData(state.requireValue.copyWith(moreError: e.message));
       } else {
@@ -184,7 +186,7 @@ class ForumTopicsController extends AsyncNotifier<ForumTopicList> {
     final api = ref.read(forumApiProvider);
     try {
       final page = await api.topics(feed, page: current.page + 1);
-      if (!ref.mounted) return;
+      if (!_isCurrent(api)) return;
       final seen = {for (final t in current.topics) t.id};
       state = AsyncData(
         current.copyWith(
@@ -200,7 +202,7 @@ class ForumTopicsController extends AsyncNotifier<ForumTopicList> {
         ),
       );
     } on ForumException catch (e) {
-      if (ref.mounted) state = AsyncData(current.copyWith(loadingMore: false, moreError: e.message));
+      if (_isCurrent(api)) state = AsyncData(current.copyWith(loadingMore: false, moreError: e.message));
     }
   }
 }
@@ -243,8 +245,9 @@ class ForumTopicController extends AsyncNotifier<ForumTopicDetail> {
     _loadingMore = true;
     try {
       final ids = current.missing.take(current.chunkSize <= 0 ? 20 : current.chunkSize).toList();
-      final fresh = await ref.read(forumApiProvider).posts(topicId, ids);
-      if (!ref.mounted) return;
+      final api = ref.read(forumApiProvider);
+      final fresh = await api.posts(topicId, ids);
+      if (!ref.mounted || !identical(api, ref.read(forumApiProvider))) return;
       final latest = state.value ?? current;
       final byId = {for (final p in latest.posts) p.id: p, for (final p in fresh) p.id: p};
       // Ids the server didn't return (deleted since) drop out of the stream,
@@ -266,16 +269,18 @@ class ForumTopicController extends AsyncNotifier<ForumTopicDetail> {
     state = AsyncData(current.copyWith(posts: [for (final p in current.posts) p.id == post.id ? post : p]));
   }
 
+  bool _isCurrent(ForumApi api) => ref.mounted && identical(api, ref.read(forumApiProvider));
+
   /// Likes or unlikes [post] right away; puts it back and rethrows when the
   /// forum says no.
   Future<void> toggleLike(ForumPost post) async {
+    final api = ref.read(forumApiProvider);
     final liked = !post.liked;
     _replace(post.copyWith(liked: liked, likeCount: (post.likeCount + (liked ? 1 : -1)).clamp(0, 1 << 30)));
     try {
-      final api = ref.read(forumApiProvider);
       liked ? await api.like(post.id) : await api.unlike(post.id);
     } catch (_) {
-      if (ref.mounted) _replace(post);
+      if (_isCurrent(api)) _replace(post);
       rethrow;
     }
   }
@@ -287,16 +292,16 @@ class ForumTopicController extends AsyncNotifier<ForumTopicDetail> {
       try {
         if (post.bookmarkId case final id?) await api.removeBookmark(id);
       } catch (_) {
-        if (ref.mounted) _replace(post);
+        if (_isCurrent(api)) _replace(post);
         rethrow;
       }
     } else {
       _replace(post.copyWith(bookmarked: true));
       try {
         final id = await api.bookmark(post.id);
-        if (ref.mounted) _replace(post.copyWith(bookmarked: true, bookmarkId: id));
+        if (_isCurrent(api)) _replace(post.copyWith(bookmarked: true, bookmarkId: id));
       } catch (_) {
-        if (ref.mounted) _replace(post);
+        if (_isCurrent(api)) _replace(post);
         rethrow;
       }
     }
@@ -345,17 +350,25 @@ class ForumNotificationsController extends AsyncNotifier<ForumNotifications> {
   Future<void> refresh() async {
     final api = ref.read(forumApiProvider);
     if (!api.signedIn) return;
-    final page = await api.notifications();
-    if (ref.mounted) state = AsyncData(ForumNotifications(items: page.notifications, hasMore: page.hasMore));
+    try {
+      final page = await api.notifications();
+      if (ref.mounted && identical(api, ref.read(forumApiProvider))) {
+        state = AsyncData(ForumNotifications(items: page.notifications, hasMore: page.hasMore));
+      }
+    } catch (_) {
+      if (!ref.mounted || !identical(api, ref.read(forumApiProvider))) return;
+      rethrow;
+    }
   }
 
   Future<void> loadMore() async {
     final current = state.value;
     if (current == null || !current.hasMore || current.loadingMore) return;
+    final api = ref.read(forumApiProvider);
     state = AsyncData(ForumNotifications(items: current.items, hasMore: true, loadingMore: true));
     try {
-      final page = await ref.read(forumApiProvider).notifications(offset: current.items.length);
-      if (!ref.mounted) return;
+      final page = await api.notifications(offset: current.items.length);
+      if (!ref.mounted || !identical(api, ref.read(forumApiProvider))) return;
       final seen = {for (final n in current.items) n.id};
       state = AsyncData(
         ForumNotifications(
@@ -368,7 +381,7 @@ class ForumNotificationsController extends AsyncNotifier<ForumNotifications> {
         ),
       );
     } catch (error) {
-      if (ref.mounted) {
+      if (ref.mounted && identical(api, ref.read(forumApiProvider))) {
         state = AsyncData(
           ForumNotifications(
             items: current.items,

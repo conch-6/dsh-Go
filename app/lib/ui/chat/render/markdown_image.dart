@@ -211,10 +211,13 @@ class ArtifactImageReader implements WorkspaceImageReader {
 /// scrolling a reply back into view draws it at once instead of reading the
 /// file again. A failed read is forgotten, so the next attempt reads afresh.
 class CachedImageReader implements WorkspaceImageReader {
-  CachedImageReader(this.inner, {this.capacity = 64});
+  CachedImageReader(this.inner, {this.capacity = 64, this.keeps});
 
   final WorkspaceImageReader inner;
   final int capacity;
+
+  /// Whether a read image is worth holding; null holds all of them.
+  final bool Function(LoadedImage image)? keeps;
   final _pending = <(String, String), Future<LoadedImage>>{};
   final _done = <(String, String), LoadedImage>{};
 
@@ -236,6 +239,7 @@ class CachedImageReader implements WorkspaceImageReader {
         .then(
           (image) {
             _pending.remove(key);
+            if (keeps?.call(image) == false) return image;
             _done[key] = image;
             while (_done.length > capacity) {
               _done.remove(_done.keys.first);
@@ -255,6 +259,42 @@ class CachedImageReader implements WorkspaceImageReader {
     _done.remove((sessionId, path));
   }
 }
+
+/// Reads images the connected engine serves itself, such as a plugin's
+/// `/api/…` assets: they need the session's cookie, which NetworkImage can't
+/// send. [path] is the image's full URL or root-relative API path.
+class EngineImageReader implements WorkspaceImageReader {
+  const EngineImageReader(this.client);
+
+  final DshClient? client;
+
+  @override
+  Future<LoadedImage> read(String sessionId, String path) async {
+    final client = this.client;
+    if (client == null) throw const ArtifactError('offline');
+    final bytes = await client.readEngineUrl(path, maxBytes: maxMarkdownImageBytes);
+    return isSvgUrl(path) ? SvgImageBytes(bytes) : RasterImage(MemoryImage(bytes));
+  }
+}
+
+/// Largest engine image held in memory between reads. These hold their bytes,
+/// unlike workspace images (a file handle): small assets such as emoji repeat
+/// in a chat, and anything bigger is read again when it scrolls back.
+const maxHeldEngineImageBytes = 256 * 1024;
+
+/// Images from the engine's own address; one cache per connection, at most
+/// 8 MiB of bytes.
+final engineImageReaderProvider = Provider<CachedImageReader>(
+  (ref) => CachedImageReader(
+    EngineImageReader(ref.watch(artifactFilesProvider).connection?.client),
+    capacity: 32,
+    keeps: (image) => switch (image) {
+      RasterImage(provider: MemoryImage(:final bytes)) || SvgImageBytes(:final bytes) =>
+        bytes.length <= maxHeldEngineImageBytes,
+      _ => true,
+    },
+  ),
+);
 
 /// The reader reply images use; one cache per connection.
 final workspaceImageReaderProvider = Provider<CachedImageReader>(
@@ -343,6 +383,9 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
   /// Workspace images: the session and the path read.
   String? _sessionId;
   String? _path;
+
+  /// An image the connected engine serves itself: read with its cookie.
+  String? _engineUrl;
   Future<LoadedImage>? _future;
   LoadedImage? _loaded;
   Object? _error;
@@ -369,6 +412,23 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
 
   void _resolve() {
     final source = _source;
+    final url = source is WebImageSource ? source.url : widget.url.trim();
+    final engine =
+        (source is WebImageSource || source is WorkspaceImageSource) &&
+        (ref.read(artifactFilesProvider).connection?.client.isEngineUrl(url) ?? false);
+    if (source is WebImageSource || engine) {
+      final next = engine ? url : null;
+      if (next == _engineUrl && (next == null || _future != null || _loaded != null)) return;
+      _engineUrl = next;
+      _sessionId = null;
+      _path = null;
+      _future = null;
+      _loaded = null;
+      _error = null;
+      if (next != null) _load();
+      return;
+    }
+    _engineUrl = null;
     if (source is! WorkspaceImageSource) return;
     final scope = MarkdownImageScope.maybeOf(context);
     final sessionId = scope?.sessionId ?? ref.read(currentSessionProvider);
@@ -403,9 +463,10 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
   }
 
   void _load() {
-    final reader = ref.read(workspaceImageReaderProvider);
-    final sessionId = _sessionId!;
-    final path = _path!;
+    final engineUrl = _engineUrl;
+    final reader = ref.read(engineUrl != null ? engineImageReaderProvider : workspaceImageReaderProvider);
+    final sessionId = engineUrl != null ? '' : _sessionId!;
+    final path = engineUrl ?? _path!;
     _error = null;
     _loaded = reader.peek(sessionId, path);
     if (_loaded != null) {
@@ -433,11 +494,16 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
     setState(() {
       _attempt += 1;
       final source = _source;
-      if (source is WorkspaceImageSource && _sessionId != null && _path != null) {
+      if (_engineUrl != null) {
+        ref.read(engineImageReaderProvider).forget('', _engineUrl!);
+        _load();
+      } else if (source is WorkspaceImageSource && _sessionId != null && _path != null) {
         ref.read(workspaceImageReaderProvider).forget(_sessionId!, _path!);
         _load();
       } else if (source is WebImageSource) {
         PaintingBinding.instance.imageCache.evict(NetworkImage(source.url));
+        // The connection may have arrived since this image was first drawn.
+        _resolve();
       }
     });
   }
@@ -462,6 +528,14 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
 
   @override
   Widget build(BuildContext context) {
+    // A replaced connection has its own cookie and cache: read through it again.
+    ref.listen(artifactFilesProvider.select((files) => files.connection?.client), (_, _) {
+      if (_source is! WebImageSource && _source is! WorkspaceImageSource) return;
+      setState(() {
+        _engineUrl = null;
+        _resolve();
+      });
+    });
     final l10n = context.l10n;
     // A media card above already shows this file: not a second time. Only
     // for a conversation already open (a previewed file never starts one).
@@ -483,11 +557,27 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
       return _ImageError(name: name, message: message, action: l10n.chatImageTapToRetry, onTap: _retry);
     }
 
+    Widget read() {
+      final loaded = _loaded;
+      if (_error != null) return failed(_error);
+      if (loaded == null) return placeholder();
+      return switch (loaded) {
+        RasterImage(:final provider) => _raster(provider, placeholder: placeholder, failed: failed),
+        // The preview page shows bitmaps only.
+        SvgImageBytes(:final bytes) => _framed(
+          memorySvg(bytes, fit: BoxFit.contain, error: (_) => failed(null)),
+          onTap: null,
+        ),
+      };
+    }
+
     final source = _source;
     final Widget child;
     switch (source) {
       case UnsupportedImageSource():
         child = _ImageError(name: name, message: l10n.chatImageUnsupportedAddress);
+      case WebImageSource() when _engineUrl != null:
+        child = read();
       case WebImageSource(:final url) when isSvgUrl(url):
         child = _framed(
           NetworkSvg(
@@ -511,21 +601,7 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
           child = _raster(MemoryImage(bytes), placeholder: placeholder, failed: failed);
         }
       case WorkspaceImageSource():
-        final loaded = _loaded;
-        if (_error != null) {
-          child = failed(_error);
-        } else if (loaded == null) {
-          child = placeholder();
-        } else {
-          child = switch (loaded) {
-            RasterImage(:final provider) => _raster(provider, placeholder: placeholder, failed: failed),
-            // The preview page shows bitmaps only.
-            SvgImageBytes(:final bytes) => _framed(
-              memorySvg(bytes, fit: BoxFit.contain, error: (_) => failed(null)),
-              onTap: null,
-            ),
-          };
-        }
+        child = read();
     }
     return Semantics(image: true, label: name, child: child);
   }

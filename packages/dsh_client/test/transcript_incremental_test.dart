@@ -116,13 +116,34 @@ Map<String, Object?> user(int n) => ev(n, 'user/message', {
     },
   ],
 });
-Map<String, Object?> assistant(int n, int step, {String? tool}) => ev(n, 'assistant/message', {
+Map<String, Object?> assistant(int n, int step, {String? tool, String? phase}) => ev(n, 'assistant/message', {
   'turn': 1,
   'step': step,
   'message': {
     'id': 'a$n',
     'role': 'assistant',
-    'source': {'kind': 'model', 'model': 'one'},
+    'source': {
+      'kind': 'model',
+      'model': 'one',
+      if (phase != null)
+        'replayState': {
+          'response': {
+            'kind': 'pi-ai',
+            'version': 2,
+            'api': 'openai-codex-responses',
+            'provider': 'openai-codex',
+            'model': 'one',
+            'stopReason': 'stop',
+          },
+          'blocks': [
+            {
+              'type': 'text',
+              'textSignature': jsonEncode({'v': 1, 'id': 'msg-$n', 'phase': phase}),
+            },
+            if (tool != null) {'type': 'tool-call'},
+          ],
+        },
+    },
     'content': [
       {'type': 'text', 'text': 'answer$n'},
       if (tool != null) {'type': 'tool-call', 'id': tool, 'name': 'first-$tool', 'arguments': '{}'},
@@ -251,6 +272,19 @@ void main() {
       expect(approvalIds.length, greaterThan(1));
     });
   }
+  test('final-answer flags agree with full rebuilds after append, resync and history', () {
+    final p = Diff();
+    p.wire(assistant(1, 1, phase: 'commentary'));
+    p.wire(assistant(2, 2, phase: 'final_answer'));
+    p.wire(assistant(3, 3, phase: 'final_answer'));
+    p.wire(assistant(4, 4));
+    expect(p.a.items.whereType<AssistantChatItem>().map((a) => a.isFinalAnswer), [false, true, true, false]);
+    p.wire(snapshot([assistant(3, 3, phase: 'final_answer')], cursor: 3), resync: true);
+    p.history([assistant(0, 0, phase: 'final_answer')['event'] as Map<String, Object?>], false);
+    expect(p.a.items.whereType<AssistantChatItem>().map((a) => a.isFinalAnswer), [true, false, true, true, false]);
+    p.wire(assistant(2, 2, phase: 'commentary'));
+    expect(p.a.items.whereType<AssistantChatItem>().map((a) => a.isFinalAnswer), [true, false, false, true, false]);
+  });
   test('late cross-turn result and approval precedence preserve first-seen fields', () {
     final p = Diff();
     for (final f in [

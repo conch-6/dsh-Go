@@ -112,7 +112,8 @@ Map<int, List<PresentedFile>> presentedByTurn(Iterable<SessionLogEvent> events) 
 /// `.` and `..` segments and repeated slashes are folded. A Windows path
 /// (`C:\…`) or a relative path without [cwd] is returned unchanged.
 String resolveSessionPath(String path, {String? cwd}) {
-  var p = path.trim();
+  // Whitespace belongs to the filename, including at the ends of a decoded URI path.
+  var p = path;
   if (p.startsWith('file://')) p = Uri.decodeFull(p.substring('file://'.length));
   if (RegExp(r'^[A-Za-z]:[\\/]').hasMatch(p)) return p;
   if (!p.startsWith('/')) {

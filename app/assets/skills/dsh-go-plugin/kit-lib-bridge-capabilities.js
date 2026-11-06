@@ -97,11 +97,11 @@ export function parseCapabilities(raw, out) {
       out.items[kind].push(item);
     });
   }
-  for (const surface of ["composer.actions", "message.actions"]) {
+  for (const surface of ["composer.actions", "message.actions", "composer.tools", "session.actions"]) {
     const list = Array.isArray(raw.contributes[surface]) ? raw.contributes[surface] : [];
-    for (const item of out.items[surface]) {
+    for (const item of out.items[surface] ?? []) {
       if (item === null) continue;
-      const i = list.findIndex((x) => isPlainObject(x) && x.id === item.id);
+      const i = out.rawIndex.get(item.id);
       const input = list[i];
       if (input?.requires === undefined) continue;
       // An unsatisfiable requirement fails closed: the action never becomes ready.
@@ -113,7 +113,7 @@ export function parseCapabilities(raw, out) {
   const panels = Array.isArray(raw.contributes.panels) ? raw.contributes.panels : [];
   for (const item of out.items.panels) {
     if (item === null) continue;
-    const i = panels.findIndex((x) => isPlainObject(x) && x.id === item.id);
+    const i = out.rawIndex.get(item.id);
     const input = panels[i];
     if (input?.micro === undefined) continue;
     if (caps.has("micro") && (out.items.micro ?? []).some((x) => x.id === input.micro)) item.micro = input.micro;

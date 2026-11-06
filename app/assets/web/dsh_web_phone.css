@@ -8,7 +8,9 @@
  *   app's menu button, which sits with the back button in the page's own
  *   header row. Phones and short landscape screens get the settings dialog
  *   as a full-screen sheet; phone widths (≤ 760px) also get a tab strip,
- *   stacked setting rows and larger dialogs.
+ *   stacked setting rows and larger dialogs. Where DSH has a drawer of its own
+ *   (0.2.2 on, below 768px) that one is used, with its settings sheet: only
+ *   the safe areas and the room for the app's buttons are the app's.
  * - "desktop", 1024px and up: the official layout, with a band above the
  *   sidebar for the app's back button and the sidebar's background running
  *   under the status and gesture bars.
@@ -63,14 +65,33 @@ body > [class*="_overlay"] {
 
 /* ── Drawer layout: one column, the sidebar a drawer ──────────────────────── */
 
+/* DSH 0.2.2 on, below 768px: the official drawer (data-sidebar-drawer on the
+   frame) in place of the one below. Its opener sits under the app's buttons,
+   which drive it; the header's own room for it is _headerLeading's, below. */
+:root[data-dsh-app-layout="drawer"] [data-sidebar-drawer] {
+  --dsh-frame-leading-clearance: 0px !important;
+}
+:root[data-dsh-app-layout="drawer"] [data-sidebar-drawer] [data-sidebar-opener] {
+  visibility: hidden;
+}
+/* Edge to edge like the app's own: it and its scrim run under the status bar
+   and the gesture bar, its content starts clear of them (below). */
+:root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"][data-sidebar-drawer] > [class*="_sidebarCol"],
+:root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"][data-sidebar-drawer] > [class*="_drawerMask"] {
+  position: fixed !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  height: auto !important;
+}
+
 /* The sidebar leaves the grid; the conversation spans its track and its
    own, and the right panel keeps the track the official layout gives
    it (wide landscape screens show files and the terminal beside the
    conversation). */
-:root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"] > [class*="_centerCol"] {
+:root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"]:not([data-sidebar-drawer]) > [class*="_centerCol"] {
   grid-column: 1 / 3 !important;
 }
-:root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"] > [class*="_rightbarCol"] {
+:root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"]:not([data-sidebar-drawer]) > [class*="_rightbarCol"] {
   grid-column: 3 !important;
 }
 
@@ -79,7 +100,7 @@ body > [class*="_overlay"] {
    opening and closing only slide it: a transform, on the compositor. The
    shadow is part of the slid layer and stays clear of the screen while
    closed, so nothing repaints on the way. */
-:root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"] > [class*="_sidebarCol"] {
+:root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"]:not([data-sidebar-drawer]) > [class*="_sidebarCol"] {
   position: fixed !important;
   z-index: 60;
   top: 0;
@@ -116,7 +137,7 @@ body > [class*="_overlay"] {
    page under it (on the frame, every touch restyled the whole page first).
    Visual only; dsh_web_phone.js closes the drawer when a touch beside it
    ends. The column shows it (and the shadow) past its edge. */
-:root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"] > [class*="_sidebarCol"] {
+:root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"]:not([data-sidebar-drawer]) > [class*="_sidebarCol"] {
   overflow: visible !important;
 }
 :root[data-dsh-app-layout="drawer"] [data-slot="root"] > [class*="_frame"][data-dsh-app-drawer] > [class*="_sidebarCol"]::after {
@@ -161,6 +182,16 @@ body > [class*="_overlay"] {
   box-sizing: border-box !important;
 }
 
+/* The right panel is fullscreen on a phone: its tab strip starts at the
+   panel's left edge, exactly where the app's back / drawer buttons float.
+   Keep the panel's top row where it is (no empty band above the page) and
+   start the strip past the buttons instead (--dsh-app-lead = their right
+   edge plus a gap). The body keeps the official layout: the strip's own
+   height still separates it from the buttons. */
+:root[data-dsh-app-layout="drawer"] [data-sidebar-right-panel="fullscreen"] [data-dockkit-strip] {
+  padding-left: var(--dsh-app-lead, 0px) !important;
+}
+
 /* Typing on a phone on its side (data-dsh-app-compact, set while the keyboard
    leaves the page too short): the header row steps aside so the composer
    stays in view; it comes back with the app's buttons when the keyboard
@@ -187,17 +218,20 @@ body > [class*="_overlay"] {
 
 /* ── Drawer layout, phones and landscape: settings as a full-screen sheet ── */
 
+/* Not with the official drawer (DSH 0.2.2 on, below 768px): its settings sheet
+   and dialogs are already made for that width. */
+
 @media (max-width: 760px), (max-height: 600px) {
   /* Edge to edge: the sheet runs under the app's buttons and the system
      bars and pads its content clear of them instead. */
-  :root[data-dsh-app-layout="drawer"] body > [class*="_overlay"]:has([data-slot="settings.section"]) {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) body > [class*="_overlay"]:has([data-slot="settings.section"]) {
     top: 0 !important;
     bottom: 0 !important;
     padding: 0 !important;
     align-items: stretch !important;
     justify-content: stretch !important;
   }
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has(> nav):has([data-slot="settings.section"]) {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has(> nav):has([data-slot="settings.section"]) {
     width: 100% !important;
     max-width: none !important;
     height: 100% !important;
@@ -213,10 +247,10 @@ body > [class*="_overlay"] {
 /* ── Drawer layout, phone widths: tab strip, stacked rows ────────────────── */
 
 @media (max-width: 760px) {
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has(> nav):has([data-slot="settings.section"]) {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has(> nav):has([data-slot="settings.section"]) {
     flex-direction: column !important;
   }
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has([data-slot="settings.section"]) > nav {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has([data-slot="settings.section"]) > nav {
     width: auto !important;
     min-width: 0 !important;
     flex: none !important;
@@ -229,34 +263,34 @@ body > [class*="_overlay"] {
     overflow-x: auto;
     scrollbar-width: none;
   }
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has([data-slot="settings.section"]) > nav::-webkit-scrollbar,
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has([data-slot="settings.section"]) > nav [class*="_navList"]::-webkit-scrollbar {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has([data-slot="settings.section"]) > nav::-webkit-scrollbar,
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has([data-slot="settings.section"]) > nav [class*="_navList"]::-webkit-scrollbar {
     display: none;
   }
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has([data-slot="settings.section"]) > nav [class*="_navList"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has([data-slot="settings.section"]) > nav [class*="_navList"] {
     scrollbar-width: none;
   }
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has([data-slot="settings.section"]) > nav [class*="_navTitle"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has([data-slot="settings.section"]) > nav [class*="_navTitle"] {
     display: none !important;
   }
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has([data-slot="settings.section"]) > nav [class*="_navList"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has([data-slot="settings.section"]) > nav [class*="_navList"] {
     flex-direction: row !important;
     gap: 6px !important;
     width: auto !important;
     margin: 0 !important;
   }
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has([data-slot="settings.section"]) > nav [class*="_navCell"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has([data-slot="settings.section"]) > nav [class*="_navCell"] {
     width: auto !important;
     flex: none !important;
     white-space: nowrap;
     padding-inline: 12px !important;
   }
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has([data-slot="settings.section"]) > [class*="_content"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has([data-slot="settings.section"]) > [class*="_content"] {
     width: 100% !important;
     min-width: 0 !important;
     flex: 1 1 auto !important;
   }
-  :root[data-dsh-app-layout="drawer"] [class*="_panel"]:has([data-slot="settings.section"]) > [class*="_content"] > [class*="_header"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_panel"]:has([data-slot="settings.section"]) > [class*="_content"] > [class*="_header"] {
     position: absolute;
     top: calc(var(--dsh-app-inset-top, 0px) + 8px);
     right: calc(var(--dsh-app-inset-right, 0px) + 8px);
@@ -264,46 +298,46 @@ body > [class*="_overlay"] {
     width: auto !important;
     background: transparent !important;
   }
-  :root[data-dsh-app-layout="drawer"] [data-slot="settings.section"] > [class*="_section"],
-  :root[data-dsh-app-layout="drawer"] [class*="_options"] > [data-slot="settings.section"] > * {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [data-slot="settings.section"] > [class*="_section"],
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [class*="_options"] > [data-slot="settings.section"] > * {
     width: auto !important;
     max-width: none !important;
     padding-inline: 16px !important;
   }
-  :root[data-dsh-app-layout="drawer"] [data-slot="settings.section"] [class*="_row"]:has(> [class*="_rowText"]),
-  :root[data-dsh-app-layout="drawer"] [data-slot="settings.section"] [class*="_setting"]:has(> [class*="_settingText"]) {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [data-slot="settings.section"] [class*="_row"]:has(> [class*="_rowText"]),
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [data-slot="settings.section"] [class*="_setting"]:has(> [class*="_settingText"]) {
     flex-direction: column !important;
     align-items: stretch !important;
     gap: 10px !important;
   }
-  :root[data-dsh-app-layout="drawer"] [data-slot="settings.section"] [class*="_rowText"],
-  :root[data-dsh-app-layout="drawer"] [data-slot="settings.section"] [class*="_settingText"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [data-slot="settings.section"] [class*="_rowText"],
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [data-slot="settings.section"] [class*="_settingText"] {
     width: auto !important;
     max-width: none !important;
     flex: none !important;
   }
-  :root[data-dsh-app-layout="drawer"] [data-slot="settings.section"] [class*="_row"] > span:last-child,
-  :root[data-dsh-app-layout="drawer"] [data-slot="settings.section"] [class*="_row"] > button:last-child,
-  :root[data-dsh-app-layout="drawer"] [data-slot="settings.section"] [class*="_control"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [data-slot="settings.section"] [class*="_row"] > span:last-child,
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [data-slot="settings.section"] [class*="_row"] > button:last-child,
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [data-slot="settings.section"] [class*="_control"] {
     align-self: flex-start !important;
   }
-  :root[data-dsh-app-layout="drawer"] [data-slot="settings.section"] [class*="_cubeRow"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [data-slot="settings.section"] [class*="_cubeRow"] {
     flex-direction: row !important;
     flex-wrap: nowrap !important;
   }
-  :root[data-dsh-app-layout="drawer"] [data-slot="settings.section"] [class*="_cubeRow"] > * {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [data-slot="settings.section"] [class*="_cubeRow"] > * {
     flex: 1 1 0 !important;
     width: auto !important;
     min-width: 0 !important;
   }
 
   /* Other dialogs: fit the screen, let footers wrap tidily. */
-  :root[data-dsh-app-layout="drawer"] body > [class*="_overlay"] > [class*="_panel"]:not(:has(> nav)),
-  :root[data-dsh-app-layout="drawer"] [role="dialog"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) body > [class*="_overlay"] > [class*="_panel"]:not(:has(> nav)),
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [role="dialog"] {
     max-width: calc(100vw - 24px) !important;
   }
-  :root[data-dsh-app-layout="drawer"] [role="dialog"] [class*="_footer"],
-  :root[data-dsh-app-layout="drawer"] [role="dialog"] [class*="_actions"] {
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [role="dialog"] [class*="_footer"],
+  :root[data-dsh-app-layout="drawer"]:not(:has([data-sidebar-drawer])) [role="dialog"] [class*="_actions"] {
     flex-wrap: wrap;
     row-gap: 8px;
   }

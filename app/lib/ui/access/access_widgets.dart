@@ -122,7 +122,7 @@ class AccessFeatureRow extends StatelessWidget {
         child: InkWell(
           key: ValueKey('access-feature-${feature.name}'),
           onTap: onTap,
-          splashFactory: NoSplash.splashFactory,
+          splashFactory: rowSplash(context),
           highlightColor: scheme.onSurface.withValues(alpha: 0.05),
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: SettingsMetrics.rowHeightTwoLine),

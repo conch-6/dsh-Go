@@ -32,6 +32,8 @@ node sdk/plugin-kit/bin/check.mjs <plugin dir | package.json | view.json | -> [-
 - View problems: the same paths and words as the app's plugin details page (`lib/messages.json` is synced from the app's ARB files; the app runs the `test/parity/` cases too).
 - Labels are measured in Chinese and English; `--load` loads your code with a temporary `DSH_HOME`.
 
+`--load` starts with an empty config, validates it and applies defaults through the plugin's own `Config` Standard Schema, then calls `apply`. Without `Config`, it passes an empty object. Like the Host, it accepts synchronous config validation only; missing required values, thrown validation errors, and async validators report a load failure without calling `apply`. The checker does not read the user's Host config.
+
 Option values must be complete: `--lang zh|en`, `--budget toolCard|panel|strip`, and `--app x.y.z`. Invalid arguments return 3; with `--json`, the diagnostic remains a JSON object. Multiple targets are checked separately, and an unreadable stdin does not prevent later files from being checked. Put filenames beginning with `-` after `--`, for example `node bin/check.mjs -- --view.json`.
 
 `package.json` must contain a JSON object. Malformed `contributes.panels` retains the bridge's diagnostic. Static views use the bridge's package path policy, so rejected outside paths and symlinks are not read again as App views. This keeps checking consistent; `--load` still executes the plugin's own code and is not a code sandbox.

@@ -185,10 +185,10 @@ final readyComposeProvider = Provider<ComposeRequest?>((ref) {
   return ref.watch(composeInboxProvider).firstOrNull;
 });
 
-/// The active host takes files other than inline images (`fileUploads/*`);
-/// DSH Remote doesn't. Before the connection is up, judged by the host kind.
+/// The active host can stage attachments or publish into its workspace.
+/// Remote workspace uploads require a capability from the live connection.
 bool canStageFiles(HostConnection? connection, HostRef host) =>
-    connection?.client.supportsEndpoint('fileUploads/upload') ?? host.kind != HostKind.relay;
+    connection?.client.supportsFileUpload ?? host.kind != HostKind.relay;
 
 /// The composer after a fill.
 class MergedDraft {

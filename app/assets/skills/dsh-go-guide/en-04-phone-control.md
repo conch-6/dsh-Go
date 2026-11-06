@@ -21,6 +21,8 @@ During a task, text on the screen is sent to the model you chose; with a vision 
 
 Open this row under **Setup**, read the explanation and tap **Authorize and enable**. A connected Shizuku, Sui, root or self-ADB channel can grant permission (the page says which one it will use). If neither is available, follow the setup page or copy the displayed command and run it once on your computer. Restoration requires both the in-app phone-control switch and the system permission.
 
+When authorizing through Shizuku (including Sui) or self-ADB, the app checks whether the permission was actually granted. It distinguishes an authorization request that could not be completed through the channel, an explicit system denial, and an acknowledged request that still left the permission ungranted. An explicit denial is not reported as an ADB disconnection. A temporary Shizuku or self-ADB authorization connection may close normally afterward; that alone does not mean the attempt failed. If the system denies permission, using the computer command is not guaranteed to succeed.
+
 After granting permission, turning off the accessibility service in Android settings will trigger an attempt to turn it back on. To stop phone control, turn off the switch inside DSH Go. Restoration changes only DSH Go's service entry and preserves other accessibility services.
 
 After a system force-stop, reopen DSH Go before it can recover. Repeated failures back off to about ten minutes between attempts. This permission does not keep the app alive indefinitely or fix the underlying cause of a service crash.
@@ -57,7 +59,7 @@ Whatever the settings, the bar closes when the reply ends.
 
 - **Stop** on the floating bar, or hold the ball for a second.
 - **Stop** on the "Operating your phone" card on the phone control page.
-- **Stop actions** on the engine notification. **Stop** on the same notification stops the whole engine.
+- **Stop phone control** on the engine notification. **Stop engine** on the same notification stops the whole engine.
 
 Stopping phone control also stops every reply in progress on this phone's engine.
 

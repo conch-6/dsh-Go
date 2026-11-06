@@ -203,7 +203,7 @@ void main() {
       final c = container();
       final view = c.read(drawerViewProvider.notifier);
       await view.ready();
-      final work = await view.createFolder('  工作  ', tint: 2, sessionIds: ['a', 'b']);
+      final work = (await view.createFolder('  工作  ', tint: 2, sessionIds: ['a', 'b']))!;
       final read = await view.createFolder('阅读', emoji: '📚');
       var state = c.read(drawerViewProvider);
       expect(state.folders.map((f) => f.name), ['阅读', '工作']);

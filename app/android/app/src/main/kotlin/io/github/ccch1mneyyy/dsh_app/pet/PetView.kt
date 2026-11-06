@@ -36,8 +36,11 @@ internal class PetView(context: Context, private val listener: Listener) : View(
         fun onDragStart()
         fun onDrag(dx: Int, dy: Int)
         fun onDragEnd(velocityX: Float)
+        fun onDragCancel()
         fun onTap(leftHalf: Boolean)
-        fun onLongPress()
+        fun onLongPress(rawX: Float?, rawY: Float?)
+        fun onMenuMove(rawX: Float, rawY: Float)
+        fun onMenuEnd(rawX: Float, rawY: Float, cancelled: Boolean)
 
         /** The system hid or showed the window (e.g. another app's setHideOverlayWindows). */
         fun onShownChanged(shown: Boolean)
@@ -140,12 +143,15 @@ internal class PetView(context: Context, private val listener: Listener) : View(
     private var downY = 0f
     private var dragging = false
     private var longPressed = false
+    private var touching = false
+    private var lastX = 0f
+    private var lastY = 0f
     private var tracker: VelocityTracker? = null
     private val longPress = Runnable {
-        if (!dragging) {
+        if (touching && !dragging) {
             longPressed = true
             performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            listener.onLongPress()
+            listener.onLongPress(lastX, lastY)
         }
     }
 
@@ -158,6 +164,9 @@ internal class PetView(context: Context, private val listener: Listener) : View(
                 if (!onBody(event.x, event.y)) return false
                 downX = event.rawX
                 downY = event.rawY
+                lastX = downX
+                lastY = downY
+                touching = true
                 dragging = false
                 longPressed = false
                 tracker?.recycle()
@@ -165,6 +174,9 @@ internal class PetView(context: Context, private val listener: Listener) : View(
                 postDelayed(longPress, longPressMs)
             }
             MotionEvent.ACTION_MOVE -> {
+                if (!touching) return true
+                lastX = event.rawX
+                lastY = event.rawY
                 tracker?.addMovement(event)
                 val dx = event.rawX - downX
                 val dy = event.rawY - downY
@@ -173,12 +185,15 @@ internal class PetView(context: Context, private val listener: Listener) : View(
                     removeCallbacks(longPress)
                     listener.onDragStart()
                 }
-                if (dragging) listener.onDrag(dx.roundToInt(), dy.roundToInt())
+                if (longPressed) listener.onMenuMove(event.rawX, event.rawY)
+                else if (dragging) listener.onDrag(dx.roundToInt(), dy.roundToInt())
             }
             MotionEvent.ACTION_UP -> {
+                if (!touching) return true
                 removeCallbacks(longPress)
                 tracker?.addMovement(event)
                 when {
+                    longPressed -> listener.onMenuEnd(event.rawX, event.rawY, false)
                     dragging -> listener.onDragEnd(velocity())
                     // Left and right halves split at the body's centre line (anchor.x), not the window's.
                     !longPressed -> listener.onTap(
@@ -187,11 +202,7 @@ internal class PetView(context: Context, private val listener: Listener) : View(
                 }
                 reset()
             }
-            MotionEvent.ACTION_CANCEL -> {
-                removeCallbacks(longPress)
-                if (dragging) listener.onDragEnd(0f)
-                reset()
-            }
+            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> cancelGesture()
         }
         return true
     }
@@ -208,15 +219,27 @@ internal class PetView(context: Context, private val listener: Listener) : View(
         return t.xVelocity
     }
 
+    fun cancelInteraction() = cancelGesture()
+
+    private fun cancelGesture() {
+        val held = touching && longPressed
+        val dragged = touching && dragging
+        reset()
+        if (held) listener.onMenuEnd(lastX, lastY, true)
+        else if (dragged) listener.onDragCancel()
+    }
+
     private fun reset() {
+        removeCallbacks(longPress)
+        touching = false
+        longPressed = false
         dragging = false
         tracker?.recycle()
         tracker = null
     }
 
     override fun onDetachedFromWindow() {
-        removeCallbacks(longPress)
-        reset()
+        cancelGesture()
         super.onDetachedFromWindow()
     }
 
@@ -233,7 +256,7 @@ internal class PetView(context: Context, private val listener: Listener) : View(
 
     override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean = when (action) {
         AccessibilityNodeInfo.ACTION_CLICK -> { listener.onTap(false); true }
-        AccessibilityNodeInfo.ACTION_LONG_CLICK -> { listener.onLongPress(); true }
+        AccessibilityNodeInfo.ACTION_LONG_CLICK -> { listener.onLongPress(null, null); true }
         else -> super.performAccessibilityAction(action, arguments)
     }
 }

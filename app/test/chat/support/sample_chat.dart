@@ -15,6 +15,7 @@ AssistantChatItem assistant(
   String? rowKey,
   bool streaming = false,
   bool interrupted = false,
+  bool isFinalAnswer = false,
 }) => AssistantChatItem(
   id: streaming ? 'd$seq' : 'a$seq',
   rowKey: rowKey,
@@ -23,6 +24,7 @@ AssistantChatItem assistant(
   reasoning: reasoning,
   streaming: streaming,
   interrupted: interrupted,
+  isFinalAnswer: isFinalAnswer,
 );
 
 ToolChatItem tool(

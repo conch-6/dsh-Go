@@ -15,9 +15,13 @@
   var OPEN = 'data-dsh-app-drawer';
 
   // The app picks the layout from the frame width (web_view_page.dart) and
-  // keeps it current through rotations and resizes.
+  // keeps it current through rotations and resizes. Below 768px DSH 0.2.2 on
+  // has a drawer of its own and ties `inert` on the page and the sidebar to its
+  // state, so nothing can slide over it: the app's buttons drive that one.
   function drawer() {
-    return document.documentElement.getAttribute('data-dsh-app-layout') === 'drawer';
+    if (document.documentElement.getAttribute('data-dsh-app-layout') !== 'drawer') return false;
+    var f = frame();
+    return !f || !f.hasAttribute('data-sidebar-drawer');
   }
 
   function frame() {

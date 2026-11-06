@@ -11,7 +11,7 @@
 - **CSP**：写在 `dist/index.html` 的 `<meta>` 里，Worker 构建时取出来作为响应头（再加 `frame-ancestors 'none'`）。脚本只能是本站文件，没有内联脚本和事件属性；样式表只能是本站文件，允许内联 `style` 属性（开场动画用 `style="--order:…"` 这类 CSS 变量）；图片只能是本站的；`connect-src` 只有本站（Star 数）。所以头像、二维码要放在 `dist/assets/author/`，不能填外链。
 - **Star 数**：页面向本站的 `GET /api/github/stars` 要数（`services/share-worker/src/github.ts`），由 Worker 去问 GitHub、缓存 10 分钟，访客的浏览器不连 GitHub。拿不到数时气泡照常显示，只是没有数字。Worker 固定查 `ccch1mneyyy/dsh-go`。
 - **搜索引擎**：首页和它的文件可以被收录（`robots.txt` 只放行这些，其余页面仍是 `noindex`）。
-- **缓存**：HTML `no-cache`，其余文件一小时。换图请换文件名（例如 `download-qr-v2.png`），不要同名覆盖。
+- **缓存**：HTML `no-cache`，其余文件一小时。换图请换文件名（例如 `download-qr-v3.png`），不要同名覆盖。
 
 ## 改内容
 
@@ -21,8 +21,10 @@
 
 以上命令都只用 Node，不联网，不需要 `npm install`。`npm run dev` 在 http://127.0.0.1:4173/ 本地预览（没有 Star 数）。
 
-下载二维码 `dist/assets/author/download-qr.png` 的内容是 `https://go.dshtui.com/download`，用 `qrencode -t PNG -l M -s 10 -m 4` 生成。改了 `download.url` 就要重新生成并扫码核对。
+下载二维码 `dist/assets/author/download-qr-v2.png` 的内容和 `download.url` 相同，纠错级别 M、每格 10 像素、留白 4 格（`qrencode -t PNG -l M -s 10 -m 4` 或同等工具）。改了 `download.url` 就要重新生成并扫码核对。
+
+分享封面 `dist/assets/author/share.png` 是 `docs/assets/social-preview.png` 的副本。
 
 ## 还要作者确认
 
-当前填的是暂定内容：作者 ID `ccch1mneyyy`、头像用品牌图标、贡献者四位、没有分享封面。确认或替换后按上面的步骤重新检查。
+当前填的是暂定内容：作者 ID `ccch1mneyyy`、头像用品牌图标、分享封面用仓库的社交预览图。确认或替换后按上面的步骤重新检查。

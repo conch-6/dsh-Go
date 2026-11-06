@@ -125,7 +125,7 @@ DS Bot 的 NOTICE 原文附在文末。
 | 版权人 | Copyright (c) 2026 DSH Remote contributors |
 | 许可 | MIT（全文另见 `packages/dsh_remote/LICENSE-ds-harness-remote`） |
 | 用途 | 远程连接：协议、分帧、校验、加密信道、直连（WebRTC）与连接逻辑 |
-| 对应上游版本 | `7e387df`（Host 插件 0.6.0） |
+| 对应上游版本 | `7e387df`（Host 插件 0.6.0）；工作区上传协议参考 `479b94341c0d0de63846f21d0fcca26997d158d1`（Host 插件 0.6.2） |
 
 路径均相对 `packages/dsh_remote/`：
 
@@ -133,7 +133,7 @@ DS Bot 的 NOTICE 原文附在文末。
 |---|---|
 | `lib/src/server/server_api.dart` | `apps/android/src/services/api.ts`（`RemoteServerApi`，含 `turnCredentials`）、`docs/protocol.md`、`docs/plugin-integration.md` |
 | `lib/src/account/remote_account.dart` | `apps/android/src/services/server-session-manager.ts`、`device-directory.ts`、`connection.ts`（含直连失败后另开纯 Relay 连接）、`packages/plugin/src/cli.ts` |
-| `lib/src/carrier/tunnel_carrier.dart` | `packages/client-core/src/remote-gateway.ts`；白名单来自 `packages/plugin/src/harness-remote-bridge.ts`、`terminal-policy.ts` |
+| `lib/src/carrier/tunnel_carrier.dart` | `packages/client-core/src/remote-gateway.ts`；白名单来自 `packages/plugin/src/harness-remote-bridge.ts`、`terminal-policy.ts`；工作区上传协议与文件名校验参考 `docs/protocol.md`、`packages/plugin/src/workspace-upload.ts`、`rpc-router.ts`（`479b943`），Dart 重写，遵守协议绝对上限，具体路径/版本限制以主机回复为准 |
 | `lib/src/crypto/noise_ik.dart` | `packages/crypto/src/noise.ts`、`packages/crypto/src/index.ts`（会话封装）；Noise IK 状态机为本项目自行实现，经上游作者同意 |
 | `lib/src/channel/secure_channel.dart` | `packages/plugin/src/client-secure-transport.ts`、`packages/plugin/src/server-connection.ts` |
 | `lib/src/channel/rpc_client.dart` | `packages/client-core/src/index.ts`（`RemoteClientCore`） |

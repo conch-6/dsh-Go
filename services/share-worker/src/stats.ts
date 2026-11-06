@@ -53,11 +53,20 @@ function hex(bytes: ArrayBuffer, take: number): string {
   return [...new Uint8Array(bytes).slice(0, take)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Keep only one completed string-key import per isolate. Match the secret
+// exactly so rotation cannot reuse the previous key; never retain a Promise.
+let hmacMemo: { secret: string; key: CryptoKey } | null = null;
+
 export async function hmacHex(key: string | CryptoKey, message: string, bytes: number): Promise<string> {
-  const k =
-    typeof key === 'string'
-      ? await crypto.subtle.importKey('raw', encoder.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-      : key;
+  let k: CryptoKey;
+  if (typeof key !== 'string') {
+    k = key;
+  } else if (hmacMemo?.secret === key) {
+    k = hmacMemo.key;
+  } else {
+    k = await crypto.subtle.importKey('raw', encoder.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    hmacMemo = { secret: key, key: k };
+  }
   return hex(await crypto.subtle.sign('HMAC', k, encoder.encode(message)), bytes);
 }
 
@@ -76,12 +85,14 @@ export class StatsSalt {
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(): Promise<Response> {
-    const day = statsDay(this.now());
+    // The saved day and its expiry must agree even when storage I/O crosses midnight.
+    const now = this.now();
+    const day = statsDay(now);
     let stored = await this.state.storage.get<Salt>('salt');
     if (!stored || stored.day !== day) {
       stored = { day, salt: base64url(crypto.getRandomValues(new Uint8Array(32))) };
       await this.state.storage.put('salt', stored);
-      await this.state.storage.setAlarm(nextDayStart(this.now()));
+      await this.state.storage.setAlarm(nextDayStart(now));
     }
     return new Response(JSON.stringify(stored), { headers: { 'Content-Type': 'application/json' } });
   }
@@ -98,24 +109,39 @@ export class StatsSalt {
 
 // Each isolate keeps the day's key in memory until the day changes.
 let saltMemo: { day: string; key: CryptoKey } | null = null;
+// Share only the final key; response bodies stay with the initiating request.
+let saltPending: { day: string; result: Promise<CryptoKey | null> } | null = null;
 
 /** For tests. */
 export function resetStatsMemo(): void {
+  hmacMemo = null;
   saltMemo = null;
+  saltPending = null;
 }
 
 async function todaysKey(env: Env, now: number): Promise<CryptoKey | null> {
   const day = statsDay(now);
   if (saltMemo?.day === day) return saltMemo.key;
   if (!env.STATS_SALT) return null;
+  if (saltPending?.day === day) return saltPending.result;
+  const pending = { day, result: readDailyKey(env.STATS_SALT, day) };
+  saltPending = pending;
   try {
-    const stub = env.STATS_SALT.get(env.STATS_SALT.idFromName('salt'));
+    const key = await pending.result;
+    if (key && saltPending === pending) saltMemo = { day, key };
+    return key;
+  } finally {
+    if (saltPending === pending) saltPending = null;
+  }
+}
+
+async function readDailyKey(namespace: DurableObjectNamespace, day: string): Promise<CryptoKey | null> {
+  try {
+    const stub = namespace.get(namespace.idFromName('salt'));
     const res = await stub.fetch('https://stats-salt/');
     const got = (await res.json()) as Salt;
     if (got.day !== day || typeof got.salt !== 'string' || got.salt.length < 32) return null;
-    const key = await crypto.subtle.importKey('raw', encoder.encode(got.salt), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    saltMemo = { day, key };
-    return key;
+    return await crypto.subtle.importKey('raw', encoder.encode(got.salt), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   } catch {
     return null;
   }

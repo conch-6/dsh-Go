@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/l10n.dart';
 import '../theme/theme.dart';
+import 'app_dialog.dart';
 import 'sheet_dismissal.dart';
 
 /// Wraps an edit page: while [isDirty], back (button, gesture or a
@@ -30,7 +31,7 @@ class DiscardGuard extends StatefulWidget {
   static Future<bool> _confirm(BuildContext context) => _asking ??= _ask(context).whenComplete(() => _asking = null);
 
   static Future<bool> _ask(BuildContext context) async {
-    final discard = await showDialog<bool>(
+    final discard = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(context.l10n.botsDiscardTitle),

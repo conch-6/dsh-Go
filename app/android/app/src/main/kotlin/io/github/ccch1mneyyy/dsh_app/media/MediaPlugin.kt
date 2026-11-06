@@ -22,6 +22,9 @@ import io.flutter.plugin.common.PluginRegistry
 import io.github.ccch1mneyyy.dsh_app.files.FilesPlugin
 import java.io.File
 import java.io.IOException
+import java.nio.file.FileAlreadyExistsException
+import java.nio.file.Files
+import java.nio.file.StandardOpenOption
 import kotlin.concurrent.thread
 
 /**
@@ -157,8 +160,7 @@ class MediaPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         val pictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
         val dir = File(pictures, ALBUM).apply { mkdirs() }
         if (!dir.isDirectory) throw IOException("cannot create $dir")
-        val target = FilesPlugin.unique(dir, name)
-        target.writeBytes(bytes)
+        val target = writeUnique(dir, name, bytes)
         MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(mime), null)
         return "${Environment.DIRECTORY_PICTURES}/$ALBUM/${target.name}"
     }
@@ -223,6 +225,29 @@ class MediaPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
          *  `Download/DSH-Go`, a path the agent types). */
         private const val ALBUM = "DSH Go"
         private const val STORAGE_REQUEST = 0x5d7
+
+        /** Own the chosen name before writing; another save must choose its own target. */
+        internal fun writeUnique(dir: File, name: String, bytes: ByteArray): File {
+            while (true) {
+                val target = FilesPlugin.unique(dir, name)
+                val output = try {
+                    Files.newOutputStream(target.toPath(), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
+                } catch (_: FileAlreadyExistsException) {
+                    continue
+                }
+                try {
+                    output.use { it.write(bytes) }
+                    return target
+                } catch (error: Throwable) {
+                    try {
+                        Files.deleteIfExists(target.toPath())
+                    } catch (cleanup: Throwable) {
+                        error.addSuppressed(cleanup)
+                    }
+                    throw error
+                }
+            }
+        }
 
         /** What a gallery takes, by MIME type → file extension. */
         private val IMAGE_TYPES = mapOf(

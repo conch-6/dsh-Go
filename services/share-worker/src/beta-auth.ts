@@ -123,7 +123,7 @@ export async function lookupKey(env: Env, input: unknown): Promise<Grant | null>
 
 // Channel checks happen on every update check and download request: remember
 // answers for a minute per isolate (KV itself is only eventually consistent).
-const channelMemo = new Map<string, { ok: boolean; at: number }>();
+const channelMemo = new Map<string, { ok: boolean; at: number; expiresAt: number | null }>();
 const CHANNEL_MEMO_MS = 60_000;
 
 /** For tests. */
@@ -138,10 +138,12 @@ export async function channelAuthorized(env: Env, request: Request, now = Date.n
   if (!token || !CHANNEL_TOKEN.test(token)) return false;
   const id = await channelId(token);
   const memo = channelMemo.get(id);
-  if (memo && now - memo.at < CHANNEL_MEMO_MS) return memo.ok;
-  const ok = grantActive(await readGrant(env, CHANNEL_PREFIX + id), now);
+  // The KV refresh window cannot extend an expiry we already know.
+  if (memo && now - memo.at < CHANNEL_MEMO_MS) return memo.ok && (memo.expiresAt === null || now < memo.expiresAt);
+  const grant = await readGrant(env, CHANNEL_PREFIX + id);
+  const ok = grantActive(grant, now);
   if (channelMemo.size > 1000) channelMemo.clear();
-  channelMemo.set(id, { ok, at: now });
+  channelMemo.set(id, { ok, at: now, expiresAt: grant?.expires ? Date.parse(grant.expires) : null });
   return ok;
 }
 

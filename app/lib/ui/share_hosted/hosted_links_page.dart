@@ -12,6 +12,7 @@ import '../../l10n/l10n.dart';
 import '../../share_hosted/hosted_client.dart' show HostedShareError;
 import '../../share_hosted/hosted_link.dart';
 import '../../share_hosted/hosted_links_state.dart';
+import '../common/app_dialog.dart';
 import '../common/list_page_row.dart';
 import '../common/smooth_size.dart';
 import '../features/feature_kit.dart';
@@ -61,7 +62,7 @@ class HostedLinksPage extends ConsumerWidget {
   }
 
   Future<void> _delete(BuildContext context, WidgetRef ref, HostedLink link) async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(context.l10n.remoteHostedDeleteTitle),

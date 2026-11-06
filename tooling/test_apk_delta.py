@@ -4,13 +4,20 @@
 """
 
 import hashlib
+import os
 import pathlib
 import random
 import shutil
+import stat
 import struct
+import subprocess
+import sys
 import tempfile
+import threading
 import unittest
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 import apk_delta
 from apk_delta import COPY, DATA, END, MAGIC, DeltaError
@@ -157,6 +164,143 @@ class ApkDeltaTest(unittest.TestCase):
             with self.assertRaisesRegex(DeltaError, error):
                 apk_delta.apply(base, patch, out)
             self.assertFalse(out.exists() or pathlib.Path(f"{out}.part").exists())
+
+    def staging_inputs(self):
+        base = self.zip("source.apk", [("classes.dex", TEXT, DEFLATED)])
+        new = self.zip("target.apk", [("classes.dex", TEXT + b"new revision", DEFLATED)], comment=b"target")
+        patch = self.dir / "reference.dshdelta"
+        apk_delta.make(base, new, patch)
+        return base, new, patch
+
+    def test_make_keeps_an_existing_part_file(self):
+        base, new, _ = self.staging_inputs()
+        out = self.dir / "publish.dshdelta"
+        other = pathlib.Path(f"{out}.part")
+        other.write_bytes(b"unrelated saved draft")
+        before = set(self.dir.iterdir())
+        apk_delta.make(base, new, out)
+        apk_delta.apply(base, out)
+        self.assertTrue(other.is_file(), "make must not remove another file")
+        self.assertEqual(other.read_bytes(), b"unrelated saved draft")
+        self.assertEqual(set(self.dir.iterdir()), before | {out})
+
+    def test_apply_keeps_an_existing_part_file(self):
+        base, new, patch = self.staging_inputs()
+        out = self.dir / "restored.apk"
+        other = pathlib.Path(f"{out}.part")
+        other.write_bytes(b"unrelated recovery data")
+        before = set(self.dir.iterdir())
+        apk_delta.apply(base, patch, out)
+        self.assertEqual(out.read_bytes(), new.read_bytes())
+        self.assertTrue(other.is_file(), "apply must not remove another file")
+        self.assertEqual(other.read_bytes(), b"unrelated recovery data")
+        self.assertEqual(set(self.dir.iterdir()), before | {out})
+
+    def test_failed_apply_keeps_existing_output_and_part(self):
+        base, _, patch = self.staging_inputs()
+        damaged = bytearray(patch.read_bytes())
+        damaged[40] ^= 1  # A wrong target digest, after real output is written.
+        patch.write_bytes(damaged)
+        out = self.dir / "restored.apk"
+        out.write_bytes(b"previous complete output")
+        other = pathlib.Path(f"{out}.part")
+        other.write_bytes(b"unrelated recovery data")
+        before = set(self.dir.iterdir())
+        with self.assertRaisesRegex(DeltaError, "doesn't reproduce"):
+            apk_delta.apply(base, patch, out)
+        self.assertEqual(out.read_bytes(), b"previous complete output")
+        self.assertTrue(other.is_file())
+        self.assertEqual(other.read_bytes(), b"unrelated recovery data")
+        self.assertEqual(set(self.dir.iterdir()), before)
+
+    def test_failed_make_commit_keeps_existing_directory_and_part(self):
+        base, new, _ = self.staging_inputs()
+        out = self.dir / "occupied.dshdelta"
+        out.mkdir()
+        (out / "owned-by-someone-else").write_bytes(b"keep directory contents")
+        other = pathlib.Path(f"{out}.part")
+        other.write_bytes(b"unrelated saved draft")
+        before = set(self.dir.iterdir())
+        with self.assertRaises(OSError):
+            apk_delta.make(base, new, out)
+        self.assertEqual((out / "owned-by-someone-else").read_bytes(), b"keep directory contents")
+        self.assertTrue(other.is_file())
+        self.assertEqual(other.read_bytes(), b"unrelated saved draft")
+        self.assertEqual(set(self.dir.iterdir()), before)
+
+    def concurrent_output(self, command):
+        base, new, patch = self.staging_inputs()
+        out = self.dir / ("concurrent.dshdelta" if command == "make" else "concurrent.apk")
+        before = set(self.dir.iterdir())
+        opened, committing = threading.Barrier(2), threading.Barrier(2)
+        real_open, real_replace = open, os.replace
+        paths, lock = [], threading.Lock()
+
+        def open_together(path, mode="r", *args, **kwargs):
+            stream = real_open(path, mode, *args, **kwargs)
+            if mode == "wb" and os.fspath(path) != os.devnull:
+                with lock:
+                    paths.append(os.path.abspath(path))
+                try:
+                    opened.wait(timeout=10)
+                except BaseException:
+                    stream.close()
+                    raise
+            return stream
+
+        def commit_together(source, destination):
+            if pathlib.Path(destination) == out:
+                committing.wait(timeout=10)
+            return real_replace(source, destination)
+
+        def invoke():
+            if command == "make":
+                return apk_delta.make(base, new, out)
+            return apk_delta.apply(base, patch, out)
+
+        with mock.patch.object(apk_delta, "open", open_together, create=True), mock.patch.object(
+            apk_delta.os, "replace", commit_together
+        ), ThreadPoolExecutor(max_workers=2) as pool:
+            pending = [pool.submit(invoke) for _ in range(2)]
+            failures = []
+            for future in pending:
+                try:
+                    future.result(timeout=15)
+                except Exception as error:
+                    failures.append(f"{type(error).__name__}: {error}")
+        self.assertEqual(failures, [], "both independently valid invocations must finish")
+        self.assertEqual(len(set(paths)), 2, "writers must own separate paths")
+        if command == "make":
+            apk_delta.apply(base, out)
+        else:
+            self.assertEqual(out.read_bytes(), new.read_bytes())
+        self.assertEqual(set(self.dir.iterdir()), before | {out})
+
+    def test_concurrent_make_does_not_remove_the_other_writer(self):
+        self.concurrent_output("make")
+
+    def test_concurrent_apply_does_not_remove_the_other_writer(self):
+        self.concurrent_output("apply")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX creation modes")
+    def test_output_modes_still_follow_normal_open_umask(self):
+        base, new, patch = self.staging_inputs()
+        script = pathlib.Path(apk_delta.__file__).resolve()
+        child = (
+            "import os, runpy, sys; os.umask(0o027); "
+            "sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')"
+        )
+        for command, second, out in [
+            ("make", new, self.dir / "mode.dshdelta"),
+            ("apply", patch, self.dir / "mode.apk"),
+        ]:
+            subprocess.run(
+                [sys.executable, "-I", "-c", child, str(script), command, str(base), str(second), str(out)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o640)
 
 
 if __name__ == "__main__":

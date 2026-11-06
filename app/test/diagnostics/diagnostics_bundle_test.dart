@@ -2,6 +2,7 @@
 // key or token survives into any of them. Also the exporter (cache file,
 // Downloads, share sheet) with fake Android ends.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -239,6 +240,76 @@ void main() {
       expect(steps.last, DiagnosticsStep.saving);
     });
 
+    for (final seconds in [0, 1]) {
+      test('a later build preserves the ZIP awaiting native save (offset $seconds)', () async {
+        final held = _HeldFiles();
+        DiagnosticsExporter make(String line, DateTime at) => DiagnosticsExporter(
+          collect: (_) async => DiagnosticsSnapshot(
+            at: at,
+            status: _status(crashed: false),
+            settings: const AppSettings(loaded: true),
+            engineLog: [line],
+          ),
+          files: held,
+          cacheRoot: () async => cache,
+          clock: () => at,
+        );
+        final first = make('first export', _at).saveToDownloads();
+        // Own errors immediately, including a failure before the native boundary.
+        final outcome = first.then<Object>((value) => value, onError: (Object error) => error);
+        addTearDown(() async {
+          if (!held.release.isCompleted) held.release.complete();
+          await outcome;
+        });
+        await Future.any<Object>([held.entered.future, outcome]);
+        expect(held.entered.isCompleted, isTrue, reason: 'the first save must reach native IO');
+        try {
+          await make('second export', _at.add(Duration(seconds: seconds))).build();
+        } finally {
+          held.release.complete();
+        }
+        expect(await outcome, 'Download/DSH-Go/dsh-go-diagnostics-20261024-153012.zip');
+        expect(_unzip(held.bytes!)['engine.log']!.trim(), 'first export');
+      });
+    }
+
+    test('save removes only its operation directory after native completion', () async {
+      final built = await exporter.build();
+      final where = await exporter.saveToDownloads(onStep: steps.add);
+      expect(where, 'Download/DSH-Go/dsh-go-diagnostics-20261024-153012.zip');
+      final source = File(files.saved.single.path);
+      expect(source.existsSync(), isFalse);
+      expect(source.parent.existsSync(), isFalse);
+      expect(built.existsSync(), isTrue, reason: 'a separate build still owns its root ZIP');
+      expect(steps, [DiagnosticsStep.collecting, DiagnosticsStep.packing, DiagnosticsStep.saving]);
+    });
+
+    test('save cleans its operation on native failure and preserves the error', () async {
+      final failure = PlatformException(code: 'permission', message: 'denied');
+      final native = _FailingFiles(failure);
+      final failed = DiagnosticsExporter(
+        collect: (_) async => _snapshot(),
+        files: native,
+        cacheRoot: () async => cache,
+        clock: () => _at,
+      );
+      await expectLater(failed.saveToDownloads(), throwsA(same(failure)));
+      expect(native.source, isNotNull);
+      expect(native.source!.parent.existsSync(), isFalse);
+    });
+
+    test('save cleans an allocated operation when collection fails', () async {
+      final failure = StateError('collection failed');
+      final failed = DiagnosticsExporter(
+        collect: (_) async => throw failure,
+        files: files,
+        cacheRoot: () async => cache,
+      );
+      await expectLater(failed.saveToDownloads(), throwsA(same(failure)));
+      expect(files.saved, isEmpty);
+      expect(Directory('${cache.path}/diagnostics').listSync(), isEmpty);
+    });
+
     test('share sends the ZIP to the share sheet', () async {
       expect(await exporter.share(onStep: steps.add), isTrue);
       final params = shared.single;
@@ -264,5 +335,34 @@ class _Files extends FilesChannel {
     expect(File(hostPath).existsSync(), isTrue);
     saved.add((path: hostPath, name: name, mime: mime));
     return 'Download/DSH-Go/$name';
+  }
+}
+
+/// Models FilesPlugin opening its source on the worker after the channel call.
+class _HeldFiles extends FilesChannel {
+  final entered = Completer<String>();
+  final release = Completer<void>();
+  List<int>? bytes;
+
+  @override
+  Future<String> saveToDownloads(String hostPath, {required String name, required String mime}) async {
+    entered.complete(hostPath);
+    await release.future;
+    bytes = await File(hostPath).readAsBytes();
+    return 'Download/DSH-Go/$name';
+  }
+}
+
+class _FailingFiles extends FilesChannel {
+  _FailingFiles(this.failure);
+
+  final Object failure;
+  File? source;
+
+  @override
+  Future<String> saveToDownloads(String hostPath, {required String name, required String mime}) async {
+    source = File(hostPath);
+    expect(source!.existsSync(), isTrue);
+    throw failure;
   }
 }

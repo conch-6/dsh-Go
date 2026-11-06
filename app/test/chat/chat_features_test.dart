@@ -15,7 +15,6 @@ import 'package:dsh_app/state/usage_state.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:dsh_app/ui/chat/diff_page.dart';
 import 'package:dsh_app/ui/chat/empty_state.dart';
-import 'package:dsh_app/ui/chat/model_sheet.dart';
 import 'package:dsh_app/ui/chat/slash_palette.dart';
 import 'package:dsh_app/ui/chat/turn_summary.dart';
 import 'package:dsh_app/ui/chat/usage_sheet.dart';
@@ -390,7 +389,10 @@ void main() {
       );
       await pumpChat(tester, harness);
       expect(find.text('选择模型'), findsOneWidget);
-      await tester.tap(find.byType(ModelChip));
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.byKey(const ValueKey('composer-model')));
       await pumpFrames(tester, 8);
       expect(find.text('需要 API Key'), findsOneWidget);
       expect(find.text('填写 API Key'), findsOneWidget);
@@ -452,7 +454,10 @@ void main() {
 
       testWidgets('model sheet', (tester) async {
         await pumpChat(tester, ChatHarness(), brightness: brightness);
-        await tester.tap(find.byType(ModelChip));
+        await tester.tap(find.byType(TextField));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.tap(find.byKey(const ValueKey('composer-model')));
         await pumpFrames(tester, 10);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/model_sheet_$suffix.png'));
       });
@@ -466,7 +471,10 @@ void main() {
           ),
           brightness: brightness,
         );
-        await tester.tap(find.byType(ModelChip));
+        await tester.tap(find.byType(TextField));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.tap(find.byKey(const ValueKey('composer-model')));
         await pumpFrames(tester, 10);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/model_empty_$suffix.png'));
       });

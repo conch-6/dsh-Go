@@ -5,6 +5,7 @@
 // `flutter test --update-goldens test/chat/empty_actions_test.dart`.
 
 import 'package:dsh_app/state/connection_state.dart';
+import 'package:dsh_app/state/sessions_state.dart';
 import 'package:dsh_app/state/workspaces_state.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:dsh_app/ui/chat/composer.dart';
@@ -148,6 +149,32 @@ void main() {
       }
       // The workspace chip grows by the same amount.
       expect(_rect(tester, _workspaceLabel).height, moreOrLessEquals(cells[0].height, epsilon: 0.5));
+    });
+
+    testWidgets('no workspace chosen on a remote host: the chip names the one it falls back to', (tester) async {
+      usePhoneView(tester);
+      final harness = ChatHarness(connected: true);
+      await tester.pumpWidget(
+        testApp(
+          const ChatScreen(),
+          overrides: [...harness.overrides, recentWorkspaceForNewChatProvider.overrideWithValue(_workspace)],
+        ),
+      );
+      await pumpFrames(tester, 8);
+      expect(find.text(_workspaceLabel), findsOneWidget);
+    });
+
+    testWidgets('no workspace at all on a remote host: the chip names its default folder', (tester) async {
+      usePhoneView(tester);
+      final harness = ChatHarness(connected: true);
+      await tester.pumpWidget(
+        testApp(
+          const ChatScreen(),
+          overrides: [...harness.overrides, newChatInHostDefaultProvider.overrideWithValue(true)],
+        ),
+      );
+      await pumpFrames(tester, 8);
+      expect(find.text('在「主机默认目录」中'), findsOneWidget);
     });
 
     testWidgets('the primary pill takes the workspace chip\'s place exactly', (tester) async {

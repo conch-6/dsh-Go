@@ -74,12 +74,17 @@ class ShareLink {
 
   /// Reads an app link or a landing link; null for anything else.
   static ShareLink? parse(Uri uri) {
-    if (uri.scheme == appLinkScheme) {
-      if (uri.host != shareLinkHost) return null;
-      return _fromParams(uri.queryParameters, ShareKind.parse(uri.pathSegments.firstOrNull));
-    }
-    if ((uri.scheme == 'https' || uri.scheme == 'http') && isLandingUri(uri)) {
-      return _fromParams(Uri.splitQueryString(uri.fragment), null);
+    try {
+      if (uri.scheme == appLinkScheme) {
+        if (uri.host != shareLinkHost) return null;
+        return _fromParams(uri.queryParameters, ShareKind.parse(uri.pathSegments.firstOrNull));
+      }
+      if ((uri.scheme == 'https' || uri.scheme == 'http') && isLandingUri(uri)) {
+        return _fromParams(Uri.splitQueryString(uri.fragment), null);
+      }
+    } on FormatException {
+      // A structurally valid URI can still contain non-UTF8 component bytes.
+      return null;
     }
     return null;
   }

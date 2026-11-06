@@ -10,7 +10,7 @@ import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 
 /// 听写中的音量条:5 根圆头竖条,最新的音量从右边进来。最高 24,比两侧
-/// 的 40 圆键矮;占发送键左边那个 40 高的小件位。
+/// 的 36 圆键矮;占发送键左边那个 36 高的小件位。
 class VoiceWaveform extends StatefulWidget {
   const VoiceWaveform({super.key, required this.level, this.active = true});
 
@@ -72,7 +72,7 @@ class _VoiceWaveformState extends State<VoiceWaveform> {
       label: widget.active ? l10n.chatListening : l10n.chatTranscribing,
       child: SizedBox(
         width: VoiceWaveform.width,
-        height: 40,
+        height: 36,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -95,7 +95,7 @@ class _VoiceWaveformState extends State<VoiceWaveform> {
   }
 }
 
-/// 听写中替换 ＋ 键的 ✕:同样 40 的圆、同样的淡底,镜像右边的停止键。
+/// 听写中替换 ＋ 键的 ✕:同样 36 的圆、同样的淡底,镜像右边的停止键。
 class VoiceCancelKey extends StatelessWidget {
   const VoiceCancelKey({super.key, required this.onPressed});
 
@@ -115,8 +115,8 @@ class VoiceCancelKey extends StatelessWidget {
         },
         radius: 22,
         child: Container(
-          width: 40,
-          height: 40,
+          width: 36,
+          height: 36,
           decoration: BoxDecoration(color: scheme.onSurface.withValues(alpha: 0.06), shape: BoxShape.circle),
           child: Icon(AppIcons.close, size: 22, color: scheme.onSurface),
         ),

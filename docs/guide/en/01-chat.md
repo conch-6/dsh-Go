@@ -15,13 +15,13 @@ With a hardware keyboard, Enter adds a line break and Ctrl+Enter or ⌘+Enter se
 
 ## Choose a model
 
-Tap the model capsule at the top right to open **Choose model**. Tap a model to switch right away; if it supports levels, pick one under **Thinking effort**. Typing `/model` in the composer opens it too. **Manage models** at the bottom goes straight to the models page in Settings; to add and manage models, see [Models and providers](02-models.md).
+On a phone, tap into the composer, then tap the model under it. On a tablet or wider screen, tap the model capsule at the top right. Either way opens **Choose model**. Tap a model to switch right away; if it supports levels, pick one under **Thinking effort**. Typing `/model` in the composer opens it too. **Manage models** at the bottom goes straight to the models page in Settings; to add and manage models, see [Models and providers](02-models.md).
 
 ## Images, files and voice
 
 Tap the plus button next to the composer and choose **Photos**, **Take photo** or **File**. You can attach up to 9 items per message. Under **This chat** in the same panel you can change this chat's **Permissions** and turn **Plan mode** on or off; while phone control is on, **Confirmation** is there too.
 
-- On a host connected through DSH Remote, you can send images only.
+- On DSH Remote, **File** appears when the host's Remote plugin supports uploads. The app adds no separate 20 MB limit; the normal 200 MB attachment limit still applies. The host decides whether it can accept the file based on its plugin version and current network path (Relay/TURN typically allow up to 20 MB). Files are uploaded in chunks to the current chat's working directory when you send. Existing files are never overwritten; the host assigns a new name on collision. If an upload fails, the question is not sent. Older hosts accept images only; update their Remote plugin and reconnect.
 - If the current model can't view images, they're sent to the AI as files. Switch to a model that can view images to let the AI see them.
 
 When the composer is empty and speech recognition is available, the send button becomes a microphone. Tap it and speak; your words fill the composer so you can check them before sending. When the recognition service isn't available, **Change** on the notice opens the voice input settings.
@@ -105,6 +105,8 @@ Touch and hold a chat for **Pin**, **Rename**, **Move to folder**, **Share**, **
 Swipe right to left over the chat and **Shortcuts** slides in from the right; tap one to open that page. It starts with **Plugins**, **Local engine** and **Settings**. Swiping on code blocks, tables and other content that scrolls sideways still scrolls them. Back closes the panel first.
 
 You can turn off **Open with a left swipe**, and under **What it lists** tick what to show and drag to reorder. There's no swipe while the chat list stays open at the side.
+
+With a conversation open, the panel is about that conversation, in two parts, **Info** and **Plugins**: Info has the whole title, workspace, model and host, with the full page a tap away at the top right; Plugins has every plugin panel, switched along its top when there are several. The shortcuts you ticked sit along the bottom. On a phone the header has no model chip, with the status and workspace under the title, and while you type, the composer shows the model and thinking depth at its foot: tap them to change, or use Overview.
 
 ## Hardware keyboard
 

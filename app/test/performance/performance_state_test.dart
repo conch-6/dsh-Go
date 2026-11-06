@@ -30,6 +30,7 @@ void main() {
         final full = tier != DeviceTier.low;
         expect(policy.blur, full);
         expect(policy.reduceMotion, !full);
+        expect(policy.fluidMotion, full);
         expect(policy.petEnabled, full);
         expect(policy.autoStartLocal, full);
         expect(policy.recommendRemote, !full);
@@ -252,6 +253,28 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.containsKey('performance.blur'), isFalse);
       expect(prefs.containsKey('performance.animations'), isFalse);
+    });
+
+    test('fluid motion: a choice sticks, resets, and always gives way to no animations', () async {
+      SharedPreferences.setMockInitialValues({'performance.fluid': true});
+      start();
+      await loaded(container);
+      final prefs = container.read(performancePrefsProvider.notifier);
+      await prefs.ready;
+      await container.read(performanceProvider.notifier).ready;
+      PerformanceDefaults defaults() => container.read(performanceDefaultsProvider);
+      // A low device keeps animations off by default, and fluid needs them.
+      expect(defaults().reduceMotion, isTrue);
+      expect(defaults().fluidMotion, isFalse);
+      await prefs.setAnimations(true);
+      expect(defaults().fluidMotion, isTrue);
+      await prefs.setFluid(false);
+      expect(defaults().fluidMotion, isFalse);
+      expect((await SharedPreferences.getInstance()).getBool('performance.fluid'), isFalse);
+      await prefs.resetEffects();
+      expect(container.read(performancePrefsProvider).fluid, isNull);
+      expect((await SharedPreferences.getInstance()).containsKey('performance.fluid'), isFalse);
+      expect(defaults().fluidMotion, isFalse);
     });
   });
 }

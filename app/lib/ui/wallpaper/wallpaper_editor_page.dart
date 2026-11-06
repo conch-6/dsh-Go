@@ -25,8 +25,8 @@ import '../theme/theme.dart';
 Future<void> showWallpaperEditor(BuildContext context, CustomWallpaper wallpaper) => Navigator.of(context).push(
   PageRouteBuilder<void>(
     opaque: true,
-    transitionDuration: AppMotion.standard,
-    reverseTransitionDuration: AppMotion.quick,
+    transitionDuration: AppMotion.of(context, AppMotion.standard),
+    reverseTransitionDuration: AppMotion.of(context, AppMotion.quick),
     pageBuilder: (context, _, _) => WallpaperEditorPage(wallpaper: wallpaper),
     transitionsBuilder: (context, animation, _, child) => FadeTransition(opacity: animation, child: child),
   ),

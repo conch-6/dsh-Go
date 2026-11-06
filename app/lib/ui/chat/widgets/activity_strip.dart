@@ -242,7 +242,10 @@ class _ActivityStripState extends State<ActivityStrip> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              WhaleTail(level: widget.speedLevel, color: whale, height: 20),
+                              // 自己一层:鲸尾每帧在动,不连累玻璃里的其余内容重绘。
+                              RepaintBoundary(
+                                child: WhaleTail(level: widget.speedLevel, color: whale, height: 20),
+                              ),
                               const SizedBox(width: 6),
                             ],
                           ),

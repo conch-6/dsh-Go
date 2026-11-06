@@ -8,6 +8,7 @@
 //   launcher shortcut  新对话 / 语音输入 → 新对话 (listening) · a recent
 //                      conversation → that conversation, on its host
 //   Quick Settings     新对话
+//   pet screenshot     新对话 with the image attached, focused and unsent
 //   a file opened with the app that no feature claims → 新对话 with it attached
 //
 // and keeps the launcher's recent conversations current. Bridges:
@@ -102,6 +103,18 @@ class _SystemEntryHostState extends ConsumerState<SystemEntryHost> {
         // intent can arrive a beat before Flutter hears it is resumed.
         if (voice) await _untilResumed();
         if (mounted) await _compose(ComposeRequest(text: text, voice: voice));
+      case ScreenshotEntry(:final path):
+        final draft = ref.read(draftStoreProvider).drafts['new'];
+        // Reuse share intake's validation and cache cleanup; unlike an opened
+        // file, this copy belongs only to this pending attachment.
+        final request = await ComposeRequest.fromShare(
+          IncomingShare(
+            files: [SharedFile(path: path, name: path.split('/').last)],
+          ),
+          heldBytes: totalAttachmentBytes(draft?.attachments ?? const []),
+        );
+        await _untilResumed();
+        if (mounted) await _compose(request);
       case OpenChatEntry(:final host, :final sessionId):
         if (!await _showChat() || !mounted) return;
         final hosts = ref.read(hostsProvider);

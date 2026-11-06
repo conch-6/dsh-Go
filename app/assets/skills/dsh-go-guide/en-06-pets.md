@@ -33,6 +33,14 @@ Floating pet: tap to open the chat that needs you most (approvals and questions 
 
 On Android 13 and later, if the switch still won't turn on after visiting system settings, **Switch disabled** appears on the pet page. Tap it for brand-specific steps to **Allow restricted settings**.
 
+## Action wheel and screenshot questions
+
+Touch and hold the floating pet without lifting your finger. A half-wheel opens toward the inside of the screen. Slide toward an action to highlight and slightly lift it, then release to choose it. Slide back to the center or outside the wheel before releasing to cancel. The wheel mirrors at the opposite screen edge; tapping and ordinary dragging are unchanged. Accessibility users can also long-press and tap an action directly. Small screens or large fonts use a scrollable list when the wheel will not fit; in that case, release without sliding, then scroll and tap.
+
+Choose **Screenshot & ask DSH-Go** to hide the pet and wheel, capture the current screen and automatically return to the app with the image as a pending attachment in a new chat. Type your question, then tap Send. Nothing is sent to AI automatically, and the previous conversation's draft is not overwritten. Existing text and attachments in the new-chat draft are kept; attachment limits are reported if the image cannot be added.
+
+Capture requires Android 11 or later and phone control's accessibility service to be enabled. Overlay permission alone is not enough. Pages protected against screenshots are not bypassed. The image uses only the app's private temporary cache, which is removed once read into the draft; it is not saved to the gallery. If a phone blocks opening the app from the background, tap the notification to continue.
+
 ## Quick ask, bubble decisions and voice
 
 Long-press the floating pet and choose Quick ask to open its input bar. The target line names the conversation and host; switch to a new conversation if needed. Messages go through normal chat and appear in its history. If the host or connection changes, reopen the bar to confirm the target. Back or a tap outside closes the bar.

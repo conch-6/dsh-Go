@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { COMMON } from './files';
+import { COMMON, type Ctx } from './files';
 import { escapeHtml as esc, pickLang, PAGE_HEADERS } from './download-page';
 
 const DEFAULT_SOURCE = 'https://ccch1mneyyy.github.io/dsh-go-market/';
@@ -85,7 +85,7 @@ export function validateCatalog(index: unknown, sidecar: unknown): sidecar is Si
       !record(p.risk) ||
       !['low', 'medium', 'high'].includes(String(p.risk.level)) ||
       !Array.isArray(p.risk.flags) ||
-      p.risk.flags.some((f) => !FLAGS.includes(String(f))) ||
+      p.risk.flags.some((f) => typeof f !== 'string' || !FLAGS.includes(f)) ||
       new Set(p.risk.flags).size !== p.risk.flags.length ||
       typeof p.integrity !== 'string' ||
       !/^sha512-[A-Za-z0-9+/]{86}==$/.test(p.integrity) ||
@@ -117,8 +117,15 @@ class MarketError extends Error {
   }
 }
 async function body(response: Response): Promise<string> {
-  if (!response.ok) throw new MarketError('upstream-http', response.status);
-  if (Number(response.headers.get('content-length')) > MAX) throw new MarketError('too-large');
+  if (!response.ok) {
+    // Initiate cancellation without waiting for a possible tee sibling.
+    void response.body?.cancel().catch(() => {});
+    throw new MarketError('upstream-http', response.status);
+  }
+  if (Number(response.headers.get('content-length')) > MAX) {
+    void response.body?.cancel().catch(() => {});
+    throw new MarketError('too-large');
+  }
   const reader = response.body?.getReader();
   if (!reader) throw new MarketError('empty');
   const chunks: Uint8Array[] = [];
@@ -183,6 +190,23 @@ async function fetchCatalog(base: string): Promise<Snapshot> {
   if (!validateCatalog(JSON.parse(index!), JSON.parse(sidecar!))) throw new MarketError('invalid-catalog');
   return { at: Date.now(), index: index!, sidecar: sidecar! };
 }
+// Share only fully consumed, validated strings within the same environment.
+// Each caller still checks its KV snapshot and owns its fallback and writes.
+const refreshing = new WeakMap<Env, Map<string, Promise<Snapshot>>>();
+function refresh(env: Env, base: string, ctx: Ctx): Promise<Snapshot> {
+  let flights = refreshing.get(env);
+  if (!flights) refreshing.set(env, flights = new Map());
+  const existing = flights.get(base);
+  if (existing) return existing;
+  const task = fetchCatalog(base).finally(() => {
+    if (flights.get(base) === task) flights.delete(base);
+  });
+  flights.set(base, task);
+  // Keep the originating request's fetch/body reads alive for overlapping
+  // callers if it disconnects. Both upstream fetches retain their 10s timeout.
+  ctx.waitUntil(task.catch(() => {}));
+  return task;
+}
 async function remember(env: Env, key: string, value: Snapshot): Promise<void> {
   if (memory.size > 4) memory.delete(memory.keys().next().value!);
   memory.set(key, value);
@@ -192,7 +216,7 @@ async function remember(env: Env, key: string, value: Snapshot): Promise<void> {
     /* current response remains available; old KV copy survives */
   }
 }
-async function catalog(env: Env): Promise<{ value: Snapshot; stale: boolean }> {
+async function catalog(env: Env, ctx: Ctx): Promise<{ value: Snapshot; stale: boolean }> {
   const base = source(env),
     key = 'market:v1:' + base;
   let previous = memory.get(key);
@@ -201,14 +225,18 @@ async function catalog(env: Env): Promise<{ value: Snapshot; stale: boolean }> {
     const saved = await env.QUOTA?.get(key);
     if (saved) {
       const parsed: unknown = JSON.parse(saved);
-      if (snapshot(parsed) && (!previous || parsed.at > previous.at)) previous = parsed;
+      // Only a newer snapshot can replace the already validated memory entry.
+      if (
+        (!previous || (record(parsed) && typeof parsed.at === 'number' && parsed.at > previous.at)) &&
+        snapshot(parsed)
+      ) previous = parsed;
     }
   } catch {
     /* memory fallback */
   }
   if (previous && Date.now() - previous.at < TTL) return { value: previous, stale: false };
   try {
-    const value = await fetchCatalog(base);
+    const value = await refresh(env, base, ctx);
     await remember(env, key, value);
     return { value, stale: false };
   } catch (e) {
@@ -252,7 +280,7 @@ export function packageFromPath(path: string): string | null {
 }
 const html = (status: number, text: string, head: boolean, headers: Record<string, string> = {}) =>
   new Response(head ? null : text, { status, headers: { ...PAGE_HEADERS, ...headers } });
-export async function market(request: Request, env: Env): Promise<Response> {
+export async function market(request: Request, env: Env, ctx: Ctx): Promise<Response> {
   const path = new URL(request.url).pathname,
     head = request.method === 'HEAD';
   if (!['GET', 'HEAD'].includes(request.method))
@@ -262,7 +290,7 @@ export async function market(request: Request, env: Env): Promise<Response> {
   if (!file && !name) return new Response(null, { status: 404, headers: COMMON });
   let result: Awaited<ReturnType<typeof catalog>>;
   try {
-    result = await catalog(env);
+    result = await catalog(env, ctx);
   } catch {
     return html(
       503,

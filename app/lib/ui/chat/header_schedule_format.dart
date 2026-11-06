@@ -118,7 +118,7 @@ Duration scheduleRelativeChangesIn(DateTime at, DateTime now) {
 List<DateTime> scheduleNextRuns(ScheduleTask task, {required String deviceZone, int count = 3}) {
   final first = task.scheduledAt;
   if (first == null) return const [];
-  if (!task.recurring || count <= 1) return [first];
+  if (!task.recurring || isCustomRule(task) || count <= 1) return [first];
   final draft = ScheduleDraft.fromTask(task, deviceZone: deviceZone, now: first);
   return [first, ...draft.nextRuns(first, count: count - 1, anchor: task.kind == 'every' ? first : null)];
 }

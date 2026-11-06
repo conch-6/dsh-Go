@@ -84,6 +84,10 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
   String? _failedSession;
 
   bool get _isEdit => widget.task != null;
+
+  /// A rule the builder can't state: shown, not edited, so saving a new name or
+  /// instruction can't turn it into what the builder would read it as.
+  bool get _customRule => _isEdit && isCustomRule(widget.task!);
   DateTime get _now => widget.now ?? DateTime.now();
 
   /// The fields as opened (timing compares [_draft] with [_initial]).
@@ -226,7 +230,7 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
     return {
       if (title.isEmpty) _F.title: context.l10n.featuresNameRequired,
       if (_prompt.text.trim().isEmpty) _F.prompt: context.l10n.featuresInstructionRequired,
-      _F.timing: ?draft.validate(_now),
+      if (!_customRule) _F.timing: ?draft.validate(_now),
     };
   }
 
@@ -474,15 +478,16 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
           title: l10n.featuresScheduleRunTime,
           children: _timingRows(draft, device),
         ),
-        Padding(
-          padding: kSettingsGroupMargin,
-          child: SchedulePreview(
-            draft: draft,
-            deviceZone: device,
-            now: _now,
-            anchor: _isEdit && draft == _initial && widget.task!.kind == 'every' ? widget.task!.scheduledAt : null,
+        if (!_customRule)
+          Padding(
+            padding: kSettingsGroupMargin,
+            child: SchedulePreview(
+              draft: draft,
+              deviceZone: device,
+              now: _now,
+              anchor: _isEdit && draft == _initial && widget.task!.kind == 'every' ? widget.task!.scheduledAt : null,
+            ),
           ),
-        ),
         if (!_isEdit) _placeSection(),
         SmoothSize(
           duration: AppMotion.of(context, AppMotion.standard),
@@ -582,6 +587,7 @@ class _ScheduleEditorPageState extends ConsumerState<ScheduleEditorPage> {
 
   List<Widget> _timingRows(ScheduleDraft draft, String device) {
     final l10n = context.l10n;
+    if (_customRule) return [SettingsTile(title: l10n.featuresRepeat, value: Text(l10n.featuresRepeatCustom))];
     final enabled = !_saving;
     final rows = <Widget>[
       SettingsTile(

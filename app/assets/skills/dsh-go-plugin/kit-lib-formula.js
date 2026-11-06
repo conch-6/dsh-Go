@@ -23,6 +23,7 @@ export function evaluateFormula(source, data) {
     if (parts.length > 16) fail()
     let current = data
     for (const part of parts) {
+      if (Array.isArray(current) && part[1] !== undefined) fail()
       const key = part[1] ?? String(Number(part[2]))
       if (current === null || typeof current !== 'object' || !Object.prototype.hasOwnProperty.call(current, key)) fail()
       current = current[key]

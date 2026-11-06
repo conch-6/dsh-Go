@@ -21,7 +21,6 @@ import '../../../plugins/native/native_state.dart';
 import '../../../ui_config/ui_config_model.dart';
 import '../../../ui_config/ui_config_state.dart';
 import '../../common/edge_fade.dart';
-import '../../common/pressable.dart';
 import '../../pets/pet_perch.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
@@ -97,48 +96,45 @@ class ComposerCapsule extends ConsumerWidget {
           ? null
           : l10n.plugslotsFromPlugin(source),
       excludeSemantics: true,
-      child: Pressable(
-        enabled: !busy || cancel != null,
-        child: GlassSurface(
-          tier: GlassTier.chrome,
-          stadium: true,
-          grouped: true,
-          onTap: busy ? cancel : item.onTap,
-          child: SizedBox(
-            height: CapsuleMetrics.height,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                AnimatedOpacity(
-                  opacity: busy ? 0 : 1,
-                  duration: duration,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: CapsuleMetrics.inset),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (item.icon case final icon?) ...[
-                          Icon(icon, size: CapsuleMetrics.icon, color: colors.onSurfaceVariant),
-                          const SizedBox(width: CapsuleMetrics.iconGap),
-                        ],
-                        Text(item.label, maxLines: 1, softWrap: false, style: style),
+      child: GlassSurface(
+        tier: GlassTier.chrome,
+        stadium: true,
+        grouped: true,
+        onTap: busy ? cancel : item.onTap,
+        child: SizedBox(
+          height: CapsuleMetrics.height,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              AnimatedOpacity(
+                opacity: busy ? 0 : 1,
+                duration: duration,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: CapsuleMetrics.inset),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (item.icon case final icon?) ...[
+                        Icon(icon, size: CapsuleMetrics.icon, color: colors.onSurfaceVariant),
+                        const SizedBox(width: CapsuleMetrics.iconGap),
                       ],
-                    ),
+                      Text(item.label, maxLines: 1, softWrap: false, style: style),
+                    ],
                   ),
                 ),
-                AnimatedOpacity(
-                  opacity: busy ? 1 : 0,
-                  duration: duration,
-                  child: SizedBox.square(
-                    key: busy ? const ValueKey('capsule-ring') : null,
-                    dimension: ring,
-                    child: busy
-                        ? CircularProgressIndicator(strokeWidth: 1.6, color: colors.onSurfaceVariant)
-                        : const SizedBox.shrink(),
-                  ),
+              ),
+              AnimatedOpacity(
+                opacity: busy ? 1 : 0,
+                duration: duration,
+                child: SizedBox.square(
+                  key: busy ? const ValueKey('capsule-ring') : null,
+                  dimension: ring,
+                  child: busy
+                      ? CircularProgressIndicator(strokeWidth: 1.6, color: colors.onSurfaceVariant)
+                      : const SizedBox.shrink(),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

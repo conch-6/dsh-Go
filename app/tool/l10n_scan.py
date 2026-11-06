@@ -135,7 +135,7 @@ def dart_files(paths):
         for root, _, files in os.walk(p):
             for f in files:
                 full = os.path.join(root, f)
-                if f.endswith('.dart') and not SKIP_FILE.search(full):
+                if f.endswith('.dart') and not SKIP_FILE.search(full.replace('\\', '/')):
                     yield full
 
 
@@ -156,7 +156,8 @@ def main(argv):
     result = {f: h for f, h in result.items() if h}
     total = sum(len(h) for h in result.values())
     if out_json:
-        json.dump({f: [[ln, t] for ln, t in h] for f, h in result.items()}, open(out_json, 'w'), ensure_ascii=False, indent=1)
+        with open(out_json, 'w', encoding='utf-8') as output:
+            json.dump({f: [[ln, t] for ln, t in h] for f, h in result.items()}, output, ensure_ascii=False, indent=1)
     if mode == 'count':
         for f, h in sorted(result.items(), key=lambda kv: -len(kv[1])):
             print(f'{len(h):5d}  {f}')
@@ -174,4 +175,7 @@ def main(argv):
 
 
 if __name__ == '__main__':
+    # Match the other maintenance CLIs when redirected through legacy pipes.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding='utf-8', errors=stream.errors)
     main(sys.argv[1:])

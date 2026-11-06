@@ -4,7 +4,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { parseCapabilities, RESOURCE_KINDS } from "./capabilities.js";
 import { validate as validateEffect } from "./effects.js";
-import { ICON, ID, LIMITS, PLACEMENTS, PROTOCOL, SEMVER, SURFACES, WANTS } from "./limits.js";
+import { ICON, ID, LIMITS, NEGOTIATED_PLACEMENTS, PLACEMENTS, PRESENTATIONS, PROTOCOL, SEMVER, SURFACES, WANTS } from "./limits.js";
 import { chars, compareSemver, isPlainObject, parseText, resolveText, toJson, truncateChars, viewStats } from "./util.js";
 
 const TOP_KEYS = new Set(["v", "minApp", "title", "icon", "wants", "assets", "contributes", "capabilities"]);
@@ -12,9 +12,21 @@ const ITEM_KEYS = {
   "composer.actions": new Set(["id", "label", "icon", "effect", "requires"]),
   "message.actions": new Set(["id", "label", "icon", "effect", "requires"]),
   "composer.strip": new Set(["id", "icon", "text", "panel"]),
-  panels: new Set(["id", "title", "icon", "placement", "view", "micro"]),
+  panels: new Set(["id", "title", "icon", "placement", "presentation", "view", "micro"]),
+  "composer.tools": new Set(["id", "label", "icon", "effect", "panel", "requires"]),
+  "session.actions": new Set(["id", "label", "icon", "effect", "requires"]),
+  "turn.note": new Set(["id"]),
 };
-const LABEL_LIMIT = { "composer.actions": LIMITS.textChars.composerAction, "message.actions": LIMITS.textChars.messageAction };
+const LABEL_LIMIT = {
+  "composer.actions": LIMITS.textChars.composerAction,
+  "message.actions": LIMITS.textChars.messageAction,
+  "composer.tools": LIMITS.textChars.composerTool,
+  "session.actions": LIMITS.textChars.sessionAction,
+};
+const ACTION_SURFACES = Object.keys(LABEL_LIMIT);
+// Only these four are always there. A later surface appears when a plugin declares it, so a plugin
+// that uses none of them gets exactly the row it always did.
+const baseItems = () => ({ "composer.actions": [], "message.actions": [], "composer.strip": [], panels: [] });
 
 const issue = (path, code, severity, message) => ({ path, code, severity, message });
 const ptr = (...parts) => `/dshGo${parts.map((p) => `/${String(p).replaceAll("~", "~0").replaceAll("/", "~1")}`).join("")}`;
@@ -48,8 +60,10 @@ export function parseManifest(pkgJson, pkgDir) {
     icon: undefined,
     wants: [],
     assetsDir: undefined,
-    items: { "composer.actions": [], "message.actions": [], "composer.strip": [], panels: [] },
+    items: baseItems(),
     ids: new Map(),
+    // Where each accepted id sits in its manifest list. An id can repeat there, and only this entry passed.
+    rawIndex: new Map(),
     issues,
   };
   const m = pkgJson.dshGo;
@@ -119,6 +133,7 @@ export function parseManifest(pkgJson, pkgDir) {
       issues.push(issue(ptr("contributes", surface), "invalid-field", "error", `${surface} must be an array`));
       continue;
     }
+    out.items[surface] ??= [];
     const cap = LIMITS.perPlugin[surface];
     list.forEach((raw, i) => {
       const at = (...p) => ptr("contributes", surface, i, ...p);
@@ -139,7 +154,9 @@ export function parseManifest(pkgJson, pkgDir) {
         if (typeof raw.icon === "string" && ICON.test(raw.icon)) item.icon = raw.icon;
         else issues.push(issue(at("icon"), "invalid-field", "error", "icon must match ^[a-z][a-z0-9-]{0,31}$"));
       }
-      if (surface === "composer.actions" || surface === "message.actions") {
+      if (surface === "turn.note") {
+        // Nothing to show until its data function pushes.
+      } else if (ACTION_SURFACES.includes(surface)) {
         item.label = parseText(raw.label);
         if (item.label === undefined) { issues.push(issue(at("label"), raw.label === undefined ? "missing-field" : "invalid-field", "error", "label must be a non-empty string or locale map")); return; }
         if (raw.effect !== undefined) {
@@ -153,6 +170,11 @@ export function parseManifest(pkgJson, pkgDir) {
           });
           else issues.push(issue(at("effect"), "invalid-field", "error", `effect must be one effect or 1-${LIMITS.effectsPerInvoke} effects`));
           if (ok) item.effect = effects;
+        }
+        if (surface === "composer.tools" && raw.panel !== undefined) {
+          if (raw.effect !== undefined) issues.push(issue(at("panel"), "invalid-field", "error", "write panel or effect, not both"));
+          else if (typeof raw.panel !== "string" || !panelIds.has(raw.panel)) issues.push(issue(at("panel"), "invalid-field", "error", "panel must be one of this plugin's panel ids"));
+          else item.effect = [validateEffect({ type: "open", page: `panel:${raw.panel}` }, { panels: panelIds, static: true }).effect];
         }
       } else if (surface === "composer.strip") {
         if (raw.text !== undefined) {
@@ -174,6 +196,10 @@ export function parseManifest(pkgJson, pkgDir) {
           else issues.push(issue(at("placement", j), "invalid-field", "error", `unknown placement ${String(p).slice(0, 40)}`));
         });
         if (item.placement.length === 0) item.placement.push("session.tab");
+        if (raw.presentation !== undefined) {
+          if (PRESENTATIONS.includes(raw.presentation)) item.presentation = raw.presentation;
+          else issues.push(issue(at("presentation"), "invalid-field", "error", "presentation must be page or sheet"));
+        }
         if (raw.view !== undefined) {
           const file = insidePackage(pkgDir, raw.view);
           let st;
@@ -184,21 +210,59 @@ export function parseManifest(pkgJson, pkgDir) {
         }
       }
       out.ids.set(raw.id, surface);
+      out.rawIndex.set(raw.id, i);
       out.items[surface].push(item);
     });
     out.items[surface] = out.items[surface].filter((x) => x !== null);
   }
+  dropOpensOfRejectedPanels(out);
   parseCapabilities(m, out);
   return out;
 }
 
 /**
- * Plugin row of the contributions response. `caps`: { versions: number[], app, locale };
+ * `panelIds` above is every panel the manifest names, and some of those were then rejected: too
+ * many, no title, a repeated id. Tapping something that opens one could only fail, so it loses that.
+ */
+function dropOpensOfRejectedPanels(out) {
+  const kept = new Set(out.items.panels.map((p) => p.id));
+  const opensRejected = (e) => e.type === "open" && e.page.startsWith("panel:") && !kept.has(e.page.slice("panel:".length));
+  const report = (surface, id) => {
+    out.issues.push(issue(ptr("contributes", surface, out.rawIndex.get(id)), "invalid-field", "error", "opens a panel that was rejected"));
+  };
+  for (const surface of ACTION_SURFACES) {
+    for (const item of out.items[surface] ?? []) {
+      if (!item.effect?.some(opensRejected)) continue;
+      delete item.effect;
+      report(surface, item.id);
+    }
+  }
+  for (const item of out.items["composer.strip"]) {
+    if (item.panel === undefined || kept.has(item.panel)) continue;
+    delete item.panel;
+    report("composer.strip", item.id);
+  }
+}
+
+/**
+ * A panel's placement as this app can draw it. An app that doesn't list a newer placement in its
+ * surfaces throws away what it doesn't know, and a panel with nothing left would vanish. So it
+ * gets the rest, or else the default.
+ */
+function placementFor(placement, caps) {
+  const known = placement.filter((p) => !NEGOTIATED_PLACEMENTS.includes(p) || caps.surfaces?.includes(p));
+  return known.length > 0 ? known : ["session.tab"];
+}
+
+/**
+ * Plugin row of the contributions response. `caps`: { versions: number[], app, locale, surfaces };
  * `live`: { panels: Map id->{data:boolean}, strips: Set, handlers: Set, degraded: boolean,
  * runtimeIssues: issue[] }.
  */
 export function renderPlugin(parsed, caps, live) {
   const issues = [...parsed.issues];
+  // Where an item sits in the manifest: rejected entries before it still count.
+  const itemPtr = (surface, it, ...rest) => ptr("contributes", surface, parsed.rawIndex.get(it.id), ...rest);
   const text = (t, max, path) => {
     const s = resolveText(t, caps.locale);
     if (s === undefined) return undefined;
@@ -225,54 +289,60 @@ export function renderPlugin(parsed, caps, live) {
     wants: parsed.wants,
     state,
     native: state === "ok",
-    contributes: { "composer.actions": [], "message.actions": [], "composer.strip": [], panels: [] },
+    contributes: baseItems(),
     issues,
   };
   if (state === "ok") {
-    for (const surface of ["composer.actions", "message.actions"]) {
-      parsed.items[surface].forEach((it, i) => {
+    for (const surface of ACTION_SURFACES) {
+      parsed.items[surface]?.forEach((it) => {
         const handled = it.effect !== undefined || live.handlers.has(it.id);
         const supported = (it.requires ?? []).every((x) => (caps.features ?? []).includes(x));
         const ready = handled && supported;
-        if (!handled) issues.push(issue(ptr("contributes", surface, i), "no-handler", "warn", `${it.id} has no effect and no on("${it.id}") handler`));
-        row.contributes[surface].push({
+        if (!handled) issues.push(issue(itemPtr(surface, it), "no-handler", "warn", `${it.id} has no effect and no on("${it.id}") handler`));
+        (row.contributes[surface] ??= []).push({
           id: it.id,
           ...(it.requires === undefined ? {} : { requires: it.requires }),
-          label: text(it.label, LABEL_LIMIT[surface], ptr("contributes", surface, i, "label")),
+          label: text(it.label, LABEL_LIMIT[surface], itemPtr(surface, it, "label")),
           ...(it.icon === undefined ? {} : { icon: it.icon }),
           ...(it.effect === undefined ? {} : { effect: it.effect }),
           ready,
         });
       });
     }
-    parsed.items["composer.strip"].forEach((it, i) => {
+    parsed.items["composer.strip"].forEach((it) => {
       const liveStrip = live.strips.has(it.id);
       const tappable = it.panel !== undefined || live.handlers.has(it.id);
       const ready = liveStrip || tappable || it.text !== undefined;
-      if (!ready) issues.push(issue(ptr("contributes", "composer.strip", i), "no-handler", "warn", `${it.id} has no text, panel, strip("${it.id}") or on("${it.id}")`));
+      if (!ready) issues.push(issue(itemPtr("composer.strip", it), "no-handler", "warn", `${it.id} has no text, panel, strip("${it.id}") or on("${it.id}")`));
       row.contributes["composer.strip"].push({
         id: it.id,
         ...(it.icon === undefined ? {} : { icon: it.icon }),
-        text: it.text === undefined ? null : text(it.text, LIMITS.textChars.stripText, ptr("contributes", "composer.strip", i, "text")),
+        text: it.text === undefined ? null : text(it.text, LIMITS.textChars.stripText, itemPtr("composer.strip", it, "text")),
         ...(it.panel === undefined ? {} : { panel: it.panel }),
         tappable,
         live: liveStrip,
         ready,
       });
     });
-    parsed.items.panels.forEach((it, i) => {
+    parsed.items.panels.forEach((it) => {
       const reg = live.panels.get(it.id);
       const ready = reg !== undefined || it.viewFile !== undefined;
-      if (!ready) issues.push(issue(ptr("contributes", "panels", i), "no-handler", "warn", `${it.id} has no view file and no panel("${it.id}") registration`));
+      if (!ready) issues.push(issue(itemPtr("panels", it), "no-handler", "warn", `${it.id} has no view file and no panel("${it.id}") registration`));
       row.contributes.panels.push({
         id: it.id,
-        title: text(it.title, LIMITS.textChars.panelTitle, ptr("contributes", "panels", i, "title")),
+        title: text(it.title, LIMITS.textChars.panelTitle, itemPtr("panels", it, "title")),
         ...(it.icon === undefined ? {} : { icon: it.icon }),
-        placement: it.placement,
+        placement: placementFor(it.placement, caps),
+        ...(it.presentation === undefined ? {} : { presentation: it.presentation }),
         ...(it.micro === undefined ? {} : { micro: it.micro }),
         ready,
         live: reg?.data === true,
       });
+    });
+    parsed.items["turn.note"]?.forEach((it) => {
+      const ready = live.notes?.has(it.id) === true;
+      if (!ready) issues.push(issue(itemPtr("turn.note", it), "no-handler", "warn", `${it.id} has no turnNote("${it.id}") registration`));
+      (row.contributes["turn.note"] ??= []).push({ id: it.id, ready });
     });
   }
   // v1.2 (only for plugins that declare capabilities): kept even when this app negotiated none.
@@ -294,7 +364,7 @@ export function panelTitle(item, locale) {
 /**
  * Pure entry for the SDK check and test hosts (no DSH): what the bridge would publish for one
  * package.json. Static view files are read and checked like GET /views does.
- * opts: { locale = "zh", app = "999.0.0", versions = [1],
+ * opts: { locale = "zh", app = "999.0.0", versions = [1], surfaces = all of them,
  *         handlers = "assume" (every contribution counts as registered) | iterable of on() ids,
  *         panels / strips / dataPanels = iterables of panel() / strip() / panel-with-data ids }.
  * Returns { state, plugin, issues } (plugin = the contributions row; issues as in §3.3), or
@@ -303,15 +373,16 @@ export function panelTitle(item, locale) {
 export function checkManifest(pkgJson, pkgDir, opts = {}) {
   if (!isPlainObject(pkgJson) || pkgJson.dshGo === undefined) return { state: "absent", plugin: null, issues: [] };
   const parsed = parseManifest(pkgJson, pkgDir);
-  const caps = { versions: opts.versions ?? [PROTOCOL], app: opts.app ?? "999.0.0", locale: opts.locale ?? "zh" };
+  const caps = { versions: opts.versions ?? [PROTOCOL], app: opts.app ?? "999.0.0", locale: opts.locale ?? "zh", surfaces: opts.surfaces ?? [...SURFACES, ...PLACEMENTS] };
   const assume = opts.handlers === undefined || opts.handlers === "assume";
-  const all = (surfaces) => surfaces.flatMap((k) => parsed.items[k].map((it) => it.id));
+  const all = (surfaces) => surfaces.flatMap((k) => (parsed.items[k] ?? []).map((it) => it.id));
   const dataPanels = new Set(opts.dataPanels ?? []);
   const panelIds = assume ? all(["panels"]) : [...(opts.panels ?? [])];
   const live = {
     panels: new Map(panelIds.map((id) => [id, { data: dataPanels.has(id) }])),
     strips: new Set(assume ? all(["composer.strip"]) : (opts.strips ?? [])),
-    handlers: new Set(assume ? all(["composer.actions", "message.actions", "composer.strip", "panels"]) : opts.handlers),
+    notes: new Set(assume ? all(["turn.note"]) : (opts.notes ?? [])),
+    handlers: new Set(assume ? all([...ACTION_SURFACES, "composer.strip", "panels"]) : opts.handlers),
     degraded: false,
     runtimeIssues: [],
   };
@@ -319,7 +390,7 @@ export function checkManifest(pkgJson, pkgDir, opts = {}) {
   const issues = [...plugin.issues];
   parsed.items.panels.forEach((it) => {
     if (it.viewFile === undefined) return;
-    const at = `/dshGo/contributes/panels/${parsed.items.panels.indexOf(it)}/view`;
+    const at = ptr("contributes", "panels", parsed.rawIndex.get(it.id), "view");
     let view;
     try {
       view = JSON.parse(readFileSync(it.viewFile, "utf8"));

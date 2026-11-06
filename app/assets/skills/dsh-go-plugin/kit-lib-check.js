@@ -34,6 +34,9 @@ const WORDS = {
       c['message.actions'] && `菜单 ${c['message.actions']}`,
       c['composer.strip'] && `状态条 ${c['composer.strip']}`,
       c.panels && `面板 ${c.panels}`,
+      c['composer.tools'] && `加号工具 ${c['composer.tools']}`,
+      c['session.actions'] && `对话操作 ${c['session.actions']}`,
+      c['turn.note'] && `回合尾注 ${c['turn.note']}`,
     ].filter(Boolean).join(' · '),
     view: (where, budget) => `视图 ${where}（${{ toolCard: '工具卡', panel: '面板', strip: '状态条' }[budget]}）`,
     viewOk: '能显示', viewFatal: '整块无法显示：', viewProblems: (n) => `，${n} 处问题`,
@@ -72,6 +75,9 @@ const WORDS = {
       c['message.actions'] && `${c['message.actions']} menu item(s)`,
       c['composer.strip'] && `${c['composer.strip']} strip`,
       c.panels && `${c.panels} panel(s)`,
+      c['composer.tools'] && `${c['composer.tools']} plus-panel tool(s)`,
+      c['session.actions'] && `${c['session.actions']} chat action(s)`,
+      c['turn.note'] && `${c['turn.note']} turn note`,
     ].filter(Boolean).join(' · '),
     view: (where, budget) => `View ${where} (${{ toolCard: 'tool card', panel: 'panel', strip: 'strip' }[budget]})`,
     viewOk: 'renders', viewFatal: 'does not render: ', viewProblems: (n) => `, ${n} problem(s)`,
@@ -106,6 +112,7 @@ const words = (lang) => WORDS[lang === 'en' ? 'en' : 'zh']
 
 // ── manifest ──────────────────────────────────────────────────────────────
 
+const FEED_SETTLE_MS = 2000
 const LOCALES = ['zh-CN', 'en-US']
 
 /** App-side icon problems (the app draws unknown names as its default glyph). */
@@ -140,7 +147,7 @@ export function checkManifest(pkgJson, options = {}) {
     const r = bridgeCheckManifest(pkgJson, dir, {
       locale,
       app: options.app,
-      ...(regs === undefined ? { handlers: 'assume' } : { handlers: [...regs.handlers, ...regs.panels], panels: regs.panels, strips: regs.strips, dataPanels: regs.dataPanels }),
+      ...(regs === undefined ? { handlers: 'assume' } : { handlers: [...regs.handlers, ...regs.panels], panels: regs.panels, strips: regs.strips, notes: regs.notes, dataPanels: regs.dataPanels }),
     })
     first ??= r
     for (const i of r.issues) {
@@ -224,7 +231,7 @@ function entryOf(pkgJson, dir) {
   return join(dir, target)
 }
 
-const SAMPLE_SCOPES = { 'session.tab': { sessionId: 'check-session' }, 'chat.panel': { sessionId: 'check-session' }, features: {} }
+const SAMPLE_SCOPES = { 'session.tab': { sessionId: 'check-session' }, 'chat.panel': { sessionId: 'check-session' }, features: {}, plugin: {} }
 
 async function loadHostHalf(pkgJson, dir, w) {
   // The plugin's code runs here: keep it away from the real DSH home.
@@ -265,7 +272,19 @@ async function loadIn(pkgJson, dir, w) {
     notes.push({ path: '/runtime/inject', code: 'load', severity: 'error', message: w.topInject })
   }
   try {
-    await mod.apply?.(host.ctx, {})
+    let config = {}
+    if (mod.Config) {
+      // Cordis resolves the plugin's own Standard Schema before apply.
+      const result = mod.Config['~standard'].validate(config)
+      if ('then' in result) {
+        // Refuse async validation without leaving its eventual rejection unobserved.
+        Promise.resolve(result).catch(() => {})
+        throw new TypeError('Async config validation is not supported')
+      }
+      if (result.issues) throw new TypeError(`invalid config: ${result.issues.map(issue => issue.message).join('; ')}`)
+      config = result.value
+    }
+    await mod.apply?.(host.ctx, config)
   } catch (error) {
     return { ok: false, error: w.loadFailed(String(error?.message ?? error).split('\n')[0]) }
   }
@@ -288,9 +307,17 @@ async function loadIn(pkgJson, dir, w) {
       }
     }
   }
-  for (const strip of host.parsed.items['composer.strip']) {
-    const feed = host.subscribe(strip.id, { sessionId: 'check-session' })
-    for (const e of feed.errors) notes.push({ path: `/runtime/${strip.id}`, code: 'load', severity: 'error', message: w.stripEmit(strip.id, e) })
+  const feeds = [...host.parsed.items['composer.strip'], ...(host.parsed.items['turn.note'] ?? [])]
+    .map((item) => host.subscribe(item.id, { sessionId: 'check-session' }))
+  // A data function may be async: wait for it to finish starting, but not for one that never does.
+  let timer
+  await Promise.race([
+    Promise.all(feeds.map((feed) => feed.settled)),
+    new Promise((done) => { timer = setTimeout(done, FEED_SETTLE_MS) }),
+  ])
+  clearTimeout(timer)
+  for (const feed of feeds) {
+    for (const e of feed.errors) notes.push({ path: `/runtime/${feed.id}`, code: 'load', severity: 'error', message: w.stripEmit(feed.id, e) })
     feed.stop()
   }
   host.dispose()

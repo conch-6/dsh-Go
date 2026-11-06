@@ -259,6 +259,12 @@
   "shellSkillInstallCheck": "3. Run {command} after writing the files. If it runs, installation is complete (a message about ui.json not existing yet is normal).",
   "shellSemanticsSeparator": ", ",
   "shellChatsArchivedPartial": "{count, plural, =1{Archived 1 chat} other{Archived {count} chats}}; {failed, plural, =1{couldn’t archive 1 chat} other{couldn’t archive {failed} chats}}",
+  "shellPanelOverview": "Info",
+  "shellPanelWorkspace": "Workspace",
+  "shellPanelModel": "Model",
+  "shellPanelHost": "Host",
+  "shellPanelOpenFull": "Open full page",
+  "shellPanelNoPlugins": "No plugin panels for this chat yet",
   "shellQuickPanel": "Shortcuts",
   "shellQuickPanelHint": "Change these in {path}",
   "@shellQuickPanelHint": {

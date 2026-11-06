@@ -169,7 +169,9 @@ class ChatNotifier(private val app: Context) {
         unlockReceiver = receiver
         val filter = IntentFilter(Intent.ACTION_USER_PRESENT)
         if (Build.VERSION.SDK_INT >= 33) {
-            app.applicationContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            // SystemUI may use its own UID. USER_PRESENT is protected: only the
+            // system can send it, so exporting this single-action receiver is safe.
+            app.applicationContext.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
         } else {
             app.applicationContext.registerReceiver(receiver, filter)
         }
@@ -363,13 +365,13 @@ class ChatNotifier(private val app: Context) {
     }
 
     /** Per-install secret proving a launch intent came from our own PendingIntent. */
-    private fun token(): String {
+    private fun token(): String = synchronized(tokenLock) {
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.getString(PREF_TOKEN, null)?.let { return it }
+        prefs.getString(PREF_TOKEN, null)?.let { return@synchronized it }
         val bytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
         val fresh = bytes.joinToString("") { "%02x".format(it) }
         prefs.edit().putString(PREF_TOKEN, fresh).apply()
-        return fresh
+        fresh
     }
 
     companion object {
@@ -396,6 +398,8 @@ class ChatNotifier(private val app: Context) {
         private const val EXTRA_EVENT = "dsh.notify.event"
         private const val PREFS = "dsh_notify"
         private const val PREF_TOKEN = "tap_token"
+        // The UI notifier and dsh-live worker create different ChatNotifier instances.
+        private val tokenLock = Any()
 
         /**
          * Per group: the conversation title and channel its summary uses (latest child wins).

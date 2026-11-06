@@ -12,6 +12,7 @@ import '../../l10n/l10n.dart';
 import '../../state/connection_state.dart';
 import '../../state/sessions_state.dart';
 import '../../state/workspaces_state.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/list_page_row.dart';
 import '../common/sheet_navigator.dart';
@@ -136,7 +137,7 @@ Future<String?> askWorkspaceTitle(BuildContext context, String initial) => showT
 /// 「移除「name」？」 — the folder and its conversations stay.
 Future<bool> confirmRemoveWorkspace(BuildContext context, String name) async {
   final l10n = context.l10n;
-  final ok = await showDialog<bool>(
+  final ok = await showAppDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
       title: Text(l10n.remoteWorkspaceRemoveTitle(name)),

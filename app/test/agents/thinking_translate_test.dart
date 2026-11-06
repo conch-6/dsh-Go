@@ -3,6 +3,7 @@
 // in place with a toggle back; failures keep the original with a retry.
 // Goldens: `flutter test --update-goldens test/agents/thinking_translate_test.dart`.
 
+import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/state/cot_translation_state.dart';
 import 'package:dsh_app/state/sessions_state.dart';
 import 'package:dsh_app/ui/chat/widgets/thinking_pill.dart';
@@ -116,6 +117,49 @@ void main() {
     await pumpFrames(tester, 2);
     await _expand(tester);
     expect(find.text('翻译'), findsNothing);
+  });
+
+  testWidgets('in the English interface, auto translates Chinese reasoning into English', (tester) async {
+    AppLocale.use(AppLocale.en);
+    addTearDown(() => AppLocale.use(AppLocale.zhCN));
+    final translator = _Translator();
+    await tester.pumpWidget(_app('先确认按钮在请求期间是否禁用。', translator: translator));
+    await pumpFrames(tester, 2);
+    await tester.tap(find.text('Thinking'));
+    await pumpFrames(tester, 6);
+    await tester.tap(find.text('Translate'));
+    await pumpFrames(tester, 4);
+    expect(translator.asked.map((a) => a.$3), ['en']);
+  });
+
+  testWidgets('switching the interface language drops the translation until asked again', (tester) async {
+    addTearDown(() => AppLocale.use(AppLocale.zhCN));
+    final translator = _Translator();
+    await tester.pumpWidget(_app(_english, translator: translator));
+    await pumpFrames(tester, 2);
+    await _expand(tester);
+    await tester.tap(find.text('翻译'));
+    await pumpFrames(tester, 4);
+    expect(find.textContaining('只发出一次请求'), findsOneWidget);
+    expect(translator.asked, hasLength(2));
+
+    AppLocale.use(AppLocale.en);
+    await tester.pumpWidget(_app(_english, translator: translator));
+    await pumpFrames(tester, 2);
+    expect(find.textContaining('只发出一次请求'), findsNothing);
+    expect(find.textContaining('double taps'), findsOneWidget);
+    // English reasoning in the English interface: nothing to translate.
+    expect(find.text('Translate'), findsNothing);
+    expect(translator.asked, hasLength(2));
+
+    AppLocale.use(AppLocale.zhCN);
+    await tester.pumpWidget(_app(_english, translator: translator));
+    await pumpFrames(tester, 2);
+    expect(find.textContaining('只发出一次请求'), findsNothing);
+    await tester.tap(find.text('翻译'));
+    await pumpFrames(tester, 4);
+    expect(find.textContaining('只发出一次请求'), findsOneWidget);
+    expect(translator.asked, hasLength(4));
   });
 
   testWidgets('a failure keeps the original and offers a retry', (tester) async {

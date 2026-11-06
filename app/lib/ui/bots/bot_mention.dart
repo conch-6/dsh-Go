@@ -322,7 +322,7 @@ class MentionKey extends StatelessWidget {
 
   final VoidCallback? onPressed;
 
-  static const size = 40.0;
+  static const size = 36.0;
 
   @override
   Widget build(BuildContext context) {
@@ -345,7 +345,7 @@ class MentionKey extends StatelessWidget {
             decoration: BoxDecoration(color: scheme.onSurface.withValues(alpha: 0.06), shape: BoxShape.circle),
             child: Icon(
               AppIcons.mention,
-              size: 22,
+              size: 20,
               color: enabled ? scheme.onSurface : scheme.onSurface.withValues(alpha: 0.38),
             ),
           ),

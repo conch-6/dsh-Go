@@ -62,7 +62,7 @@ void main() {
     final book = IslandRecipeBook.parse(File('assets/islands/recipes.json').readAsStringSync());
 
     test('the shipped book reads', () {
-      expect(book.release, '0.2.1-rc.4');
+      expect(book.release, '0.2.2-rc.1');
       expect(book.officialSettings, containsAll(['general', 'models']));
       expect(book.recipeFor('settings.section')!.stretch, IslandStretch.scroller);
       expect(book.recipeFor('main')!.stretch, IslandStretch.child);

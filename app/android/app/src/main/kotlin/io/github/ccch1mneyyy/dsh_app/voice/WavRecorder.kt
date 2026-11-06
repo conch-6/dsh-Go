@@ -5,6 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.log10
@@ -22,14 +23,17 @@ class WavRecorder(
     private val maxSeconds: Int,
     private val onLevel: (Double) -> Unit,
     private val onLimit: () -> Unit,
+    private val onError: () -> Unit,
 ) {
     private var record: AudioRecord? = null
     private var thread: Thread? = null
     private var rate = TARGET_RATE
     private val pcm = ByteArrayOutputStream()
+    private val captureState = Any()
 
     @Volatile
     private var running = false
+    private var captureError: IOException? = null
 
     /** The capture's audio session (AudioManager's recording configurations name it); 0 when not recording. */
     val sessionId: Int get() = record?.audioSessionId ?: 0
@@ -63,7 +67,7 @@ class WavRecorder(
             }
             record = r
             rate = candidate
-            running = true
+            synchronized(captureState) { running = true }
             thread = Thread({ capture() }, "dsh-voice-recorder").also { it.start() }
             return true
         }
@@ -77,8 +81,16 @@ class WavRecorder(
         val limit = maxSeconds.toLong() * rate
         var captured = 0L
         while (running) {
-            val n = r.read(chunk, 0, chunk.size)
-            if (n < 0) break
+            val n = try {
+                r.read(chunk, 0, chunk.size)
+            } catch (error: RuntimeException) {
+                failCapture(IOException("Could not read microphone", error))
+                break
+            }
+            if (n < 0) {
+                failCapture(IOException("Could not read microphone ($n)"))
+                break
+            }
             if (n == 0) continue
             val take = minOf(n.toLong(), limit - captured).toInt()
             bytes.clear()
@@ -92,11 +104,27 @@ class WavRecorder(
             captured += take
             onLevel(levelOf(sum, take))
             if (captured >= limit) {
-                running = false
-                onLimit()
+                val reached = synchronized(captureState) {
+                    if (!running) false else {
+                        running = false
+                        true
+                    }
+                }
+                if (reached) onLimit()
                 break
             }
         }
+    }
+
+    private fun failCapture(error: IOException) {
+        // stopCapture retires the read before calling AudioRecord.stop(). Its
+        // interrupted read must not turn an ordinary stop into a capture error.
+        synchronized(captureState) {
+            if (!running) return
+            captureError = error
+            running = false
+        }
+        onError()
     }
 
     /** RMS in dBFS mapped from -50..-10 dB to 0..1. */
@@ -108,9 +136,11 @@ class WavRecorder(
         return ((db + 50) / 40).coerceIn(0.0, 1.0)
     }
 
-    /** Stops capturing and returns the WAV, or null when nothing was captured. */
+    /** Stops capturing and returns the WAV, or null when nothing was captured.
+     * A failed or still-running capture cannot be returned as a finished recording. */
     fun finish(): ByteArray? {
-        stopCapture()
+        if (!stopCapture()) throw IOException("Microphone capture did not stop")
+        synchronized(captureState) { captureError }?.let { throw it }
         val raw = synchronized(pcm) { pcm.toByteArray() }
         if (raw.size < 2) return null
         val samples = ShortArray(raw.size / 2)
@@ -125,14 +155,16 @@ class WavRecorder(
         synchronized(pcm) { pcm.reset() }
     }
 
-    private fun stopCapture() {
-        running = false
+    private fun stopCapture(): Boolean {
+        synchronized(captureState) { running = false }
         val r = record
         record = null
         runCatching { r?.stop() }
-        runCatching { thread?.join(1000) }
+        val t = thread
+        runCatching { t?.join(1000) }
         thread = null
         runCatching { r?.release() }
+        return t?.isAlive != true
     }
 
     private fun resample(input: ShortArray, from: Int, to: Int): ShortArray {

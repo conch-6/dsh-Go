@@ -425,11 +425,16 @@ Future<Uint8List> shortcutBitmap(ui.Image picture, Rect crop, Color fill) async 
       Paint()..filterQuality = FilterQuality.high,
     );
   }
-  final image = await recorder.endRecording().toImage(out, out);
+  final recording = recorder.endRecording();
   try {
-    final data = await image.toByteData(format: ui.ImageByteFormat.png);
-    return data!.buffer.asUint8List();
+    final image = await recording.toImage(out, out);
+    try {
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      return data!.buffer.asUint8List();
+    } finally {
+      image.dispose();
+    }
   } finally {
-    image.dispose();
+    recording.dispose();
   }
 }

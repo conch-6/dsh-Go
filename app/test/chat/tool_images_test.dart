@@ -36,12 +36,7 @@ ToolChatItem result({int count = 1, String name = 'phone_screenshot', String arg
   name: name,
   arguments: arguments,
   status: ToolStatus.succeeded,
-  resultParts: [
-    for (var i = 0; i < count; i++)
-      ImagePart(
-        ImageAttachment(attachmentId: 'image-$i', mediaType: 'image/png', bytes: png.length, name: 'screen-$i.png'),
-      ),
-  ],
+  resultParts: [for (var i = 0; i < count; i++) ImagePart(imageAt(i))],
 );
 
 Widget scene(
@@ -71,7 +66,10 @@ Future<void> openDetails(WidgetTester tester) async {
   await tester.tap(find.byType(ToolRow));
   await tester.pumpAndSettle();
   await tester.runAsync(() async {
-    await Future<void>.delayed(const Duration(milliseconds: 50));
+    // Image widgets exist before their first decoded frame makes them tappable.
+    for (final element in find.byType(Image).evaluate()) {
+      await precacheImage((element.widget as Image).image, element, onError: (_, _) {});
+    }
   });
   await tester.pumpAndSettle();
 }
@@ -100,6 +98,9 @@ class RemoteImages extends DshCarrier {
   }
 }
 
+ImageAttachment imageAt(int i) =>
+    ImageAttachment(attachmentId: 'image-$i', mediaType: 'image/png', bytes: png.length, name: 'screen-$i.png');
+
 void main() {
   setUpAll(loadTestFonts);
 
@@ -110,7 +111,7 @@ void main() {
       scene(
         result(),
         overrides: [
-          sessionImageProvider(('child-session', 'image-0')).overrideWith((ref) async {
+          sessionImageProvider(('child-session', imageAt(0))).overrideWith((ref) async {
             requests++;
             return png;
           }),
@@ -137,7 +138,7 @@ void main() {
         result(count: 3),
         overrides: [
           for (var i = 0; i < 3; i++)
-            sessionImageProvider(('child-session', 'image-$i')).overrideWith((ref) async => png),
+            sessionImageProvider(('child-session', imageAt(i))).overrideWith((ref) async => png),
         ],
       ),
     );
@@ -174,8 +175,9 @@ void main() {
       scene(
         result(count: 2),
         overrides: [
-          sessionImageProvider(('child-session', 'image-0')).overrideWith((ref) => pending.future),
-          sessionImageProvider(('child-session', 'image-1')).overrideWith((ref) async => Uint8List.fromList([1, 2, 3])),
+          sessionImageProvider(('child-session', imageAt(0))).overrideWith((ref) => pending.future),
+          sessionImageProvider(('child-session', imageAt(1)))
+              .overrideWith((ref) async => Uint8List.fromList([1, 2, 3])),
         ],
       ),
     );
@@ -238,9 +240,9 @@ void main() {
             brightness: brightness,
             english: english,
             overrides: [
-              sessionImageProvider(('child-session', 'image-0')).overrideWith((ref) async => portrait),
-              sessionImageProvider(('child-session', 'image-1')).overrideWith((ref) async => png),
-              sessionImageProvider(('child-session', 'image-2'))
+              sessionImageProvider(('child-session', imageAt(0))).overrideWith((ref) async => portrait),
+              sessionImageProvider(('child-session', imageAt(1))).overrideWith((ref) async => png),
+              sessionImageProvider(('child-session', imageAt(2)))
                   .overrideWith((ref) async => throw StateError('missing')),
             ],
           ),

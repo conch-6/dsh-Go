@@ -25,15 +25,16 @@ final deviceTimeZoneProvider = FutureProvider<String>((ref) => detectDeviceTimeZ
 final hostWorkspacesProvider = FutureProvider.autoDispose<List<Workspace>>((ref) async {
   final client = ref.watch(activeConnectionProvider).value?.client;
   if (client == null) return const [];
+  // A one-shot read still owns its subscription after timeout or editor disposal.
+  final first = StreamIterator(client.watchWorkspaces().where((u) => u is WorkspaceBaseline));
+  ref.onDispose(() => unawaited(first.cancel()));
   try {
-    final first = await client
-        .watchWorkspaces()
-        .where((u) => u is WorkspaceBaseline)
-        .first
-        .timeout(const Duration(seconds: 6));
-    return (first as WorkspaceBaseline).workspaces;
+    if (!await first.moveNext().timeout(const Duration(seconds: 6))) return const [];
+    return (first.current as WorkspaceBaseline).workspaces;
   } on Object {
     return const [];
+  } finally {
+    await first.cancel();
   }
 });
 
@@ -116,6 +117,9 @@ Future<ScheduleTask> requestSchedule(
 }) async {
   final known = {for (final t in await client.scheduleCatalog()) t.id};
   final done = Completer<ScheduleTask>();
+  // Host events can fail before prompt's RPC returns. Observe that interval;
+  // the await below still returns the task or throws the same failure.
+  done.future.ignore();
   var running = false;
   Timer? idle;
 
@@ -170,8 +174,7 @@ Future<ScheduleTask> requestSchedule(
   }
 }
 
-/// 「立即运行」: sends the task's instruction into its conversation now, as a
-/// message (queued behind a running turn). Not a Host delivery: the run
-/// history doesn't list it.
+/// 「立即运行」: uses the Host target-aware run API on 0.2.2; legacy Hosts
+/// retain the queued conversation prompt behavior.
 Future<void> runScheduleNow(DshClient client, ScheduleTask task, {String? timeZone}) =>
-    client.prompt(task.sessionId, task.prompt, mode: PromptMode.queue, timeZone: timeZone);
+    client.runScheduledTask(task, timeZone: timeZone);

@@ -16,6 +16,7 @@ import '../../state/connection_state.dart';
 import '../../state/features_state.dart';
 import '../../state/schedule_editor_state.dart';
 import '../../state/sessions_state.dart';
+import '../common/app_dialog.dart';
 import '../common/feature_tile.dart';
 import '../common/list_page_row.dart';
 import '../common/page_hero.dart';
@@ -272,7 +273,7 @@ class _ScheduleDetailPageState extends ConsumerState<ScheduleDetailPage> {
   }
 
   Future<void> _delete() async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(context.l10n.featuresScheduleDeleteTitle),

@@ -13,6 +13,7 @@
 // Without BETA_SECRET everything here is 404 (apart from that redirect).
 
 import type { Env } from './env';
+import { readCapped } from './api';
 import { channelAuthorized, grantActive, linkAuthorized, lookupKey, signLink } from './beta-auth';
 import { guard } from './beta-guard';
 import { PAGE_SCRIPT, asLang, lockPage, pageResponse, pickLang, releaseCard } from './download-page';
@@ -87,25 +88,40 @@ export interface Build {
   onDl: boolean;
 }
 
-let latestMemo: { at: number; build: Build | null } | null = null;
+interface LatestEntry {
+  memo?: { at: number; build: Build | null };
+  pending?: Promise<Build | null>;
+}
+let latest = new WeakMap<R2Bucket, LatestEntry>();
 
 /** For tests. */
 export function resetBetaCache(): void {
-  latestMemo = null;
+  latest = new WeakMap();
 }
 
 /** The arm64 build in beta/update.json; null when nothing is published. */
-export async function latestBuild(env: Env, now = Date.now()): Promise<Build | null> {
-  if (latestMemo && now - latestMemo.at < 30_000) return latestMemo.build;
-  let build: Build | null = null;
-  try {
-    const object = await env.BUCKET.get(BETA_MANIFEST);
-    if (object) build = toBuild(JSON.parse(await object.text()) as Manifest);
-  } catch {
-    build = null;
-  }
-  latestMemo = { at: now, build };
-  return build;
+export async function latestBuild(env: Env, ctx: Ctx, now = Date.now()): Promise<Build | null> {
+  let entry = latest.get(env.BUCKET);
+  if (!entry) { entry = {}; latest.set(env.BUCKET, entry); }
+  if (entry.memo && now - entry.memo.at < 30_000) return entry.memo.build;
+  if (entry.pending) return entry.pending;
+  const owner = entry;
+  const task = (async () => {
+    let build: Build | null = null;
+    try {
+      const object = await env.BUCKET.get(BETA_MANIFEST);
+      if (object) build = toBuild(JSON.parse(await object.text()) as Manifest);
+    } catch {
+      build = null;
+    }
+    // Preserve the existing 30s memo, including a missing/unreadable release.
+    owner.memo = { at: now, build };
+    return build;
+  })().finally(() => { if (owner.pending === task) delete owner.pending; });
+  owner.pending = task;
+  // Only the decoded Build crosses requests; retain the initiating R2 read.
+  ctx.waitUntil(task);
+  return task;
 }
 
 function toBuild(m: Manifest): Build | null {
@@ -134,7 +150,10 @@ function toBuild(m: Manifest): Build | null {
 // ── Routes ───────────────────────────────────────────────────────────────
 
 async function readBody(request: Request): Promise<{ key?: unknown; lang?: unknown }> {
-  const text = await request.text().catch(() => '');
+  // A 1024-code-unit UTF-8 body fits below this bound, including its optional BOM.
+  const bytes = await readCapped(request, 4096).catch(() => null);
+  if (!bytes) return {};
+  const text = new TextDecoder().decode(bytes);
   if (text.length > 1024) return {};
   try {
     const body = JSON.parse(text) as unknown;
@@ -144,7 +163,7 @@ async function readBody(request: Request): Promise<{ key?: unknown; lang?: unkno
   }
 }
 
-async function unlock(request: Request, env: Env): Promise<Response> {
+async function unlock(request: Request, env: Env, ctx: Ctx): Promise<Response> {
   const ip = clientKey(request);
   if (!(await burstAllowed(env.READ_LIMIT, `beta-unlock:${ip}`))) return json(429, { error: 'too_many_attempts' }, { 'Retry-After': '60' });
   const busy = () => json(429, { error: 'too_many_attempts' }, { 'Retry-After': '600' });
@@ -161,7 +180,7 @@ async function unlock(request: Request, env: Env): Promise<Response> {
     return json(403, { error: 'invalid_key' });
   }
 
-  const build = await latestBuild(env);
+  const build = await latestBuild(env, ctx);
   if (!build) return json(404, { error: 'no_release' });
   const link = await signLink(env.BETA_SECRET!, `/beta/${build.version}/${build.name}`);
   const routes = routesFor(env, build, link.url);
@@ -187,7 +206,7 @@ export async function beta(request: Request, env: Env, ctx: Ctx): Promise<Respon
   if (!env.BETA_SECRET) return plain(404, 'Not found');
 
   if (path === '/beta/api/unlock') {
-    return method === 'POST' ? unlock(request, env) : json(405, { error: 'method_not_allowed' }, { Allow: 'POST' });
+    return method === 'POST' ? unlock(request, env, ctx) : json(405, { error: 'method_not_allowed' }, { Allow: 'POST' });
   }
   if (method !== 'GET' && method !== 'HEAD') return plain(405, 'Method not allowed', { Allow: 'GET, HEAD' });
 

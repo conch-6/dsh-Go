@@ -390,7 +390,10 @@ class RenderDockStack extends RenderBox
     final accessory = hasAccessory && all.isNotEmpty ? all.removeLast() : null;
     final cards = all;
     for (final card in cards) {
-      card.layout(BoxConstraints.tightFor(width: width), parentUsesSize: true);
+      // Probe visibility at the last settled width. A full-width probe can
+      // unwrap todo rows and clamp their scroll offset before we narrow again.
+      final probeWidth = card.hasSize ? card.size.width.clamp(0.0, width) : width;
+      card.layout(BoxConstraints.tightFor(width: probeWidth), parentUsesSize: true);
     }
     final shown = [
       for (final (i, card) in cards.indexed)
@@ -423,9 +426,7 @@ class RenderDockStack extends RenderBox
       final front = (from.first == i ? 1 - f : 0.0) + (to.first == i ? f : 0.0);
       final beside = front + ((i == spreadFront ? 1.0 : 0.0) - front) * t;
       final room = accessoryRoom * beside + (i == spreadTop ? foldRoom * folding : 0);
-      if (room > 0) {
-        cards[i].layout(BoxConstraints.tightFor(width: (width - room).clamp(0.0, width)), parentUsesSize: true);
-      }
+      cards[i].layout(BoxConstraints.tightFor(width: (width - room).clamp(0.0, width)), parentUsesSize: true);
     }
     double height(int i) => cards[i].size.height;
 

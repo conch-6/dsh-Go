@@ -275,6 +275,7 @@ class _Scanner {
     var deferredStart = deferredEnd < 0 ? -1 : _memo[_candidateStart];
     var cursor = from;
     while (true) {
+      if (end == length) break;
       final at = _nextLiteral(cursor);
       if (at < 0) break;
       final literal = _found;
@@ -290,7 +291,7 @@ class _Scanner {
         }
         deferredStart = -1;
       }
-      if (start >= 0 && (at >= end || end == length)) break;
+      if (start >= 0 && at >= end) break;
       if (format.kind == _Kind.address) {
         deferredEnd = _addressPassword(at);
         deferredStart = deferredEnd < 0 ? -1 : _memo[_candidateStart];

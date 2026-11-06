@@ -112,7 +112,7 @@ void main() {
     });
 
     test(
-      'share: the ZIP lands in the cache under the official name',
+      'share: the ZIP keeps its bytes and official name',
       () => _withRealHttp(() async {
         final shared = <ShareParams>[];
         final exporter = SessionLogExporter(
@@ -123,10 +123,9 @@ void main() {
         );
         expect(exporter.supported, isTrue);
         await exporter.share('s/1');
-        final file = File('${cache.path}/exports/dsh-session-s_1.zip');
-        expect(file.readAsBytesSync(), [0x50, 0x4b, 0x05, 0x06]);
         final params = shared.single;
-        expect(params.files!.single.path, file.path);
+        expect(await params.files!.single.readAsBytes(), [0x50, 0x4b, 0x05, 0x06]);
+        expect(params.files!.single.mimeType, 'application/zip');
         expect(params.fileNameOverrides, ['dsh-session-s_1.zip']);
       }),
     );

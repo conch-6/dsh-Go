@@ -15,7 +15,7 @@ class ReadOnlyBar extends StatelessWidget {
   final String? text;
 
   /// A one-line composer: the 40 keys plus 8 on each side.
-  static const height = 56.0;
+  static const height = 48.0;
 
   @override
   Widget build(BuildContext context) {

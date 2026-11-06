@@ -277,10 +277,10 @@ class _ShareImageCellState extends ConsumerState<_ShareImageCell> {
     switch (widget.image) {
       case ShareProvidedImage(:final provider):
         _decode(provider);
-      case ShareAttachmentImage(:final attachmentId):
+      case ShareAttachmentImage(:final attachment):
         final sessionId = _sessionId;
         if (sessionId == null) return _fail();
-        _subscription = ref.listenManual(sessionImageProvider((sessionId, attachmentId)), (_, next) {
+        _subscription = ref.listenManual(sessionImageProvider((sessionId, attachment)), (_, next) {
           switch (next) {
             case AsyncData(:final value):
               _decode(MemoryImage(value));

@@ -35,3 +35,28 @@ test('new contribution ids share old uniqueness and reject missing features', ()
   const invalid = structuredClone(pkg); invalid.dshGo.contributes.media[0].id = 'go'; invalid.dshGo.capabilities = ['audio']; const p = parseManifest(invalid, '.')
   assert.equal(p.items.media.length, 0); assert.equal(p.items.micro.length, 0); assert.ok(p.issues.length > 0)
 })
+
+test('a micro feed settles like the others, and records what fails', async () => {
+  const subscribe = (data) => {
+    const h = createTestHost({ pkg, caps: { features: ['micro'] } })
+    h.dshGo.micro('text', { data })
+    return h.subscribeMicro('text')
+  }
+  const tick = () => new Promise((done) => setImmediate(done))
+  const failing = subscribe(async () => { throw new Error('boom') })
+  await failing.settled
+  assert.deepEqual(failing.errors, ['boom'])
+  const thrown = subscribe(() => { throw new Error('thrown') })
+  await thrown.settled
+  assert.deepEqual(thrown.errors, ['thrown'])
+  const late = subscribe(async () => async () => { throw new Error('late') })
+  late.stop()
+  await late.settled
+  await tick()
+  assert.deepEqual(late.errors, ['late'])
+  const live = subscribe(() => async () => { throw new Error('rejected') })
+  await live.settled
+  live.stop()
+  await tick()
+  assert.deepEqual(live.errors, ['rejected'])
+})

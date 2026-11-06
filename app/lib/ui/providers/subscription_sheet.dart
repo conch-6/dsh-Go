@@ -119,6 +119,9 @@ class _SubscriptionLoginSheetState extends ConsumerState<SubscriptionLoginSheet>
   }
 
   void _retry() {
+    _copiedTimer?.cancel();
+    _copiedTimer = null;
+    _copied = null;
     _answer.clear();
     _opened = null;
     _browserFailed = false;
@@ -415,7 +418,7 @@ final _cjk = RegExp(r'[\u4e00-\u9fff]');
 String promptTitle(String? message) {
   final m = message?.toLowerCase() ?? '';
   // l10n:keep matches the engine’s prompt wording
-  return m.contains('url') || m.contains('redirect') || m.contains('链接')
+  return m.contains('url') || m.contains('redirect') || m.contains('链接') || m.contains('网址')
       ? appL10n.engineSubscriptionPasteRedirect
       : appL10n.engineSubscriptionPasteCode;
 }
@@ -468,6 +471,7 @@ class _PromptBodyState extends State<_PromptBody> {
     final value = widget.controller.text.trim();
     if (value.isEmpty || widget.busy) return;
     FocusManager.instance.primaryFocus?.unfocus();
+    widget.controller.clear();
     widget.onSubmit(value);
   }
 

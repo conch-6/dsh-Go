@@ -279,13 +279,17 @@ List<ChatRow> deriveRows({
     return artifacts.sublist(start, nextArtifacts);
   }
 
-  /// 把 [pieceStart] 到 [reply] 之间的过程收成一行;返回 [reply] 在 rows 里
-  /// 的新下标(它也收进去了时 null)。[cut]:这一片结束在哪条插话。
+  /// 收起当前片的过程,保留显式正式答案;没有标记时用 [reply] 回退。
+  /// 返回最后一条外露回复的新下标(全收进去时 null)。[cut]:这一片结束在哪条插话。
   int? fold(TurnTrace trace, int? reply, {int? cut}) {
     final start = pieceStart!;
-    // 留在外面的那句话:最后一条有正文的回复,除非它后面还有活(那就整片
-    // 都是过程)。
-    var answer = reply;
+    // Prefer explicit final answers: a late subagent result can produce another
+    // answer in the same turn. Older hosts/models keep the positional fallback.
+    final hasFinalAnswer = rows
+        .getRange(start, pieceEnd)
+        .whereType<AssistantRow>()
+        .any((row) => row.item.isFinalAnswer && row.item.text.trim().isNotEmpty);
+    var answer = hasFinalAnswer ? null : reply;
     if (answer != null) {
       for (var i = answer + 1; i < pieceEnd; i++) {
         final row = rows[i];
@@ -298,6 +302,7 @@ List<ChatRow> deriveRows({
     final end = answer ?? pieceEnd;
     final process = <ChatRow>[];
     final kept = <ChatRow>[];
+    int? keptAnswer;
     var toolCalls = 0;
     var messages = 0;
     for (var i = start; i < end; i++) {
@@ -313,6 +318,15 @@ List<ChatRow> deriveRows({
         case final ToolGroupRow row:
           toolCalls += row.tools.length;
           process.add(row);
+        case final AssistantRow row when row.item.isFinalAnswer && row.item.text.trim().isNotEmpty:
+          var item = row.item;
+          if (item.reasoning.trim().isNotEmpty) {
+            final (thinking, reply) = _splitReasoning(item);
+            process.add(AssistantRow(thinking));
+            item = reply;
+          }
+          keptAnswer = kept.length;
+          kept.add(AssistantRow(item));
         case final AssistantRow row:
           if (row.item.text.trim().isNotEmpty) messages++;
           process.add(AssistantRow(row.item));
@@ -338,7 +352,8 @@ List<ChatRow> deriveRows({
     final removed = (answer == null ? end : answer + 1) - start;
     rows.replaceRange(start, start + removed, replacement);
     pieceEnd += replacement.length - removed;
-    return answerRow == null ? null : start + replacement.length - 1;
+    if (answerRow != null) return start + replacement.length - 1;
+    return keptAnswer == null ? null : start + 1 + keptAnswer;
   }
 
   /// 收尾当前这一片。[cut] 为 null:这一轮到这里结束(不知道属于哪一轮的
@@ -351,10 +366,7 @@ List<ChatRow> deriveRows({
     final trace = turn;
     final done = trace != null && !trace.running && trace.endSeq != null ? trace : null;
     var index = lastText;
-    if (foldTurns &&
-        done != null &&
-        pieceStart != null &&
-        (done.endReason?.isCompleted ?? false)) {
+    if (foldTurns && done != null && pieceStart != null && (done.endReason?.isCompleted ?? false)) {
       index = fold(done, index, cut: cut);
     }
     final footnote = last ? done : null;
@@ -499,5 +511,6 @@ List<ChatRow> deriveRows({
     interrupted: item.interrupted,
     usage: item.usage,
     model: item.model,
+    isFinalAnswer: item.isFinalAnswer,
   ),
 );

@@ -326,7 +326,7 @@ abstract final class AppIcons {
   static const plugin = DshGlyphs.puzzlePiece;
   static const pluginInventory = DshGlyphs.listBullets;
   static const skill = DshGlyphs.bookOpen;
-  static const model = DshGlyphs.sparkle;
+  static const model = DshGlyphs.cpu;
   static const providers = DshGlyphs.sparkle;
 
   /// 模型列表里的一个模型。

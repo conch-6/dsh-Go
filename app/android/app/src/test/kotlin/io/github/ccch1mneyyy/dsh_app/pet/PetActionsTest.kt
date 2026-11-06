@@ -45,9 +45,11 @@ class PetActionsTest {
 
     @Test fun menuOnlyOffersApplicableShortcuts() {
         val base = PetPush.fromMap(mapOf("packId" to "deepy-whale"), 100)
-        assertEquals(listOf(PetMenuItem.ASK, PetMenuItem.NEW_CHAT, PetMenuItem.SNOOZE, PetMenuItem.SETTINGS), PetMenuItem.of(base))
+        assertEquals(listOf(PetMenuItem.ASK, PetMenuItem.NEW_CHAT, PetMenuItem.SCREENSHOT, PetMenuItem.SNOOZE, PetMenuItem.SETTINGS), PetMenuItem.of(base, screenshots = true))
+        assertEquals(listOf(PetMenuItem.ASK, PetMenuItem.NEW_CHAT, PetMenuItem.SNOOZE, PetMenuItem.SETTINGS), PetMenuItem.of(base, screenshots = false))
         val busy = base.copy(canStop = true, hosts = listOf(PetHost("a", "A", true), PetHost("b", "B", false)))
-        assertTrue(PetMenuItem.of(busy).containsAll(listOf(PetMenuItem.STOP, PetMenuItem.SWITCH_HOST)))
+        assertTrue(PetMenuItem.of(busy, screenshots = true).containsAll(listOf(PetMenuItem.STOP, PetMenuItem.SWITCH_HOST)))
+        assertEquals(7, PetMenuItem.of(busy, screenshots = true).size)
     }
 
     @Test fun openBarKeepsPetVisibleAndUndimmedButDoesNotOverrideLockOrForeground() {

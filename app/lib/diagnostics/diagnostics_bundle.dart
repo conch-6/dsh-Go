@@ -17,12 +17,14 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../phone/phone_channel.dart';
 import '../runtime/runtime_bridge.dart';
 import '../performance/performance_state.dart';
 import '../runtime/runtime_state.dart';
 import '../state/app_info.dart';
 import '../state/connection_state.dart';
 import '../state/settings_state.dart';
+import '../state/phone_state.dart' show phoneChannelProvider;
 import '../state/voice_settings.dart';
 import 'diagnostics_channel.dart';
 import 'app_error_log.dart';
@@ -39,6 +41,7 @@ class DiagnosticsSnapshot {
     required this.status,
     required this.settings,
     this.native = const NativeDiagnostics(),
+    this.phone = const PhoneStatus.notReady(),
     this.connection = const {},
     this.performance = const {},
     this.voiceMode = VoiceMode.auto,
@@ -51,6 +54,9 @@ class DiagnosticsSnapshot {
   final RuntimeStatus status;
   final AppSettings settings;
   final NativeDiagnostics native;
+
+  /// A current local status sample; notReady means no observation, not disabled.
+  final PhoneStatus phone;
 
   /// Last observed connection state and remote link stage; may be stale.
   /// `not_observed` means no active observation is currently retained.
@@ -97,6 +103,14 @@ abstract final class DiagnosticsBundle {
         'error': status.error,
       },
       'manifest': s.native.manifest,
+      'phone': {
+        'available': s.phone.ready,
+        if (s.phone.ready) ...{
+          'enabled': s.phone.enabled,
+          'bridgeListening': s.phone.bridgeListening,
+          'a11y': {'enabled': s.phone.a11y.enabled, 'serviceConnected': s.phone.a11y.serviceConnected},
+        },
+      },
       'connection': s.connection,
       'performance': s.performance,
       'voice': {...voiceDiagnosticsFacts(s.native.voice), 'mode': s.voiceMode.name},
@@ -188,6 +202,7 @@ Future<DiagnosticsSnapshot> collectDiagnostics(Ref ref, DateTime at) async {
   }
 
   final native = await attempt(channel.info, const NativeDiagnostics());
+  final phone = await attempt(() => ref.read(phoneChannelProvider).status(), const PhoneStatus.notReady());
   // The log file outlives the app process; the in-memory log is the
   // fallback (and what tests see).
   var engineLog = await attempt(channel.engineLog, const <String>[]);
@@ -205,6 +220,7 @@ Future<DiagnosticsSnapshot> collectDiagnostics(Ref ref, DateTime at) async {
     status: status,
     settings: settings,
     native: native,
+    phone: phone,
     connection: ref.read(connectionDiagnosticsProvider).snapshot,
     performance: performanceDiagnostics(ref),
     voiceMode: await attempt(() => ref.read(voiceSettingsProvider.notifier).ready(), VoiceMode.auto),

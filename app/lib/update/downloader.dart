@@ -124,6 +124,7 @@ class ApkDownloader {
       target = File('${directory.path}/$fileName');
       part = File('${target.path}.part');
       if (await target.exists()) {
+        if (cancel?.isCancelled ?? false) return const DownloadCancelled();
         onVerifying?.call();
         if (await hasher(target) == sha256) return DownloadDone(target, null);
         await target.delete();
@@ -141,8 +142,11 @@ class ApkDownloader {
         if (step == _Step.cancelled) return const DownloadCancelled();
         if (step == _Step.storage) return const DownloadFailed(DownloadFailure.storage);
         if (step == _Step.complete) {
+          // The UI can still cancel while the file is closing or being renamed.
+          if (cancel?.isCancelled ?? false) return const DownloadCancelled();
           try {
             await part.rename(target.path);
+            if (cancel?.isCancelled ?? false) return const DownloadCancelled();
             onVerifying?.call();
             if (await hasher(target) == sha256) return DownloadDone(target, url);
             // Corrupt or tampered: start over from the next source.
@@ -232,6 +236,11 @@ class ApkDownloader {
     }
     if (expectedSize != null && offset == expectedSize && offset > 0) return _Step.complete;
 
+    // A failed cache check or prior source may have left the caller verifying.
+    // Report the actual resume point before waiting for response headers.
+    onProgress?.call(DownloadProgress(received: offset, total: expectedSize, source: url.label));
+    if (cancel?.isCancelled ?? false) return _Step.cancelled;
+
     final UpdateHttpResponse response;
     try {
       response = await http.get(
@@ -245,14 +254,20 @@ class ApkDownloader {
         timeout: connectTimeout,
       );
     } on Object {
-      return _Step.unreachable;
+      return (cancel?.isCancelled ?? false) ? _Step.cancelled : _Step.unreachable;
+    }
+    // Cancellation can arrive while get is waiting for response headers.
+    if (cancel?.isCancelled ?? false) {
+      final body = response.body.listen(null, onError: (Object _) {});
+      unawaited(body.cancel().catchError((Object _) {}));
+      return _Step.cancelled;
     }
 
     var append = false;
     switch (response.status) {
       case 206:
         final start = RegExp(r'bytes (\d+)-').firstMatch(response.headers['content-range'] ?? '')?.group(1);
-        if (start != null && int.parse(start) != offset) {
+        if (start != null && int.tryParse(start) != offset) {
           await response.discard();
           await _deleteQuietly(part);
           return _Step.interrupted;

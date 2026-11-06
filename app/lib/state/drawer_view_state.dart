@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dsh_client/dsh_client.dart';
+import 'package:flutter/widgets.dart' show StringCharacters;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -209,19 +210,27 @@ class DrawerViewController extends Notifier<DrawerView> {
     return id;
   }
 
-  /// Adds a folder at the top and moves [sessionIds] into it; returns its id.
-  Future<String> createFolder(String name, {int? tint, String? emoji, Iterable<String> sessionIds = const []}) async {
-    await _loading;
-    final id = _newId();
-    final members = sessionIds.toSet();
-    await _update(
-      (view) => view.copyWith(
+  /// Adds a folder at the top and moves [sessionIds] into it; returns its id,
+  /// or null when the originating action no longer belongs to this Host.
+  Future<String?> createFolder(
+    String name, {
+    int? tint,
+    String? emoji,
+    Iterable<String> sessionIds = const [],
+    bool Function()? isCurrent,
+  }) async {
+    String? id;
+    await _update((view) {
+      final created = _newId();
+      id = created;
+      final members = sessionIds.toSet();
+      return view.copyWith(
         folders: [
-          DrawerFolder(id: id, name: _clean(name), tint: tint, emoji: emoji, sessionIds: members.toList()),
+          DrawerFolder(id: created, name: _clean(name), tint: tint, emoji: emoji, sessionIds: members.toList()),
           for (final f in view.folders) _without(f, members),
         ],
-      ),
-    );
+      );
+    }, isCurrent: isCurrent);
     return id;
   }
 
@@ -376,7 +385,7 @@ class DrawerViewController extends Notifier<DrawerView> {
 
   static String _clean(String name) {
     final trimmed = name.trim();
-    return trimmed.length <= maxName ? trimmed : trimmed.substring(0, maxName);
+    return trimmed.characters.take(maxName).toString();
   }
 
   static DrawerFolder _without(DrawerFolder f, Set<String> ids) => f.sessionIds.any(ids.contains)
@@ -459,8 +468,9 @@ enum SessionDay { today, yesterday, thisWeek, earlier }
 /// Calendar grouping in local time; weeks start on Monday.
 SessionDay sessionDayOf(DateTime at, DateTime now) {
   final local = at.toLocal();
-  final today = DateTime(now.year, now.month, now.day);
-  final day = DateTime(local.year, local.month, local.day);
+  // Compare calendar dates on a fixed-length day axis, including across DST.
+  final today = DateTime.utc(now.year, now.month, now.day);
+  final day = DateTime.utc(local.year, local.month, local.day);
   final diff = today.difference(day).inDays;
   if (diff <= 0) return SessionDay.today;
   if (diff == 1) return SessionDay.yesterday;

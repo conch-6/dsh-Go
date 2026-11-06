@@ -195,6 +195,7 @@ Widget goldenApp({
   required Brightness brightness,
   List<Override> overrides = const [],
   OnboardingPrefs? prefs,
+  bool animations = false,
 }) {
   return ProviderScope(
     overrides: [
@@ -214,7 +215,7 @@ Widget goldenApp({
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       // Freeze breathing / spinning loops on a still frame.
       builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context).copyWith(disableAnimations: true),
+        data: MediaQuery.of(context).copyWith(disableAnimations: !animations),
         // As the app's root does (lib/app.dart).
         child: MirroredSideInsets(child: child!),
       ),

@@ -17,10 +17,10 @@ import { join, resolve } from 'node:path'
 import { normalize as normalizeEffects, splitPending } from './bridge/effects.js'
 import { ICON, ID, LIMITS, PROTOCOL, TONES } from './bridge/limits.js'
 import { parseManifest, renderPlugin } from './bridge/manifest.js'
-import { chars, isPlainObject, toJson, truncateChars, viewStats, withoutNulls } from './bridge/util.js'
+import { chars, cleanLine, isPlainObject, sanitizeNotes, toJson, truncateChars, viewStats, withoutNulls } from './bridge/util.js'
 
-const CONTEXT_FOR = { 'composer.actions': ['draft', 'clipboard'], 'message.actions': ['message'] }
-const SURFACE_OF = { 'composer.actions': 'composer.actions', 'message.actions': 'message.actions', 'composer.strip': 'composer.strip', panel: 'panels' }
+const CONTEXT_FOR = { 'composer.actions': ['draft', 'clipboard'], 'composer.tools': ['draft', 'clipboard'], 'message.actions': ['message'] }
+const SURFACE_OF = { 'composer.actions': 'composer.actions', 'message.actions': 'message.actions', 'composer.strip': 'composer.strip', panel: 'panels', 'composer.tools': 'composer.tools', 'session.actions': 'session.actions' }
 
 /** The caps an up-to-date app sends (protocol §3.1). */
 export function defaultCaps(overrides = {}) {
@@ -28,7 +28,7 @@ export function defaultCaps(overrides = {}) {
     protocol: PROTOCOL,
     app: '99.0.0',
     locale: 'zh-CN',
-    surfaces: ['composer.actions', 'message.actions', 'composer.strip', 'panels'],
+    surfaces: ['composer.actions', 'message.actions', 'composer.strip', 'panels', 'composer.tools', 'session.actions', 'turn.note', 'plugin'],
     components: JSON.parse(readFileSync(new URL('../schema/view.schema.json', import.meta.url), 'utf8')).$defs.node.properties.type.enum,
     ...overrides,
   }
@@ -37,11 +37,22 @@ export function defaultCaps(overrides = {}) {
 function stripValue(d) {
   if (d === null) return { text: null }
   if (!isPlainObject(d)) return undefined
-  const text = typeof d.text === 'string' ? d.text.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim() : ''
+  const text = typeof d.text === 'string' ? cleanLine(d.text) : ''
   const out = { text: text === '' ? null : chars(text) > LIMITS.textChars.stripText ? truncateChars(text, LIMITS.textChars.stripText) : text }
   if (typeof d.icon === 'string' && ICON.test(d.icon)) out.icon = d.icon
   if (TONES.includes(d.tone)) out.tone = d.tone
   return out
+}
+
+const recordFailure = (feed) => (error) => { feed.errors.push(String(error?.message ?? error)) }
+
+/** A feed's cleanup as the bridge runs it: it may be async, and no failure of it escapes. */
+function runCleanup(fn, failed) {
+  try {
+    Promise.resolve(fn()).catch(failed)
+  } catch (error) {
+    failed(error)
+  }
 }
 
 class HostError extends Error {
@@ -69,16 +80,36 @@ export function createTestHost(options = {}) {
   const logs = []
   const pending = []
   const runtimeIssues = new Map()
-  const regs = { panels: new Map(), strips: new Map(), handlers: new Map(), media: new Map(), micro: new Map(), capability: new Map() }
+  const regs = { panels: new Map(), strips: new Map(), notes: new Map(), handlers: new Map(), media: new Map(), micro: new Map(), capability: new Map() }
   const feeds = new Set()
   const violations = []
 
   const undeclared = (kind, id) => {
     const declared = parsed.ids.get(id)
-    const ok = kind === 'media' || kind === 'micro' ? declared === kind : kind === 'handlers' ? declared !== undefined : kind === 'panels' ? declared === 'panels' : declared === 'composer.strip'
+    const ok = kind === 'media' || kind === 'micro' ? declared === kind : kind === 'handlers' ? declared !== undefined : kind === 'panels' ? declared === 'panels' : kind === 'notes' ? declared === 'turn.note' : declared === 'composer.strip'
     if (!ok) {
-      const name = { panels: 'panel', strips: 'strip', handlers: 'on' }[kind]
+      const name = { panels: 'panel', strips: 'strip', notes: 'turnNote', handlers: 'on' }[kind]
       runtimeIssues.set(`undeclared:${kind}:${id}`, { path: `/runtime/${id}`, code: 'undeclared', severity: 'warn', message: `${name}("${id}") is not declared in dshGo.contributes; ignored` })
+    }
+  }
+
+  const stopFeeds = (id) => {
+    for (const feed of [...feeds]) {
+      if (feed.id !== id) continue
+      feed.stop()
+      feeds.delete(feed)
+    }
+  }
+
+  // As the bridge does: replacing or removing a registration ends its feeds, and the disposer of
+  // one that was replaced leaves its successor alone.
+  const addFeedSource = (map, id, reg) => {
+    if (map.has(id)) stopFeeds(id)
+    map.set(id, reg)
+    return () => {
+      if (map.get(id) !== reg) return
+      map.delete(id)
+      stopFeeds(id)
     }
   }
 
@@ -90,17 +121,25 @@ export function createTestHost(options = {}) {
       if (!isPlainObject(def) || !(isPlainObject(def.view) || typeof def.view === 'function')) throw new TypeError('dshGo.panel: { view } is required (an object or a function)')
       if (def.data !== undefined && typeof def.data !== 'function') throw new TypeError('dshGo.panel: data must be a function (scope, emit) => cancel')
       if (def.actions !== undefined && (!isPlainObject(def.actions) || Object.values(def.actions).some((f) => typeof f !== 'function'))) throw new TypeError('dshGo.panel: actions must map names to functions')
-      regs.panels.set(id, { view: def.view, data: def.data, actions: def.actions })
+      const dispose = addFeedSource(regs.panels, id, { view: def.view, data: def.data, actions: def.actions })
       undeclared('panels', id)
-      return () => regs.panels.delete(id)
+      return dispose
+    },
+    turnNote(id, def) {
+      if (typeof id !== 'string' || !ID.test(id)) throw new TypeError(`dshGo.turnNote: id must match ${ID}`)
+      const data = typeof def === 'function' ? def : def?.data
+      if (typeof data !== 'function') throw new TypeError('dshGo.turnNote: pass (scope, emit) => cancel or { data }')
+      const dispose = addFeedSource(regs.notes, id, { data })
+      undeclared('notes', id)
+      return dispose
     },
     strip(id, def) {
       if (typeof id !== 'string' || !ID.test(id)) throw new TypeError(`dshGo.strips: id must match ${ID}`)
       const data = typeof def === 'function' ? def : def?.data
       if (typeof data !== 'function') throw new TypeError('dshGo.strip: pass (scope, emit) => cancel or { data }')
-      regs.strips.set(id, { data })
+      const dispose = addFeedSource(regs.strips, id, { data })
       undeclared('strips', id)
-      return () => regs.strips.delete(id)
+      return dispose
     },
     media(id, handler) {
       if (typeof id !== 'string' || !ID.test(id) || typeof handler !== 'function') throw new TypeError('invalid media registration')
@@ -180,6 +219,7 @@ export function createTestHost(options = {}) {
     return {
       panels: new Map([...regs.panels].map(([id, r]) => [id, { data: typeof r.data === 'function' }])),
       strips: new Set(regs.strips.keys()),
+      notes: new Set(regs.notes.keys()),
       handlers: new Set(regs.handlers.keys()),
       degraded: false,
       runtimeIssues: [...runtimeIssues.values()],
@@ -189,7 +229,7 @@ export function createTestHost(options = {}) {
   const surfaceItem = (surface, id) => parsed.items[SURFACE_OF[surface]]?.find((x) => x.id === id)
 
   function findSurface(id) {
-    for (const surface of ['composer.actions', 'message.actions', 'composer.strip']) if (surfaceItem(surface, id)) return surface
+    for (const surface of ['composer.actions', 'message.actions', 'composer.strip', 'composer.tools', 'session.actions']) if (surfaceItem(surface, id)) return surface
     if (surfaceItem('panel', id)) return 'panel'
     return undefined
   }
@@ -268,6 +308,7 @@ export function createTestHost(options = {}) {
       return {
         panels: [...regs.panels.keys()],
         strips: [...regs.strips.keys()],
+        notes: [...regs.notes.keys()],
         handlers: [...regs.handlers.keys()],
         dataPanels: [...regs.panels].filter(([, r]) => typeof r.data === 'function').map(([id]) => id),
       }
@@ -275,7 +316,7 @@ export function createTestHost(options = {}) {
     /** The plugin's row in GET /dsh-go/v1/contributions for `caps`. */
     contributions(capsOverride = {}) {
       const c = { ...caps, ...capsOverride }
-      return renderPlugin(parsed, { versions: [c.protocol ?? PROTOCOL], app: c.app, locale: c.locale, features: c.features }, live())
+      return renderPlugin(parsed, { versions: [c.protocol ?? PROTOCOL], app: c.app, locale: c.locale, surfaces: c.surfaces, features: c.features }, live())
     },
     /**
      * POST /dsh-go/v1/invoke. Resolves { effects, issues } like the bridge; rejects with
@@ -327,9 +368,14 @@ export function createTestHost(options = {}) {
       const def = regs.micro.get(id)
       if (!caps.features?.includes('micro') || !parsed.capabilities?.includes('micro') || !(parsed.items.micro ?? []).some(x => x.id === id) || !def) throw new HostError(404, 'not-found', 'no micro')
       let closed = false, cancel
-      const feed = { id, scope, data: undefined, history: [], errors: [], stale: 0, stop() { if (closed) return; closed = true; cancel?.() } }
+      const feed = { id, scope, data: undefined, history: [], errors: [], stale: 0, settled: Promise.resolve(), stop() { if (closed) return; closed = true; if (cancel) runCleanup(cancel, failed) } }
+      const failed = recordFailure(feed)
       const emit = value => { if (closed) return; const model = microModel(value); if (!model) { feed.errors.push('invalid micro model'); return } feed.data = model; feed.history.push(model) }
-      Promise.resolve(def.data({ ...scope }, emit, { protocol: 1, locale: caps.locale })).then(fn => { if (typeof fn === 'function') { if (closed) fn(); else cancel = fn } })
+      feed.settled = new Promise(resolve => resolve(def.data({ ...scope }, emit, { protocol: 1, locale: caps.locale }))).then(fn => {
+        if (typeof fn !== 'function') return
+        if (closed) runCleanup(fn, failed)
+        else cancel = fn
+      }).catch(failed)
       feeds.add(feed)
       return feed
     },
@@ -359,24 +405,41 @@ export function createTestHost(options = {}) {
       return { view: json.value, stats: { bytes: json.bytes, ...viewStats(json.value) }, source: reg !== undefined ? 'registered' : 'file' }
     },
     /**
-     * Start the data function of panel or strip `id` for `scope`. `feed.data` is the latest
-     * value as the app would hold it (nulls dropped, strip text cut to 24); `feed.history` all
-     * of them. No 4 Hz throttling here: every emit is recorded.
+     * Start the data function of panel, strip or turn note `id` for `scope`. `feed.data` is the
+     * latest value as the app would hold it (nulls dropped, strip text cut to 24); `feed.history`
+     * all of them; `feed.settled` resolves once the data function has finished starting. Removing
+     * or replacing the registration stops the feed. No 4 Hz throttling here: every emit is recorded.
      */
     subscribe(id, scope = {}) {
-      const strip = regs.strips.get(id)
-      const panel = regs.panels.get(id)
-      const dataFn = strip?.data ?? panel?.data
-      const feed = { id, scope, data: undefined, history: [], stale: 0, errors: [], stop: () => {} }
+      // As the bridge does: the manifest says what this id is, whatever else is registered under it.
+      const kind = parsed.ids.get(id)
+      const reg = { 'composer.strip': regs.strips, 'turn.note': regs.notes, panels: regs.panels }[kind]?.get(id)
+      const dataFn = reg?.data
+      let stopped = false
+      let cancel
+      const feed = {
+        id, scope, data: undefined, history: [], stale: 0, errors: [], settled: Promise.resolve(),
+        stop: () => {
+          stopped = true
+          const fn = cancel
+          cancel = undefined
+          if (typeof fn === 'function') runCleanup(fn, failed)
+        },
+      }
+      const failed = recordFailure(feed)
       if (typeof dataFn !== 'function') {
         feed.data = null
         return feed
       }
       const emit = (d) => {
+        if (stopped) return
         let value
-        if (strip !== undefined) {
+        if (kind === 'composer.strip') {
           value = stripValue(d)
           if (value === undefined) return feed.errors.push(`strip(${id}) emitted a non-object`)
+        } else if (kind === 'turn.note') {
+          value = sanitizeNotes(d)
+          if (value === undefined) return feed.errors.push(`turnNote(${id}) emitted a non-object`)
         } else {
           if (d !== null && !isPlainObject(d)) return feed.errors.push(`data(${id}) emitted a non-object`)
           const json = toJson(d)
@@ -387,14 +450,18 @@ export function createTestHost(options = {}) {
         feed.data = value
         feed.history.push(value)
       }
-      let cancel
       try {
-        cancel = dataFn({ ...scope }, emit, { protocol: caps.protocol, locale: caps.locale })
+        const result = dataFn({ ...scope }, emit, { protocol: caps.protocol, locale: caps.locale })
+        if (typeof result === 'function') cancel = result
+        // A cleanup that arrives after stop() still has to run.
+        else feed.settled = Promise.resolve(result).then((fn) => {
+          if (typeof fn !== 'function') return
+          if (stopped) runCleanup(fn, failed)
+          else cancel = fn
+        }).catch(failed)
       } catch (error) {
-        feed.errors.push(String(error?.message ?? error))
+        failed(error)
       }
-      Promise.resolve(cancel).then((c) => { if (typeof c === 'function') feed.stop = c })
-      if (typeof cancel === 'function') feed.stop = cancel
       feeds.add(feed)
       return feed
     },

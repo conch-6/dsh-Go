@@ -107,7 +107,7 @@ extension SessionActivationApi on DshClient {
       }
       return identical(mux.generation, generation) &&
           mux.state == DshConnectionState.connected &&
-          version == '0.2.2-alpha.2';
+          (version == '0.2.2-alpha.2' || version == '0.2.2-rc.1');
     } on Object {
       // Negative and unknown results are cached only for this generation.
       return false;

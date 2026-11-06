@@ -449,7 +449,7 @@ class VoiceModelController extends Notifier<VoiceModelState> {
     final replacing = _replacing;
     _replacing = false;
     _cancelled = true;
-    _run++;
+    final run = ++_run;
     _poll?.cancel();
     _download?.cancel();
     _download = null;
@@ -477,8 +477,8 @@ class VoiceModelController extends Notifier<VoiceModelState> {
     // stop not reported yet leaves it where it is (a later 重新下载 or delete
     // removes it after the same check, the next start in any case).
     if (replacing && !downloadStopping) await _dropStaging();
+    if (!_alive(run)) return;
     _line(null);
-    if (!ref.mounted) return;
     state = replacing
         ? _kept.copyWith(wanted: false)
         : state.copyWith(status: _client == null ? VoiceModelStatus.waiting : VoiceModelStatus.absent, clearFailure: true);

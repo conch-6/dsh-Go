@@ -14,8 +14,8 @@ import 'wallpaper_backdrop.dart';
 Future<void> showWallpaperPreview(BuildContext context) => Navigator.of(context).push(
   PageRouteBuilder<void>(
     opaque: true,
-    transitionDuration: AppMotion.standard,
-    reverseTransitionDuration: AppMotion.quick,
+    transitionDuration: AppMotion.of(context, AppMotion.standard),
+    reverseTransitionDuration: AppMotion.of(context, AppMotion.quick),
     pageBuilder: (context, _, _) => const WallpaperPreviewPage(),
     transitionsBuilder: (context, animation, _, child) => FadeTransition(opacity: animation, child: child),
   ),

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dsh_app/state/artifact_files.dart';
@@ -14,6 +15,10 @@ class _Carrier extends DshCarrier {
   String version = 'v1';
   int? size = 4;
   final requests = <Completer<RpcResult>>[];
+  final requestSessions = <String>[];
+  String? drainSession;
+  int closeCalls = 0;
+  void Function(int index, String session)? onRead;
   final entered = List.generate(8, (_) => Completer<void>());
 
   @override
@@ -24,18 +29,26 @@ class _Carrier extends DshCarrier {
   @override
   Future<RpcResult> call(String endpoint, Map<String, Object?> args, {Duration? timeout}) async {
     if (endpoint == 'workspaceFiles/stat') {
-      return RpcOk({'absolutePath': _artifact.path, 'version': version, 'bytes': size});
+      return RpcOk({'absolutePath': args['path'], 'version': version, 'bytes': size});
     }
     if (endpoint == 'workspaceFiles/readBytes') {
       final request = Completer<RpcResult>();
       requests.add(request);
+      final session = args['workspaceFileScopeId'] as String;
+      requestSessions.add(session);
       entered[requests.length - 1].complete();
+      if (closeCalls > 0) {
+        request.completeError(const DshClosedException('carrier closed'));
+      } else if (session == drainSession) {
+        request.complete(const RpcOk({'data': <int>[], 'eof': true}));
+      }
+      onRead?.call(requests.length - 1, session);
       return request.future;
     }
     return const RpcError(DshRemoteException('gateway/not-found', 'missing'));
   }
 
-  void succeed(int index, {List<int> bytes = const [1, 2, 3, 4], String responseVersion = 'v1'}) {
+  void succeed(int index, {List<int> bytes = const [1, 2, 3, 4], String responseVersion = 'v1', bool eof = true}) {
     requests[index].complete(
       RpcOk({
         'absolutePath': _artifact.path,
@@ -43,7 +56,7 @@ class _Carrier extends DshCarrier {
         'bytes': bytes.length,
         'offset': 0,
         'data': bytes,
-        'eof': true,
+        'eof': eof,
       }),
     );
   }
@@ -55,7 +68,9 @@ class _Carrier extends DshCarrier {
   @override
   Future<DshMuxLink> openLink(MuxOptions options) => throw UnsupportedError('unused');
   @override
-  Future<void> close() async {}
+  Future<void> close() async {
+    closeCalls++;
+  }
 }
 
 class _Rig {
@@ -82,6 +97,51 @@ class _Rig {
 
 Future<Object> _observed(Future<Object> future) =>
     future.then<Object>((value) => value, onError: (Object error, StackTrace _) => error);
+
+const _noSpace = FileSystemException('write failed', '', OSError('No space left', 28));
+
+class _FailingConsumer implements StreamConsumer<List<int>> {
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await for (final _ in stream) {
+      throw _noSpace;
+    }
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
+class _FailingHandle implements RandomAccessFile {
+  _FailingHandle(this.file);
+  final RandomAccessFile file;
+  @override
+  Future<RandomAccessFile> writeFrom(List<int> buffer, [int start = 0, int? end]) async => throw _noSpace;
+  @override
+  Future<void> close() => file.close();
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FaultFile implements File {
+  _FaultFile(this.file, {required this.openFailure, required this.makeFile});
+  final File file;
+  final bool openFailure;
+  final File Function(String) makeFile;
+  File get missing => makeFile('${file.path}.missing-parent/clip');
+  @override
+  String get path => file.path;
+  @override
+  Directory get parent => file.parent;
+  @override
+  IOSink openWrite({FileMode mode = FileMode.write, Encoding encoding = utf8}) =>
+      openFailure ? missing.openWrite(mode: mode, encoding: encoding) : IOSink(_FailingConsumer());
+  @override
+  Future<RandomAccessFile> open({FileMode mode = FileMode.read}) async =>
+      openFailure ? await missing.open(mode: mode) : _FailingHandle(await file.open(mode: mode));
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -204,6 +264,117 @@ void main() {
     expect(await File('${current.parent.path}/.version').readAsString(), 'v2');
     await rig.files.materialize('s1', _artifact);
     expect(rig.carrier.requests.length, 3);
+    await rig.noStagingLeft();
+  });
+  for (final openFailure in [false, true]) {
+    test('async ${openFailure ? 'open' : 'write'} failure stays in materialize and leaves its peer alive', () async {
+      // The peer already owns a staging directory, and shares the real DshClient.
+      final peer = _observed(rig.files.materialize('peer', _artifact));
+      await rig.carrier.entered[0].future;
+      final outer = Zone.current;
+      File realFile(String path) => outer.run(() => File(path));
+      final zoneErrors = <Object>[];
+      final firstFailure = Completer<void>();
+      final finished = Completer<Object>();
+      void signal() {
+        if (!firstFailure.isCompleted) firstFailure.complete();
+      }
+
+      runZonedGuarded(
+        () => IOOverrides.runZoned(
+          () async {
+            try {
+              finished.complete(await rig.files.materialize('s1', _artifact));
+            } catch (error) {
+              finished.complete(error);
+            } finally {
+              signal();
+            }
+          },
+          createFile: (path) {
+            final file = realFile(path);
+            return path.split('/').any((part) => part.startsWith('.part-'))
+                ? _FaultFile(file, openFailure: openFailure, makeFile: realFile)
+                : file;
+          },
+        ),
+        (error, _) {
+          zoneErrors.add(error);
+          signal();
+        },
+      );
+      if (!openFailure) {
+        await rig.carrier.entered[1].future;
+        rig.carrier.succeed(1, bytes: [1, 2], eof: false);
+      }
+      await firstFailure.future;
+      // Old code can be awaiting a second RPC after losing the sink error to the zone.
+      // Settle every outstanding/future window deterministically before asserting.
+      rig.carrier.drainSession = 's1';
+      for (var i = 1; i < rig.carrier.requests.length; i++) {
+        if (rig.carrier.requestSessions[i] == 's1' && !rig.carrier.requests[i].isCompleted) {
+          rig.carrier.succeed(i, bytes: const []);
+        }
+      }
+      final failure = await finished.future;
+      final filesBeforePeer = await rig.cache.list(recursive: true).where((f) => f is File).toList();
+      final stagesBeforePeer = await rig.cache
+          .list(recursive: true)
+          .where((f) => f is Directory && f.path.split('/').last.startsWith('.part-'))
+          .toList();
+      // The peer must issue a fresh window after the failure has fully settled.
+      final peerWindow = Completer<int>();
+      rig.carrier.onRead = (index, session) {
+        if (session == 'peer' && !peerWindow.isCompleted) peerWindow.complete(index);
+      };
+      rig.carrier.succeed(0, bytes: [1, 2], eof: false);
+      final nextPeerIndex = await Future.any<int?>([peerWindow.future, peer.then((_) => null)]);
+      if (nextPeerIndex != null && !rig.carrier.requests[nextPeerIndex].isCompleted) {
+        rig.carrier.succeed(nextPeerIndex, bytes: [3, 4]);
+      }
+      final successful = await peer;
+      final bytes = successful is File ? await successful.readAsBytes() : null;
+      await rig.noStagingLeft();
+      expect(zoneErrors, isEmpty, reason: 'Every async file error belongs to the materialize Future');
+      if (openFailure) {
+        expect(
+          failure,
+          isA<FileSystemException>()
+              .having((e) => e.osError?.errorCode, 'errno', 2)
+              .having((e) => e.path, 'path', endsWith('.missing-parent/clip')),
+        );
+      } else {
+        expect(failure, same(_noSpace), reason: 'close must not replace the original ENOSPC');
+      }
+      expect(
+        rig.carrier.requestSessions.where((s) => s == 's1'),
+        hasLength(openFailure ? 0 : 1),
+        reason: 'All requests are recorded, including drain and after the failure Future',
+      );
+      expect(rig.carrier.closeCalls, 0, reason: 'A file failure must not close the shared client');
+      expect(nextPeerIndex, isNotNull);
+      expect(rig.carrier.requestSessions.where((s) => s == 'peer'), hasLength(2));
+      expect(successful, isA<File>());
+      expect(
+        filesBeforePeer.where((f) => !f.path.contains('/.part-')),
+        isEmpty,
+        reason: 'No target or version marker is published by the failed download',
+      );
+      expect(stagesBeforePeer, hasLength(1), reason: 'Only the peer staging survives failure cleanup');
+      expect(bytes, [1, 2, 3, 4]);
+      expect(await File('${(successful as File).parent.path}/.version').readAsString(), 'v1');
+    });
+  }
+
+  test('a real zero-byte eof publishes an empty file and matching marker', () async {
+    rig.carrier.size = 0;
+    final download = rig.files.materialize('s1', _artifact);
+    await rig.carrier.entered[0].future;
+    rig.carrier.succeed(0, bytes: const []);
+    final file = await download;
+    expect(await file.length(), 0);
+    expect(await File('${file.parent.path}/.version').readAsString(), 'v1');
+    expect(rig.carrier.requests, hasLength(1));
     await rig.noStagingLeft();
   });
 }

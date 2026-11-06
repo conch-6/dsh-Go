@@ -21,6 +21,7 @@ import 'dart:convert';
 
 import 'package:dsh_client/dsh_client.dart';
 
+import '../l10n/host_text.dart';
 import '../l10n/l10n.dart';
 import '../state/hosts_state.dart';
 import '../ui/chat/media/media_format.dart' show chatTitleShown;
@@ -204,12 +205,8 @@ String approvalText(ApprovalRequest request) {
     'web_search' => appL10n.stateWebSearch,
     final name => appL10n.stateAlertUseTool(name),
   };
-  final display = request.displayReason;
   final reason = snippet(
-    (AppLocale.isEnglish
-            ? display['en'] ?? display['zh-CN'] ?? display['zh-Hans'] ?? display['zh']
-            : display['zh-CN'] ?? display['zh-Hans'] ?? display['zh'] ?? display['en']) ??
-        request.reason,
+    localizedHostText(request.displayReason, locale: AppLocale.current.toLanguageTag(), fallback: request.reason),
     max: 90,
   );
   return reason == null ? appL10n.stateAlertApprovalAction(action) : appL10n.stateAlertApprovalReason(action, reason);

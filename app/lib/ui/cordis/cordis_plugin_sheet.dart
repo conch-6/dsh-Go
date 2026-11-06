@@ -14,6 +14,7 @@ import '../../l10n/l10n.dart';
 import '../../state/connection_state.dart';
 import '../../state/cordis_state.dart';
 import '../../state/sessions_state.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/expand_reveal.dart';
 import '../common/list_page_row.dart';
@@ -100,7 +101,7 @@ class _CordisPluginSheetState extends ConsumerState<CordisPluginSheet> {
     if (client == null || _busy != null) return;
     final plugin = _plugin;
     final versions = plugin.packages.length;
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) {
         final l10n = dialog.l10n;

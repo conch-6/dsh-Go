@@ -104,17 +104,18 @@ class ClipPlayer(context: Context, private val listener: Listener) {
         then()
     }
 
-    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-            if (player != null) finish(generation) { listener.onStopped("interrupted") }
-        }
-    }
-
     private fun requestFocus(): Boolean {
         val am = audio ?: return true
+        // A focus event can outlive abandon/re-request. Bind both the listener identity
+        // and its generation to this clip, rather than rebinding an old event to a new one.
+        val gen = generation
         val request = focus ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
             .setAudioAttributes(ATTRIBUTES)
-            .setOnAudioFocusChangeListener(focusListener)
+            .setOnAudioFocusChangeListener { change ->
+                if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                    if (player != null) finish(gen) { listener.onStopped("interrupted") }
+                }
+            }
             .build()
             .also { focus = it }
         return am.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED

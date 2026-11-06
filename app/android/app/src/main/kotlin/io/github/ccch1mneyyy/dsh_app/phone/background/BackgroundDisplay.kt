@@ -69,7 +69,18 @@ class BackgroundDisplay(
             putBoolean(Proto.DETAIL, detail)
             putBoolean(Proto.WANT_IMAGE, image)
         }
-        return snapshot(channel().execute(request), markNew = false)
+        val response = channel().execute(request)
+        requireObservation(response.getBoolean(Proto.OK), response.getString(Proto.ERROR), response.getString(Proto.ERROR_DETAIL))
+        return snapshot(response, markNew = false)
+    }
+
+    /** A failed read is not an empty snapshot; old element numbers are no longer actionable. */
+    internal fun requireObservation(ok: Boolean, code: String?, detail: String?) {
+        if (ok) return
+        lastScreenId = null
+        lastElements = emptyList()
+        previousLabels = emptySet()
+        throw IllegalStateException(Reasons.of(code, detail))
     }
 
     override fun collect(screenId: String, listElementId: Int, maxPages: Int, until: String?): CollectResult {
@@ -189,6 +200,12 @@ class BackgroundDisplay(
             // l10n:keep agent screen protocol
             val text = "屏幕 $id · 后台屏 · 受保护页面（支付或密码），已交还用户"
             return ScreenSnapshot(id, text, appLabel, pkg, secure = true)
+        }
+        if (response.getBoolean(Proto.FRAME_NOT_READY)) {
+            lastScreenId = id; lastElements = emptyList(); previousLabels = emptySet()
+            // l10n:keep agent screen protocol
+            val text = "屏幕 $id · 后台屏\n" + Reasons.of("frameNotReady")
+            return ScreenSnapshot(id, text, appLabel, pkg, secure = false, poorTree = true)
         }
         val elements = buildElements(response, markNew)
         lastElements = elements

@@ -121,9 +121,32 @@ void main() {
       );
     });
 
-    test('DSH Web as shipped and other sites keep the bar', () {
+    test('DSH Web as shipped: a seat in its own header on phones, the bar above', () {
+      // Below its own drawer breakpoint the official layout keeps a leading
+      // seat in the header row: the handle takes it, with no bar of its own.
+      expect(_resolve(_phonePortrait, adapt: false).chrome, WebChrome.seat);
+      expect(_resolve(_tablet600, adapt: false).chrome, WebChrome.seat);
+      // Wider windows have no seat (an icon rail, then the full layout).
+      expect(_resolve(_tablet840, adapt: false).chrome, WebChrome.bar);
+      expect(_resolve(_phoneLandscape, adapt: false).chrome, WebChrome.bar);
       expect(_resolve(_tablet1280, adapt: false).chrome, WebChrome.bar);
+      // Other sites are not DSH Web: the bar as before.
       expect(_resolve(_phoneLandscape, dshWeb: false, adapt: false).chrome, WebChrome.bar);
+    });
+
+    test("DSH Web as shipped on a phone: the handle takes the page's own seat", () {
+      final i = _resolve(_phonePortrait, adapt: false);
+      // The page starts under the status bar: its drawer layout keeps the
+      // leading room (11 down, 12 from the side) for the handle.
+      expect((i.chrome, i.rootTop, i.left), (WebChrome.seat, 52, 0));
+      expect(i.layerTop, 52 + WebChromeMetrics.seatTop + WebChromeMetrics.button + 6);
+      // The reserve is widened from the official 48 to the handle's 52.
+      expect(i.script, contains('--dsh-frame-leading-clearance:52.0px'));
+      // The fullscreen right panel's tab strip starts past the handle too.
+      expect(i.script, contains('padding-left:52.0px!important'));
+      // The official layout stays: no app layout attribute.
+      expect(i.script, contains("removeAttribute('data-dsh-app-layout')"));
+      expect(i.script, isNot(contains("setAttribute('data-dsh-app-layout'")));
     });
   });
 
@@ -216,6 +239,18 @@ void main() {
       // DSH Web runs edge to edge and pads its own root.
       expect(tester.getRect(find.byKey(fakeWebViewKey)), Offset.zero & _phoneLandscape.size);
       expect(_platform.controller.insetsScript, contains('left:52.0px'));
+    });
+
+    testWidgets('DSH Web as shipped on a phone: the handle sits in the page\'s own seat', (tester) async {
+      await _pump(tester, _phonePortrait, phoneLayout: false);
+      // Its own drawer layout keeps the leading room; no bar above the page.
+      expect(find.byKey(const ValueKey('web-controls-seat')), findsOneWidget);
+      expect(find.byKey(const ValueKey('web-controls-bar')), findsNothing);
+      final back = tester.getRect(_button('返回'));
+      expect(back.left, WebChromeMetrics.seatLeft);
+      expect(back.top, 52 + WebChromeMetrics.seatTop);
+      expect(back.size, const Size.square(WebChromeMetrics.button));
+      expect(_platform.controller.insetsScript, contains('--dsh-frame-leading-clearance:52.0px'));
     });
 
     testWidgets('tablet: back sits in the band above the sidebar, on the rail column', (tester) async {

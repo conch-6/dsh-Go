@@ -97,6 +97,8 @@ data class Hazard(val path: String, val kind: String, val detail: String) {
 object SafeMode {
     const val PROFILE = "dsh-app-safe"
     const val GUEST_DIR = "/var/lib/dsh-app/safe-mode"
+    const val ORIGINAL_HOME = "/root/.dsh"
+    const val HOME = "$GUEST_DIR/home"
     const val OVERLAY = "$GUEST_DIR/overlay.patch.yml"
     const val AGENTS_HOME = "$GUEST_DIR/agents"
     const val TOOL = "$GUEST_DIR/bin/dsh-app-plugins"
@@ -109,7 +111,10 @@ object SafeMode {
     private const val LEGACY_SAFE = "/usr/local/bin/dsh $SAFE_PROFILE_ARGS "
 
     /** Extra guest environment for safe starts only. */
-    val GUEST_ENV: Map<String, String> = linkedMapOf("DSH_AGENTS_HOME" to AGENTS_HOME, "DSH_APP_SAFE_MODE" to "1")
+    val GUEST_ENV: Map<String, String> = linkedMapOf(
+        "DSH_HOME" to HOME, "DSH_APP_ORIGINAL_HOME" to ORIGINAL_HOME,
+        "DSH_AGENTS_HOME" to AGENTS_HOME, "DSH_APP_SAFE_MODE" to "1",
+    )
 
     // l10n:keep agent repair briefing
     const val OVERLAY_YAML = """# dsh-app safe mode overlay (rewritten by the app on every safe start).
@@ -118,6 +123,15 @@ object SafeMode {
   disabled: true
 - id: tool-plugin-manager
   disabled: true
+# rc.1 Standard and Creator presets contain their own plugin-manager tools.
+# Keep the shipped PTC and Minimal compositions, which do not enable those tools.
+- id: preset-standard
+  disabled: true
+- id: preset-cordis
+  disabled: true
+- id: agent-preset-registry
+  config:
+    default: ptc
 # No live recomposition: edits to any profile take effect only on the next boot.
 - id: hmr
   disabled: true
@@ -238,6 +252,11 @@ object SafeMode {
     /** Writes the overlay, the agent briefing, the failure data and the repair tool under [GUEST_DIR]. */
     fun prepare(rootfs: File, briefing: Briefing) {
         val dir = realDir(guestFile(rootfs, GUEST_DIR))
+        val home = File(dir, "home")
+        if (Files.isSymbolicLink(home.toPath()) || (home.exists() && !home.isDirectory)) {
+            throw IOException("rescue home must be a real directory: ${home.path}")
+        }
+        realDir(home)
         val agents = realDir(File(dir, "agents"))
         val bin = realDir(File(dir, "bin"))
         writeAtomic(File(dir, "overlay.patch.yml"), OVERLAY_YAML)
@@ -273,7 +292,7 @@ object SafeMode {
             // l10n:keep agent repair briefing
             "用户的正常配置（profile `web`）出了问题。App 用纯净 profile `$PROFILE` 启动了你：只有 DSH 自带组件，" +
                 // l10n:keep agent repair briefing
-                "没有任何第三方插件，插件管理和热加载都关掉了。用户的对话、登录和 API Key 都还在。" +
+                "没有任何第三方插件，插件管理和热加载都关掉了。原对话、登录和 API Key 保留在原目录，未复制到救援环境；救援助手可能需要重新配置模型。" +
                 // l10n:keep agent repair briefing
                 "你的任务是帮用户把 `web` 修好，让它能正常启动。",
         )
@@ -318,11 +337,24 @@ object SafeMode {
         if (b.moved.isNotEmpty()) {
             appendLine(
                 // l10n:keep agent repair briefing
-                "- App 已把这些全局文件改名移开（它们对所有 profile 都生效，会连累安全模式）：${b.moved.joinToString("；")}。" +
+                "- App 已把这些全局文件改名移开（原配置仍需检查这些文件，工作目录 .env 也可能影响安全模式）：${b.moved.joinToString("；")}。" +
                     // l10n:keep agent repair briefing
                     "修好后和用户确认，再决定要不要改回来。",
             )
         }
+        appendLine()
+        // l10n:keep agent repair briefing
+        appendLine("## 原数据与救援数据")
+        // l10n:keep agent repair briefing
+        appendLine("- 安全模式默认使用官方 PTC 预设，也可选择官方 Minimal；Standard 和 Creator 依赖已关闭的插件管理服务，在安全模式中不可用。正常模式的预设不变。")
+        // l10n:keep agent repair briefing
+        appendLine("- 当前救援 DSH_HOME 是 `$HOME`；原数据在 `$ORIGINAL_HOME`，修复工具和 trial 始终针对原目录。原对话不会显示在救援会话列表里。")
+        // l10n:keep agent repair briefing
+        appendLine("- 救援模式的 App 诊断快照在 `$HOME/dsh-app/diagnostics.md`；先在 App 设置里生成诊断。")
+        // l10n:keep agent repair briefing
+        appendLine("- 无需模型或发送消息：已有救援会话可直接打开标题详情里的终端。首次空库时，先切换到「网页模式」，让官方页面自动创建空救援会话，再通过 DSH 原生悬浮手柄「切回原生界面」保留该会话，打开标题详情里的终端。运行 `$TOOL export \"\$PWD/dsh-recovery.tar\"`，再在该对话的文件页长按归档保存到手机。必须指定尚不存在、位于原数据目录之外的输出文件。")
+        // l10n:keep agent repair briefing
+        appendLine("- 导出保留原始 sessions、attachments 和 workspace 元数据，包括损坏记录；不会修复数据，不是完整插件或工作区备份。符号链接只保存链接，不读取目标。归档含私人对话和图片，妥善保存；诊断包使用 App 设置里的诊断导出入口。")
         appendLine()
         // l10n:keep agent repair briefing
         appendLine("## 主配置在哪")
@@ -333,7 +365,7 @@ object SafeMode {
         // l10n:keep agent repair briefing
         appendLine("- `/root/.dsh/profiles/web/.plugin-manager/logs/`：插件安装日志；`/root/.dsh/logs/`：DSH 的启动诊断。")
         // l10n:keep agent repair briefing
-        appendLine("- 对所有 profile（包括你现在这个）都生效：`/root/.dsh/cordis.patch.yml`、`/root/.dsh/.env`、`/root/.env`。")
+        appendLine("- 原数据根下的配置受 `/root/.dsh/cordis.patch.yml`、`/root/.dsh/.env` 影响；救援数据根与它们隔离。工作目录的 `/root/.env` 仍需单独检查。")
         if (b.lkgAt == null) {
             // l10n:keep agent repair briefing
             appendLine("- App 还没有记录过正常运行时的插件配置。")
@@ -371,7 +403,7 @@ object SafeMode {
             "2. 设置写坏了：先备份 `cp /root/.dsh/profiles/web/cordis.patch.yml /root/.dsh/profiles/web/cordis.patch.yml.bak-\$(date +%Y%m%d%H%M)`，再改原文件。",
         )
         // l10n:keep agent repair briefing
-        appendLine("3. 用户确认不要这个插件了，再卸载：`dsh plugin --profile web remove <包名>`。")
+        appendLine("3. 用户确认不要这个插件了，再卸载：`DSH_HOME=$ORIGINAL_HOME dsh plugin --profile web remove <包名>`。")
         appendLine(
             // l10n:keep agent repair briefing
             "4. 实在修不好，先问用户，再 `mv /root/.dsh/profiles/web /root/.dsh/profiles/web.broken-\$(date +%Y%m%d%H%M)`：" +
@@ -395,7 +427,7 @@ object SafeMode {
         // l10n:keep agent repair briefing
         appendLine("## 不要做")
         // l10n:keep agent repair briefing
-        appendLine("- 不要往 `$PROFILE` 装插件，不要改 `$GUEST_DIR/`、`/opt/dsh`、`/opt/node`：下次安全启动时它们会被重建或覆盖。")
+        appendLine("- 不要往 `$PROFILE` 装插件，不要改救援工具、说明、`/opt/dsh`、`/opt/node`：它们会被重建或覆盖。救援 HOME 内的新对话保留，与原对话分开。")
         // l10n:keep agent repair briefing
         appendLine("- 不要结束 `/tmp/dsh-web.pid` 里的进程（那就是你自己），不要 `pkill node`。")
         // l10n:keep agent repair briefing
@@ -491,13 +523,14 @@ object SafeMode {
 //   disable <pkg>...     drop packages from dsh.profile.bundles (files stay; enable undoes it)
 //   enable <pkg>...      put installed packages back into dsh.profile.bundles
 //   blame [row-id...]    which package inserted / patched each config row (dsh --dump-config)
-//   trial [profile]      boot the profile on a spare port and report PASS / FAIL
+//   trial [profile]      boot the original profile on a spare port and report PASS / FAIL
+//   export <output.tar>  preserve raw original conversations outside the original HOME
 'use strict'
 const fs = require('fs')
 const path = require('path')
 const cp = require('child_process')
 
-const HOME = process.env.DSH_HOME || '/root/.dsh'
+const HOME = process.env.DSH_APP_ORIGINAL_HOME || process.env.DSH_HOME || '/root/.dsh'
 const SAFE = process.env.DSH_APP_SAFE_DIR || '/var/lib/dsh-app/safe-mode'
 const APP_PATCH = process.env.DSH_APP_PATCH || '/etc/dsh-app/dsh-web.patch.yml'
 const SHIPPED = '@deepseek-ai/'
@@ -640,10 +673,70 @@ function enable (names) {
   out(changed ? '已启用：' + names.join('、') + '。重启到正常模式后生效。' : '这些包本来就是启用的')
 }
 
+// A raw rescue copy, independent of session parsing and model credentials.
+function exportOriginal (args) {
+  if (args.length !== 1 || !args[0]) die('用法：dsh-app-plugins export <output.tar>')
+  let output
+  let fd
+  try {
+    const home = fs.realpathSync(HOME)
+    const requested = path.resolve(args[0])
+    output = path.join(fs.realpathSync(path.dirname(requested)), path.basename(requested))
+    const relative = path.relative(home, output)
+    if (!relative || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative))) {
+      throw new Error('输出文件必须位于原 DSH_HOME 之外')
+    }
+    const sessions = fs.lstatSync(path.join(home, 'sessions'))
+    if (!sessions.isDirectory()) throw new Error('原 sessions 必须是真实目录，不能是符号链接')
+    const entries = ['sessions']
+    function optional (name, directory) {
+      let info
+      try { info = fs.lstatSync(path.join(home, name)) } catch (e) {
+        if (e.code === 'ENOENT') return
+        throw e
+      }
+      if (info.isSymbolicLink()) throw new Error('不读取符号链接：' + name)
+      if (directory ? !info.isDirectory() : !info.isFile()) throw new Error('不支持的文件类型：' + name)
+      entries.push(name)
+    }
+    optional('attachments', true)
+    let storage
+    try { storage = fs.lstatSync(path.join(home, 'storages')) } catch (e) {
+      if (e.code !== 'ENOENT') throw e
+    }
+    if (storage) {
+      if (!storage.isDirectory()) throw new Error('原 storages 必须是真实目录，不能是符号链接')
+      optional('storages/workspace.json', false)
+      optional('storages/workspace', true)
+    }
+    fd = fs.openSync(output, 'wx', 0o600)
+    const env = Object.assign({}, process.env)
+    delete env.TAR_OPTIONS
+    const result = cp.spawnSync('tar', ['--create', '--file', '-', '--directory', home, '--'].concat(entries), {
+      env: env, stdio: ['ignore', fd, 'pipe'], encoding: 'utf8'
+    })
+    if (result.error) throw result.error
+    if (result.status !== 0) throw new Error('tar 导出失败：' + (result.stderr || result.signal || result.status))
+    fs.fsyncSync(fd)
+    fs.closeSync(fd)
+    fd = undefined
+    out('已导出原始对话备份：' + output)
+    out('包含：' + entries.join('、') + '。不含完整工作区、插件、凭据和诊断日志；符号链接不读取目标。')
+  } catch (e) {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd) } catch (_) {}
+      try { fs.unlinkSync(output) } catch (_) {}
+    }
+    die('导出失败：' + e.message)
+  }
+}
+
 function cleanEnv () {
   const env = Object.assign({}, process.env)
   delete env.DSH_AGENTS_HOME
   delete env.DSH_APP_SAFE_MODE
+  delete env.DSH_APP_ORIGINAL_HOME
+  env.DSH_HOME = HOME
   return env
 }
 function patchArgs () { return fs.existsSync(APP_PATCH) ? ['--patch', APP_PATCH] : [] }
@@ -764,8 +857,9 @@ else if (command === 'disable') disable(rest)
 else if (command === 'enable') enable(rest)
 else if (command === 'blame') blame(rest)
 else if (command === 'trial') trial(rest)
+else if (command === 'export') exportOriginal(rest)
 else {
-  out('用法：dsh-app-plugins list | disable <包名>... | enable <包名>... | blame [配置行 id...] | trial [profile]')
+  out('用法：dsh-app-plugins list | disable <包名>... | enable <包名>... | blame [配置行 id...] | trial [profile] | export <output.tar>')
   process.exit(command ? 1 : 0)
 }
 """

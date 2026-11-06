@@ -39,6 +39,72 @@ async function stars(now: number, env = makeEnv().env) {
 }
 
 describe('GET /api/github/stars', () => {
+  it('coalesces overlapping cold requests into one upstream read', async () => {
+    const gate = Promise.withResolvers<void>();
+    answer = async () => {
+      await gate.promise;
+      return Response.json({ stargazers_count: 1234 });
+    };
+    const env = makeEnv().env;
+    const requests = Array.from({ length: 20 }, () => {
+      const { ctx, settle } = makeCtx();
+      return worker.fetch(get(), env, ctx).then(async (res) => {
+        await settle();
+        return { status: res.status, body: await res.json() };
+      });
+    });
+    gate.resolve();
+    expect(await Promise.all(requests)).toEqual(Array.from({ length: 20 }, () => ({ status: 200, body: { stars: 1234 } })));
+    expect(github).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces failed refreshes while every caller retains its stale count', async () => {
+    await stars(T0);
+    const gate = Promise.withResolvers<void>();
+    answer = async () => {
+      await gate.promise;
+      return new Response('rate limited', { status: 403 });
+    };
+    const requests = Array.from({ length: 20 }, () => stars(T0 + STARS_FRESH_MS));
+    gate.resolve();
+    const results = await Promise.all(requests);
+    expect(results.every((r) => r.status === 200 && r.body.stars === 1234)).toBe(true);
+    expect(github).toHaveBeenCalledTimes(2); // one initial success, one failed refresh
+    await stars(T0 + STARS_FRESH_MS + STARS_RETRY_MS - 1);
+    expect(github).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not share in-flight upstream authorization between different tokens', async () => {
+    const gate = Promise.withResolvers<void>();
+    answer = async () => {
+      await gate.promise;
+      return Response.json({ stargazers_count: 1234 });
+    };
+    const first = stars(T0, makeEnv({ GITHUB_TOKEN: 'first-test-token' }).env);
+    const second = stars(T0, makeEnv({ GITHUB_TOKEN: 'second-test-token' }).env);
+    gate.resolve();
+    expect((await Promise.all([first, second])).map((r) => r.body)).toEqual([{ stars: 1234 }, { stars: 1234 }]);
+    expect(github).toHaveBeenCalledTimes(2);
+    const authorization = github.mock.calls.map((call) => new Headers((call as [string, RequestInit])[1].headers).get('Authorization'));
+    expect(authorization).toEqual(['Bearer first-test-token', 'Bearer second-test-token']);
+  });
+
+  it('releases a failed in-flight read so the next uncached request can retry', async () => {
+    delete (globalThis as { caches?: unknown }).caches;
+    const gate = Promise.withResolvers<void>();
+    answer = async () => {
+      await gate.promise;
+      throw new TypeError('network down');
+    };
+    const requests = Array.from({ length: 5 }, () => stars(T0));
+    gate.resolve();
+    expect((await Promise.all(requests)).every((r) => r.status === 503)).toBe(true);
+    expect(github).toHaveBeenCalledTimes(1);
+    answer = () => Response.json({ stargazers_count: 1240 });
+    expect((await stars(T0 + 1)).body).toEqual({ stars: 1240 });
+    expect(github).toHaveBeenCalledTimes(2);
+  });
+
   it('asks GitHub from the Worker and answers {stars}', async () => {
     const { ctx, settle } = makeCtx();
     const res = await worker.fetch(get(), makeEnv().env, ctx);

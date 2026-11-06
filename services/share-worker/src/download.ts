@@ -52,7 +52,7 @@ function found(location: string): Response {
  *  uncounted (a page left open across a release, a made-up link). */
 async function get(request: Request, env: Env, ctx: Ctx, url: URL): Promise<Response> {
   const via = url.searchParams.get('via');
-  const build = await latestBuild(env);
+  const build = await latestBuild(env, ctx);
   const route = build && url.searchParams.get('v') === build.version ? routesFor(env, build, globalUrl(env, build)).find((r) => r.id === via) : undefined;
   if (!build || !route) return found(via && /^(cn|global|github)$/.test(via) ? `/download?via=${via}` : '/download');
   // HEAD (publish-release.sh checking the links) and floods aren't counted;
@@ -70,7 +70,7 @@ export async function download(request: Request, env: Env, ctx: Ctx): Promise<Re
 
   if (path === '/download') {
     const inApp = inAppBrowser(request);
-    const build = inApp ? null : await latestBuild(env);
+    const build = inApp ? null : await latestBuild(env, ctx);
     let card = null;
     if (build) {
       // The buttons go through /download/get, which counts and redirects.

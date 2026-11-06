@@ -1,5 +1,7 @@
 package io.github.ccch1mneyyy.dsh_app.phone.background
 
+import io.github.ccch1mneyyy.dsh_app.R
+
 /**
  * WRITE_SECURE_SETTINGS for 自动恢复无障碍 ([io.github.ccch1mneyyy.dsh_app.phone.a11y.A11yKeeper]):
  * which one-tap way to it the shell-uid engine offers right now, and the command for granting it
@@ -37,6 +39,26 @@ object SecureSettingsGrant {
     }
 
     fun command(packageName: String): String = "adb shell pm grant $packageName $PERMISSION"
+
+    /** One grant attempt, retained before a temporary channel is normally closed. */
+    enum class Attempt { UNAVAILABLE, DENIED, EXECUTED, FAILED, CANCELLED }
+
+    /** RPC acknowledgement is not a permission receipt; the caller must read permission back. */
+    fun attempt(ok: Boolean, error: String?): Attempt = when {
+        ok -> Attempt.EXECUTED
+        error == "systemOperationDenied" -> Attempt.DENIED
+        error == "deviceUnavailable" -> Attempt.UNAVAILABLE
+        else -> Attempt.FAILED
+    }
+
+    /** A true permission readback wins even when this attempt failed or was cancelled. */
+    fun failureReason(granted: Boolean, attempt: Attempt): Int? = if (granted) null else when (attempt) {
+        Attempt.UNAVAILABLE -> R.string.a11y_keeper_grant_unavailable
+        Attempt.DENIED -> R.string.a11y_keeper_grant_denied
+        Attempt.EXECUTED -> R.string.a11y_keeper_grant_not_acquired
+        Attempt.FAILED -> R.string.a11y_keeper_grant_failed
+        Attempt.CANCELLED -> R.string.background_selection_cancelled
+    }
 
     /** `background.privileged.grantPath`: a chosen root never falls back to another provider. */
     fun privilegedPath(granted: Boolean, shizuku: ShizukuStatus, adb: AdbStatus, rootSelected: Boolean, rootConnected: Boolean): String {

@@ -13,9 +13,10 @@ import '../theme/theme.dart';
 sealed class PaletteContent {
   const PaletteContent();
 
-  /// 输入框里的内容需要面板吗(以 `/` 开头,且还在打指令名,或者是一个
-  /// 带参数提示的已知指令)。
+  /// 输入框里的内容需要面板吗(以 `/` 开头,且还在打指令名,或者首行的
+  /// 已知指令有提示文案、参数还未填写)。
   static PaletteContent? of(List<SlashCommand> commands, String text, {int? caret}) {
+    final draft = text;
     if (caret != null) {
       if (caret < 0 || caret > text.length) return null;
       // Text after the cursor may be an existing draft. It must not become
@@ -27,8 +28,17 @@ sealed class PaletteContent {
     if (!input.hasArgs) {
       return PaletteMatches(filterSlashCommands(commands, input.token), typed: input.token.isNotEmpty);
     }
+    // A hint describes an empty argument on this line. Moving back before an
+    // existing argument must not reopen it; name completion above still uses
+    // only the prefix so inserting a slash keeps the draft to its right.
+    if (input.rest!.trim().isNotEmpty ||
+        (caret != null && draft.substring(caret).trim().isNotEmpty) ||
+        text.contains('\n') ||
+        text.contains('\r')) {
+      return null;
+    }
     final command = resolveSlashCommand(commands, input.token);
-    if (command != null && command.takesInput) return PaletteHint(command);
+    if (command != null && (command.hint?.trim().isNotEmpty ?? false)) return PaletteHint(command);
     return null;
   }
 }
@@ -190,7 +200,7 @@ class _CommandTile extends StatelessWidget {
               ),
               constraints: const BoxConstraints(minHeight: 52),
               // 6 + 6 + half of 32 = 28: the icon's centre over the ＋ key's.
-              padding: const EdgeInsets.fromLTRB(6, 8, 12, 8),
+              padding: const EdgeInsets.fromLTRB(2, 8, 12, 8),
               child: Row(
                 children: [
                   SizedBox(width: 32, child: Icon(slashIcon(command), size: 20, color: colors.onSurfaceVariant)),

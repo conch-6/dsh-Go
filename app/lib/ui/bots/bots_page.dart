@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/bots_state.dart';
+import '../common/fluid_bits.dart';
 import '../common/list_page_row.dart';
 import '../features/feature_kit.dart';
 import '../features/feature_widgets.dart';
@@ -269,7 +270,7 @@ class UnreadBadge extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 6),
           child: Center(
             widthFactor: 1,
-            child: Text(
+            child: RollingCount(
               count > 99 ? '99+' : '$count',
               textScaler: TextScaler.noScaling,
               style: AppType.tabular(

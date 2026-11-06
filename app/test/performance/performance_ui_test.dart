@@ -11,12 +11,14 @@ import 'package:dsh_app/pets/pet_pack.dart';
 import 'package:dsh_app/pets/pet_sheets.dart';
 import 'package:dsh_app/state/locale_state.dart';
 import 'package:dsh_app/state/ui_mode_state.dart';
+import 'package:dsh_app/ui/common/app_sheet.dart';
 import 'package:dsh_app/ui/common/display_image.dart';
 import 'package:dsh_app/ui/onboarding/runtime_choice.dart';
 import 'package:dsh_app/runtime/local_footprint.dart';
 import 'package:dsh_app/ui/pets/pet_sprite.dart';
 import 'package:dsh_app/ui/plugins/plugin_widgets.dart';
 import 'package:dsh_app/ui/settings/performance_page.dart';
+import 'package:dsh_app/ui/settings/settings_widgets.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:dsh_app/ui/web/mode_home.dart';
 import 'package:dsh_app/ui/web/web_view_page.dart';
@@ -158,6 +160,121 @@ void main() {
     expect(DshSurfaces.of(context).blurEnabled, isTrue);
   });
 
+  testWidgets('remove animations turned on with the app open takes the transition off pages', (tester) async {
+    window(tester);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    SharedPreferences.setMockInitialValues({'performance.mode': 'full'});
+    await mount(
+      tester,
+      Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const Scaffold(body: Center(child: Text('page'))),
+                ),
+              ),
+              child: const Text('push'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(AppMotion.reduced(tester.element(find.text('push'))), isFalse);
+
+    tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(disableAnimations: true);
+    await tester.pump();
+    expect(AppMotion.reduced(tester.element(find.text('push'))), isTrue);
+    await tester.tap(find.text('push'));
+    await tester.pump();
+    expect(tester.getCenter(find.text('page')).dx, 195);
+    Navigator.of(tester.element(find.text('page'))).pop();
+    await tester.pumpAndSettle();
+
+    // And off again: the transition is back.
+    tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures();
+    await tester.pump();
+    expect(AppMotion.reduced(tester.element(find.text('push'))), isFalse);
+    await tester.tap(find.text('push'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(tester.getCenter(find.text('page')).dx, greaterThan(195));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('the animation switch takes the transition off pages and sheets', (tester) async {
+    window(tester);
+    SharedPreferences.setMockInitialValues({'performance.mode': 'full'});
+    final c = await mount(
+      tester,
+      Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const Scaffold(body: Center(child: Text('page'))),
+                    ),
+                  ),
+                  child: const Text('push'),
+                ),
+                TextButton(
+                  onPressed: () => showAppSheet<void>(context, builder: (_) => const Text('sheet')),
+                  child: const Text('open'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    NavigatorState navigator() => tester.state<NavigatorState>(find.byType(Navigator).first);
+
+    // On: both take their time.
+    await tester.tap(find.text('push'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(tester.getCenter(find.text('page')).dx, greaterThan(195));
+    await tester.pumpAndSettle();
+    navigator().pop();
+    await tester.pump();
+    expect(find.text('page'), findsOneWidget, reason: 'still on its way out');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    final rising = tester.getTopLeft(find.text('sheet')).dy;
+    await tester.pumpAndSettle();
+    final resting = tester.getTopLeft(find.text('sheet')).dy;
+    expect(rising, greaterThan(resting));
+    navigator().pop();
+    await tester.pumpAndSettle();
+
+    // Off, the switch from the settings page: the first frame is the last one.
+    await c.read(performancePrefsProvider.notifier).setAnimations(false);
+    await tester.pumpAndSettle();
+    expect(AppMotion.reduced(tester.element(find.text('push'))), isTrue);
+    await tester.tap(find.text('push'));
+    await tester.pump();
+    expect(tester.getCenter(find.text('page')).dx, 195);
+    navigator().pop();
+    await tester.pump();
+    expect(find.text('page'), findsNothing);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    expect(tester.getTopLeft(find.text('sheet')).dy, resting);
+    navigator().pop();
+    await tester.pump();
+    expect(find.text('sheet'), findsNothing);
+  });
+
   for (final brightness in Brightness.values) {
     for (final language in [AppLanguage.zh, AppLanguage.en]) {
       for (final scale in [1.0, 2.0]) {
@@ -196,6 +313,72 @@ void main() {
       }
     }
   }
+
+  group('fluid motion', () {
+    bool scoped(WidgetTester tester) => tester.widget<AppMotionScope>(find.byType(AppMotionScope)).fluid;
+
+    testWidgets('reaches the whole app, and the switch turns it off', (tester) async {
+      window(tester);
+      final c = await mount(tester, const PerformancePage());
+      await tester.pumpAndSettle();
+      expect(scoped(tester), isTrue);
+      expect(FrameClock.instance.enabled, isTrue);
+      final fluid = find.byKey(const ValueKey('performance-fluid'));
+      await tester.ensureVisible(fluid);
+      await tester.tap(fluid);
+      await tester.pumpAndSettle();
+      expect(c.read(performancePrefsProvider).fluid, isFalse);
+      expect(scoped(tester), isFalse);
+      expect(FrameClock.instance.enabled, isFalse);
+      expect(Theme.of(tester.element(fluid)).splashFactory, isNot(AppInkGlow.splashFactory));
+    });
+
+    testWidgets('with animations off in the system there is no switch to offer', (tester) async {
+      window(tester);
+      tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(
+        disableAnimations: true,
+      );
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      await mount(tester, const PerformancePage());
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('performance-fluid')), findsNothing);
+    });
+
+    testWidgets('a low device starts without it, and its switch comes with animations', (tester) async {
+      window(tester);
+      final c = await mount(tester, const PerformancePage(), tier: DeviceTier.low);
+      await tester.pumpAndSettle();
+      expect(scoped(tester), isFalse);
+      final fluid = find.byKey(const ValueKey('performance-fluid'));
+      expect(fluid, findsNothing);
+      // Light mode leaves animations off; asking for them brings the finer choice.
+      await c.read(performancePrefsProvider.notifier).setAnimations(true);
+      await c.read(performancePrefsProvider.notifier).setFluid(true);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(fluid);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SettingsSwitchTile>(fluid).value, isTrue);
+      expect(scoped(tester), isTrue);
+      await tester.tap(fluid);
+      await tester.pumpAndSettle();
+      expect(c.read(performancePrefsProvider).fluid, isFalse);
+      expect(scoped(tester), isFalse);
+    });
+
+    testWidgets('going back to the mode forgets the choice', (tester) async {
+      window(tester);
+      final c = await mount(tester, const PerformancePage());
+      await tester.pumpAndSettle();
+      await c.read(performancePrefsProvider.notifier).setFluid(false);
+      await tester.pumpAndSettle();
+      final reset = find.byKey(const ValueKey('performance-reset-effects'));
+      await tester.ensureVisible(reset);
+      await tester.tap(reset);
+      await tester.pumpAndSettle();
+      expect(c.read(performancePrefsProvider).fluid, isNull);
+      expect(scoped(tester), isTrue);
+    });
+  });
 
   testWidgets('a low device recommends remote but keeps a deliberate local selection', (tester) async {
     window(tester);

@@ -263,6 +263,7 @@ class _Loopback {
     server.listen((request) async {
       final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map<String, dynamic>;
       received.add({'path': request.uri.path, 'body': body});
+      if (!requestReceived.isCompleted) requestReceived.complete();
       final answer = await result.future;
       request.response.headers.contentType = ContentType.json;
       request.response.write(jsonEncode({'type': 'server-response', 'rpcId': body['rpcId'], 'result': answer}));
@@ -270,6 +271,7 @@ class _Loopback {
     });
   }
   final HttpServer server;
+  final requestReceived = Completer<void>();
   final result = Completer<Map<String, Object?>>();
   final received = <Map<String, Object?>>[];
   static Future<_Loopback> start() async => _Loopback(await HttpServer.bind(InternetAddress.loopbackIPv4, 0));
@@ -629,46 +631,69 @@ void main() {
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
   });
 
-  test('P12 B5 real HTTP in-flight failure after graceful close pollutes new stop', () async {
-    // Flutter widget tests replace HttpClient by a 400-only fake. This plain
-    // test explicitly uses Dart's real loopback HTTP transport in this zone.
+  testWidgets('P12 B5 real HTTP in-flight failure after graceful close pollutes new stop', (tester) async {
+    // Keep real loopback I/O, but drive provider updates and the chat's 32 ms
+    // publication timer with the test clock rather than a wall-clock sleep.
     await HttpOverrides.runWithHttpOverrides(() async {
-      final host = await _Loopback.start();
+      final host = (await tester.runAsync(_Loopback.start))!;
       final h = _LocalHarness();
-      addTearDown(() async {
+      try {
+        await tester.pump(Duration.zero);
+        expect(h.connects.map((entry) => entry.$1), ['A']);
+        final a = h.complete('A', carrier: host.carrier());
+        await tester.pump(Duration.zero);
+        expect(a.watched, ['S']);
+        a.running('S');
+        await tester.pump(Duration.zero);
+        await tester.pump(const Duration(milliseconds: 32));
+        expect(h.state.running, isTrue);
+        expect(h.state.syncing, isFalse);
+        late Future<List<PendingPrompt>> oldCancel;
+        await tester.runAsync(() async {
+          oldCancel = h.chat.cancel();
+          await host.requestReceived.future;
+        });
+        expect(host.received.single['path'], '/api/session/cancel');
+        h.runtime.replace('B');
+        await tester.pump(Duration.zero);
+        expect(h.connects.map((entry) => entry.$1), ['A', 'B']);
+        final b = h.complete('B');
+        await tester.pump(Duration.zero);
+        expect(b.watched, ['S']);
+        b.running('S');
+        // Deliver the asynchronous status first, then advance its publication
+        // timer. A watched stream alone does not mean cancel() can run yet.
+        await tester.pump(Duration.zero);
+        await tester.pump(const Duration(milliseconds: 32));
+        expect(h.state.running, isTrue, reason: 'The replacement status must publish before cancel');
+        expect(h.state.syncing, isFalse);
+        final newCancel = h.chat.cancel();
+        expect(b.wire.cancels, hasLength(1));
+        expect(b.wire.cancels.single.isCompleted, isFalse);
+        expect(h.state.stopping, isTrue);
+        expect(a.wire.closed, isTrue);
+        await tester.runAsync(() async {
+          host.result.complete({
+            'ok': false,
+            'error': {'code': 'probe/late-failure', 'message': 'old response after close'},
+          });
+          await oldCancel;
+        });
+        final stopping = h.state.stopping;
+        trace('B5-real-HTTP-graceful-close-failure', {
+          'oldClientClosed': a.wire.closed,
+          'serverReceived': host.received,
+          'stopping': stopping,
+          'error': h.state.error,
+        });
+        b.wire.cancels.single.complete(const RpcOk(null));
+        await newCancel;
+        expect(stopping, isTrue);
+        expect(h.state.error, isNull);
+      } finally {
         await h.close();
-        await host.close();
-      });
-      await _waitFor(() => h.connects.isNotEmpty);
-      final a = h.complete('A', carrier: host.carrier());
-      await _waitFor(() => a.watched.isNotEmpty);
-      a.running('S');
-      await flush();
-      final oldCancel = h.chat.cancel();
-      await _waitFor(() => host.received.isNotEmpty);
-      h.runtime.replace('B');
-      await _waitFor(() => h.connects.length == 2);
-      final b = h.complete('B');
-      await _waitFor(() => b.watched.isNotEmpty);
-      b.running('S');
-      await flush();
-      final newCancel = h.chat.cancel();
-      expect(a.wire.closed, isTrue);
-      host.result.complete({
-        'ok': false,
-        'error': {'code': 'probe/late-failure', 'message': 'old response after close'},
-      });
-      await oldCancel;
-      final stopping = h.state.stopping;
-      trace('B5-real-HTTP-graceful-close-failure', {
-        'oldClientClosed': a.wire.closed,
-        'serverReceived': host.received,
-        'stopping': stopping,
-        'error': h.state.error,
-      });
-      b.wire.cancels.single.complete(const RpcOk(null));
-      await newCancel;
-      expect(stopping, isTrue);
+        await tester.runAsync(host.close);
+      }
     }, _RealHttp());
   });
 

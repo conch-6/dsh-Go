@@ -8,6 +8,7 @@ import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
 import '../../state/engine_control.dart';
 import '../../state/safe_mode_state.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../engine/log_view.dart';
 import '../theme/app_icons.dart';
@@ -46,7 +47,7 @@ abstract final class SafeModeActions {
   static Future<bool?> confirmMoveAside(BuildContext context, List<SafeHazard> hazards) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
-    return showDialog<bool>(
+    return showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(l10n.phoneSafeMoveAsideTitle),
@@ -95,7 +96,7 @@ abstract final class SafeModeActions {
       );
       return;
     }
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(l10n.phoneSafeRestoreTitle),
@@ -139,7 +140,7 @@ abstract final class SafeModeActions {
   static Future<void> leave(BuildContext context) async {
     final l10n = context.l10n;
     final container = _container(context);
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(l10n.phoneSafeLeaveTitle),

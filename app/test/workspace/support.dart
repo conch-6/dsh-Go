@@ -376,8 +376,9 @@ List<Override> workspaceOverrides(
   bool phoneStorage = true,
   String? current = 's2',
   bool livePrefs = false,
+  HostConnection? connection,
 }) => [
-  activeConnectionProvider.overrideWithValue(AsyncData(workspaceHost(host))),
+  activeConnectionProvider.overrideWithValue(AsyncData(connection ?? workspaceHost(host))),
   localRuntimeProvider.overrideWith(() => FakeRuntime(const LocalRuntimeState(loaded: true, status: runningStatus))),
   settingsProvider.overrideWith(() => FakeSettings(AppSettings(loaded: true, phoneStorage: phoneStorage))),
   // Live: the real controller over (mocked) shared preferences.

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/bots_state.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/sheet_title_bar.dart';
 import '../theme/theme.dart';
@@ -95,7 +96,7 @@ class _WorkingFolderSheetState extends ConsumerState<WorkingFolderSheet> {
     final selected = _selected;
     setState(() => _saving = true);
     try {
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showAppDialog<bool>(
         context: context,
         builder: (dialog) => AlertDialog(
           title: Text(context.l10n.botsFolderConfirm),

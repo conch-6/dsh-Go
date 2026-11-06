@@ -1,5 +1,6 @@
 package io.github.ccch1mneyyy.dsh_app.runtime
 
+import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -14,7 +15,7 @@ class ProotTempFilesTest {
     @get:Rule val fixture = TemporaryFolder()
 
     private fun directory(path: Path): Path = Files.createDirectories(path)
-    private fun file(path: Path): Path = Files.writeString(path, "keep")
+    private fun file(path: Path): Path = path.also { it.toFile().writeText("keep") }
     private fun exists(path: Path) = Files.exists(path, NOFOLLOW_LINKS)
     private fun store(): Path = directory(fixture.root.toPath().resolve("cache/proot-tmp"))
 
@@ -50,7 +51,7 @@ class ProotTempFilesTest {
 
     @Test fun usesRealProcAbsenceRatherThanAnUnreadableStatFile() {
         val root = store()
-        val livePid = ProcessHandle.current().pid().toInt()
+        val livePid = File("/proc/self").canonicalFile.name.toInt()
         val live = directory(root.resolve("proot-$livePid-abcdef"))
         val dead = directory(root.resolve("proot-2147483647-abcdef"))
         val result = ProotTempFiles.prune(root.toFile()) { pid ->
@@ -75,7 +76,7 @@ class ProotTempFilesTest {
         Files.createSymbolicLink(stale.resolve("dangling"), outside.resolve("missing"))
         assertEquals(ProotTempFiles.Result(1, false), ProotTempFiles.prune(root.toFile()) { true })
         assertTrue(exists(linked))
-        assertEquals("keep", Files.readString(sentinel))
+        assertEquals("keep", sentinel.toFile().readText())
         assertFalse(exists(stale))
     }
 
@@ -87,7 +88,7 @@ class ProotTempFilesTest {
         assertEquals(0, ProotTempFiles.prune(storeLink.toFile()) { true }.removed)
         val parentLink = Files.createSymbolicLink(fixture.root.toPath().resolve("cache-link"), outside.parent.parent)
         assertEquals(0, ProotTempFiles.prune(parentLink.resolve("proot-tmp").toFile()) { true }.removed)
-        assertEquals("keep", Files.readString(sentinel))
+        assertEquals("keep", sentinel.toFile().readText())
     }
 
     @Test fun aCandidateReplacedByASymlinkDuringThePidCheckCannotEscape() {
@@ -102,7 +103,7 @@ class ProotTempFilesTest {
         }
         assertEquals(0, result.removed)
         assertTrue(Files.isSymbolicLink(stale))
-        assertEquals("keep", Files.readString(sentinel))
+        assertEquals("keep", sentinel.toFile().readText())
     }
 
     @Test fun replacingTheStorePathDoesNotRedirectAnAlreadyOpenedDirectory() {
@@ -118,7 +119,7 @@ class ProotTempFilesTest {
         }
         assertEquals(ProotTempFiles.Result(1, false), result)
         assertFalse(exists(moved.resolve("proot-42-abcdef")))
-        assertEquals("keep", Files.readString(sentinel))
+        assertEquals("keep", sentinel.toFile().readText())
     }
 
     @Test fun aDisappearingCandidateAndMissingStoreAreHarmless() {

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../../../l10n/l10n.dart';
 import '../../common/bleed.dart';
+import '../../common/fluid_bits.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 import 'message_menu.dart';
@@ -132,7 +133,11 @@ class _ReplyActionRowState extends State<ReplyActionRow> {
           tooltip: _copied ? l10n.commonCopied : l10n.commonCopy,
           onPressed: _copy,
           style: style.copyWith(foregroundColor: WidgetStatePropertyAll(_copied ? colors.primary : muted)),
-          icon: swap(Icon(_copied ? AppIcons.done : AppIcons.copy, key: ValueKey(_copied))),
+          icon: swap(
+            _copied && AppMotion.fluid(context)
+                ? const DrawnCheck(key: ValueKey(true))
+                : Icon(_copied ? AppIcons.done : AppIcons.copy, key: ValueKey(_copied)),
+          ),
         ),
         if (onShare != null)
           IconButton(

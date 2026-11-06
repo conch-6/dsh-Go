@@ -17,6 +17,7 @@ import '../../../state/engine_settings_state.dart';
 import '../../../state/media_catalog.dart';
 import '../../../state/media_generation.dart' show GenerateKind, mediaCatalogProvider;
 import '../../../state/media_settings.dart';
+import '../../common/app_dialog.dart';
 import '../../engine_settings/field_row.dart';
 import '../../engine_settings/field_sheets.dart';
 import '../../engine_settings/schema_form.dart';
@@ -378,7 +379,7 @@ class _MediaServiceDetailBody extends ConsumerWidget {
     String title,
   ) async {
     final l10n = context.l10n;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(l10n.mediaSettingsDeleteTitle(title)),

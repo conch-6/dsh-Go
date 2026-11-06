@@ -16,6 +16,7 @@ import 'ui/theme/theme.dart';
 Future<void> main() => runWithFrameProbe(_startApp);
 
 Future<void> _startApp() async {
+  if (!frameProbeEnabled) SteadyFrameBinding();
   WidgetsFlutterBinding.ensureInitialized();
   appErrorCapture.install();
   // The first frame is already in the chosen language (设置 → 语言), and is the launch

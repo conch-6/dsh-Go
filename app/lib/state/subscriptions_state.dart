@@ -141,7 +141,8 @@ final subscriptionProfileProvider = FutureProvider.autoDispose.family<ProviderPr
 /// start → begin → poll … open | device | prompt … → done | failed | cancelled
 /// ```
 ///
-/// [close] stops polling and cancels an attempt that has not finished.
+/// [close] stops polling and requests cancellation unless the engine has
+/// reported the attempt finished.
 class LoginSession extends ChangeNotifier {
   LoginSession(this.backend, this.subscription, {this.interval = const Duration(seconds: 1)});
 
@@ -152,6 +153,7 @@ class LoginSession extends ChangeNotifier {
   LoginStep _step = const LoginStep(phase: LoginPhase.starting);
   LoginStep get step => _step;
 
+  // A known attempt that the engine has not reported as finished.
   String? _attemptId;
   Timer? _timer;
   bool _closed = false;
@@ -175,7 +177,7 @@ class LoginSession extends ChangeNotifier {
     final previous = _attemptId;
     _attemptId = null;
     _misses = 0;
-    if (previous != null && !_step.phase.finished) unawaited(backend.cancel(previous).catchError((_) {}));
+    if (previous != null) unawaited(backend.cancel(previous).catchError((_) {}));
     _set(const LoginStep(phase: LoginPhase.starting));
     try {
       final id = await backend.begin(subscription);
@@ -198,6 +200,7 @@ class LoginSession extends ChangeNotifier {
       final next = await backend.poll(id);
       if (_closed || id != _attemptId) return;
       _misses = 0;
+      if (next.phase.finished) _attemptId = null;
       _set(next);
       if (next.phase.finished) return;
     } catch (error) {
@@ -207,6 +210,8 @@ class LoginSession extends ChangeNotifier {
         return;
       }
     }
+    // An answer may have started another poll while this one was in flight.
+    _timer?.cancel();
     _timer = Timer(interval, () => unawaited(_poll()));
   }
 
@@ -230,13 +235,13 @@ class LoginSession extends ChangeNotifier {
     await _poll();
   }
 
-  /// Stops polling; an unfinished attempt is cancelled on the engine.
+  /// Stops polling and asks the engine to cancel an attempt not known to have finished.
   void close() {
     if (_closed) return;
     _closed = true;
     _timer?.cancel();
     final id = _attemptId;
-    if (id != null && !_step.phase.finished) unawaited(backend.cancel(id).catchError((_) {}));
+    if (id != null) unawaited(backend.cancel(id).catchError((_) {}));
   }
 
   @override

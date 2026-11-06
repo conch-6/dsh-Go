@@ -38,6 +38,7 @@
   "phoneEngineReset": "Reset runtime",
   "phoneEngineResetHint": "Delete chats and files, then extract again",
   "phoneEngineResetTitle": "Reset the runtime?",
+  "phoneResetAlsoDeletes": "Anything else in the home folder (/root) goes too, including files in your workspaces, AGENTS.md and data that plugins store themselves, such as memories.",
   "phoneEngineKeepUiSkills": "Keep interface settings and skills",
   "phoneEngineKeepPluginsSettings": "Keep installed plugins and settings",
   "phoneEngineDeleteReset": "Delete and reset",

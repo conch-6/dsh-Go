@@ -25,6 +25,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/star_prompt.dart';
+import '../common/app_dialog.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 
@@ -46,7 +47,7 @@ enum StarPromptChoice {
 Future<StarPromptChoice?> showStarPrompt(BuildContext context, {required int hours}) async {
   final container = ProviderScope.containerOf(context, listen: false);
   final messenger = ScaffoldMessenger.maybeOf(context);
-  final choice = await showDialog<StarPromptChoice>(
+  final choice = await showAppDialog<StarPromptChoice>(
     context: context,
     builder: (_) => StarPromptDialog(hours: hours),
   );

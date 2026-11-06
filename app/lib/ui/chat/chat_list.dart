@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../pets/pet_signals.dart' show petHeadroomProvider;
+import '../../plugins/native/native_surface.dart' show nativeTurnNoteProvider;
 import '../../state/agents_state.dart' show hostSessionsProvider, selectConversation;
 import '../../state/artifacts.dart';
 import '../../state/attachments.dart' show DraftAttachment;
@@ -24,6 +25,7 @@ import '../../state/hosts_state.dart' show HostKind, activeHostProvider;
 import '../../state/regenerate.dart';
 import '../../state/sessions_state.dart';
 import '../../state/settings_state.dart';
+import '../common/app_dialog.dart';
 import '../common/bleed.dart';
 import '../common/ui_trace.dart';
 import '../pets/pet_perch.dart';
@@ -144,7 +146,7 @@ class ChatList extends ConsumerStatefulWidget {
   ConsumerState<ChatList> createState() => _ChatListState();
 }
 
-class _ChatListState extends ConsumerState<ChatList> {
+class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderStateMixin {
   late final _scroll = _TopBoundedScrollController(_leadingBoundary);
   final _centerKey = UniqueKey();
   final _beforeKey = GlobalKey();
@@ -174,7 +176,72 @@ class _ChatListState extends ConsumerState<ChatList> {
   /// 解除。
   bool _held = false;
 
-  late final _physics = _FollowPhysics(() => _pinned && !_held);
+  late final _physics = _FollowPhysics(() => _pinned && !_held && _fingers == 0, glides: () => _glidable);
+
+  /// Fingers on the list. Any `jumpTo` ends the drag under them for good (it goes idle,
+  /// and the rest of that gesture moves nothing), so while one rests here or the list is
+  /// moving on its own, following waits: the list is the user's.
+  int _fingers = 0;
+
+  bool get _userHasList => _fingers > 0 || (_scroll.hasClients && _scroll.position.isScrollingNotifier.value);
+
+  /// Heading up, by finger or fling: however near the bottom, that is not "at the bottom".
+  bool _goingUp = false;
+
+  /// Following waited for the user; it picks up when they let go.
+  bool _followWaiting = false;
+
+  /// The next follow overrides the user: they asked for the bottom, or just sent something.
+  bool _followNow = false;
+
+  /// The fluid tier: following glides to a new line instead of snapping to it. Real
+  /// scrolling, so everything else about the list is as it was; the new line only starts
+  /// a little lower, behind the composer.
+  bool _fluid = false;
+
+  /// The glide is ours: its scroll updates say nothing about what the user wants.
+  bool _gliding = false;
+  bool _snapNext = false;
+  late final Ticker _glide = createTicker(_onGlide);
+  Duration _glideLast = Duration.zero;
+
+  /// Time constant of the glide: a line (about 28) lands in some 150ms, and lines
+  /// arriving faster than that blend into one steady motion.
+  static const _glideSeconds = 0.07;
+
+  /// Further than this is not a next line: a jump, as before.
+  static const _glideReach = 240.0;
+
+  bool get _glidable => _fluid && !_snapNext;
+
+  void _startGlide() {
+    _gliding = true;
+    if (_glide.isActive) return;
+    _glideLast = Duration.zero;
+    _glide.start();
+  }
+
+  void _stopGlide() {
+    _gliding = false;
+    if (_glide.isActive) _glide.stop();
+  }
+
+  void _onGlide(Duration elapsed) {
+    if (!mounted || !_scroll.hasClients || !_pinned || _held) return _stopGlide();
+    if (_userHasList) {
+      _followWaiting = true;
+      return _stopGlide();
+    }
+    final seconds = (elapsed - _glideLast).inMicroseconds / Duration.microsecondsPerSecond;
+    _glideLast = elapsed;
+    final p = _scroll.position;
+    final gap = p.maxScrollExtent - p.pixels;
+    if (gap <= 0.5 || gap > _glideReach) {
+      if (gap != 0) p.jumpTo(p.maxScrollExtent);
+      return _stopGlide();
+    }
+    p.jumpTo(p.pixels + gap * (1 - math.exp(-seconds / _glideSeconds)));
+  }
 
   /// 回到底部按钮 / 新内容角标。用 notifier 而不是 setState:
   /// 显隐翻转不该重建整个列表。
@@ -232,6 +299,7 @@ class _ChatListState extends ConsumerState<ChatList> {
 
   @override
   void dispose() {
+    _glide.dispose();
     _scroll.dispose();
     _showJump.dispose();
     _hasNew.dispose();
@@ -264,9 +332,25 @@ class _ChatListState extends ConsumerState<ChatList> {
         return;
       }
       final p = _scroll.position;
+      if (_followNow) {
+        _followNow = false;
+        // Ends a fling or a drag in progress.
+        p.jumpTo(p.pixels);
+      } else if (_userHasList) {
+        _followScheduled = false;
+        _followWaiting = true;
+        return;
+      }
       if (uiTraceEnabled && p.pixels != p.maxScrollExtent) {
         uiTrace('chat-list', 'follow', {'from': p.pixels, 'to': p.maxScrollExtent, 'held': _held, 'attempt': attempts});
       }
+      final gap = p.maxScrollExtent - p.pixels;
+      if (_glidable && gap > 0 && gap <= _glideReach) {
+        _followScheduled = false;
+        _startGlide();
+        return;
+      }
+      _snapNext = false;
       if (p.pixels != p.maxScrollExtent) p.jumpTo(p.maxScrollExtent);
       attempts++;
       if (attempts < 4 && _scroll.position.pixels < p.maxScrollExtent - 0.5) {
@@ -277,10 +361,28 @@ class _ChatListState extends ConsumerState<ChatList> {
     }
 
     WidgetsBinding.instance.addPostFrameCallback(step);
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _resumeFollow() {
+    if (!_followWaiting || _userHasList) return;
+    _followWaiting = false;
+    if (!_pinned) return;
+    _held = false;
+    _follow();
+  }
+
+  void _onFingerUp() {
+    if (_fingers > 0) _fingers--;
+    _resumeFollow();
   }
 
   void jumpToBottom() {
     _pinned = true;
+    _goingUp = false;
+    _followNow = true;
+    _snapNext = true;
+    _stopGlide();
     _hasNew.value = false;
     _showJump.value = false;
     _follow();
@@ -317,6 +419,21 @@ class _ChatListState extends ConsumerState<ChatList> {
 
   void _applyMetrics(ScrollMetrics metrics) {
     _reportScrolledUnder(metrics);
+    // The reveal grows the reply between state updates.
+    if (_glidable && _pinned && !_held && _scroll.hasClients && !_atBottom(0.5) && _atBottom(_glideReach)) {
+      if (_userHasList) {
+        _followWaiting = true;
+      } else {
+        _startGlide();
+      }
+    } else if (_glidable && _pinned && !_held && _scroll.hasClients && !_atBottom(_glideReach)) {
+      // Too far to glide, with no new state to set off a follow: the jump it would do.
+      if (_userHasList) {
+        _followWaiting = true;
+      } else {
+        _follow();
+      }
+    }
     // 点开的内容往下长出了视口:不再算贴底,之后的新内容不把它顶走。
     if (_held && _pinned && !_atBottom()) {
       _pinned = false;
@@ -336,7 +453,20 @@ class _ChatListState extends ConsumerState<ChatList> {
     if (n is UserScrollNotification && n.direction == ScrollDirection.forward) {
       // 手指往下拖 = 往回看:立刻停止跟随,别和用户抢。
       _pinned = false;
-    } else if (n is ScrollUpdateNotification || n is ScrollEndNotification) {
+      _goingUp = true;
+    } else if (n is UserScrollNotification && n.direction == ScrollDirection.reverse) {
+      _goingUp = false;
+    } else if (_gliding) {
+      // Our own motion: still following, however far behind it is for now.
+    } else if (n is ScrollEndNotification) {
+      _goingUp = false;
+      // Behind only because following waited: that isn't the user leaving.
+      if (!_followWaiting || !_pinned) _pinned = _atBottom();
+      // The activity that ended is still being replaced.
+      scheduleMicrotask(() {
+        if (mounted) _resumeFollow();
+      });
+    } else if (n is ScrollUpdateNotification && !_goingUp && !_followWaiting) {
       _pinned = _atBottom();
     }
     // Show only after leaving the bottom area; once shown, keep it until
@@ -415,6 +545,8 @@ class _ChatListState extends ConsumerState<ChatList> {
     if (s.pending.length > _lastPendingCount) {
       // 自己刚发了消息:无论之前翻到哪,都回到底部。
       _pinned = true;
+      _goingUp = false;
+      _followNow = true;
       _afterFrame(() => _hasNew.value = false);
     }
     _lastPendingCount = s.pending.length;
@@ -520,6 +652,7 @@ class _ChatListState extends ConsumerState<ChatList> {
     );
     final rows = _rows;
     final split = _split;
+    _fluid = AppMotion.fluid(context);
 
     // Images in replies read this conversation's workspace.
     final headroom = ref.watch(petHeadroomProvider);
@@ -548,7 +681,17 @@ class _ChatListState extends ConsumerState<ChatList> {
           return Stack(
             children: [
               Listener(
-                onPointerDown: (_) => _held = true,
+                onPointerDown: (_) {
+                  _fingers++;
+                  // The list stops where it is, under the finger.
+                  if (_gliding) {
+                    _stopGlide();
+                    _followWaiting = true;
+                  }
+                  _held = true;
+                },
+                onPointerUp: (_) => _onFingerUp(),
+                onPointerCancel: (_) => _onFingerUp(),
                 child: NotificationListener<ScrollMetricsNotification>(
                   onNotification: _onMetrics,
                   child: NotificationListener<ScrollNotification>(
@@ -627,27 +770,39 @@ class _ChatListState extends ConsumerState<ChatList> {
     final row = _rows[index];
     final previous = index > 0 ? _rows[index - 1] : null;
     final fresh = _fresh.remove(row.key);
+    final padding = EdgeInsets.fromLTRB(AppSpace.gutter, _gapBefore(row, previous), AppSpace.gutter, 0);
+    final body = StreamFadeIn(
+      enabled: fresh != null,
+      index: fresh ?? 0,
+      rise: row is UserRow || row is PendingRow,
+      child: _rowWidget(row),
+    );
     return KeyedSubtree(
       key: ValueKey<String>(row.key),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSpace.readingWidth),
           // 撑满阅读宽度:否则短行(用户气泡、提示行)会被 Center 居中。
-          child: Container(
-            width: double.infinity,
-            padding: EdgeInsets.fromLTRB(AppSpace.gutter, _gapBefore(row, previous), AppSpace.gutter, 0),
-            child: StreamFadeIn(enabled: fresh != null, index: fresh ?? 0, child: _rowWidget(row)),
-          ),
+          child: row is AssistantRow
+              // 等待和思考算过程行,正文不算:接上正文时间距缓缓让开,回复不跳。
+              ? AnimatedPadding(
+                  duration: AppMotion.of(context, AppMotion.quick),
+                  curve: AppMotion.std,
+                  padding: padding,
+                  child: SizedBox(width: double.infinity, child: body),
+                )
+              : Container(width: double.infinity, padding: padding, child: body),
         ),
       ),
     );
   }
 
-  /// 过程行:工具、工具组、只有思考的回复、斜杠指令、非错误提示。
+  /// 过程行:工具、工具组、只有思考的回复(或还在等第一个字:接上来多半是思考,
+  /// 间距先按它算,交接时不跳)、斜杠指令、非错误提示。
   /// 它们自带上下 4 的留白,彼此之间不再加间距(图形块之间正好 8)。
   static bool _isProcess(ChatRow? row) => switch (row) {
     ToolCallRow() || ToolGroupRow() || CommandNoticeRow() => true,
-    AssistantRow(:final item) => item.text.trim().isEmpty && item.reasoning.trim().isNotEmpty,
+    AssistantRow(:final item) => item.text.trim().isEmpty && (item.reasoning.trim().isNotEmpty || item.streaming),
     NoticeRowData(:final item) => item.kind != 'error',
     _ => false,
   };
@@ -716,7 +871,7 @@ class _ChatListState extends ConsumerState<ChatList> {
     });
     var text = prompt.text;
     try {
-      final edited = await showDialog<String>(
+      final edited = await showAppDialog<String>(
         context: context,
         builder: (dialog) => AlertDialog(
           title: Text(appL10n.chatEditFailedSubmission),
@@ -788,7 +943,7 @@ class _ChatListState extends ConsumerState<ChatList> {
     return DshUiScope(
       sessionId: widget.sessionId,
       messageId: item.id,
-      state: !item.text.contains('dsh-ui')
+      state: !item.text.contains('dsh-ui') && !item.text.contains('{')
           ? DshUiState.expired
           : dshUiStateFor(
               items: s.items,
@@ -802,9 +957,12 @@ class _ChatListState extends ConsumerState<ChatList> {
     );
   }
 
-  Widget _footnote(TurnTrace trace) => TurnFootnote(
-    trace: trace,
-    onTap: () => showTrajectorySheet(context, sessionId: widget.sessionId, turn: trace.turn),
+  Widget _footnote(TurnTrace trace) => Consumer(
+    builder: (context, ref, _) => TurnFootnote(
+      trace: trace,
+      notes: ref.watch(nativeTurnNoteProvider((widget.sessionId, trace.turn))),
+      onTap: () => showTrajectorySheet(context, sessionId: widget.sessionId, turn: trace.turn),
+    ),
   );
 
   Future<void> _branch(AssistantChatItem item) async {
@@ -1060,6 +1218,7 @@ class _JumpToBottom extends StatelessWidget {
     final colors = theme.colorScheme;
     final dsh = DshColors.of(context);
     final quick = AppMotion.of(context, AppMotion.quick);
+    final fluid = AppMotion.fluid(context);
 
     final pill = GlassSurface(
       key: const ValueKey('waiting'),
@@ -1109,8 +1268,8 @@ class _JumpToBottom extends StatelessWidget {
               valueListenable: hasNew,
               builder: (context, fresh, _) => AnimatedScale(
                 scale: fresh ? 1 : 0,
-                duration: quick,
-                curve: AppMotion.std,
+                duration: fluid && fresh ? AppMotion.popCurve.duration : quick,
+                curve: fluid && fresh ? AppMotion.popCurve : AppMotion.std,
                 child: Container(
                   width: 9,
                   height: 9,
@@ -1132,9 +1291,9 @@ class _JumpToBottom extends StatelessWidget {
       builder: (context, show, _) => IgnorePointer(
         ignoring: !show,
         child: AnimatedScale(
-          scale: show ? 1 : 0.8,
-          duration: quick,
-          curve: AppMotion.enter,
+          scale: show ? 1 : (fluid ? 0.6 : 0.8),
+          duration: fluid && show ? AppMotion.popCurve.duration : quick,
+          curve: fluid && show ? AppMotion.popCurve : AppMotion.enter,
           child: AnimatedOpacity(
             opacity: show ? 1 : 0,
             duration: quick,
@@ -1164,12 +1323,17 @@ class _JumpToBottom extends StatelessWidget {
 /// 且上一帧刚 `jumpTo` 过就不夹:那一帧末尾露出一道缝,再由回弹动画收回,
 /// 看起来像被往上推了一下。
 class _FollowPhysics extends ScrollPhysics {
-  const _FollowPhysics(this.follows, {super.parent});
+  const _FollowPhysics(this.follows, {required this.glides, super.parent});
 
   final bool Function() follows;
 
+  /// A taller list is left for the glide to catch up with. Shorter still lands at once:
+  /// a gap at the bottom can't wait.
+  final bool Function() glides;
+
   @override
-  _FollowPhysics applyTo(ScrollPhysics? ancestor) => _FollowPhysics(follows, parent: buildParent(ancestor));
+  _FollowPhysics applyTo(ScrollPhysics? ancestor) =>
+      _FollowPhysics(follows, glides: glides, parent: buildParent(ancestor));
 
   @override
   double adjustPositionForNewDimensions({
@@ -1187,7 +1351,8 @@ class _FollowPhysics extends ScrollPhysics {
     if (isScrolling || velocity != 0 || !follows()) return adjusted;
     // 上一帧之后可能刚追过底(帧后 jumpTo):看当前位置,也看上次记下的。
     final at = newPosition.pixels > oldPosition.pixels ? newPosition.pixels : oldPosition.pixels;
-    if (oldPosition.maxScrollExtent - at > 1) return adjusted;
+    if (oldPosition.maxScrollExtent - at > 1 && !glides()) return adjusted;
+    if (glides() && newPosition.maxScrollExtent >= at) return adjusted;
     return newPosition.maxScrollExtent;
   }
 }

@@ -171,7 +171,7 @@ void main() {
       await pumpFrames(tester, 6);
       expect(find.byType(HeaderAgentsKey), findsNothing);
       expect(find.byType(HeaderBackKey), findsNothing);
-      expect(find.byType(ModelChip), findsOneWidget);
+      expect(find.byKey(const ValueKey('chat-new-chat')), findsOneWidget);
       expect(find.byIcon(AppIcons.menu), findsOneWidget);
     });
 
@@ -183,16 +183,10 @@ void main() {
       final capsule = tester.getRect(
         find.descendant(of: find.byType(HeaderAgentsKey), matching: find.byType(GlassSurface)).first,
       );
-      final chip = tester.getRect(
-        find.descendant(of: find.byType(ModelChip), matching: find.byType(GlassSurface)).first,
-      );
       final title = tester.getRect(find.ancestor(of: find.text('修复登录重复提交'), matching: find.byType(GlassSurface)).first);
       expect(capsule.height, closeTo(44, 0.01));
-      expect(capsule.height, closeTo(chip.height, 0.01));
       expect(capsule.height, closeTo(menu.height, 0.01));
-      expect(capsule.center.dy, closeTo(chip.center.dy, 0.01));
       expect(capsule.center.dy, closeTo(menu.center.dy, 0.01));
-      expect(chip.left - capsule.right, closeTo(8, 0.01));
       expect(capsule.left - title.right, greaterThanOrEqualTo(8 - 0.01));
       // Glyph and count sit 14 in from each end, centred on one line.
       final glyph = tester.getRect(

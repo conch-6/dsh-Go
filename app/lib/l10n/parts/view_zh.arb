@@ -660,6 +660,7 @@
     }
   },
   "viewEmptySwitchWorkspace": "切换工作区",
+  "viewEmptyHostDefaultDirectory": "主机默认目录",
   "viewScheduleTitle": "自动化任务",
   "viewScheduleRefreshFailed": "没能刷新",
   "viewScheduleNone": "没有进行中的任务",

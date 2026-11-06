@@ -206,7 +206,6 @@ object LastKnownGood {
         val deadline = System.currentTimeMillis() + 3000
         while (true) {
             if (lock.createNewFile()) {
-                lock.writeText("${android.os.Process.myPid()}\n")
                 break
             }
             val holder = try {
@@ -222,6 +221,7 @@ object LastKnownGood {
             Thread.sleep(50)
         }
         try {
+            lock.writeText("${android.os.Process.myPid()}\n")
             return block()
         } finally {
             lock.delete()

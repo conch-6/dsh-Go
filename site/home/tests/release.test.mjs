@@ -35,7 +35,7 @@ test('交付模板阻止正式发布，并明确指出未填字段', async () =>
 test('当前配置可以正式发布，二维码文件存在', async () => {
   const report = await validateConfig(original, dist);
   assert.deepEqual(report.errors, []);
-  assert.equal(original.download.qrImage, 'assets/author/download-qr.png');
+  assert.equal(original.download.qrImage, 'assets/author/download-qr-v2.png');
 });
 test('只填下载直链、品牌头像和空贡献者都合法，不要求二维码', async () => {
   const report = await validateConfig(filled(), dist);

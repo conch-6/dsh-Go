@@ -47,7 +47,7 @@ void main() {
     await tester.pump();
 
     container.read(composerInsertProvider.notifier).request(ComposerInsert.skill('pdf', sessionId: 's1'));
-    await pumpFrames(tester, 4);
+    await pumpFrames(tester, 14);
 
     expect(_field(tester).text, '总结 /pdf 这个文件');
     expect(_field(tester).selection, const TextSelection.collapsed(offset: 8));
@@ -68,6 +68,26 @@ void main() {
     addTearDown(tester.view.resetViewInsets);
     await pumpFrames(tester, 3);
     expect(gap(), moreOrLessEquals(composerToastGap, epsilon: 1));
+  });
+
+  testWidgets('a skill that adds lines: the confirmation clears the grown composer', (tester) async {
+    final container = await _pump(tester, ChatHarness(session: 's1', states: {'s1': const ChatState(loading: false)}));
+    await tester.enterText(find.byType(TextField), '一段很长的话' * 12);
+    await tester.pump();
+    await pumpFrames(tester, 14);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    final before = tester.getRect(find.byType(Composer)).height;
+
+    container
+        .read(composerInsertProvider.notifier)
+        .request(ComposerInsert.skill('一个名字很长很长很长很长的技能' * 4, sessionId: 's1'));
+    // Measure after the composer settles, before the brief confirmation expires.
+    await pumpFrames(tester, 10);
+
+    expect(tester.getRect(find.byType(Composer)).height, greaterThan(before), reason: 'the insert did add a line');
+    final toast = tester.getRect(find.descendant(of: find.byType(SnackBar), matching: find.byType(Material)).first);
+    expect(tester.getRect(find.byType(Composer)).top - toast.bottom, greaterThanOrEqualTo(composerToastGap - 1));
   });
 
   testWidgets('a new conversation: the open one keeps its draft', (tester) async {

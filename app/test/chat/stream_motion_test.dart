@@ -1,14 +1,18 @@
 // New rows ease in (fade + rise 8) once, the first time they show; what was
 // already there when the conversation opened never animates. Expanding a
-// tool row keeps its detail mounted while it collapses again.
+// tool row keeps its detail mounted while it collapses again. The waiting dots
+// hand over to whatever comes next by cross-fading on the same line.
 
 import 'package:dsh_app/state/chat_state.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:dsh_app/ui/chat/empty_state.dart' show chatClock;
+import 'package:dsh_app/ui/chat/render/markdown_body.dart';
 import 'package:dsh_app/ui/chat/widgets/assistant_message.dart';
 import 'package:dsh_app/ui/chat/widgets/stream_motion.dart';
+import 'package:dsh_app/ui/chat/widgets/stream_row.dart';
 import 'package:dsh_app/ui/chat/widgets/thinking_pill.dart';
 import 'package:dsh_app/ui/chat/widgets/tool_row.dart';
+import 'package:dsh_app/ui/common/typing_indicator.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +33,48 @@ double _opacityOf(WidgetTester tester, Finder finder) {
 }
 
 ChatState _state(List<ChatItem> items) => ChatState(items: items, title: '测试', loading: false);
+
+/// One reply alone in a list, as in the chat: full width, height unbounded.
+Widget _reply(AssistantChatItem item, {bool reduced = false}) => testApp(
+  Builder(
+    builder: (context) => MediaQuery(
+      data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
+      child: Scaffold(
+        body: ListView(
+          padding: EdgeInsets.zero,
+          children: [AssistantMessage(item: item)],
+        ),
+      ),
+    ),
+  ),
+);
+
+double _replyHeight(WidgetTester tester) => tester.getSize(find.byType(AssistantMessage)).height;
+
+/// The cross-fade's opacity over [finder].
+double _fadeOf(WidgetTester tester, Finder finder) =>
+    tester.widget<FadeTransition>(find.ancestor(of: finder, matching: find.byType(FadeTransition)).first).opacity.value;
+
+/// How far the hand-off still holds [finder] below its place.
+double _riseOf(WidgetTester tester, Finder finder) => tester
+    .widget<Transform>(find.ancestor(of: finder, matching: find.byType(Transform)).first)
+    .transform
+    .getTranslation()
+    .y;
+
+/// The largest height change between two 16 ms frames over [frames] frames.
+Future<double> _largestStep(WidgetTester tester, int frames) async {
+  var largest = 0.0;
+  var last = _replyHeight(tester);
+  for (var i = 0; i < frames; i++) {
+    await tester.pump(const Duration(milliseconds: 16));
+    final height = _replyHeight(tester);
+    final step = (height - last).abs();
+    if (step > largest) largest = step;
+    last = height;
+  }
+  return largest;
+}
 
 void main() {
   setUpAll(() async {
@@ -122,6 +168,154 @@ void main() {
     );
     expect(_opacityOf(tester, find.text('第二个回答')), 1);
     expect(find.byType(Opacity), findsNothing);
+  });
+
+  testWidgets('the dots cross-fade to the thinking row on the same line', (tester) async {
+    await tester.pumpWidget(_reply(assistant(2, '', streaming: true)));
+    expect(_replyHeight(tester), StreamRow.minHeight);
+
+    await tester.pumpWidget(_reply(assistant(2, '', reasoning: '先看一下', streaming: true)));
+    final pill = tester.state(find.byType(ThinkingPill));
+    expect(find.byType(TypingIndicator), findsOneWidget);
+    expect(_replyHeight(tester), StreamRow.minHeight);
+    await tester.pump();
+
+    // Out: 90 ms, linear, in place. In: 160 ms on Grok's curve, rising 3.
+    await tester.pump(const Duration(milliseconds: 45));
+    final eased = const Cubic(0.23, 1, 0.32, 1).transform(45 / 160);
+    expect(_fadeOf(tester, find.byType(TypingIndicator)), closeTo(0.5, 0.01));
+    expect(_riseOf(tester, find.byType(TypingIndicator)), 0);
+    expect(_fadeOf(tester, find.byType(ThinkingPill)), closeTo(eased, 0.01));
+    expect(_riseOf(tester, find.byType(ThinkingPill)), closeTo(3 * (1 - eased), 0.02));
+
+    await tester.pump(const Duration(milliseconds: 46));
+    await tester.pump();
+    expect(find.byType(TypingIndicator), findsNothing);
+    await tester.pump(const Duration(milliseconds: 70));
+    expect(_fadeOf(tester, find.byType(ThinkingPill)), 1);
+    expect(_riseOf(tester, find.byType(ThinkingPill)), 0);
+    expect(tester.state(find.byType(ThinkingPill)), same(pill));
+  });
+
+  testWidgets('the three-line window grows in after the dots, not all in one frame', (tester) async {
+    await tester.pumpWidget(_reply(assistant(2, '', streaming: true)));
+    await tester.pumpWidget(_reply(assistant(2, '', reasoning: '先看一下', streaming: true)));
+    expect(await _largestStep(tester, 30), lessThan(13));
+    expect(_replyHeight(tester), closeTo(StreamRow.minHeight + 13 * 1.3 * 3 + 12, 0.5));
+    expect(find.byType(ThinkingTicker), findsOneWidget);
+  });
+
+  testWidgets('the dots hand over to shorter text without a step', (tester) async {
+    await tester.pumpWidget(_reply(assistant(2, '', streaming: true)));
+    await tester.pumpWidget(_reply(assistant(2, '回答', streaming: true)));
+    expect(_replyHeight(tester), StreamRow.minHeight);
+    expect(await _largestStep(tester, 15), lessThan(2));
+    expect(_replyHeight(tester), closeTo(16 * 1.65, 0.5));
+    expect(find.byType(TypingIndicator), findsNothing);
+  });
+
+  testWidgets('the first text after thinking fades in once and grows in with its gap', (tester) async {
+    await tester.pumpWidget(_reply(assistant(2, '', reasoning: '先看一下', streaming: true)));
+    await pumpFrames(tester);
+    final pill = tester.state(find.byType(ThinkingPill));
+
+    await tester.pumpWidget(_reply(assistant(2, '回答', reasoning: '先看一下', streaming: true)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final halfway = _opacityOf(tester, find.byType(MarkdownBody));
+    expect(halfway, greaterThan(0));
+    expect(halfway, lessThan(1));
+    await tester.pump(const Duration(milliseconds: 101));
+    expect(_opacityOf(tester, find.byType(MarkdownBody)), 1);
+
+    // More text never fades again, and the gap under the row is where it was.
+    await tester.pumpWidget(_reply(assistant(2, '回答接着写', reasoning: '先看一下', streaming: true)));
+    await tester.pump();
+    expect(_opacityOf(tester, find.byType(MarkdownBody)), 1);
+    await pumpFrames(tester);
+    expect(tester.state(find.byType(ThinkingPill)), same(pill));
+    final gap = tester.getTopLeft(find.byType(MarkdownBody)).dy - tester.getBottomLeft(find.byType(ThinkingPill)).dy;
+    expect(gap, 8);
+  });
+
+  testWidgets('the hand-over from thinking to text never pushes the list up by the new line', (tester) async {
+    await tester.pumpWidget(_reply(assistant(2, '', reasoning: '先看一下', streaming: true)));
+    await pumpFrames(tester);
+    final before = _replyHeight(tester);
+    await tester.pumpWidget(_reply(assistant(2, '回答', reasoning: '先看一下', streaming: true)));
+    expect((_replyHeight(tester) - before).abs(), lessThan(13), reason: 'the frame the text arrives on');
+    expect(await _largestStep(tester, 30), lessThan(13));
+  });
+
+  testWidgets('a reply that never waited here carries no hand-off', (tester) async {
+    await tester.pumpWidget(_reply(assistant(2, '回答', reasoning: '先看一下')));
+    expect(find.byType(AnimatedSwitcher), findsNothing);
+    expect(_opacityOf(tester, find.byType(MarkdownBody)), 1);
+    expect(find.byType(Opacity), findsNothing);
+  });
+
+  testWidgets('reduced motion: the hand-off and the first text are simply there', (tester) async {
+    await tester.pumpWidget(_reply(assistant(2, '', streaming: true), reduced: true));
+    await tester.pumpWidget(_reply(assistant(2, '', reasoning: '先看一下', streaming: true), reduced: true));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(TypingIndicator), findsNothing);
+    expect(_fadeOf(tester, find.byType(ThinkingPill)), 1);
+    expect(_riseOf(tester, find.byType(ThinkingPill)), 0);
+    expect(_replyHeight(tester), closeTo(StreamRow.minHeight + 13 * 1.3 * 3 + 12, 0.5));
+
+    await tester.pumpWidget(_reply(assistant(2, '回答', reasoning: '先看一下', streaming: true), reduced: true));
+    expect(_opacityOf(tester, find.byType(MarkdownBody)), 1);
+  });
+
+  testWidgets('after a tool row the dots take the thinking row\'s place exactly', (tester) async {
+    usePhoneView(tester);
+    final done = [
+      user(1, '问题'),
+      tool('b', 'bash', {'command': 'echo hi'}, result: 'hi'),
+    ];
+    final harness = ChatHarness(
+      session: 's1',
+      states: {
+        's1': _state([...done, assistant(3, '', rowKey: 'm1.1', streaming: true)]),
+      },
+    );
+    await tester.pumpWidget(testApp(const ChatScreen(), overrides: harness.overrides));
+    await tester.pump();
+    final before = tester.getTopLeft(find.byType(AssistantMessage)).dy;
+    harness.controllers['s1']!.emit(
+      _state([...done, assistant(3, '', rowKey: 'm1.1', streaming: true, reasoning: '嗯')]),
+    );
+    await tester.pump();
+    expect(tester.getTopLeft(find.byType(AssistantMessage)).dy, before);
+  });
+
+  testWidgets('after a tool row the dots hand over to direct text without a step', (tester) async {
+    usePhoneView(tester);
+    final done = [
+      user(1, '问题'),
+      tool('b', 'bash', {'command': 'echo hi'}, result: 'hi'),
+    ];
+    final harness = ChatHarness(
+      session: 's1',
+      states: {
+        's1': _state([...done, assistant(3, '', rowKey: 'm1.1', streaming: true)]),
+      },
+    );
+    await tester.pumpWidget(testApp(const ChatScreen(), overrides: harness.overrides));
+    await tester.pump();
+    final before = tester.getTopLeft(find.byType(AssistantMessage)).dy;
+    harness.controllers['s1']!.emit(_state([...done, assistant(3, '回答', rowKey: 'm1.1', streaming: true)]));
+    await tester.pump();
+    var last = tester.getTopLeft(find.byType(AssistantMessage)).dy;
+    expect((last - before).abs(), lessThan(1), reason: 'the frame the text arrives on');
+    for (var i = 0; i < 16; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      final now = tester.getTopLeft(find.byType(AssistantMessage)).dy;
+      expect((now - last).abs(), lessThan(3), reason: 'frame $i');
+      last = now;
+    }
+    expect(last - before, closeTo(8, 0.01), reason: 'the usual gap once settled');
   });
 
   testWidgets('tool detail stays mounted while it collapses', (tester) async {

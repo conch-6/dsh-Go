@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/phone_state.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/list_page_row.dart';
 import '../common/risk_notice.dart';
@@ -112,7 +113,7 @@ class PhoneAppRulesPage extends ConsumerWidget {
   }
 
   Future<void> _add(BuildContext context, WidgetRef ref) async {
-    final added = await showDialog<(String, AppRule)>(context: context, builder: (_) => const _AddAppDialog());
+    final added = await showAppDialog<(String, AppRule)>(context: context, builder: (_) => const _AddAppDialog());
     if (added == null) return;
     final ok = await ref.read(phoneProvider.notifier).setRule(added.$1, added.$2);
     if (!ok && context.mounted) {

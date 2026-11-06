@@ -1,7 +1,7 @@
 // Portions derived from Phase (https://github.com/CikeSeven/phase), used with the author's permission. See THIRD_PARTY_NOTICES.md.
 // Local changes: blocking, one owner per task (the bridge serialises calls on one worker
 // thread); a UiAutomation control-tree read rendered to the screen text format, so text-only
-// models can use 不打扰模式 too; IME policy HIDE; JPEG capture with black-frame → secure; display
+// models can use 不打扰模式 too; IME policy HIDE; JPEG capture with bounded first-frame readiness; display
 // sized to the phone's aspect (short side 720). No commands, paths or display ids are accepted
 // from callers.
 package io.github.ccch1mneyyy.dsh_app.phone.background
@@ -114,12 +114,16 @@ class PrivilegedDisplayCore(private val context: Context) {
 
     private fun failureCode(e: Throwable): String = when (e) {
         is Fault -> e.code
+        is InputProbe.Failure -> e.code
+        is InterruptedException -> "cancelled"
         is SecurityException -> "systemOperationDenied"
         else -> "deviceUnavailable"
     }
 
     private fun failureDetail(e: Throwable): String? =
-        if (e is Fault || e is SecurityException) null else e.javaClass.simpleName
+        if (e is InputProbe.Failure) e.observation?.encode()
+        else if (e is Fault || e is InterruptedException || e is SecurityException) null
+        else e.javaClass.simpleName
 
     private fun dispatch(op: String?, request: Bundle, response: Bundle) {
         val ownerId = request.getString(Proto.OWNER).orEmpty()
@@ -145,7 +149,7 @@ class PrivilegedDisplayCore(private val context: Context) {
             }
             Proto.OP_OBSERVE -> {
                 requireDisplay(); requireForeground(pkg)
-                observe(pkg, request.getBoolean(Proto.WANT_IMAGE), response)
+                observe(pkg, request.getBoolean(Proto.WANT_IMAGE), response, requireTree = true)
             }
             Proto.OP_TAP -> {
                 requireDisplay(); requireForeground(pkg)
@@ -175,30 +179,32 @@ class PrivilegedDisplayCore(private val context: Context) {
         }
     }
 
-    /**
-     * Capability probe: create a tiny trusted display (fails with displayUnsupported on 15-QPR2-type
-     * ROMs) and inject one harmless event (fails on Xiaomi without 「USB 调试(安全设置)」). Then
-     * release. Reports [Proto.OK] + [Proto.INJECT_OK]; never launches an app.
-     */
+    /** Test a real input receiver, not an empty display. Never launches or touches a user app. */
     private fun gateProbe(response: Bundle) {
+        // A settings probe must not replace or release an active task's display.
+        if (owner != null || display != null) throw Fault("probeBusy")
         try {
             owner = "__gate__"
-            createDisplay(Bundle().apply { putInt(Proto.SHORT_SIDE, 360); putInt(Proto.ASPECT_W, 9); putInt(Proto.ASPECT_H, 20) })
-            // The input side learns of a new display only after createVirtualDisplay returns, and
-            // a tap that arrives first reports false (#362). A task's input is never replayed, but
-            // nothing is on this display and it is released below, so here repeating touches nothing.
+            createDisplay(Bundle().apply { putInt(Proto.SHORT_SIDE, 360); putInt(Proto.ASPECT_W, 9); putInt(Proto.ASPECT_H, 20) }, probe = true)
+            response.putInt(Proto.DISPLAY_ID, displayId())
+            var probeDetail: String? = null
             val injection = runCatching {
-                BackgroundPolicy.retryUntil(
-                    GATE_INPUT_WAIT_MS, GATE_INPUT_PAUSE_MS, SystemClock::uptimeMillis, ::sleepChecked,
-                    retry = { it is Fault && it.code == "inputRejected" },
-                ) { injectTap(1, 1, false) }
+                val window = BackgroundInputProbe(privileged, checkNotNull(display).display)
+                try {
+                    window.verify { target, time ->
+                        sendMotion(MotionEvent.ACTION_DOWN, target.x, target.y, time, waitForFinish = false)
+                        sendMotion(MotionEvent.ACTION_UP, target.x, target.y, time, waitForFinish = false)
+                    }
+                } finally {
+                    // Cleanup failure must replace a delivery failure, not be hidden by use().
+                    try { window.close() } finally { probeDetail = window.failureDetail }
+                }
             }
             response.putBoolean(Proto.INJECT_OK, injection.isSuccess)
             injection.exceptionOrNull()?.let {
                 response.putString(Proto.INJECT_ERROR, failureCode(it))
-                failureDetail(it)?.let { detail -> response.putString(Proto.ERROR_DETAIL, detail) }
+                (probeDetail ?: failureDetail(it))?.let { detail -> response.putString(Proto.ERROR_DETAIL, detail) }
             }
-            response.putInt(Proto.DISPLAY_ID, displayId())
         } finally {
             releaseAll()
         }
@@ -209,7 +215,7 @@ class PrivilegedDisplayCore(private val context: Context) {
     private fun displayId(): Int = display?.display?.displayId ?: throw Fault("displayMissing")
     private fun requireDisplay() { if (display == null) throw Fault("displayMissing") }
 
-    private fun createDisplay(request: Bundle) {
+    private fun createDisplay(request: Bundle, probe: Boolean = false) {
         val shortSide = request.getInt(Proto.SHORT_SIDE, 720).coerceIn(360, 1080)
         val aspectW = request.getInt(Proto.ASPECT_W, 9).coerceAtLeast(1)
         val aspectH = request.getInt(Proto.ASPECT_H, 20).coerceAtLeast(1)
@@ -224,7 +230,10 @@ class PrivilegedDisplayCore(private val context: Context) {
                     bits or DisplayManager::class.java.getDeclaredField("VIRTUAL_DISPLAY_FLAG_$name").getInt(null)
                 }
             } catch (_: ReflectiveOperationException) { throw Fault("displayUnsupported") }
-            val vd = displays.createVirtualDisplay("dsh-background", w, h, 320, ir.surface, flags)
+            // Presentation requires this flag for the gate's inert receiver. Actual tasks keep
+            // their existing display flags; this tests delivery, not every target app's policy.
+            val vd = displays.createVirtualDisplay("dsh-background", w, h, 320, ir.surface,
+                flags or if (probe) DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION else 0)
             if (vd.display.displayId <= Display.DEFAULT_DISPLAY) { vd.release(); throw Fault("displayUnsupported") }
             width = w; height = h; reader = ir; display = vd
             // Keep the virtual display's keyboard off the main screen: IME policy HIDE.
@@ -280,21 +289,37 @@ class PrivilegedDisplayCore(private val context: Context) {
 
     // ---- observation (tree + optional screenshot) --------------------------
 
-    private fun observe(pkg: String, wantImage: Boolean, response: Bundle) {
+    private fun observe(pkg: String, wantImage: Boolean, response: Bundle, requireTree: Boolean = false) {
         val id = displayId()
         response.putInt(Proto.DISPLAY_ID, id)
         response.putString(Proto.FG_PKG, pkg)
         response.putBoolean(Proto.PORTRAIT, height >= width)
-        val shot = runCatching { capture() }.getOrNull()
-        var secure = shot?.black == true
+        val captureResult = runCatching { capture() }
+        val captureFailure = captureResult.exceptionOrNull()
+        if (captureFailure is InterruptedException ||
+            captureFailure is Fault && captureFailure.code == "cancelled") throw captureFailure
+        // Other capture faults retain the existing tree-only observation path.
+        val shot = captureResult.getOrNull()
         val label = runCatching { appLabel(pkg) }.getOrNull()
         label?.let { response.putString(Proto.APP_LABEL, it) }
-        val tree = runCatching { readTree(id, pkg) }.getOrElse {
-            if (it is Fault && it.code == "secureWindow") secure = true
-            null
-        }
+        val treeResult = runCatching { readTree(id, pkg) }
+        val failure = treeResult.exceptionOrNull()
+        if (failure is InterruptedException || failure is Fault && failure.code == "cancelled") throw failure
+        // Pixels alone never identify FLAG_SECURE. Keep an explicit secure failure authoritative.
+        val secure = failure is Fault && failure.code == "secureWindow"
         response.putBoolean(Proto.SECURE, secure)
         if (secure) { response.putBoolean(Proto.POOR, false); response.putInt(Proto.COUNT, 0); return }
+        // A read must report its failure; observation after an already-dispatched write
+        // must not turn that write into a failed action that a caller might replay.
+        val tree = if (requireTree) treeResult.getOrThrow() else treeResult.getOrNull()
+        if (captureResult.isSuccess && shot == null) {
+            if (requireTree) throw Fault("frameNotReady")
+            // The action already happened. Never make the caller replay it for an absent frame.
+            response.putBoolean(Proto.FRAME_NOT_READY, true)
+            response.putBoolean(Proto.POOR, true)
+            response.putInt(Proto.COUNT, 0)
+            return
+        }
         // The screenshot contains the whole viewport, including nodes beyond the 120-line
         // text limit. Never attach it when secrets were found or the scan was incomplete.
         // The typing unlock changes permission to write, never permission to reveal a secret.
@@ -338,9 +363,10 @@ class PrivilegedDisplayCore(private val context: Context) {
         return runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrNull()
     }
 
-    private class CaptureResult(val jpeg: ByteArray, val black: Boolean)
+    private class CaptureResult(val jpeg: ByteArray)
 
-    private fun capture(): CaptureResult {
+    /** Null means only absent/black frames; other capture failures remain distinguishable. */
+    private fun capture(): CaptureResult? {
         val ir = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         try {
             synchronized(lock) {
@@ -350,33 +376,47 @@ class PrivilegedDisplayCore(private val context: Context) {
                 reader = ir
                 previous?.close()
             }
-            val deadline = SystemClock.uptimeMillis() + 2500
-            var image = ir.acquireLatestImage()
-            while (image == null) {
-                if (SystemClock.uptimeMillis() >= deadline) throw Fault("screenshotFailed")
-                sleepChecked(40)
-                image = ir.acquireLatestImage()
-            }
-            try {
-                val plane = image.planes.singleOrNull() ?: throw Fault("screenshotFailed")
-                if (plane.pixelStride != 4 || plane.rowStride < width * 4) throw Fault("screenshotFailed")
-                val pixels = ByteBuffer.allocate(width * height * 4)
-                val src = plane.buffer.duplicate()
-                for (row in 0 until height) {
-                    val start = row * plane.rowStride
-                    src.position(start); src.limit(start + width * 4)
-                    pixels.put(src)
+            val deadline = SystemClock.uptimeMillis() + BackgroundFrameReadiness.CAPTURE_TIMEOUT_MS
+            for (attempt in 0..1) {
+                if (released.get() || Thread.currentThread().isInterrupted) throw Fault("cancelled")
+                if (attempt > 0 && SystemClock.uptimeMillis() >= deadline) return null
+                var image = ir.acquireLatestImage()
+                while (image == null) {
+                    val remaining = deadline - SystemClock.uptimeMillis()
+                    if (remaining <= 0) return null
+                    sleepChecked(minOf(40L, remaining))
+                    image = ir.acquireLatestImage()
                 }
-                pixels.flip()
-                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 try {
-                    bitmap.copyPixelsFromBuffer(pixels)
-                    val black = isMostlyBlack(bitmap)
-                    val buffer = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, buffer)
-                    return CaptureResult(buffer.toByteArray(), black)
-                } finally { bitmap.recycle() }
-            } finally { image.close() }
+                    val plane = image.planes.singleOrNull() ?: throw Fault("screenshotFailed")
+                    if (plane.pixelStride != 4 || plane.rowStride < width * 4) throw Fault("screenshotFailed")
+                    val pixels = ByteBuffer.allocate(width * height * 4)
+                    val src = plane.buffer.duplicate()
+                    for (row in 0 until height) {
+                        val start = row * plane.rowStride
+                        src.limit(start + width * 4); src.position(start)
+                        pixels.put(src)
+                    }
+                    pixels.flip()
+                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    try {
+                        bitmap.copyPixelsFromBuffer(pixels)
+                        val remaining = deadline - SystemClock.uptimeMillis()
+                        when (BackgroundFrameReadiness.next(isMostlyBlack(bitmap), attempt, remaining)) {
+                            BackgroundFrameReadiness.Next.NOT_READY -> return null
+                            BackgroundFrameReadiness.Next.RETRY -> Unit
+                            BackgroundFrameReadiness.Next.READY -> {
+                                val buffer = ByteArrayOutputStream()
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, buffer)
+                                return CaptureResult(buffer.toByteArray())
+                            }
+                        }
+                    } finally { bitmap.recycle() }
+                } finally { image.close() }
+                // Release the first Image before taking one more from this same reader/surface.
+                sleepChecked(BackgroundFrameReadiness.retryWaitMs(deadline - SystemClock.uptimeMillis()))
+            }
+            return null
         } finally { /* reader kept for next frame; closed on release */ }
     }
 
@@ -412,8 +452,10 @@ class PrivilegedDisplayCore(private val context: Context) {
     private fun readTree(displayId: Int, pkg: String): TreeRead {
         val vd = display ?: throw Fault("displayMissing")
         val conn = TreeConnection(context, pkg)
-        val automation = try { conn.open(vd.display) } catch (_: Throwable) { throw Fault("treeUnavailable") }
-        try { return readTree(automation, displayId, pkg) } finally { conn.close() }
+        try {
+            val automation = try { conn.open(vd.display) } catch (_: Throwable) { throw Fault("treeUnavailable") }
+            return readTree(automation, displayId, pkg)
+        } finally { conn.close() }
     }
 
     private fun readTree(automation: UiAutomation, displayId: Int, pkg: String, targetId: Int = 0): TreeRead {
@@ -607,8 +649,8 @@ class PrivilegedDisplayCore(private val context: Context) {
         if (index < 1 || text.isEmpty() || text.length > 500 || '\u0000' in text) throw Fault("invalidArguments")
         val vd = display ?: throw Fault("displayMissing")
         val conn = TreeConnection(context, pkg)
-        val automation = try { conn.open(vd.display) } catch (_: Throwable) { throw Fault("textConnectionUnavailable") }
         try {
+            val automation = try { conn.open(vd.display) } catch (_: Throwable) { throw Fault("textConnectionUnavailable") }
             val node = readTree(automation, vd.display.displayId, pkg, index).target ?: throw Fault("elementMissing")
             try {
                 if (!node.refresh()) throw Fault("textTargetChanged")
@@ -673,10 +715,10 @@ class PrivilegedDisplayCore(private val context: Context) {
         sendMotion(MotionEvent.ACTION_UP, ex, ey, down)
     }
 
-    private fun sendMotion(action: Int, x: Int, y: Int, downTime: Long) {
+    private fun sendMotion(action: Int, x: Int, y: Int, downTime: Long, waitForFinish: Boolean = true) {
         val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x.toFloat(), y.toFloat(), 0)
         event.source = InputDevice.SOURCE_TOUCHSCREEN
-        try { inject(event) } finally { event.recycle() }
+        try { inject(event, waitForFinish) } finally { event.recycle() }
     }
 
     private fun injectKey(src: KeyEvent) {
@@ -688,7 +730,7 @@ class PrivilegedDisplayCore(private val context: Context) {
     // Runs in the shell-uid privileged process (Shizuku UserService or app_process),
     // which the app hidden-API policy that lint models doesn't apply to.
     @SuppressLint("BlockedPrivateApi")
-    private fun inject(event: InputEvent) {
+    private fun inject(event: InputEvent, waitForFinish: Boolean = true) {
         val id = display?.display?.displayId ?: throw Fault("displayMissing")
         // WAIT_FOR_FINISH can time out after the event was delivered. A false result is
         // not proof of rejection: never replay the same event with another mode.
@@ -698,13 +740,14 @@ class PrivilegedDisplayCore(private val context: Context) {
             // Android 17 removed InputManager.getInstance(); the Context service works on every version.
             val manager = privileged.getSystemService(InputManager::class.java)
             InputManager::class.java.getMethod("injectInputEvent", InputEvent::class.java, Int::class.javaPrimitiveType)
-                .invoke(manager, event, 2) == true
+                .invoke(manager, event, if (waitForFinish) 2 else 0) == true
         } catch (e: InvocationTargetException) {
             throw e.targetException // the system's own answer, e.g. SecurityException
         } catch (_: ReflectiveOperationException) {
             throw Fault("inputApiUnavailable") // the hidden API is missing or blocked here
         }
-        if (!accepted) throw Fault("inputRejected")
+        // Only the gate uses ASYNC: its window receipt, not this boolean, decides delivery.
+        if (waitForFinish && !accepted) throw Fault("inputRejected")
     }
 
     private fun setImePolicyHide(displayId: Int) {
@@ -825,8 +868,6 @@ class PrivilegedDisplayCore(private val context: Context) {
 
     companion object {
         private val PACKAGE = Regex("[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+")
-        private const val GATE_INPUT_WAIT_MS = 1500L
-        private const val GATE_INPUT_PAUSE_MS = 50L
         private val FLAG_NAMES = listOf(
             "PUBLIC", "OWN_CONTENT_ONLY", "SUPPORTS_TOUCH", "DESTROY_CONTENT_ON_REMOVAL",
             "TRUSTED", "OWN_FOCUS", "STEAL_TOP_FOCUS_DISABLED")

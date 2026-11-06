@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/providers_state.dart';
+import '../common/app_dialog.dart';
 import '../common/expand_reveal.dart';
 import '../common/list_page_row.dart';
 import '../common/page_hero.dart';
@@ -82,7 +83,7 @@ class _ProviderDetailPageState extends ConsumerState<ProviderDetailPage> {
   }
 
   Future<void> _delete(CustomProvider provider) async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(context.l10n.engineProviderDeleteTitle(provider.displayName)),

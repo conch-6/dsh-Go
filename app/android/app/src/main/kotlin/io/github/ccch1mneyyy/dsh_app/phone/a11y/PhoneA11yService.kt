@@ -48,6 +48,9 @@ class PhoneA11yService : AccessibilityService() {
 
     internal fun invalidateOverlayWindowContext() { overlayContext = null }
 
+    /** User-initiated display captures must omit the service's own controls too. */
+    internal fun hideControlOverlayForPetScreenshot(hide: Boolean) { overlay?.hideForCapture(hide) }
+
     private val screenOff = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             // l10n:keep agent stop reason
@@ -80,12 +83,12 @@ class PhoneA11yService : AccessibilityService() {
     }
 
     /**
-     * The system interrupts feedback (rare for a feedbackGeneric service). The service stays
-     * bound, so the registration stays; only the running task stops.
+     * The system requests feedback interruption, not cancellation of the phone task.
+     * We own no ongoing speech or vibration feedback; keep task ownership and actions intact.
+     * Screen off, explicit stop and service teardown retain their separate stop paths.
      */
     override fun onInterrupt() {
-        // l10n:keep agent stop reason
-        stopAll("无障碍服务被系统打断")
+        Log.i(TAG, "accessibility feedback interrupted; phone task unchanged")
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {

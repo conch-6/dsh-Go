@@ -73,8 +73,22 @@ class ShareOut {
   );
 
   /// Into `Download/DSH-Go`; returns where it landed.
-  Future<String> save(File file) =>
-      files.saveToDownloads(file.path, name: file.uri.pathSegments.last, mime: shareFileMime);
+  Future<String> save(String name, String content) async {
+    final dir = await Directory('${(await _cacheRoot()).path}/share_code').create(recursive: true);
+    // A dismissed sheet may reopen while the native worker still reads its source.
+    final operation = await dir.createTemp('save-');
+    try {
+      final file = File('${operation.path}/$name');
+      await file.writeAsString(content, flush: true);
+      return await files.saveToDownloads(file.path, name: name, mime: shareFileMime);
+    } finally {
+      try {
+        await operation.delete(recursive: true);
+      } catch (_) {
+        // Cache cleanup must not change the native save result or original error.
+      }
+    }
+  }
 }
 
 final shareOutProvider = Provider<ShareOut>((ref) => ShareOut(files: ref.watch(filesChannelProvider)));

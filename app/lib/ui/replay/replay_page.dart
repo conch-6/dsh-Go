@@ -197,7 +197,7 @@ class _ReplayPageState extends ConsumerState<ReplayPage> with SingleTickerProvid
       // The bubbles' pictures come from the file, not from an engine.
       overrides: [
         sessionImageProvider.overrideWith((ref, key) async {
-          final asset = assets[key.$2];
+          final asset = assets[key.$2.attachmentId];
           if (asset == null) throw StateError('not in the file');
           return asset.bytes;
         }),

@@ -161,6 +161,7 @@
   "viewEmptyReconnect": "Reconnect",
   "viewEmptyWorkspace": "In “{value}”",
   "viewEmptySwitchWorkspace": "Switch workspace",
+  "viewEmptyHostDefaultDirectory": "Host default folder",
   "viewScheduleTitle": "Automations",
   "viewScheduleRefreshFailed": "Couldn’t refresh",
   "viewScheduleNone": "No active automations",

@@ -351,7 +351,7 @@ class AccountTile extends ConsumerWidget {
 
     return InkWell(
       onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountPage())),
-      splashFactory: NoSplash.splashFactory,
+      splashFactory: rowSplash(context),
       highlightColor: scheme.onSurface.withValues(alpha: 0.05),
       child: ConstrainedBox(
         constraints: BoxConstraints(

@@ -62,7 +62,11 @@ bool isUnshareableString(String value) {
   final uri = Uri.tryParse(v);
   if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
     if (uri.userInfo.isNotEmpty) return true;
-    if (uri.queryParameters.keys.any(_secretQuery.hasMatch)) return true;
+    try {
+      if (uri.queryParameters.keys.any(_secretQuery.hasMatch)) return true;
+    } on FormatException {
+      return true;
+    }
   }
   return false;
 }

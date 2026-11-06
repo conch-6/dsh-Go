@@ -22,7 +22,9 @@ import hashlib
 import os
 import struct
 import sys
+import tempfile
 import zipfile
+from contextlib import contextmanager
 
 MAGIC = b"DSHDLT01"
 END, COPY, DATA = 0, 1, 2
@@ -105,13 +107,24 @@ def plan(base, new):
     return ops
 
 
+@contextmanager
+def _staged_output(out):
+    if not out:
+        yield os.devnull
+        return
+    parent = os.path.dirname(os.path.abspath(out))
+    # A private directory owns the path, while ordinary open() preserves
+    # the output's normal creation mode and the caller's umask.
+    with tempfile.TemporaryDirectory(prefix=".dsh-apk-delta-", dir=parent) as directory:
+        yield os.path.join(directory, "output")
+
+
 def apply(base, patch, out=None):
     """Writes NEW from [base] and [patch] to [out] (None: only checks it).
     Refuses a patch for another base; anything but exactly the target's length
     and SHA-256 is an error, and leaves nothing at [out]."""
-    tmp = f"{out}.part" if out else None
-    try:
-        with open(base, "rb") as b, open(patch, "rb") as p, open(tmp or os.devnull, "wb") as sink:
+    with _staged_output(out) as tmp:
+        with open(base, "rb") as b, open(patch, "rb") as p, open(tmp, "wb") as sink:
             head = read(p, HEADER)
             if head[:8] != MAGIC:
                 raise DeltaError(f"{patch}: not a DSHDLT01 patch")
@@ -138,17 +151,13 @@ def apply(base, patch, out=None):
                 raise DeltaError(f"{patch} doesn't reproduce its target")
         if out:
             os.replace(tmp, out)
-    finally:
-        if tmp and os.path.exists(tmp):
-            os.unlink(tmp)
 
 
 def make(base, new, out):
     """Writes the patch from [base] to [new] at [out], once applying it gives
     [new] back. Returns its ops (see plan)."""
     ops = plan(base, new)
-    tmp = f"{out}.part"
-    try:
+    with _staged_output(out) as tmp:
         with open(new, "rb") as n, open(tmp, "wb") as f:
             f.write(MAGIC + sha256(base) + sha256(new) + struct.pack(">Q", n.seek(0, os.SEEK_END)))
             for op, offset, length in ops:
@@ -161,9 +170,6 @@ def make(base, new, out):
             f.write(bytes([END]))
         apply(base, tmp)
         os.replace(tmp, out)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
     return ops
 
 

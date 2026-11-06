@@ -131,6 +131,7 @@ class PetFocus {
   const PetFocus({
     required this.host,
     required this.sessionId,
+    this.title,
     this.activity = PetActivity.none,
     this.compacting = false,
     this.waitingKey,
@@ -139,6 +140,9 @@ class PetFocus {
 
   final HostRef host;
   final String sessionId;
+
+  /// The current chat state's title, before notification masking.
+  final String? title;
   final PetActivity activity;
   final bool compacting;
 
@@ -157,13 +161,14 @@ class PetFocus {
       other is PetFocus &&
       other.host == host &&
       other.sessionId == sessionId &&
+      other.title == title &&
       other.activity == activity &&
       other.compacting == compacting &&
       other.waitingKey == waitingKey &&
       other.waitingQuestion == waitingQuestion;
 
   @override
-  int get hashCode => Object.hash(host, sessionId, activity, compacting, waitingKey, waitingQuestion);
+  int get hashCode => Object.hash(host, sessionId, title, activity, compacting, waitingKey, waitingQuestion);
 }
 
 /// The level signals at one moment.

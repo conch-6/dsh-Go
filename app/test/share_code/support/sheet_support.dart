@@ -119,9 +119,10 @@ class RecordingShareOut extends ShareOut {
   Future<void> shareFile(File file, {String? text}) async => sharedFiles.add(file.path);
 
   @override
-  Future<String> save(File file) async {
+  Future<String> save(String name, String content) async {
+    final file = await write(name, content);
     saved.add(file.path);
-    return 'Download/DSH-Go/${file.uri.pathSegments.last}';
+    return 'Download/DSH-Go/$name';
   }
 }
 

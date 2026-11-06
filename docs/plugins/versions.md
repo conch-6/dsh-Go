@@ -34,6 +34,17 @@ NA 的破坏性变化需要另升主版本。视图 v2 则是明确选择的新�
 
 v1 golden 仍用原基准，不因 v2 更新；v2 的浅深色、窄屏、大字号用独立 golden。工具卡中已有 v1 字段的含义不变。
 
+## 较新的位置
+
+`composer.tools`、`session.actions`、`turn.note`、面板 `placement: "plugin"`、`presentation: "sheet"` 在协议 v1 内增加，不改已有含义。App 在 `caps.surfaces` 里列出自己能画的；视图函数用 `hasSurface(caps, …)` 判断。
+
+| 组合 | 结果 |
+|---|---|
+| 新桥接 + 老 App | 老 App 忽略这些键。只放在 `plugin` 的面板退回 `session.tab`，不会消失；`presentation` 被忽略，仍然推页 |
+| 老桥接 + 新 App | 这些键不存在，也不算错误；清单里写了新位置时老桥接记一条 `unknown-surface` |
+
+尾注的上限收紧过一次：一段对话最多跟前 8 个开着尾注的插件，第 9 个起不再显示。之前没有这个上限，排在后面的插件在前面的没占满一轮 2 个名额时也能显示。
+
 ## NA v1.3：选择文件
 
 新增可选能力 `files`、直接点按效果 `pickFile` / `pickImage`、invoke 可选字段 `userGesture`，以及桥接专用的有界上传/一次性读取句柄。协议主版本仍为 `1`，NA 的小版本与视图版本分别演进。
@@ -86,6 +97,7 @@ view: (scope, caps) => {
 
 | DSH | 状态 |
 |---|---|
+| 0.2.2-rc.1 | DSH Go 内置的引擎：插槽目录（109 个）和网页岛配方按它核对 |
 | 0.2.1-rc.4 | 开发基线：插槽目录（103 个）和网页岛配方按它核对 |
 | 0.2.1-rc.2 | 已验证（工具卡链路、插件安装、桥接） |
 | 0.2.x 其他 | 按 `engines.dsh` 自行声明；`presentationMeta` 自 0.2.0 起存在 |

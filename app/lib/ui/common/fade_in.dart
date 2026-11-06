@@ -36,6 +36,9 @@ class FadeSlideIn extends StatefulWidget {
   /// Rise distance in logical pixels.
   final double offset;
 
+  /// The fluid tier rises this many times further.
+  static const _fluidRise = 2.5;
+
   /// How long after a scroll view's first entrance later items still animate.
   static const _window = Duration(milliseconds: 400);
 
@@ -49,6 +52,9 @@ class FadeSlideIn extends StatefulWidget {
 class _FadeSlideInState extends State<FadeSlideIn> with SingleTickerProviderStateMixin {
   AnimationController? _controller;
   Animation<double>? _curve;
+
+  /// The fluid tier: the rise on a spring of its own, from further down.
+  Animation<double>? _rise;
   bool _decided = false;
 
   @override
@@ -57,15 +63,26 @@ class _FadeSlideInState extends State<FadeSlideIn> with SingleTickerProviderStat
     if (_decided) return;
     _decided = true;
     if (!_shouldAnimate()) return;
+    final fluid = AppMotion.fluid(context);
     final lead = widget.delay + AppMotion.stagger * widget.index;
-    final total = lead + widget.duration;
+    final total = lead + (fluid ? AppMotion.riseCurve.duration : widget.duration);
     final controller = AnimationController(vsync: this, duration: total);
     final start = total.inMicroseconds == 0 ? 0.0 : lead.inMicroseconds / total.inMicroseconds;
     _controller = controller;
     _curve = CurvedAnimation(
       parent: controller,
-      curve: Interval(start, 1, curve: AppMotion.enter),
+      curve: Interval(
+        start,
+        fluid ? (lead + widget.duration).inMicroseconds / total.inMicroseconds : 1,
+        curve: AppMotion.enter,
+      ),
     );
+    if (fluid) {
+      _rise = CurvedAnimation(
+        parent: controller,
+        curve: Interval(start, 1, curve: AppMotion.riseCurve),
+      );
+    }
     controller.forward();
   }
 
@@ -93,10 +110,13 @@ class _FadeSlideInState extends State<FadeSlideIn> with SingleTickerProviderStat
   Widget build(BuildContext context) {
     final curve = _curve;
     if (curve == null) return widget.child;
+    final rise = _rise;
     return AnimatedBuilder(
-      animation: curve,
+      animation: rise ?? curve,
       builder: (context, child) => Transform.translate(
-        offset: Offset(0, widget.offset * (1 - curve.value)),
+        offset: rise == null
+            ? Offset(0, widget.offset * (1 - curve.value))
+            : Offset(0, widget.offset * FadeSlideIn._fluidRise * (1 - rise.value)),
         child: Opacity(opacity: curve.value, alwaysIncludeSemantics: true, child: child),
       ),
       child: widget.child,

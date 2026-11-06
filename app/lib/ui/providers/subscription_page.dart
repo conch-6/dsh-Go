@@ -12,6 +12,7 @@ import '../../state/models_state.dart';
 import '../../state/providers_state.dart' show formatTokens;
 import '../../state/read_list_cache.dart' show ReadListStatus;
 import '../../state/subscriptions_state.dart';
+import '../common/app_dialog.dart';
 import '../common/list_page_row.dart';
 import '../common/page_hero.dart';
 import '../common/read_list_status.dart';
@@ -40,7 +41,7 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
   String get _label => subscriptionLabel(widget.subscription);
 
   Future<void> _signOut() async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(context.l10n.engineSubscriptionSignOutTitle(_label)),

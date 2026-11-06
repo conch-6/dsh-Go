@@ -19,8 +19,10 @@ export interface TestFeed<D = unknown> {
   history: Array<D | null>
   /** How many times ctx.dshGo.refresh(id) was called while subscribed. */
   stale: number
-  /** Emits the bridge would reject. */
+  /** Emits the bridge would reject, and failures of the data function or its cleanup. */
   errors: string[]
+  /** Resolves once the data function has finished starting. Never rejects: a failure lands in `errors`. */
+  settled: Promise<void>
   stop(): void
 }
 
@@ -37,7 +39,7 @@ export interface TestHost {
   contributions(caps?: Partial<Caps>): ContributionsPlugin
   /** POST /dsh-go/v1/invoke; rejects with HostError where the bridge answers an error. */
   invoke(id: string, request?: {
-    surface?: 'composer.actions' | 'message.actions' | 'composer.strip' | 'panel'
+    surface?: 'composer.actions' | 'message.actions' | 'composer.strip' | 'panel' | 'composer.tools' | 'session.actions'
     action?: string
     value?: unknown
     scope?: Scope
@@ -61,7 +63,7 @@ export interface TestHost {
   capabilityEvent(scope: Scope, event: Omit<CapabilityEvent, 'signal'>): Promise<void>
   /** GET /dsh-go/v1/views/<pkg>/<id>. */
   view(id: string, scope?: Scope, caps?: Partial<Caps>): Promise<{ view: View; stats: { bytes: number; nodes: number; depth: number } }>
-  /** Start a panel's or strip's data function. */
+  /** Start the data function of a panel, strip or turn note. Removing or replacing its registration stops the feed. */
   subscribe<D = any>(id: string, scope?: Scope): TestFeed<D>
   /** Fire a host event to the plugin's ctx.on listeners. */
   emitEvent(name: string, ...args: unknown[]): void

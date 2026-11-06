@@ -44,11 +44,15 @@
 
 以下命令从仓库根目录运行。按改动范围选择；在 PR 中写明实际执行的命令和结果。缺少设备、资源或依赖时，明确写“未运行”和原因。
 
+[CI](.github/workflows/ci.yml) 会在 PR 和 `main` 上跑这些检查：PR 跑通用检查和改动涉及的部分，合入 `main` 后跑全量，结果看 `CI OK`。CI 不碰真机和真实账号，这部分仍要单独验证。
+
 **Flutter 应用：**
 
 ```bash
 (cd app && flutter pub get && flutter analyze && flutter test)
 ```
+
+**真机调界面（热重载）：** `tooling/dev-run.sh` 把 debug 包覆盖安装到手机上已有的 release 版，再挂上 Flutter，按 `r` 几秒内生效。它用 `adb install -r` 加 `flutter attach`，不用 `flutter run`，因为后者安装失败时会先卸载，清掉手机上的数据。debug 模式动画偏卡，只用来看布局、尺寸和颜色，判断流畅度要打 release 包。需要 `app/android/key.properties` 和手机上的包同一把 key。
 
 **Dart 通信包：**
 

@@ -9,8 +9,8 @@ window.DSH_GO_CONFIG = {
     title: "DSH Go · 万物皆插件，随身而行",
     description: "DSH Go，由 DSH-TUI 作者 ccchimneyyy 精心打造的非官方 DeepSeek Harness 移动应用。万物皆插件，现在随身而行。",
     siteUrl: "https://go.dshtui.com/",
-    shareImage: "", // 可选：assets/author/share.png 或完整 HTTPS 图片地址，推荐 1200×630 PNG/JPEG
-    shareImageAlt: "DSH Go，万物皆插件，现在随身而行"
+    shareImage: "assets/author/share.png", // 可选：本站图片或完整 HTTPS 图片地址，推荐 1200×630 PNG/JPEG
+    shareImageAlt: "DSH Go 的手机和平板界面：把 DeepSeek Harness 装进口袋"
   },
   author: {
     avatar: "assets/dsh-go.svg", // 换成 assets/author/avatar.png
@@ -21,13 +21,13 @@ window.DSH_GO_CONFIG = {
     label: "下载 DSH Go",
     platform: "Android 8.0+",
     title: "获取 DSH Go",
-    description: "DSH Go 1.0 已发布，支持 Android 8.0 及以上的手机，安装包在 GitHub Releases 发布。",
-    qrImage: "assets/author/download-qr.png", // 内容是下面的 url；改 url 时要重新生成
-    qrNote: "扫码打开 GitHub 下载页",
-    url: "https://github.com/ccch1mneyyy/dsh-go/releases/latest", // 下载入口：GitHub Releases 最新版本
-    urlLabel: "从 GitHub 下载",
-    altUrl: "", // 可选：第二个下载入口，空值隐藏
-    altLabel: ""
+    description: "DSH Go 1.0 已发布，支持 Android 8.0 及以上的手机。下载页列出了当前可用的下载线路。",
+    qrImage: "assets/author/download-qr-v2.png", // 内容是下面的 url；改 url 时要重新生成并换文件名
+    qrNote: "扫码打开下载页",
+    url: "https://go.dshtui.com/download", // 下载入口：下载页，在微信、QQ 里会提示换浏览器
+    urlLabel: "打开下载页",
+    altUrl: "https://github.com/ccch1mneyyy/dsh-go/releases/latest", // 第二个入口：GitHub Releases 最新版本，空值隐藏
+    altLabel: "从 GitHub 下载"
   },
   // 代码框和 Star 气泡都链接到这里；气泡上的 Star 数由本站的 /api/github/stars
   // 提供（services/share-worker/src/github.ts，固定查 ccch1mneyyy/dsh-go）。
@@ -42,13 +42,6 @@ window.DSH_GO_CONFIG = {
   // 示例：{ bilibili: { label: "B站昵称", url: "https://space.bilibili.com/数字ID" } }
   // 同一项同时写 github、bilibili 即可得到「GitHub ID / B站昵称」。
   contributors: [
-    { github: { label: "HuanLinOTO", url: "https://github.com/HuanLinOTO" }, row: 1 },
-    { github: { label: "liguobao", url: "https://github.com/liguobao" }, row: 2 },
-    { github: { label: "CikeSeven", url: "https://github.com/CikeSeven" }, row: 3 },
-    {
-      github: { label: "ClayGao233", url: "https://github.com/ClayGao233" },
-      bilibili: { label: "采云师烧饼", url: "https://space.bilibili.com/28879571" },
-      row: 1
-    }
+    { github: { label: "ccch1mneyyy", url: "https://github.com/ccch1mneyyy" }, row: 1 }
   ]
 };

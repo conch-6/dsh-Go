@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'redact.dart';
 
-enum AppErrorSource { flutter, platform }
+enum AppErrorSource { flutter, platform, session }
 
 /// A bounded, already-redacted record from this app process. It is not a
 /// persistent crash report, nor a listener for errors in other isolates.

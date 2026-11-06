@@ -111,14 +111,33 @@ List<SubagentNode> buildLineage(
   int depth = 0,
   Set<String>? seen,
 }) {
-  final visited = seen ?? <String>{parentId};
+  if (depth > 8) return const [];
+  // Build once per snapshot traversal; even a leaf used to scan every host
+  // session again. Keep this local so deletion/reparenting needs no cache invalidation.
+  final childrenByParent = <String, List<SessionSummary>>{};
+  for (final session in sessions.values) {
+    final parent = session.parentSessionId;
+    if (session.isSubagent && parent != null) {
+      (childrenByParent[parent] ??= []).add(session);
+    }
+  }
+  return _buildLineage(parentId, sessions, childrenByParent, depth, seen ?? <String>{parentId});
+}
+
+List<SubagentNode> _buildLineage(
+  String parentId,
+  Map<String, SessionSummary> sessions,
+  Map<String, List<SessionSummary>> childrenByParent,
+  int depth,
+  Set<String> visited,
+) {
   if (depth > 8) return const [];
   final parent = sessions[parentId];
   final entries = <SubagentCatalogEntry>[...?parent?.projections.subagentCatalog];
   final named = {for (final e in entries) e.id};
   final extra = [
-    for (final s in sessions.values)
-      if (s.isSubagent && s.parentSessionId == parentId && !named.contains(s.sessionId)) s,
+    for (final s in childrenByParent[parentId] ?? const <SessionSummary>[])
+      if (!named.contains(s.sessionId)) s,
   ]..sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
   for (final s in extra) {
     final identity = s.projections.subagentIdentity;
@@ -144,7 +163,7 @@ List<SubagentNode> buildLineage(
         title: title == null || title.isEmpty || title == label ? null : title,
         timing: summary?.projections.subagentTiming,
         createdAt: entry.createdAt,
-        children: buildLineage(entry.id, sessions, depth: depth + 1, seen: visited),
+        children: _buildLineage(entry.id, sessions, childrenByParent, depth + 1, visited),
       ),
     );
   }

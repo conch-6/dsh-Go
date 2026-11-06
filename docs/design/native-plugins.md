@@ -231,7 +231,7 @@ output: {
 
 `presentationMeta` 是 DSH 工具的正式字段（`dsh-tools` 类型：`output.presentationMeta`，注释写的是「可重放的展示元数据，与模型内容分开」）。它的值持久化在 `tool/result.meta` 里，App 已经收到它（`ToolChatItem.meta`，现在用来读 diff 和子代理 id）。
 
-`scope` = `{ host, sessionId?, turnId?, messageId?, callId? }`。只有用户点按 `composer.actions` 时，才附带当前输入框文字和剪贴板，并且两样都要声明 `"wants": ["draft" | "clipboard"]`，安装或首次使用时提示一次。
+`scope` = `{ host, sessionId?, turnId?, messageId?, callId? }`。只有用户点按 `composer.actions` 或 `composer.tools` 时，才附带当前输入框文字和剪贴板，并且两样都要声明 `"wants": ["draft" | "clipboard"]`，安装或首次使用时提示一次。
 
 ### 3.3 插槽（surface）v1
 

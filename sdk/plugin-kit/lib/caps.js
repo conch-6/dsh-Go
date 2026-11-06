@@ -6,6 +6,8 @@ import { V1_COMPONENTS, isBinding } from './view.js'
 
 /** Surfaces of protocol v1. */
 export const SURFACES = Object.freeze(['composer.actions', 'message.actions', 'composer.strip', 'panels'])
+/** Newer than v1: an app that draws them lists them in `caps.surfaces`. */
+export const NEWER_SURFACES = Object.freeze(['composer.tools', 'session.actions', 'turn.note', 'plugin'])
 
 const list = (v) => (Array.isArray(v) ? v : undefined)
 
@@ -55,7 +57,7 @@ export function localize(capsOrLocale, text) {
   if (typeof text !== 'object' || text === null) return ''
   const tag = (typeof capsOrLocale === 'string' ? capsOrLocale : capsOrLocale?.locale) ?? ''
   const keys = Object.keys(text)
-  const find = (want) => keys.find((k) => k.toLowerCase().replace('_', '-') === want.toLowerCase().replace('_', '-'))
+  const find = (want) => keys.find((k) => k.toLowerCase().replaceAll('_', '-') === want.toLowerCase().replaceAll('_', '-'))
   const lang = tag.split(/[-_]/)[0]
   const hit = (tag && find(tag)) || (lang && find(lang)) || find('en') || find('zh') || keys[0]
   return hit === undefined ? '' : String(text[hit])

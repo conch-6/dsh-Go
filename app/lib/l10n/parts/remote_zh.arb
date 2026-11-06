@@ -1034,5 +1034,13 @@
     }
   },
   "remoteNetworkSnapshotHint": "显示最近一次确认的路径与延迟，刷新可重新检测。",
-  "remoteNetworkObservedAt": "最近观测"
+  "remoteNetworkObservedAt": "最近观测",
+  "remoteNetworkLocalIpVersion": "手机 ICE IP 版本",
+  "remoteNetworkRemoteIpVersion": "主机 ICE IP 版本",
+  "remoteNetworkIceProtocol": "ICE 协议",
+  "remoteTransferSettings": "远程传输",
+  "remoteCompactHistory": "精简历史",
+  "remoteErrHistoryModeChanged": "主机已不支持精简历史，请切换到其他主机后再连回来，或重启 App，重新加载历史",
+  "remoteCompactHistoryHint": "支持的 DSH Remote 主机会精简历史工具详情，实时回复和审批不变。切换主机或重启 App 后生效；旧主机仍传输完整历史。",
+  "searchKwRemoteCompactHistory": "精简 简洁 历史 工具 传输 流量 远程 compact slim lite"
 }

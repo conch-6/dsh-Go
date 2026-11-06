@@ -25,6 +25,7 @@ import '../../state/read_list_identity.dart';
 import '../../state/workspaces_state.dart';
 import '../bots/bots_page.dart' show BotsPage, UnreadBadge;
 import '../chat/media/media_format.dart' show chatTitleShown;
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/empty_view.dart';
 import '../common/pressable.dart';
@@ -34,6 +35,7 @@ import '../common/status_dot.dart';
 import '../onboarding/local_install.dart';
 import '../remote/host_status.dart';
 import '../remote/host_switcher.dart' show showHostSheet;
+import '../remote/network_details_sheet.dart' show showRemoteNetworkDetails;
 import '../safe_mode/engine_failure_card.dart';
 import '../safe_mode/safe_mode_banner.dart';
 import '../share/share_entry.dart';
@@ -162,7 +164,7 @@ class SessionsDrawer extends ConsumerWidget {
                       ),
                     ),
                     // 网页模式, quietly: the one solid element stays 新对话.
-                    const WebModeKey(),
+                    const WebModeKey(tier: GlassTier.pill),
                     const SizedBox(width: 8),
                     NewChatButton(onTap: newChat),
                   ],
@@ -198,113 +200,97 @@ class SessionsDrawer extends ConsumerWidget {
       child: _SessionList(onClose: onClose, now: now),
     );
 
-    const radius = BorderRadius.only(
-      topRight: Radius.circular(AppShape.xl),
-      bottomRight: Radius.circular(AppShape.xl),
-    );
+    const radius = BorderRadius.only(topRight: Radius.circular(AppShape.xl), bottomRight: Radius.circular(AppShape.xl));
     final content = Material(
-        type: MaterialType.transparency,
-        child: SafeArea(
-          right: false,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (short)
-                Expanded(
-                  child: NestedScrollView(
-                    headerSliverBuilder: (context, _) => [
-                      SliverToBoxAdapter(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: top),
-                      ),
-                    ],
-                    body: list,
-                  ),
-                )
-              else ...[
-                ...top,
-                Expanded(child: list),
-              ],
-              // The action bar lies exactly over the identity bar, which
-              // keeps its size while hidden: same height at any text size.
-              _ReportHeight(
-                height: identityBarHeight,
-                child: Stack(
-                  children: [
-                    AnimatedOpacity(
-                      opacity: selecting ? 0 : 1,
-                      duration: quick,
-                      child: IgnorePointer(
-                        ignoring: selecting,
-                        child: ExcludeSemantics(
-                          excluding: selecting,
-                          child: IdentityBar(
-                            onHost: () => showHostSheet(context, onManage: () => onOpen(DrawerDestination.remote)),
-                            onFeatures: () => onOpen(DrawerDestination.features),
-                            onSettings: () => onOpen(DrawerDestination.settings),
-                            onSettingsHold: () => onOpen(DrawerDestination.settingsSearch),
-                          ),
+      type: MaterialType.transparency,
+      child: SafeArea(
+        right: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (short)
+              Expanded(
+                child: NestedScrollView(
+                  headerSliverBuilder: (context, _) => [
+                    SliverToBoxAdapter(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: top),
+                    ),
+                  ],
+                  body: list,
+                ),
+              )
+            else ...[
+              ...top,
+              Expanded(child: list),
+            ],
+            // The action bar lies exactly over the identity bar, which
+            // keeps its size while hidden: same height at any text size.
+            _ReportHeight(
+              height: identityBarHeight,
+              child: Stack(
+                children: [
+                  AnimatedOpacity(
+                    opacity: selecting ? 0 : 1,
+                    duration: quick,
+                    child: IgnorePointer(
+                      ignoring: selecting,
+                      child: ExcludeSemantics(
+                        excluding: selecting,
+                        child: IdentityBar(
+                          onHost: () => showHostSheet(context, onManage: () => onOpen(DrawerDestination.remote)),
+                          onLocalDetails: () => onOpen(DrawerDestination.engine),
+                          onFeatures: () => onOpen(DrawerDestination.features),
+                          onSettings: () => onOpen(DrawerDestination.settings),
+                          onSettingsHold: () => onOpen(DrawerDestination.settingsSearch),
                         ),
                       ),
                     ),
-                    Positioned.fill(
-                      child: AnimatedSwitcher(
-                        duration: quick,
-                        child: selecting
-                            ? SelectionActionBar(
-                                key: const ValueKey('selecting'),
-                                onMove: () {
-                                  if (ref.read(drawerScopeProvider)?.readOnly == false) {
-                                    moveToFolderFlow(
-                                      context,
-                                      ref,
-                                      ref.read(drawerSelectionProvider)?.toList() ?? const [],
-                                    );
-                                  }
-                                },
-                                onPin: () {
-                                  if (ref.read(drawerScopeProvider)?.readOnly == false) pinSelectionFlow(context, ref);
-                                },
-                                onArchive: () {
-                                  if (ref.read(drawerScopeProvider)?.readOnly == false) {
-                                    archiveSelectionFlow(context, ref);
-                                  }
-                                },
-                                onDelete: () {
-                                  if (ref.read(drawerScopeProvider)?.readOnly == false) {
-                                    unawaited(deleteSelectionFlow(context, ref));
-                                  }
-                                },
-                              )
-                            : const SizedBox.shrink(),
-                      ),
+                  ),
+                  Positioned.fill(
+                    child: AnimatedSwitcher(
+                      duration: quick,
+                      child: selecting
+                          ? SelectionActionBar(
+                              key: const ValueKey('selecting'),
+                              onMove: () {
+                                if (ref.read(drawerScopeProvider)?.readOnly == false) {
+                                  moveToFolderFlow(
+                                    context,
+                                    ref,
+                                    ref.read(drawerSelectionProvider)?.toList() ?? const [],
+                                  );
+                                }
+                              },
+                              onPin: () {
+                                if (ref.read(drawerScopeProvider)?.readOnly == false) pinSelectionFlow(context, ref);
+                              },
+                              onArchive: () {
+                                if (ref.read(drawerScopeProvider)?.readOnly == false) {
+                                  archiveSelectionFlow(context, ref);
+                                }
+                              },
+                              onDelete: () {
+                                if (ref.read(drawerScopeProvider)?.readOnly == false) {
+                                  unawaited(deleteSelectionFlow(context, ref));
+                                }
+                              },
+                            )
+                          : const SizedBox.shrink(),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      );
+      ),
+    );
 
     final motion = drawerMotion;
     if (motion == null) {
       return GlassSurface(tier: GlassTier.sheet, borderRadius: radius, child: content);
     }
-    return AnimatedBuilder(
-      animation: motion,
-      child: content,
-      builder: (context, child) {
-        // 滑动中的面板不做背景模糊:玻璃每帧重新采样它背后的聊天内容,中低端
-        // 机上就是掉帧的主因。停稳(0 / 1)时再恢复玻璃。
-        final moving = motion.value > 0.0 && motion.value < 1.0;
-        return GlassSurface(
-          tier: GlassTier.sheet,
-          borderRadius: radius,
-          blur: moving ? false : null,
-          child: child,
-        );
-      },
-    );
+    return SlidingGlass(motion: motion, tier: GlassTier.sheet, borderRadius: radius, child: content);
   }
 }
 
@@ -630,7 +616,7 @@ class _SessionList extends ConsumerWidget {
 
   Future<String?> _askTitle(BuildContext context, String initial) {
     final controller = TextEditingController(text: initial);
-    return showDialog<String>(
+    return showAppDialog<String>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(context.l10n.shellRenameChat),
@@ -928,9 +914,8 @@ class _RemoteEmptyState extends ConsumerWidget {
   }
 }
 
-/// The drawer's footer: who this is talking to (the active host and its state;
-/// tap to switch, or to manage remote hosts), then 网页版 and 设置 as two equal
-/// round buttons.
+/// The drawer's footer: the host icon opens its details; the name and dropdown
+/// switch hosts. 全部功能 and 设置 follow as two equal round buttons.
 class IdentityBar extends ConsumerWidget {
   const IdentityBar({
     super.key,
@@ -938,9 +923,13 @@ class IdentityBar extends ConsumerWidget {
     required this.onFeatures,
     required this.onSettings,
     this.onSettingsHold,
+    this.onLocalDetails,
   });
 
   final VoidCallback onHost;
+
+  /// Local hosts have engine details, not a remote network path.
+  final VoidCallback? onLocalDetails;
 
   /// 全部功能: what there is to do now. (网页版 is in 全部功能, in 设置 ›
   /// 界面 and on the brand row's switch.)
@@ -961,6 +950,9 @@ class IdentityBar extends ConsumerWidget {
     final host = ref.watch(activeHostProvider);
     final name = ref.watch(hostNameProvider(host)) ?? (host.isLocal ? l10n.commonThisPhone : l10n.commonRemoteHost);
     final view = watchHostStatus(ref, host);
+    final link = host.kind == HostKind.relay ? ref.watch(hostLinkStatusProvider(host)).value : null;
+    final path = link?.isConnected == true ? link?.network?.path ?? link?.path : null;
+    final statusLabel = path == null ? view.label : path.label;
     final tint = hostKindTint(host.kind);
     return Padding(
       // Same 10 / 20 grid as the rows above: the highlight's edge at 10, the
@@ -971,72 +963,90 @@ class IdentityBar extends ConsumerWidget {
       child: Row(
         children: [
           Expanded(
-            child: Semantics(
-              button: true,
-              label: l10n.shellCurrentHostLabel(name, view.label),
-              onTap: onHost,
-              excludeSemantics: true,
-              child: InkWell(
-                onTap: onHost,
-                customBorder: Squircle.border(AppShape.md),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: IdentityBar.keySize),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 0, 8, 0),
-                    child: Row(
-                      children: [
-                        DecoratedBox(
-                          decoration: ShapeDecoration(color: colors.identity[tint], shape: const CircleBorder()),
-                          child: SizedBox.square(
-                            dimension: 36,
-                            child: Icon(hostKindIcon(host.kind), size: 19, color: colors.onIdentity[tint]),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Flexible(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.titleSmall,
-                              ),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  StatusDot(tone: view.tone, size: 6),
-                                  const SizedBox(width: 6),
-                                  Flexible(
-                                    child: AnimatedSwitcher(
-                                      duration: AppMotion.of(context, AppMotion.quick),
-                                      layoutBuilder: (current, previous) =>
-                                          Stack(alignment: Alignment.centerLeft, children: [...previous, ?current]),
-                                      child: Text(
-                                        view.label,
-                                        key: ValueKey(view.label),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: AppType.tabular(
-                                          theme.textTheme.bodySmall!.copyWith(color: colors.textTertiary),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(AppIcons.dropdown, size: 18, color: colors.textTertiary),
-                      ],
+            child: Row(
+              key: const ValueKey('identity-host-controls'),
+              children: [
+                const SizedBox(width: 6),
+                IconButton(
+                  key: const ValueKey('identity-host-details'),
+                  tooltip: host.isLocal ? l10n.phoneEngineTitle : l10n.remoteNetworkDetails,
+                  onPressed: host.isLocal ? onLocalDetails : () => showRemoteNetworkDetails(context, host),
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints.tightFor(width: keySize, height: keySize),
+                  style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                  icon: DecoratedBox(
+                    decoration: ShapeDecoration(color: colors.identity[tint], shape: const CircleBorder()),
+                    child: SizedBox.square(
+                      dimension: 36,
+                      child: Icon(hostKindIcon(host.kind), size: 19, color: colors.onIdentity[tint]),
                     ),
                   ),
                 ),
-              ),
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    label: l10n.shellCurrentHostLabel(name, statusLabel),
+                    onTap: onHost,
+                    excludeSemantics: true,
+                    child: InkWell(
+                      key: const ValueKey('identity-host-switcher'),
+                      onTap: onHost,
+                      customBorder: Squircle.border(AppShape.md),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: IdentityBar.keySize),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleSmall,
+                                    ),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        StatusDot(tone: view.tone, size: 6),
+                                        const SizedBox(width: 6),
+                                        Flexible(
+                                          child: AnimatedSwitcher(
+                                            duration: AppMotion.of(context, AppMotion.quick),
+                                            layoutBuilder: (current, previous) => Stack(
+                                              alignment: Alignment.centerLeft,
+                                              children: [...previous, ?current],
+                                            ),
+                                            child: Text(
+                                              statusLabel,
+                                              key: ValueKey(statusLabel),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: AppType.tabular(
+                                                theme.textTheme.bodySmall!.copyWith(color: colors.textTertiary),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(AppIcons.dropdown, size: 18, color: colors.textTertiary),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(width: 8),
@@ -1094,7 +1104,7 @@ class _RoundButton extends StatelessWidget {
         onTap: onTap,
         onLongPress: hold,
         excludeSemantics: true,
-        child: Pressable(child: button),
+        child: button,
       ),
     );
   }

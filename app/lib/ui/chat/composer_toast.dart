@@ -41,15 +41,18 @@ void showComposerToast(
 }) {
   final bottom = MediaQuery.paddingOf(context).bottom;
   final content = composerHeight - math.max(bottom, safeMinimum);
+  final margin = EdgeInsets.fromLTRB(16, 0, 16, math.max(0.0, content) + safeMinimum + gap);
   ScaffoldMessenger.maybeOf(context)
     ?..hideCurrentSnackBar()
     ..showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: actionLabel == null ? briefNoticeDuration(message) : composerToastActionDuration,
-        persist: false,
-        action: actionLabel == null ? null : SnackBarAction(label: actionLabel, onPressed: onAction ?? () {}),
-        margin: EdgeInsets.fromLTRB(16, 0, 16, math.max(0.0, content) + safeMinimum + gap),
-      ),
+      actionLabel == null
+          ? briefNoticeBar(message, margin: margin)
+          : SnackBar(
+              content: Text(message),
+              duration: composerToastActionDuration,
+              persist: false,
+              action: SnackBarAction(label: actionLabel, onPressed: onAction ?? () {}),
+              margin: margin,
+            ),
     );
 }

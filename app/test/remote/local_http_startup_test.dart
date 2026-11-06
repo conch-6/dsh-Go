@@ -185,20 +185,25 @@ void main() {
         }
       };
       late DshClient client;
-      late Future<DshConnectionState> refused;
+      final refused = Completer<void>();
       final c = container(
         key: 'fake-key',
         connector: ({required baseUri, required token}) async {
           client = await DshClient.connect(baseUri: host.baseUri, token: FakeDsh.token, startMux: false);
-          refused = client.mux.states.firstWhere((s) => s == DshConnectionState.unauthorized);
+          unawaited(
+            client.mux.states
+                .firstWhere((s) => s == DshConnectionState.unauthorized)
+                .then((_) => refused.complete(), onError: refused.completeError),
+          );
           return client;
         },
       );
       final seen = <AsyncValue<HostConnection?>>[];
       final sub = c.listen(localConnectionProvider, (_, v) => seen.add(v));
       try {
-        await entered.future;
-        await refused;
+        // A refusal that lands first closes the client, and the key's RPC never leaves.
+        await Future.any([entered.future, refused.future]);
+        await refused.future;
         expect(client.mux.lastError, isA<DshHttpException>().having((e) => e.statusCode, 'status', status));
         release.complete();
         expect(await failed(c), isA<DshHttpException>().having((e) => e.statusCode, 'status', status));
@@ -252,13 +257,16 @@ void main() {
     var completed = false;
     final failure = const DshTransportException('ready failed before key');
     final result = c.read(localConnectionProvider.future);
-    final observed = result.then<Object?>((value) {
-      completed = true;
-      return value;
-    }, onError: (Object error, StackTrace stack) {
-      completed = true;
-      return error;
-    });
+    final observed = result.then<Object?>(
+      (value) {
+        completed = true;
+        return value;
+      },
+      onError: (Object error, StackTrace stack) {
+        completed = true;
+        return error;
+      },
+    );
     try {
       await client.keyEntered.future;
       client.mux.result.completeError(failure);

@@ -58,6 +58,18 @@ void main() {
       expect((LauncherEntry.parse({'kind': 'chat', 'sessionId': 's2'}) as OpenChatEntry).host, HostRef.local);
     });
 
+    test('a pet screenshot carries only its private cache path', () {
+      final entry = LauncherEntry.parse({'kind': 'screenshot', 'path': '/cache/pet-screenshots/slot/screen.png'});
+      expect(entry, isA<ScreenshotEntry>());
+      expect((entry as ScreenshotEntry).path, '/cache/pet-screenshots/slot/screen.png');
+    });
+
+    test('malformed screenshot entries are dropped', () {
+      for (final path in [null, 42, '', 'screen.png', 'content://screen', '/cache/bad\u0000.png']) {
+        expect(LauncherEntry.parse({'kind': 'screenshot', 'path': path}), isNull);
+      }
+    });
+
     test('anything else is dropped', () {
       expect(LauncherEntry.parse(null), isNull);
       expect(LauncherEntry.parse({'kind': 'chat'}), isNull);

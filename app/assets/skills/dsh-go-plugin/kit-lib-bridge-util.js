@@ -1,6 +1,6 @@
 // Small pure helpers shared by the native-plugin modules. Node built-ins only.
 import { createHash } from "node:crypto";
-import { SCOPE_KEYS, SEMVER } from "./limits.js";
+import { LIMITS, SCOPE_KEYS, SEMVER, TONES } from "./limits.js";
 
 export const isPlainObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v)
   && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
@@ -25,6 +25,21 @@ export function cleanLine(s) {
   return s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/** A turn note push `{ turnId: { text, tone? } }` cleaned and cut to size, the newest turns kept. Undefined when malformed. */
+export function sanitizeNotes(d) {
+  if (d === null || d === undefined) return null;
+  if (!isPlainObject(d)) return undefined;
+  const out = {};
+  for (const [turn, note] of Object.entries(d).slice(-LIMITS.turnNotesPerFeed)) {
+    if (!isPlainObject(note) || typeof note.text !== "string" || turn.length > 64) continue;
+    const text = cleanLine(note.text);
+    if (text === "") continue;
+    out[turn] = { text: chars(text) > LIMITS.textChars.turnNote ? truncateChars(text, LIMITS.textChars.turnNote) : text };
+    if (TONES.includes(note.tone)) out[turn].tone = note.tone;
+  }
+  return out;
+}
+
 /** Multi-line payload text (insert / copy): keeps \n and \t, drops other control characters. */
 export function cleanBlock(s) {
   return s.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
@@ -43,7 +58,7 @@ export function parseText(v) {
   for (const [k, raw] of Object.entries(v)) {
     if (!LOCALE.test(k) || typeof raw !== "string") continue;
     const s = cleanLine(raw);
-    if (s !== "") out[k.toLowerCase().replace("_", "-")] = s;
+    if (s !== "") out[k.toLowerCase().replaceAll("_", "-")] = s;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -52,7 +67,7 @@ export function parseText(v) {
 export function resolveText(text, locale) {
   if (text === undefined || text === null) return undefined;
   if (typeof text === "string") return text;
-  const want = typeof locale === "string" ? locale.toLowerCase().replace("_", "-") : "";
+  const want = typeof locale === "string" ? locale.toLowerCase().replaceAll("_", "-") : "";
   if (want && text[want] !== undefined) return text[want];
   const lang = want.split("-")[0];
   if (lang && text[lang] !== undefined) return text[lang];
@@ -88,6 +103,11 @@ export function deepEqual(a, b) {
   return true;
 }
 
+// JSON member names are data, including "__proto__"; never invoke inherited setters.
+function setJsonMember(object, key, value) {
+  Object.defineProperty(object, key, { value, enumerable: true, configurable: true, writable: true });
+}
+
 /**
  * RFC 7386 JSON Merge Patch turning `from` into `to` (both JSON values). Objects recurse, keys
  * missing from `to` become null, everything else is replaced whole. Returns undefined when equal.
@@ -98,17 +118,17 @@ export function mergeDiff(from, to) {
   let changed = false;
   for (const k of Object.keys(from)) {
     if (!Object.hasOwn(to, k) || to[k] === null) {
-      if (from[k] !== null) { patch[k] = null; changed = true; }
+      if (from[k] !== null) { setJsonMember(patch, k, null); changed = true; }
     }
   }
   for (const [k, v] of Object.entries(to)) {
     if (v === null) continue;
-    if (!Object.hasOwn(from, k) || from[k] === null) { patch[k] = v; changed = true; continue; }
+    if (!Object.hasOwn(from, k) || from[k] === null) { setJsonMember(patch, k, v); changed = true; continue; }
     if (isPlainObject(from[k]) && isPlainObject(v)) {
       const sub = mergeDiff(from[k], v);
-      if (sub !== undefined) { patch[k] = sub; changed = true; }
+      if (sub !== undefined) { setJsonMember(patch, k, sub); changed = true; }
     } else if (!deepEqual(from[k], v)) {
-      patch[k] = v;
+      setJsonMember(patch, k, v);
       changed = true;
     }
   }
@@ -121,7 +141,7 @@ export function mergeApply(target, patch) {
   const out = isPlainObject(target) ? { ...target } : {};
   for (const [k, v] of Object.entries(patch)) {
     if (v === null) delete out[k];
-    else out[k] = mergeApply(out[k], v);
+    else setJsonMember(out, k, mergeApply(Object.hasOwn(out, k) ? out[k] : undefined, v));
   }
   return out;
 }
@@ -131,7 +151,7 @@ export function withoutNulls(v) {
   if (Array.isArray(v)) return v.map(withoutNulls);
   if (!isPlainObject(v)) return v;
   const out = {};
-  for (const [k, x] of Object.entries(v)) if (x !== null) out[k] = withoutNulls(x);
+  for (const [k, x] of Object.entries(v)) if (x !== null) setJsonMember(out, k, withoutNulls(x));
   return out;
 }
 

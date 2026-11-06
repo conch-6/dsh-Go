@@ -63,6 +63,20 @@ void main() {
       expect(galleryFileName('图片', 'image/gif', now: now), 'DSH_20261024_153012.gif');
       expect(galleryFileName('  ', 'image/jpeg', now: now), 'DSH_20261024_153012.jpg');
     });
+
+    test('UTF-16 cap never splits a supplementary character', () {
+      final prefix = '图' * 79;
+      final name = galleryFileName('$prefix😀.png', 'image/png');
+      expect(utf8.decode(utf8.encode(name)), name, reason: 'a valid title must remain valid through UTF-8');
+      expect(name, '$prefix.png');
+    });
+
+    test('UTF-16 cap preserves complete pairs and the original size budget', () {
+      final prefix = '图' * 78;
+      expect(galleryFileName('$prefix😀suffix.png', 'image/png'), '$prefix😀.png');
+      expect(galleryFileName('${'图' * 81}.webp', 'image/webp'), '${'图' * 80}.webp');
+      expect(galleryFileName('${'a' * 81}.jpeg', 'image/jpeg'), '${'a' * 80}.jpg');
+    });
   });
 
   group('galleryImage', () {
@@ -134,6 +148,21 @@ void main() {
         saveToGallery(const MediaChannel(), _png, name: 'a.png'),
         throwsA(isA<GallerySaveException>().having((e) => e.code, 'code', 'permission')),
       );
+    });
+
+    test('UTF-16 cap does not send a replacement character through the media channel', () async {
+      final prefix = '图' * 79;
+      final expected = '$prefix.png';
+      final calls = _mockMedia((call) async {
+        final args = call.arguments as Map;
+        return 'Pictures/DSH Go/${args['name']}';
+      });
+      final where = await saveToGallery(const MediaChannel(), _png, name: '$prefix😀.png');
+      final args = calls.single.arguments as Map;
+      expect(args['name'], expected);
+      expect(args['bytes'], _png);
+      expect(args['mime'], 'image/png');
+      expect(where, 'Pictures/DSH Go/$expected');
     });
   });
 
