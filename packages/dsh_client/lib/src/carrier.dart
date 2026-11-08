@@ -52,6 +52,11 @@ abstract class DshCarrier {
   /// code `METHOD_NOT_ALLOWED` instead of throwing.
   bool allowsEndpoint(String endpoint) => true;
 
+  /// Optional features the far end announced on this link (ds-harness-remote's
+  /// encrypted capability probe, e.g. `harness.terminal.v1`). Null when the
+  /// carrier has no such probe: [allowsEndpoint] alone decides.
+  Set<String>? get peerCapabilities => null;
+
   /// One unary call. Host failures come back as [RpcError]; carrier
   /// failures throw ([DshHttpException], [DshTransportException],
   /// [DshProtocolException], [DshCarrierRefusedException]).

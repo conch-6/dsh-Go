@@ -13,7 +13,6 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
 import java.io.File
-import java.nio.file.Files
 import kotlin.concurrent.thread
 
 /**
@@ -139,35 +138,28 @@ class LinksPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         val shown = safeName(name ?: source.lastPathSegment ?: "shared")
         if (size > MAX_FILE_BYTES) return mapOf("error" to "too_large", "name" to shown)
         val dir = File(context.cacheDir, "links").apply { mkdirs() }
-        prune(dir)
-        // One folder per arrival so two files with the same name don't collide.
-        val slot = Files.createTempDirectory(dir.toPath(), "arrival-").toFile()
-        val target = File(slot, shown)
-        val input = resolver.openInputStream(source) ?: return mapOf("error" to "unreadable", "name" to shown)
-        input.use { stream ->
-            target.outputStream().use { out ->
-                val buffer = ByteArray(16 * 1024)
-                var total = 0L
-                while (true) {
-                    val read = stream.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    if (total > MAX_FILE_BYTES) {
-                        out.close()
-                        slot.deleteRecursively()
-                        return mapOf("error" to "too_large", "name" to shown)
+        return LinkCopySlots.withSlot(dir) { slot ->
+            val target = File(slot, shown)
+            val input = resolver.openInputStream(source) ?: return@withSlot mapOf("error" to "unreadable", "name" to shown)
+            input.use { stream ->
+                target.outputStream().use { out ->
+                    val buffer = ByteArray(16 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val read = stream.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        if (total > MAX_FILE_BYTES) {
+                            out.close()
+                            slot.deleteRecursively()
+                            return@withSlot mapOf("error" to "too_large", "name" to shown)
+                        }
+                        out.write(buffer, 0, read)
                     }
-                    out.write(buffer, 0, read)
                 }
             }
+            mapOf("uri" to Uri.fromFile(target).toString(), "name" to shown)
         }
-        return mapOf("uri" to Uri.fromFile(target).toString(), "name" to shown)
-    }
-
-    /** Keeps the last few arrivals. */
-    private fun prune(dir: File) {
-        val slots = dir.listFiles()?.sortedByDescending { it.lastModified() } ?: return
-        for (old in slots.drop(KEEP_FILES)) old.deleteRecursively()
     }
 
     // Delivery
@@ -181,12 +173,54 @@ class LinksPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         const val SCHEME = "dshgo"
         private const val EXTRA_TAKEN = "io.github.ccch1mneyyy.dsh_app.links.TAKEN"
         private const val MAX_FILE_BYTES = 4L * 1024 * 1024
-        private const val KEEP_FILES = 6
 
-        /** A file name without path separators or control characters. */
+        /** At most 120 UTF-16 units / 255 UTF-8 bytes, keeping a fitting suffix and whole code points. */
         fun safeName(name: String): String {
-            val cleaned = name.substringAfterLast('/').replace(Regex("[\\u0000-\\u001f\\\\:*?\"<>|]"), "_").trim()
-            return cleaned.ifEmpty { "shared" }.take(120)
+            val cleaned = wellFormedName(name.substringAfterLast('/')).replace(Regex("[\\u0000-\\u001f\\\\:*?\"<>|]"), "_").trim()
+            val safe = cleaned.ifEmpty { "shared" }
+            if (safe == "." || safe == "..") return "shared"
+            if (safe.length <= 120 && safe.toByteArray(Charsets.UTF_8).size <= 255) return safe
+            val dot = safe.lastIndexOf('.')
+            val suffix = if (dot > 0 && dot < safe.lastIndex) safe.substring(dot) else ""
+            val suffixBytes = suffix.toByteArray(Charsets.UTF_8).size
+            if (suffix.length in 1 until 120 && suffixBytes in 1 until 255) {
+                val stem = namePrefix(safe.substring(0, dot), 120 - suffix.length, 255 - suffixBytes)
+                if (stem.isNotEmpty()) return stem + suffix
+            }
+            return namePrefix(safe, 120, 255)
+        }
+
+        /** Filesystem encoders need not replace malformed UTF-16 like CharsetEncoder does. */
+        private fun wellFormedName(text: String): String = buildString(text.length) {
+            var index = 0
+            while (index < text.length) {
+                val current = text[index++]
+                if (Character.isHighSurrogate(current)) {
+                    if (index < text.length && Character.isLowSurrogate(text[index])) {
+                        append(current)
+                        append(text[index++])
+                    } else append('\uFFFD')
+                } else append(if (Character.isLowSurrogate(current)) '\uFFFD' else current)
+            }
+        }
+
+        private fun namePrefix(text: String, maxUnits: Int, maxBytes: Int): String {
+            var end = 0
+            var bytes = 0
+            while (end < text.length) {
+                val point = text.codePointAt(end)
+                val units = Character.charCount(point)
+                val size = when {
+                    point <= 0x7f -> 1
+                    point <= 0x7ff -> 2
+                    point <= 0xffff -> 3
+                    else -> 4
+                }
+                if (end + units > maxUnits || bytes + size > maxBytes) break
+                end += units
+                bytes += size
+            }
+            return text.substring(0, end)
         }
     }
 }

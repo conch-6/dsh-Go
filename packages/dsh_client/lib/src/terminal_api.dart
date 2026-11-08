@@ -15,8 +15,12 @@
 ///   newest attachment holds input; older ones keep reading output and get
 ///   `ack.refusal: read-only`. Input is never replayed across attachments.
 ///
-/// Attach needs uplink items, which the relay tunnel does not carry:
-/// [TerminalApi.supportsTerminals] is false there.
+/// Attach needs uplink items, which the ds-harness-remote tunnel does not
+/// carry. There the Host plugin (`harness.terminal.v1`, plugin
+/// `terminal-carrier-compat.ts`) joins a `terminal/follow` stream bound to an
+/// attachment id with unary `terminal/write` / `terminal/resize` calls into
+/// the official attach; [TerminalApi.attachTerminal] picks that route when
+/// the carrier has no uplink (see [_FollowLink]).
 library;
 
 import 'dart:async';
@@ -536,9 +540,25 @@ class TerminalAttachment {
 // -----------------------------------------------------------------------------
 
 extension TerminalApi on DshClient {
-  /// Whether this connection can run terminals: attach needs uplink items,
-  /// which the relay tunnel lacks.
-  bool get supportsTerminals => carrier.supportsUplink && carrier.allowsEndpoint('terminal/attach');
+  /// Whether this connection can run terminals: a duplex `terminal/attach`,
+  /// or on a carrier without uplink (ds-harness-remote) `terminal/follow`
+  /// plus unary `terminal/write` / `terminal/resize`. A Remote Host whose
+  /// owner turned the terminal off answers `TERMINAL_DISABLED`.
+  bool get supportsTerminals => carrier.supportsUplink ? carrier.allowsEndpoint('terminal/attach') : _followTerminals;
+
+  /// A Remote Host that announced its features without `harness.terminal.v1`:
+  /// its owner turned the terminal off in the Host's local Remote settings
+  /// (or the plugin predates it). Calls answer `TERMINAL_DISABLED` until the
+  /// owner turns it on, which takes effect without reconnecting.
+  bool get terminalsOffOnHost =>
+      !carrier.supportsUplink &&
+      _followTerminals &&
+      !(carrier.peerCapabilities?.contains('harness.terminal.v1') ?? true);
+
+  bool get _followTerminals =>
+      carrier.allowsEndpoint('terminal/follow') &&
+      carrier.allowsEndpoint('terminal/write') &&
+      carrier.allowsEndpoint('terminal/resize');
 
   /// `terminal/environment`: the conversation's directory and the limits.
   Future<TerminalEnvironment> terminalEnvironment(String sessionId) async =>
@@ -630,6 +650,10 @@ extension TerminalApi on DshClient {
     String id, {
     TerminalEnvironment environment = TerminalEnvironment.defaults,
   }) {
+    if (!carrier.supportsUplink) {
+      final link = _FollowLink(this, sessionId, id, maxInputBytes: environment.maxInputBytes);
+      return TerminalAttachment.over(items: link.items, send: link.send, cancel: link.cancel, environment: environment);
+    }
     final MuxStream stream;
     try {
       stream = mux.open('terminal/attach', {'agentId': sessionId, 'id': id});
@@ -647,5 +671,149 @@ extension TerminalApi on DshClient {
       cancel: stream.cancel,
       environment: environment,
     );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Follow route (carriers without uplink items)
+// -----------------------------------------------------------------------------
+
+/// One attachment over ds-harness-remote: a `terminal/follow` stream bound to
+/// a fresh [attachmentId], with input sent as unary calls that carry it. The
+/// Host plugin turns both into the official attach. Mirrors the plugin's own
+/// Desktop client (`openRemoteTerminal`):
+/// * `snapshot` / `state` frames are writable when `info.controllerId` is
+///   this attachment (the Host stamps it on the attachment holding input);
+/// * commands go out one call at a time, in order, and each is acknowledged
+///   here once its call succeeded; a command while read-only is refused
+///   locally without a call;
+/// * a failed call fails the attachment: input is never replayed.
+///
+/// Consecutive writes queued behind a call go out as one `terminal/write`
+/// (then acknowledged together, in order), so typing over a slow relay does
+/// not wait one round trip per key.
+class _FollowLink {
+  _FollowLink(this._client, this._sessionId, this._id, {required this.maxInputBytes}) : attachmentId = uuidV4() {
+    _items = StreamController<Object?>(onListen: _open, onCancel: cancel);
+  }
+
+  /// Largest coalesced `terminal/write` (the Host accepts 64 Ki UTF-16 units).
+  static const maxWriteChars = 32 * 1024;
+
+  /// The Host's per-write UTF-8 budget ([TerminalEnvironment.maxInputBytes]):
+  /// a coalesced write stays within it as each command already does.
+  final int maxInputBytes;
+
+  final DshClient _client;
+  final String _sessionId;
+  final String _id;
+  final String attachmentId;
+  late final StreamController<Object?> _items;
+  final Queue<Map<String, Object?>> _queue = Queue();
+  MuxStream? _stream;
+  StreamSubscription<Object?>? _sub;
+  bool _writable = false;
+  bool _sending = false;
+  bool _closed = false;
+
+  Stream<Object?> get items => _items.stream;
+
+  Map<String, Object?> get _target => {'agentId': _sessionId, 'id': _id, 'attachmentId': attachmentId};
+
+  void _open() {
+    final MuxStream stream;
+    try {
+      stream = _stream = _client.mux.open('terminal/follow', _target);
+    } on Object catch (error, stack) {
+      _fail(error, stack);
+      return;
+    }
+    _sub = stream.items.listen(_onItem, onError: _fail, onDone: () => unawaited(cancel()));
+  }
+
+  void _onItem(Object? item) {
+    if (_closed) return;
+    final map = asMap(item);
+    if (map == null) return;
+    final info = asMap(map['info']);
+    switch (map['type']) {
+      case 'snapshot' || 'state' when info != null:
+        _writable = info['controllerId'] == attachmentId;
+        _items.add({...map, 'writable': _writable});
+      case 'ack':
+        // The Host settles the official acks itself; ours come from [_drain].
+        return;
+      default:
+        _items.add(map);
+    }
+  }
+
+  void send(Object? value) {
+    final command = asMap(value);
+    if (_closed || command == null) return;
+    _queue.add(command);
+    if (_sending) return;
+    _sending = true;
+    unawaited(_drain());
+  }
+
+  Future<void> _drain() async {
+    try {
+      while (!_closed && _queue.isNotEmpty) {
+        final first = _queue.removeFirst();
+        final sequences = [asInt(first['sequence']) ?? 0];
+        if (!_writable) {
+          _items.add({'type': 'ack', 'sequence': sequences.single, 'refusal': 'read-only'});
+          continue;
+        }
+        switch (first['type']) {
+          case 'write':
+            final firstData = asString(first['data']) ?? '';
+            final data = StringBuffer(firstData);
+            var bytes = utf8.encode(firstData).length;
+            while (_queue.isNotEmpty && _queue.first['type'] == 'write') {
+              final more = asString(_queue.first['data']) ?? '';
+              final moreBytes = utf8.encode(more).length;
+              if (data.length + more.length > maxWriteChars || bytes + moreBytes > maxInputBytes) break;
+              data.write(more);
+              bytes += moreBytes;
+              sequences.add(asInt(_queue.removeFirst()['sequence']) ?? 0);
+            }
+            await _client.rpc.call('terminal/write', {..._target, 'data': data.toString()});
+          case 'resize':
+            await _client.rpc.call('terminal/resize', {..._target, 'cols': first['cols'], 'rows': first['rows']});
+          default:
+            throw const TerminalStreamException('invalidOutput', 'unknown terminal input command');
+        }
+        if (_closed) return;
+        for (final sequence in sequences) {
+          _items.add({'type': 'ack', 'sequence': sequence});
+        }
+      }
+    } on Object catch (error, stack) {
+      _fail(error, stack);
+    } finally {
+      _sending = false;
+    }
+  }
+
+  void _fail(Object error, [StackTrace? stack]) {
+    if (_closed) return;
+    _items.addError(error, stack);
+    unawaited(cancel());
+  }
+
+  /// Detaches; the terminal keeps running. Idempotent.
+  Future<void> cancel() async {
+    if (_closed) return;
+    _closed = true;
+    _queue.clear();
+    final sub = _sub;
+    final stream = _stream;
+    _sub = null;
+    _stream = null;
+    if (!_items.isClosed) unawaited(_items.close());
+    await sub?.cancel();
+    await stream?.cancel();
   }
 }

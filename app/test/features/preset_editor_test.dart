@@ -31,7 +31,11 @@ class _Sessions extends SessionsController {
   Future<List<SessionSummary>> build() async => const [];
 
   @override
-  Future<String> create() async {
+  Future<String> createForConnection(
+    HostConnection conn, {
+    required bool Function() isCurrent,
+    bool autoApprove = true,
+  }) async {
     creates++;
     return 'new-1';
   }
@@ -125,6 +129,40 @@ void main() {
     final request = carrier.argsOf('session/prompt').single['request']! as Map;
     return ((request['content']! as List).single as Map)['text']! as String;
   }
+
+  for (final description in <String?>['Saved custom preset', null]) {
+    testWidgets('loading diagnostic is visible with description=$description', (tester) async {
+      const broken = 'Cannot resolve @deepseek-ai/dsh-tool-subagent-control/list-agents';
+      carrier.handlers['agentPresets/list'] = (_) => {
+        'presets': [
+          {'id': 'review', 'name': 'Broken preset', 'description': description, 'broken': broken},
+        ],
+      };
+      await pump(tester, const AgentPresetsPage());
+      await tester.tap(find.text('Broken preset'));
+      await tester.pumpAndSettle();
+      expect(find.text(broken), findsOneWidget);
+      await tester.tap(find.text('设为新对话默认'));
+      await tester.pumpAndSettle();
+      expect(carrier.argsOf('settings/update'), isEmpty);
+    });
+  }
+
+  testWidgets('healthy preset keeps its description', (tester) async {
+    carrier.handlers['agentPresets/list'] = (_) => {
+      'presets': [
+        {'id': 'review', 'name': 'Healthy preset', 'description': 'Saved custom preset'},
+      ],
+    };
+    await pump(tester, const AgentPresetsPage());
+    await tester.tap(find.text('Healthy preset'));
+    await tester.pumpAndSettle();
+    // The list row shows the description too; look inside the sheet only.
+    expect(
+      find.descendant(of: find.byType(BottomSheet), matching: find.text('Saved custom preset')),
+      findsOneWidget,
+    );
+  });
 
   testWidgets('新建: creator mode gets the bundle, the chat opens', (tester) async {
     await pump(tester, const AgentPresetsPage());

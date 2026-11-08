@@ -75,7 +75,8 @@ class LocalPluginReloadController extends Notifier<bool> {
           !eligible(current())) {
         return PluginReloadResult.unavailable;
       }
-      await EngineControl.restart(ref.container);
+      // An unfinished stop requested no start; the sheet reports it as a failed reload.
+      if (!await EngineControl.restart(ref.container)) throw StateError('runtime_not_stopped');
       if (ref.mounted && ref.read(activeHostProvider) == active) {
         // A fast reconnect can keep the same declarations available. Their
         // live views still need a fresh read after source code changed.

@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicReference
 class NotificationGate(
     private val app: Context,
     /** The one-line status ("DSH 正在操作 · …"); the app shows it on the engine's notification. */
-    private val onStatus: (String?) -> Unit,
+    private val onStatus: (String?, (() -> Unit) -> Boolean) -> Unit,
 ) : UserGate, PhonePromptPresenter {
     private val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val ids = AtomicInteger(4200)
@@ -53,8 +53,11 @@ class NotificationGate(
     override fun confirm(request: ConfirmRequest): Decision {
         PhoneRegistry.promptGate?.let { return it.confirm(request) }
         if (!available()) return Decision.UNAVAILABLE
+        // Without the unified presenter, a visual request can only authorize this step;
+        // its three slots must not silently remove the one-shot alternative.
         // Three buttons fit a heads-up: 本任务免确认 makes "allow" waive the rest of the task.
         val allow = when {
+            request.visualScope != null -> AppStrings.get(app, R.string.overlay_allow_once)
             request.offerTaskWaiver -> AppStrings.get(app, R.string.overlay_allow_task_no_ask)
             request.firstInApp -> AppStrings.get(app, R.string.overlay_allow_task)
             else -> AppStrings.get(app, R.string.overlay_allow_once)
@@ -70,6 +73,7 @@ class NotificationGate(
         )
         return when (choice) {
             "allow" -> when {
+                request.visualScope != null -> Decision.ALLOW_ONCE
                 request.offerTaskWaiver -> Decision.ALLOW_ALL_FOR_TASK
                 request.firstInApp -> Decision.ALLOW_APP_FOR_TASK
                 else -> Decision.ALLOW_ONCE
@@ -102,7 +106,9 @@ class NotificationGate(
         return HandoffResult.TIMEOUT
     }
 
-    override fun status(text: String?) = onStatus(text)
+    override fun status(text: String?) = onStatus(text) { update -> update(); true }
+
+    override fun status(text: String?, ifCurrent: (() -> Unit) -> Boolean) = onStatus(text, ifCurrent)
 
     /** Non-blocking presentation for the shared arbiter. Open uses an Activity PendingIntent. */
     override fun showPrompt(presentation: PromptPresentation): (() -> Unit)? {
@@ -145,10 +151,7 @@ class NotificationGate(
                     .setContentTitle(PhonePromptUi.title(app, content.kind)).build())
                 .setContentIntent(open).setDeleteIntent(broadcast("dismiss", 7)).setAutoCancel(false)
             if (Build.VERSION.SDK_INT >= 26) b.setTimeoutAfter(p.ticket.remainingMs)
-            // Native task/app waiver replaces its ordinary allow in the three notification slots.
-            val choices = content.choices.let { all ->
-                if (all.size > 3) all.filterNot { it == PromptChoice.ALLOW_ONCE } else all
-            }
+            val choices = content.notificationChoices
             choices.forEachIndexed { index, choice ->
                 val pi = if (choice == PromptChoice.OPEN) open else broadcast(choice.name, index)
                 b.addAction(Notification.Action.Builder(null, PhonePromptUi.label(app, choice), pi).build())

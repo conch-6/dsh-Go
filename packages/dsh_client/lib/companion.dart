@@ -1,0 +1,6 @@
+/// Companion models, the host API, and the engine-free local store.
+library;
+
+export 'src/companion_api.dart';
+export 'src/companion_local_store.dart';
+export 'src/errors.dart' show DshRemoteException;

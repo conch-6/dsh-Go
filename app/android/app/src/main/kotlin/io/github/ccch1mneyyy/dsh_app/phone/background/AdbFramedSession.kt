@@ -1,5 +1,6 @@
 package io.github.ccch1mneyyy.dsh_app.phone.background
 
+import android.os.Bundle
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -18,6 +19,18 @@ class AdbFramedSession(
     private val lock = Any()
     private val closed = AtomicBoolean(false)
     private var synced = false
+    private val muxGuard = Any()
+    @Volatile private var mux: FramedMuxSession<Bundle>? = null
+
+    internal fun installMux(peer: String, retired: () -> Unit, deadlineMs: Long = FramedMuxSession.REQUEST_DEADLINE_MS) =
+        synchronized(muxGuard) {
+            check(!closed.get() && synced && mux == null)
+            FramedMuxSession(input, output, { MuxProtocol.unwrap(Bundles.unmarshal(it), peer) },
+                { retired(); close() }, deadlineMs).also { mux = it; it.start() }
+        }
+
+    internal fun exchangeMux(request: Bundle, peer: String): Bundle =
+        checkNotNull(mux).exchange { id -> Bundles.marshal(MuxProtocol.request(request, peer, id)) }
 
     fun alive(): Boolean = !closed.get() && transportAlive()
 
@@ -49,7 +62,11 @@ class AdbFramedSession(
     }
 
     fun close() {
-        if (!closed.compareAndSet(false, true)) return
+        val current = synchronized(muxGuard) {
+            if (!closed.compareAndSet(false, true)) return
+            mux
+        }
+        current?.close()
         // libadb.close first wakes readers, then writes CLSE; a blocked transport write must not
         // hold the caller or delay the logical invalidation above. No DESTROY exchange is sent.
         Thread({ runCatching { closeTransport() } }, "dsh-adb-close").apply {

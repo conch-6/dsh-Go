@@ -16,6 +16,7 @@ library;
 export 'src/agents_api.dart';
 export 'src/carrier.dart';
 export 'src/client_inventory_api.dart';
+export 'src/companion_api.dart';
 export 'src/connection.dart';
 export 'src/cordis_api.dart';
 export 'src/cot_translation_api.dart';

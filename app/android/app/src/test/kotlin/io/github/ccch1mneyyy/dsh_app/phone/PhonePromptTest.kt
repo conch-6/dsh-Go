@@ -36,7 +36,7 @@ class PhonePromptTest {
 
     @Test fun reviewNeverAuthorizesEvenIfAnotherSurfaceSendsAnAllowAction() {
         val t = begin(kind = PromptKind.REVIEW); val p = shown(t)
-        for (choice in listOf(PromptChoice.ALLOW_ONCE, PromptChoice.ALLOW_APP, PromptChoice.ALLOW_TASK, PromptChoice.CONTINUE)) {
+        for (choice in listOf(PromptChoice.ALLOW_ONCE, PromptChoice.ALLOW_APP, PromptChoice.ALLOW_TASK, PromptChoice.ALLOW_VISUAL, PromptChoice.CONTINUE)) {
             assertFalse(p.choose(choice)); assertTrue(t.live)
         }
         assertTrue(p.choose(PromptChoice.OPEN))
@@ -46,6 +46,7 @@ class PhonePromptTest {
     @Test fun engineApprovalCannotGrantAnyTaskWaiver() {
         val p = shown(begin())
         assertFalse(p.choose(PromptChoice.ALLOW_TASK)); assertFalse(p.choose(PromptChoice.ALLOW_APP))
+        assertFalse(p.choose(PromptChoice.ALLOW_VISUAL))
         assertTrue(p.choose(PromptChoice.ALLOW_ONCE))
     }
 
@@ -208,19 +209,50 @@ class PhonePromptTest {
         val call = MainThreadCall { "done" }; call.run(); assertEquals("done", call.await(1))
     }
 
-    @Test fun hardwareStrokeWithAccessibilityFlagStillWorksAfterArming() {
-        assertTrue(PromptInputPolicy.allows(1000, 600, true, false, false, false, true, false))
+    @Test fun aFingerAuthorizesWhateverItsEventFieldsSay() {
+        // #608 (OPPO PJB110) and #296 (realme RMX3706): device -1 and flags 0x800 on a real finger.
+        // The policy no longer reads those fields, so such a touch authorizes once the card is armed.
+        assertTrue(PromptInputPolicy.allows(1000, 600, live = true, injecting = false, obscured = false))
     }
 
-    @Test fun injectedAndObscuredTouchesNeverAuthorize() {
-        assertFalse(PromptInputPolicy.allows(1000, 600, true, true, false, false, false, false))
-        assertFalse(PromptInputPolicy.allows(1000, 600, true, false, true, false, false, true))
-        assertFalse(PromptInputPolicy.allows(1000, 600, true, false, false, true, true, false))
+    @Test fun ourOwnInputAndObscuredTouchesNeverAuthorize() {
+        assertFalse(PromptInputPolicy.allows(1000, 600, live = true, injecting = true, obscured = false))
+        assertFalse(PromptInputPolicy.allows(1000, 600, live = true, injecting = false, obscured = true))
     }
 
-    @Test fun talkBackExceptionDoesNotBypassArmingOrLifetime() {
-        assertTrue(PromptInputPolicy.allows(1000, 600, true, false, false, true, true, true))
-        assertFalse(PromptInputPolicy.allows(500, 600, true, false, false, true, true, true))
-        assertFalse(PromptInputPolicy.allows(1000, 600, false, false, false, true, true, true))
+    @Test fun nothingAuthorizesBeforeArmingOrAfterTheCardEnds() {
+        assertFalse(PromptInputPolicy.allows(500, 600, live = true, injecting = false, obscured = false))
+        assertFalse(PromptInputPolicy.allows(1000, 600, live = false, injecting = false, obscured = false))
     }
+    @Test fun nativeVisualChoiceIsIndependentAndCannotSurviveExpiryOrOwnerReplacement() {
+        val tasks = PhoneTasks()
+        val owner = (tasks.begin() as PhoneTasks.Begin.Go).owner
+        val scope = VisualScope.Background("resource", PhoneAppIdentity("example.app", 10123), Any())
+        val request = ConfirmRequest("visual", "App", "example.app", false, visualScope = scope)
+        val ticket = arbiter.begin(null, tasks, PromptContent(PromptKind.NATIVE_CONFIRM, "visual", request), 30_000) {
+            tasks.isCurrent(owner)
+        }!!
+        val p = shown(ticket, PromptSurface.APP)
+        assertFalse(p.choose(PromptChoice.ALLOW_APP))
+        assertFalse(p.choose(PromptChoice.ALLOW_TASK))
+        assertTrue(p.choose(PromptChoice.ALLOW_VISUAL))
+        assertEquals(PromptOutcome.ALLOW_VISUAL, ticket.finalResult().outcome)
+        now += 30_001
+        assertEquals(PromptOutcome.TIMEOUT, ticket.finalResult().outcome)
+        tasks.stop("stop")
+        assertEquals(PromptOutcome.STOPPED, ticket.finalResult().outcome)
+    }
+
+    @Test fun visualNotificationsKeepOnceWithoutChangingTheFullCardOrOrdinaryChoices() {
+        val scope = VisualScope.Background("resource", PhoneAppIdentity("example.app", 10123), Any())
+        val request = ConfirmRequest("visual", "App", "example.app", false, visualScope = scope)
+        val content = PromptContent(PromptKind.NATIVE_CONFIRM, "visual", request)
+        assertEquals(listOf(PromptChoice.ALLOW_VISUAL, PromptChoice.ALLOW_ONCE, PromptChoice.REJECT, PromptChoice.STOP), content.choices)
+        assertEquals(listOf(PromptChoice.ALLOW_ONCE, PromptChoice.REJECT, PromptChoice.STOP), content.notificationChoices)
+        val ordinary = content.copy(native = request.copy(visualScope = null, firstInApp = true))
+        assertEquals(listOf(PromptChoice.ALLOW_APP, PromptChoice.REJECT, PromptChoice.STOP), ordinary.notificationChoices)
+        val engine = PromptContent(PromptKind.APPROVAL, "approval")
+        assertEquals(engine.choices, engine.notificationChoices)
+    }
+
 }

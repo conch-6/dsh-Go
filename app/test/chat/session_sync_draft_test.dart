@@ -43,7 +43,7 @@ class _SequenceSessions extends FakeSessions {
   final _ids = ['S', 'T'];
 
   @override
-  Future<String> create() async => _ids.removeAt(0);
+  Future<String> create({bool autoApprove = true}) async => _ids.removeAt(0);
 }
 
 Future<SyncHarness> beginFirstSend(WidgetTester tester, {FakeSessions? sessions, bool withImage = false}) async {

@@ -197,7 +197,9 @@ class ApkInstaller(private val context: Context) {
         val (newCurrent, newHistory) = signers(archive) ?: return null
         val (oldCurrent, _) = signers(installed) ?: return null
         if (newCurrent.isEmpty() || oldCurrent.isEmpty()) return null
-        return newCurrent == oldCurrent || newHistory.containsAll(oldCurrent)
+        // Multiple signers form one identity; only single-signer packages can rotate.
+        return newCurrent == oldCurrent ||
+            (newCurrent.size == 1 && oldCurrent.size == 1 && newHistory.containsAll(oldCurrent))
     }
 
     private fun fingerprint(signature: android.content.pm.Signature): String =

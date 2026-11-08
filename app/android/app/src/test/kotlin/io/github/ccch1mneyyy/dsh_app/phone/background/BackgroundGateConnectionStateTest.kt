@@ -31,7 +31,7 @@ class BackgroundGateConnectionStateTest {
 
     @Test fun noResponsePreservesThePreviousCapabilityFacts() {
         val state = BackgroundGateState()
-        assertTrue(state.update(state.begin { true }!!, true, null, false, "inputUnconfirmed", "detail"))
+        assertTrue(state.update(state.begin { true }!!, true, null, false, "inputUnconfirmed", "detail") is BackgroundGateState.Update.Accepted)
         val before = state.snapshot
 
         assertTrue(state.failed(state.begin { true }!!, noResponse, Any()))
@@ -41,7 +41,7 @@ class BackgroundGateConnectionStateTest {
 
     @Test fun anExplicitRetryClearsConnectionFailureAndPreservesCapabilities() {
         val state = BackgroundGateState()
-        assertTrue(state.update(state.begin { true }!!, true, null, false, "inputUnconfirmed", "detail"))
+        assertTrue(state.update(state.begin { true }!!, true, null, false, "inputUnconfirmed", "detail") is BackgroundGateState.Update.Accepted)
         val old = state.begin { true }!!
         assertTrue(state.failed(old, noResponse, Any()))
         val before = state.snapshot
@@ -50,8 +50,8 @@ class BackgroundGateConnectionStateTest {
 
         assertEquals(before.copy(connectionError = null), state.snapshot)
         assertFalse(state.failed(old, notReady))
-        assertFalse(state.update(old, false, "old", false, "old", "old"))
-        assertTrue(state.update(retry, true, null, true, null, null))
+        assertSame(BackgroundGateState.Update.Cancelled, state.update(old, false, "old", false, "old", "old"))
+        assertTrue(state.update(retry, true, null, true, null, null) is BackgroundGateState.Update.Accepted)
         assertEquals(BackgroundGateState.Snapshot(true, true), state.snapshot)
     }
 
@@ -74,7 +74,7 @@ class BackgroundGateConnectionStateTest {
         val before = state.snapshot
 
         assertFalse(state.failed(old, noResponse, Any()))
-        assertFalse(state.update(old, true, null, true, null, null))
+        assertSame(BackgroundGateState.Update.Cancelled, state.update(old, true, null, true, null, null))
         state.cancelUnwantedPending()
 
         assertFalse(state.current(old))
@@ -104,8 +104,8 @@ class BackgroundGateConnectionStateTest {
 
         assertEquals(BackgroundGateState.Snapshot(), state.snapshot)
         assertFalse(state.failed(old, noResponse, Any()))
-        assertFalse(state.update(old, false, "old", false, "old", "old"))
-        assertTrue(state.update(state.begin { true }!!, true, null, true, null, null))
+        assertSame(BackgroundGateState.Update.Cancelled, state.update(old, false, "old", false, "old", "old"))
+        assertTrue(state.update(state.begin { true }!!, true, null, true, null, null) is BackgroundGateState.Update.Accepted)
     }
 
     @Test fun aHealthyReplacementClearsAnEarlierFailedConnection() {
@@ -132,7 +132,7 @@ class BackgroundGateConnectionStateTest {
 
     @Test fun aFreshChannelClearsOnlyTransportFailureNotFailedCapabilities() {
         val state = BackgroundGateState()
-        assertTrue(state.update(state.begin { true }!!, true, null, false, "inputUnconfirmed", "detail"))
+        assertTrue(state.update(state.begin { true }!!, true, null, false, "inputUnconfirmed", "detail") is BackgroundGateState.Update.Accepted)
         assertTrue(state.failed(state.begin { true }!!, noResponse, Any()))
         val observed = state.snapshot
 

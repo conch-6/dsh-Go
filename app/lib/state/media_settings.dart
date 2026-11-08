@@ -213,7 +213,82 @@ MediaServiceConfig? mediaServiceFromPreset({
 /// (pictures and video of one provider usually bill one account).
 MediaServiceConfig? mediaKeyDonor(Iterable<MediaServiceConfig> services, MediaPreset preset) {
   for (final service in services) {
-    if (service.provider == preset.provider && service.keyRef.isNotEmpty) return service;
+    if (service.provider == preset.provider &&
+        service.keyRef.isNotEmpty &&
+        !mediaTargetOriginChanged(service.baseUrl, preset.baseUrl)) {
+      return service;
+    }
+  }
+  return null;
+}
+
+/// Local shape feedback only. The host still decides allowed targets/protocols.
+enum MediaUrlIssue { invalid, endpoint, rootRequired }
+
+MediaUrlIssue? mediaBaseUrlIssue(String value, String profile) {
+  final text = value.trim();
+  final uri = Uri.tryParse(text);
+  if (text.isEmpty ||
+      text.length > 2048 ||
+      RegExp(r'[\s\\\x00-\x1f\x7f]').hasMatch(text) ||
+      uri == null ||
+      uri.scheme != 'https' ||
+      !uri.hasAuthority ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty ||
+      uri.hasQuery ||
+      uri.hasFragment ||
+      (uri.hasPort && (uri.port < 1 || uri.port > 65535))) {
+    return MediaUrlIssue.invalid;
+  }
+  final path = uri.path.replaceAll(RegExp(r'/+$'), '').toLowerCase();
+  if (RegExp(
+    r'/(images/(generations|edits)|chat/completions|responses|contents/generations/tasks|video/(submit|status)|video-synthesis|multimodal-generation/generation)(/|$)',
+  ).hasMatch(path)) {
+    return MediaUrlIssue.endpoint;
+  }
+  if (const {
+        'ark-image',
+        'ark-video',
+        'ali-wan-image',
+        'ali-video',
+        'silicon-image',
+        'silicon-video',
+      }.contains(profile) &&
+      path.isNotEmpty) {
+    return MediaUrlIssue.rootRequired;
+  }
+  return null;
+}
+
+/// Origin comparison includes the port; malformed old roots require confirmation.
+bool mediaTargetOriginChanged(String before, String after) {
+  final a = Uri.tryParse(before.trim());
+  final b = Uri.tryParse(after.trim());
+  return a == null ||
+      b == null ||
+      !a.hasAuthority ||
+      !b.hasAuthority ||
+      !const {'http', 'https'}.contains(a.scheme) ||
+      !const {'http', 'https'}.contains(b.scheme) ||
+      a.origin != b.origin;
+}
+
+/// Create-request preview, not a provider probe. Native paths come from the host;
+/// older catalogues without them must not invent an endpoint.
+String? mediaRequestPreview(String baseUrl, String profile, Object? catalog) {
+  if (mediaBaseUrlIssue(baseUrl, profile) != null) return null;
+  final profiles = catalog is Map ? catalog['profiles'] : null;
+  final spec = profiles is Map ? profiles[profile] : null;
+  if (spec is Map) {
+    final path = spec['path'];
+    if (path is! String || !path.startsWith('/') || path.startsWith('//') || RegExp(r'[\s?#\\]').hasMatch(path)) {
+      return null;
+    }
+    return '${Uri.parse(baseUrl.trim()).origin}$path';
+  }
+  if (profile == 'openai-gpt-image' || profile == 'openai-compatible') {
+    return '${baseUrl.trim().replaceAll(RegExp(r'/+$'), '')}/images/generations';
   }
   return null;
 }

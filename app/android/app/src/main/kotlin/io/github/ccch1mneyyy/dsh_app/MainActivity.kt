@@ -51,6 +51,7 @@ class MainActivity : FlutterActivity() {
             engine.plugins.add(ShortcutsPlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.diagnostics.DiagnosticsPlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.media.MediaPlugin())
+            engine.plugins.add(io.github.ccch1mneyyy.dsh_app.media.MediaVideoPlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.icons.LauncherIconPlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.theme.DynamicColorPlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.performance.PerformancePlugin())
@@ -63,6 +64,8 @@ class MainActivity : FlutterActivity() {
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.launch.LaunchClipPlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.icons.PictureShortcutPlugin())
             engine.plugins.add(io.github.ccch1mneyyy.dsh_app.usage.UsagePlugin())
+            engine.plugins.add(io.github.ccch1mneyyy.dsh_app.companion.CompanionVoicePlugin())
+            engine.plugins.add(io.github.ccch1mneyyy.dsh_app.companion.CompanionWidgetPlugin())
             engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
             cache.put(ENGINE_ID, engine)
         }

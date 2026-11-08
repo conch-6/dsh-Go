@@ -12,6 +12,7 @@ import 'dart:convert';
 import 'package:dsh_app/ui/chat/render/mermaid_preview.dart';
 import 'package:dsh_app/ui/common/side_insets.dart';
 import 'package:dsh_app/ui/shell/page_frame.dart';
+import 'package:dsh_app/ui/web/web_handle.dart';
 import 'package:dsh_app/ui/web/web_view_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -123,7 +124,8 @@ void main() {
 
     test('DSH Web as shipped: a seat in its own header on phones, the bar above', () {
       // Below its own drawer breakpoint the official layout keeps a leading
-      // seat in the header row: the handle takes it, with no bar of its own.
+      // seat in the header row: the handle takes the far left of it, with no
+      // bar of its own.
       expect(_resolve(_phonePortrait, adapt: false).chrome, WebChrome.seat);
       expect(_resolve(_tablet600, adapt: false).chrome, WebChrome.seat);
       // Wider windows have no seat (an icon rail, then the full layout).
@@ -134,16 +136,20 @@ void main() {
       expect(_resolve(_phoneLandscape, dshWeb: false, adapt: false).chrome, WebChrome.bar);
     });
 
-    test("DSH Web as shipped on a phone: the handle takes the page's own seat", () {
+    test("DSH Web as shipped on a phone: the handle takes the far left, the page's own opener moves past it", () {
       final i = _resolve(_phonePortrait, adapt: false);
       // The page starts under the status bar: its drawer layout keeps the
       // leading room (11 down, 12 from the side) for the handle.
       expect((i.chrome, i.rootTop, i.left), (WebChrome.seat, 52, 0));
-      expect(i.layerTop, 52 + WebChromeMetrics.seatTop + WebChromeMetrics.button + 6);
-      // The reserve is widened from the official 48 to the handle's 52.
-      expect(i.script, contains('--dsh-frame-leading-clearance:52.0px'));
-      // The fullscreen right panel's tab strip starts past the handle too.
-      expect(i.script, contains('padding-left:52.0px!important'));
+      expect(i.layerTop, 52 + WebChromeMetrics.seatTop + WebChromeMetrics.seatButton + 6);
+      // The official seat holds DSH Web's own sidebar opener: it moves past
+      // the marker instead of under it (12 → 48), one row.
+      expect(i.script, contains('[data-sidebar-drawer]>[data-shell-leading]{left:48.0px!important}'));
+      // The reserve covers marker, gap, the official opener and the gap after
+      // it: 84 (the official layout's own 48 is 12 + 28 + 8).
+      expect(i.script, contains('--dsh-frame-leading-clearance:84.0px'));
+      // The fullscreen right panel's tab strip starts past them too.
+      expect(i.script, contains('padding-left:84.0px!important'));
       // The official layout stays: no app layout attribute.
       expect(i.script, contains("removeAttribute('data-dsh-app-layout')"));
       expect(i.script, isNot(contains("setAttribute('data-dsh-app-layout'")));
@@ -241,16 +247,69 @@ void main() {
       expect(_platform.controller.insetsScript, contains('left:52.0px'));
     });
 
-    testWidgets('DSH Web as shipped on a phone: the handle sits in the page\'s own seat', (tester) async {
+    testWidgets('DSH Web as shipped on a phone: the app\'s mark sits left of the page\'s own opener', (tester) async {
       await _pump(tester, _phonePortrait, phoneLayout: false);
       // Its own drawer layout keeps the leading room; no bar above the page.
       expect(find.byKey(const ValueKey('web-controls-seat')), findsOneWidget);
       expect(find.byKey(const ValueKey('web-controls-bar')), findsNothing);
-      final back = tester.getRect(_button('返回'));
+      // A page with no handle still seats one mark of the app: the same round
+      // key, as the page's way back — not an arrow.
+      final mark = find.byType(WebMarkButton);
+      expect(mark, findsOneWidget);
+      expect(tester.widget<WebMarkButton>(mark).tooltip, '返回');
+      expect(_button('返回'), findsNothing);
+      // The marker is the size of the page's own controls in that row (28)
+      // and keeps its measured seat.
+      final back = tester.getRect(mark);
       expect(back.left, WebChromeMetrics.seatLeft);
       expect(back.top, 52 + WebChromeMetrics.seatTop);
-      expect(back.size, const Size.square(WebChromeMetrics.button));
-      expect(_platform.controller.insetsScript, contains('--dsh-frame-leading-clearance:52.0px'));
+      expect(back.size, const Size.square(WebChromeMetrics.seatButton));
+      // The page's own opener, in its own seat, moves past the marker: the
+      // marker never covers it. Both sit in the one header row DSH Web lays
+      // out, and the title starts past both.
+      expect(
+        _platform.controller.insetsScript,
+        contains('[data-sidebar-drawer]>[data-shell-leading]{left:48.0px!important}'),
+      );
+      expect(_platform.controller.insetsScript, contains('--dsh-frame-leading-clearance:84.0px'));
+      expect(
+        back.right,
+        lessThan(WebChromeMetrics.seatLeft + WebChromeMetrics.seatShift),
+        reason: 'the marker leaves the official opener its room',
+      );
+    });
+
+    testWidgets('DSH Web\'s sidebar as a drawer: the marker steps aside, not over it', (tester) async {
+      await _pump(tester, _phonePortrait, phoneLayout: false);
+      final seat = find.byKey(const ValueKey('web-controls-seat'));
+      AnimatedOpacity fade() =>
+          tester.widget<AnimatedOpacity>(find.descendant(of: seat, matching: find.byType(AnimatedOpacity)).first);
+      IgnorePointer touches() =>
+          tester.widget<IgnorePointer>(find.descendant(of: seat, matching: find.byType(IgnorePointer)).first);
+      expect(fade().opacity, 1);
+      expect(touches().ignoring, isFalse);
+      // The page's sidebar drawer goes up: the marker gets out of its way,
+      // and touches fall through to the sidebar's mask.
+      _platform.controller.post('DshAppSidebar', 'open');
+      await tester.pump();
+      expect(fade().opacity, 0);
+      expect(touches().ignoring, isTrue);
+      // Folded away again: the marker comes back.
+      _platform.controller.post('DshAppSidebar', 'closed');
+      await tester.pump();
+      expect(fade().opacity, 1);
+      expect(touches().ignoring, isFalse);
+    });
+
+    testWidgets("DSH Web's sidebar state reaches the app (dsh_web_sidebar.js)", (tester) async {
+      await _pump(tester, _phonePortrait, phoneLayout: false);
+      expect(_platform.controller.channels, contains('DshAppSidebar'));
+      // The bridge loads from the asset bundle: real time, then frames.
+      for (var i = 0; i < 40 && !_platform.controller.scripts.any((s) => s.contains('__dshAppSidebar')); i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump();
+      }
+      expect(_platform.controller.scripts.any((s) => s.contains('__dshAppSidebar')), isTrue);
     });
 
     testWidgets('tablet: back sits in the band above the sidebar, on the rail column', (tester) async {

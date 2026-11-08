@@ -6,6 +6,7 @@ import 'package:dsh_app/state/compose_inbox.dart';
 import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/phone_state.dart';
 import 'package:dsh_app/ui/common/list_page_row.dart';
+import 'package:dsh_app/ui/common/overview_card.dart';
 import 'package:dsh_app/ui/phone/action_log_page.dart';
 import 'package:dsh_app/ui/phone/dnd_mode_page.dart';
 import 'package:dsh_app/ui/phone/phone_control_screen.dart';
@@ -100,11 +101,19 @@ void main() {
       expect(h.runtime.starts, ['start']);
       expect(find.text('已开启，引擎正在重启'), findsOneWidget);
       expect(find.text('准备'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('进阶'), 200, scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
       expect(find.text('进阶'), findsOneWidget);
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool(PhoneController.disclosureKey), isTrue);
       expect(prefs.getBool(phoneBackgroundGuideSeenKey), isTrue);
 
+      // Return to the master card after checking the lower advanced section.
+      await tester.scrollUntilVisible(
+        find.descendant(of: find.byType(OverviewCard), matching: find.byType(Switch)),
+        -200, scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
       // Off, then on again: no second disclosure.
       await tester.tap(find.byType(Switch).first);
       await tester.pumpAndSettle();
@@ -238,6 +247,8 @@ void main() {
       await leaveAndResume(tester);
       expect(inTile('通知', find.text('已允许')), findsOneWidget);
 
+      await tester.scrollUntilVisible(find.text('后台运行'), 200, scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('后台运行'));
       await tester.pumpAndSettle();
       expect(find.byType(BackgroundGuidePage), findsOneWidget);
@@ -295,6 +306,152 @@ void main() {
     expect(find.text('正在操作「美团」'), findsNothing);
   });
 
+  testWidgets('停止 stops the task it was shown for, even after another one is selected', (tester) async {
+    Map<String, Object?> selected(int id) => {
+      ...phoneStatus(a11y: true), 'taskProtocol': 1, 'selectedTaskId': id,
+      'tasks': [
+        {'id': 12, 'sessionId': 'A', 'runId': '1', 'active': true, 'app': '美团'},
+        {'id': 13, 'sessionId': 'B', 'runId': '1', 'active': true, 'app': '京东'},
+      ],
+    };
+    final h = await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: selected(12)));
+    // A tap already on its way when B became the selected task.
+    final shownForA = tester.widget<FixButton>(inTile('正在操作「美团」', find.byType(FixButton))).onPressed!;
+    h.native!.push(selected(13));
+    await settlePhone(tester);
+    expect(find.text('正在操作「京东」'), findsOneWidget);
+    shownForA();
+    await tester.pump();
+    expect(h.native!.callsOf('stopTask').single.arguments, {'taskId': 12});
+  });
+
+  testWidgets('resource wait rows consume native targets and elapsed snapshots without exposing holders', (tester) async {
+    Map<String, Object?> status(List<Map<String, Object?>> tasks) => {
+      ...phoneStatus(a11y: true), 'taskProtocol': 1, 'tasks': tasks,
+    };
+    final native = FakePhoneNative(status: status([
+      {'id': 71, 'sessionId': 'secret-holder', 'active': true, 'waitingForApp':
+        {'kind': 'known', 'packageName': 'example.app', 'uid': 10123}, 'waitingForMs': 2501},
+      {'id': 72, 'active': true, 'waitingForApp': {'kind': 'unknown'}, 'waitingForMs': 900},
+    ]));
+    await pumpPhone(tester, const PhoneControlScreen(), native: native);
+    expect(find.text('任务 71 · 等待资源'), findsOneWidget);
+    expect(find.text('等待应用 example.app，已等待 2 秒。'), findsOneWidget);
+    expect(find.text('等待界面资源（应用身份未确认），已等待 0 秒。'), findsOneWidget);
+    expect(find.textContaining('secret-holder'), findsNothing);
+    expect(find.textContaining('10123'), findsNothing);
+    native.push(status([
+      {'id': 71, 'active': true, 'waitingForApp': {'kind': 'known', 'packageName': 'example.app'}, 'waitingForMs': 4501},
+    ]));
+    await settlePhone(tester);
+    expect(find.text('等待应用 example.app，已等待 4 秒。'), findsOneWidget);
+    expect(find.byKey(const ValueKey('phone-waiting-72')), findsNothing);
+    native.push(status([{'id': 71, 'active': true}]));
+    await settlePhone(tester);
+    expect(find.byKey(const ValueKey('phone-waiting-71')), findsNothing);
+  });
+
+  testWidgets('legacy screen waiting remains visible and malformed app status does not invent a target', (tester) async {
+    await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: {
+      ...phoneStatus(a11y: true), 'taskProtocol': 1, 'tasks': [
+        {'id': 81, 'active': true, 'waitingForScreen': 'background', 'waitingForMs': 3000},
+        {'id': 82, 'active': true, 'waitingForApp': {'kind': 'known'}, 'waitingForMs': 999},
+        {'id': 83, 'stopped': true, 'sessionId': 'stopped', 'waitingForApp': {'kind': 'unknown'}},
+      ],
+    }));
+    expect(find.text('等待后台屏，已等待 3 秒。'), findsOneWidget);
+    expect(find.byKey(const ValueKey('phone-waiting-82')), findsNothing);
+    expect(find.byKey(const ValueKey('phone-waiting-83')), findsNothing);
+    expect(find.byKey(const ValueKey('phone-resume-83')), findsOneWidget);
+  });
+
+  testWidgets('inactive modern sessions have an explicit exact resume action', (tester) async {
+    final status = {
+      ...phoneStatus(a11y: true),
+      'taskProtocol': 1,
+      'selectedTaskId': 12,
+      'tasks': [
+        {'id': 10, 'sessionId': 'A', 'runId': 'old', 'active': false, 'stopped': true},
+        {'id': 11, 'sessionId': 'A', 'runId': 'new', 'active': false, 'stopped': true},
+        {'id': 12, 'sessionId': 'B', 'runId': 'run', 'active': false, 'stopped': true},
+      ],
+    };
+    final h = await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: status));
+    expect(find.byKey(const ValueKey('phone-resume-10')), findsNothing);
+    final resumeA = find.byKey(const ValueKey('phone-resume-11'));
+    await tester.ensureVisible(resumeA);
+    await tester.tap(resumeA);
+    await tester.pump();
+    final call = h.native!.callsOf('resumeTask').single;
+    expect(call.arguments, {'taskId': 11});
+    expect(h.native!.callsOf('stopTask'), isEmpty);
+    expect(find.byKey(const ValueKey('phone-resume-12')), findsOneWidget);
+  });
+
+  testWidgets('retiring or draining tasks cannot be resumed before physical cleanup', (tester) async {
+    final h = await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: {
+      ...phoneStatus(a11y: true),
+      'taskProtocol': 1,
+      'tasks': [
+        {'id': 11, 'sessionId': 'A', 'runId': 'run', 'stopped': true, 'draining': true},
+        {'id': 12, 'sessionId': 'B', 'runId': 'run', 'stopped': true, 'retiring': true},
+      ],
+    }));
+    for (final id in [11, 12]) {
+      final button = find.descendant(of: find.byKey(ValueKey('phone-resume-$id')), matching: find.byType(FilledButton));
+      expect(tester.widget<FilledButton>(button).onPressed, isNull);
+    }
+    expect(h.native!.callsOf('resumeTask'), isEmpty);
+  });
+
+  testWidgets('cleanup retry is a separate exact action and never implicitly resumes', (tester) async {
+    Map<String, Object?> status(bool failed) => {
+      ...phoneStatus(a11y: true),
+      'taskProtocol': 1,
+      'tasks': [
+        {'id': 11, 'sessionId': 'A', 'runId': 'run', 'stopped': true, 'cleanupFailed': failed, 'finishing': failed},
+      ],
+    };
+    final h = await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: status(true)));
+    final action = find.byKey(const ValueKey('phone-resume-11'));
+    await tester.ensureVisible(action);
+    await tester.tap(action); await tester.pump();
+    expect(h.native!.callsOf('retryTaskCleanup').single.arguments, {'taskId': 11});
+    expect(h.native!.callsOf('resumeTask'), isEmpty);
+    h.native!.push(status(false)); await settlePhone(tester);
+    await tester.tap(action); await tester.pump();
+    expect(h.native!.callsOf('resumeTask').single.arguments, {'taskId': 11});
+  });
+
+  testWidgets('a newer stopped run cannot hide an older cleanup failure in its session', (tester) async {
+    final h = await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: {
+      ...phoneStatus(a11y: true), 'taskProtocol': 1,
+      'tasks': [
+        {'id': 11, 'sessionId': 'A', 'runId': 'old', 'cleanupFailed': true, 'finishing': true},
+        {'id': 12, 'sessionId': 'A', 'runId': 'new', 'stopped': true},
+      ],
+    }));
+    expect(find.byKey(const ValueKey('phone-resume-12')), findsNothing);
+    final retry = find.byKey(const ValueKey('phone-resume-11'));
+    await tester.ensureVisible(retry); await tester.tap(retry); await tester.pump();
+    expect(h.native!.callsOf('retryTaskCleanup').single.arguments, {'taskId': 11});
+    expect(h.native!.callsOf('resumeTask'), isEmpty);
+  });
+
+  testWidgets('legacy cleanup failure is recoverable without adding modern sticky resume', (tester) async {
+    final h = await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: {
+      ...phoneStatus(a11y: true), 'taskProtocol': 1,
+      'tasks': [ {'id': 9, 'stopped': true, 'cleanupFailed': true, 'finishing': true} ],
+    }));
+    final retry = find.byKey(const ValueKey('phone-resume-9'));
+    await tester.ensureVisible(retry); await tester.tap(retry); await tester.pump();
+    expect(h.native!.callsOf('retryTaskCleanup').single.arguments, {'taskId': 9});
+    h.native!.push({...phoneStatus(a11y: true), 'taskProtocol': 1, 'tasks': [ {'id': 9, 'stopped': true} ]});
+    await settlePhone(tester);
+    expect(find.byKey(const ValueKey('phone-resume-9')), findsNothing);
+    expect(h.native!.callsOf('resumeTask'), isEmpty);
+  });
+
   testWidgets('status events update the page live', (tester) async {
     final h = await pumpPhone(tester, const PhoneControlScreen());
     expect(inTile('无障碍服务', find.byType(DoneMark)), findsNothing);
@@ -337,6 +494,8 @@ void main() {
           status: phoneStatus(mode: 'shizuku', backgroundReason: 'Shizuku 没有在运行'),
         ),
       );
+      await tester.scrollUntilVisible(find.text('不打扰模式'), 200, scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
       expect(find.text('Shizuku · Shizuku 没有在运行'), findsOneWidget);
       await tester.tap(find.text('不打扰模式'));
       await tester.pumpAndSettle();

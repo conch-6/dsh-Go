@@ -10,6 +10,7 @@ import '../../runtime/runtime_state.dart';
 import '../../state/notify_state.dart';
 import '../common/app_sheet.dart';
 import '../common/progress_halo.dart';
+import '../engine/diagnostics_export_card.dart';
 import '../engine/engine_status.dart';
 import '../engine/log_view.dart';
 import '../shell/adaptive/adaptive_layout.dart' show WindowClass;
@@ -27,7 +28,7 @@ enum _SetupView { choose, waiting, installing, done, failed }
 /// The screen is meant to be calm: one slowly filling halo, a percentage, one
 /// short line about what is happening, and a rough time estimate. Logs are one
 /// tap away but never on screen by default. On failure the halo turns the danger
-/// colour and the page offers "重试" and "查看日志".
+/// colour and the page offers retry, logs and a diagnostics export.
 ///
 /// With [choose], a runtime that is not there yet is not installed at once:
 /// the page first asks where DSH runs, on this phone or on a remote host
@@ -197,9 +198,7 @@ class _RuntimeSetupPageState extends ConsumerState<RuntimeSetupPage> {
       _SetupView.failed when state.status.keepFailed => l10n.shellRuntimeRestoreFailed,
       _SetupView.failed => humanizeRuntimeError(state.status.error) ?? l10n.shellRuntimeExtractFailed,
     };
-    final meta = view == _SetupView.installing
-        ? installMetaLine(l10n, progress, ref.watch(installEtaProvider))
-        : null;
+    final meta = view == _SetupView.installing ? installMetaLine(l10n, progress, ref.watch(installEtaProvider)) : null;
     // Set up and waiting: when a notification can say it's done, say so.
     final notifies =
         widget.waiting &&
@@ -279,6 +278,15 @@ class _RuntimeSetupPageState extends ConsumerState<RuntimeSetupPage> {
                 child: FilledButton(onPressed: () => _install(), child: Text(l10n.commonRetry)),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          Center(
+            // Quiet like the links below it: a way to get help, not the next step.
+            child: TextButton(
+              onPressed: () => unawaited(showDiagnosticsExportSheet(context)),
+              style: TextButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
+              child: Text(l10n.phoneDiagnosticsExport),
+            ),
           ),
         ] else
           // One quiet line instead of a card: what matters while it runs.

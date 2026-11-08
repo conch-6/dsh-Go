@@ -105,6 +105,11 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
         }
     }
 
+    /** Short ownership read; never reconnects, probes, or waits for transport work. */
+    internal fun isPublished(expected: PrivilegedChannel): Boolean = synchronized(guard) {
+        channel === expected && operation == null
+    }
+
     /** Connects to the local adbd. mayStart is a nonblocking lease, checked before publication. */
     fun connect(port: Int? = null, whenAvailable: (() -> Unit)? = null, mayStart: () -> Boolean = { true }): PrivilegedChannel? {
         if (port != null && port !in 1..65535) return null
@@ -151,6 +156,7 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
             if (!wanted(op)) return null
             val probe = value.execute(android.os.Bundle().apply { putString(Proto.OP, Proto.OP_PROBE) })
             if (!probe.getBoolean(Proto.OK) || probe.getString("revision") != Proto.REVISION) return null
+            value.negotiate(probe)
             synchronized(guard) {
                 if (!op.valid || !op.mayStart()) return null
                 channel = value
@@ -191,13 +197,14 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
     }
 
     fun cancelUnwantedPending() {
-        synchronized(guard) {
+        val candidate = synchronized(guard) {
             val op = operation ?: return
             if (op.published || op.mayStart()) return
             op.valid = false
             op.worker?.interrupt()
-            op.candidate?.close()
+            op.candidate
         }
+        candidate?.close()
     }
 
     fun disconnectIfCurrent(expected: PrivilegedChannel?) {
@@ -212,20 +219,22 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
     }
 
     private fun retire(expected: PrivilegedChannel?) {
+        var published: PrivilegedChannel? = null
+        var candidate: PrivilegedChannel? = null
         val cleanup = synchronized(guard) {
             if (expected != null && channel !== expected) return
-            channel?.close()
-            channel = null
+            published = channel; channel = null
             val pending = operation
             if (pending != null) {
                 pending.valid = false
                 pending.worker?.interrupt()
-                pending.candidate?.close()
+                candidate = pending.candidate
                 null
             } else {
                 Operation({ false }, null).also { it.valid = false; operation = it }
             }
         }
+        published?.close(); candidate?.close()
         if (cleanup != null) Thread({ finish(cleanup, preserve = false); onChanged() }, "dsh-adb-disconnect").apply {
             isDaemon = true
             start()

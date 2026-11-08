@@ -290,6 +290,7 @@ class GlassIconButton extends StatelessWidget {
     this.grouped = true,
     this.tier = GlassTier.chrome,
     this.size = 44,
+    this.iconSize = 22,
     this.badge,
   });
 
@@ -301,6 +302,9 @@ class GlassIconButton extends StatelessWidget {
   /// On glass already (the drawer), [GlassTier.pill]: a blur over a blur shows bands.
   final GlassTier tier;
   final double size;
+
+  /// The glyph in it; smaller buttons in a page's own chrome shrink it.
+  final double iconSize;
 
   /// Small widget pinned to the top-right corner (e.g. a status dot).
   final Widget? badge;
@@ -317,7 +321,7 @@ class GlassIconButton extends StatelessWidget {
         grouped: grouped,
         onTap: onPressed,
         child: Center(
-          child: Icon(icon, size: 22, color: enabled ? scheme.onSurface : DshColors.of(context).textDisabled),
+          child: Icon(icon, size: iconSize, color: enabled ? scheme.onSurface : DshColors.of(context).textDisabled),
         ),
       ),
     );

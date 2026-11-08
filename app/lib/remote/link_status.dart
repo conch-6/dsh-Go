@@ -45,7 +45,7 @@ enum HostLinkStep {
 
 /// Why a link failed, with a sentence a person can act on.
 class HostLinkError implements Exception {
-  const HostLinkError(this.kind, this.message, {this.detail, this.retryable = false});
+  const HostLinkError(this.kind, this.message, {this.detail, this.retryable = false, this.diagnosticCode});
 
   final HostLinkErrorKind kind;
 
@@ -57,6 +57,9 @@ class HostLinkError implements Exception {
 
   /// Network-ish failures are retried automatically; the rest need the person.
   final bool retryable;
+
+  /// A closed diagnostic vocabulary; never a server message or exception text.
+  final HostLinkDiagnosticCode? diagnosticCode;
 
   @override
   String toString() => detail == null ? message : appL10n.remoteErrorDetail(message, detail!);
@@ -97,6 +100,38 @@ enum HostLinkErrorKind {
   hostOffline,
   unavailable,
   other,
+}
+
+/// Safe failure provenance for passive diagnostics. Values do not change retry policy.
+enum HostLinkDiagnosticCode {
+  unknown,
+  sshTransportEnded,
+  sshKeepaliveMissed,
+  sshKickProbeFailed,
+  sshTunnelTimedOut,
+  sshTunnelRefused,
+  sshTunnelFailed,
+  remoteHostOffline,
+  remoteAccountAuthRequired,
+  remoteDeviceRevoked,
+  remoteTokenExpired,
+  remotePeerIdentityMismatch,
+  remoteHostNotTrusted,
+  remoteConnectionReplaced,
+  remoteConnectionRejected,
+  remoteMembershipRequired,
+  remoteDeviceNotFound,
+  remoteHarnessVersionIncompatible,
+  remoteProtocolMismatch,
+  remoteUnsupportedVersion,
+  remoteCapabilityNotSupported,
+  remoteFrameTooLarge,
+  remoteInvalidMessage,
+  remoteSecureChannelFailed,
+  remoteRpcTimeout,
+  remoteConnectionFailed,
+  remoteRateLimited,
+  remoteHistoryModeChanged,
 }
 
 enum NetworkIpVersion { ipv4, ipv6 }

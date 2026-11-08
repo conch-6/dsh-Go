@@ -115,6 +115,12 @@ object CrashClassifier {
     private const val SHIPPED_SCOPE = "@deepseek-ai/"
     private const val SUMMARY_MAX = 240
 
+    /** A token deadline must not hide existing evidence, nor invent it for a silent loader. */
+    fun classifyAfterTokenTimeout(tokenTimedOut: Boolean, failure: RunFailure): Boolean =
+        tokenTimedOut && failure.kind in setOf(
+            FailureKind.STARTUP_FAILED, FailureKind.NO_SPACE, FailureKind.LAUNCH_FAILED,
+        )
+
     fun isFatal(line: String): Boolean = FATAL.any { it.containsMatchIn(line) }
 
     fun redact(line: String): String = TOKEN.replace(line, "token=•••")

@@ -59,6 +59,37 @@ class RuntimeProcessOwnershipTest {
         assertEquals(listOf(10), snapshot.records.map { it.pid })
     }
 
+    @Test fun failedEnumerationWithoutCapturedPidsCannotProveAnEmptyRuntime() {
+        val reader = Reader().apply { denied += "list" }
+        val unknown = RuntimeProcessOwnership.scan(reader, 101, 20)
+        assertTrue(unknown.enumerationFailed)
+        assertFalse(unknown.observed)
+        assertTrue(unknown.uncertain.isEmpty())
+        assertTrue(RuntimeProcessOwnership.owned(unknown.records, setOf("/owned/root"), 20).isEmpty())
+        assertTrue(reader.reads.isEmpty())
+
+        // The absent record was an observation gap, not a confirmed exit.
+        reader.denied.clear()
+        val recovered = RuntimeProcessOwnership.scan(reader, 101, 20)
+        assertTrue(recovered.observed)
+        assertEquals(listOf(10), RuntimeProcessOwnership.owned(recovered.records, setOf("/owned/root"), 20).map { it.pid })
+    }
+
+    @Test fun confirmedCapturedExitDoesNotRepairFailedGlobalEnumeration() {
+        val reader = Reader().apply { denied += "list"; rows.remove(10) }
+        val incomplete = RuntimeProcessOwnership.scan(reader, 101, 20, setOf(10))
+        assertEquals(setOf(10), incomplete.retired)
+        assertTrue(incomplete.records.isEmpty())
+        assertFalse(incomplete.observed)
+
+        reader.denied.clear()
+        reader.listed = listOf(20)
+        val complete = RuntimeProcessOwnership.scan(reader, 101, 20, setOf(10))
+        assertTrue(complete.observed)
+        assertEquals(setOf(10), complete.retired)
+        assertTrue(complete.records.isEmpty())
+    }
+
     @Test fun aKnownPidOmittedFromEnumerationIsExplicitlyRead() {
         val reader = Reader().apply { listed = emptyList() }
         val alive = RuntimeProcessOwnership.scan(reader, 101, 20, setOf(10))

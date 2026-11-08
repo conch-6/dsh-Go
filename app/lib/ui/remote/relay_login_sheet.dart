@@ -42,6 +42,7 @@ class _SelfHostedLoginSheetState extends ConsumerState<SelfHostedLoginSheet> {
   }
 
   Future<void> _login() async {
+    if (_busy) return;
     FocusManager.instance.primaryFocus?.unfocus();
     if (_server.text.trim().isEmpty || _email.text.trim().isEmpty || _password.text.isEmpty) {
       setState(() => _error = context.l10n.remoteRelayLoginRequired);

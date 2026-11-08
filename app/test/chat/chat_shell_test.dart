@@ -52,8 +52,8 @@ void main() {
   });
 
   group('empty state', () {
-    // The chips' own geometry (cells, insets, one column on narrow phones
-    // with large text) is measured in empty_actions_test.dart.
+    // The cards' own geometry (cells, insets, one column on very narrow
+    // cells) is measured in empty_actions_test.dart.
     for (final (size, scale) in [(const Size(390, 844), 1.0), (const Size(360, 780), 1.3)]) {
       testWidgets('suggestions line up with the composer (${size.width.round()}dp, ×$scale)', (tester) async {
         await _pump(tester, ChatHarness(), size: size, textScale: scale);
@@ -70,14 +70,14 @@ void main() {
         expect(composer.left, moreOrLessEquals(12, epsilon: 0.5));
         expect(width - composer.right, moreOrLessEquals(12, epsilon: 0.5));
 
-        // Equal chips, EmptyActions.gap apart.
+        // Equal cards (each row as tall as its taller card), a card gap apart.
         for (final c in chips) {
           expect(c.width, moreOrLessEquals(chips[0].width, epsilon: 0.5));
-          expect(c.height, moreOrLessEquals(chips[0].height, epsilon: 0.5));
         }
-        // The third chip starts a new row (2×2) or follows the second
-        // (one column): EmptyActions.gap below it either way.
-        expect(chips[2].top - chips[1].bottom, moreOrLessEquals(EmptyActions.gap));
+        expect(chips[1].height, moreOrLessEquals(chips[0].height, epsilon: 0.5));
+        expect(chips[3].height, moreOrLessEquals(chips[2].height, epsilon: 0.5));
+        // The third card starts the second row: one card gap below the first.
+        expect(chips[2].top - chips[1].bottom, moreOrLessEquals(SuggestionCardMetrics.gap));
 
         // Greeting centred on the screen.
         final greeting = tester.getRect(find.text('下午好'));

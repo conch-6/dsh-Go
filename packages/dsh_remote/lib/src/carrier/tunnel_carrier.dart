@@ -258,6 +258,9 @@ class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
 
   /// Capabilities of the live (or last) Host connection.
   List<String> get capabilities => _lastCapabilities;
+
+  @override
+  Set<String>? get peerCapabilities => _lastCapabilities.isEmpty ? null : _lastCapabilities.toSet();
   List<String> _lastCapabilities = const [];
 
   RemoteFailure? get lastFailure => _lastFailure;
@@ -469,7 +472,9 @@ class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
           if (error.isLocal ||
               error.code != 'RESPONSE_TOO_LARGE' ||
               endpoint == 'commands/execute' ||
-              endpoint == 'settings/mutate') {
+              endpoint == 'settings/mutate' ||
+              endpoint == 'settings/update' ||
+              endpoint == 'settings/replace') {
             rethrow;
           }
           response = await _callTransferred(session, endpoint, encoded, timeout);

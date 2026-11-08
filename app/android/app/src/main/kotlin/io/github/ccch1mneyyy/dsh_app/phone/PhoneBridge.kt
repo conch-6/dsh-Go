@@ -40,7 +40,10 @@ import kotlin.concurrent.thread
 class PhoneBridge(
     private val server: McpServer,
     private val log: (String) -> Unit,
+    private val admit: (McpServer.Dispatch.Call) -> (() -> String) = { call -> { call.run() } },
+    private val admitEnd: (McpServer.Dispatch.RunEnd) -> EndWork = { EndWork(it.ack()) {} },
 ) {
+    class EndWork(val reply: String, val finish: () -> Unit)
     @Volatile private var running = false
     private var local: LocalServerSocket? = null
     private var tcp: ServerSocket? = null
@@ -122,15 +125,17 @@ class PhoneBridge(
         }
     }
 
+    private fun current(token: String): Boolean = running && endpoint?.token == token
+
     private fun acceptLocal(s: LocalServerSocket, token: String) {
-        while (running) {
+        while (current(token)) {
             val sock: LocalSocket = try {
                 s.accept()
             } catch (e: Exception) {
-                if (running) log("[dsh-app] phone bridge: accept failed: ${e.message}")
+                if (current(token)) log("[dsh-app] phone bridge: accept failed: ${e.message}")
                 return
             }
-            if (!running) {
+            if (!current(token)) {
                 runCatching { sock.close() }
                 return
             }
@@ -149,14 +154,14 @@ class PhoneBridge(
     }
 
     private fun acceptTcp(s: ServerSocket, token: String) {
-        while (running) {
+        while (current(token)) {
             val sock: Socket = try {
                 s.accept()
             } catch (e: Exception) {
-                if (running) log("[dsh-app] phone bridge: tcp accept failed: ${e.message}")
+                if (current(token)) log("[dsh-app] phone bridge: tcp accept failed: ${e.message}")
                 return
             }
-            if (!running) {
+            if (!current(token)) {
                 runCatching { sock.close() }
                 return
             }
@@ -172,11 +177,15 @@ class PhoneBridge(
 
     private fun serve(sock: Closeable, raw: InputStream, output: OutputStream, token: String, timeout: (Int) -> Unit) {
         val input = java.io.BufferedInputStream(raw)
-        if (!slots.tryAcquire()) {
+        // Admission and stop's socket sweep share one launch boundary.
+        val admitted = synchronized(this) {
+            if (!current(token) || !slots.tryAcquire()) false
+            else { open += sock; true }
+        }
+        if (!admitted) {
             runCatching { sock.close() }
             return
         }
-        open += sock
         thread(name = "dsh-phone-conn", isDaemon = true) {
             try {
                 timeout(HELLO_TIMEOUT_MS)
@@ -185,7 +194,10 @@ class PhoneBridge(
                     log("[dsh-app] phone bridge: bad token, connection closed")
                     return@thread
                 }
-                authed.incrementAndGet()
+                synchronized(this@PhoneBridge) {
+                    if (!current(token)) return@thread
+                    authed.incrementAndGet()
+                }
                 timeout(0)
                 val lock = Object()
                 fun send(line: String) {
@@ -194,14 +206,27 @@ class PhoneBridge(
                         output.flush()
                     }
                 }
-                while (running) {
+                while (current(token)) {
                     val line = readLine(input, MAX_LINE) ?: break
+                    if (!current(token)) break
                     when (val d = server.dispatch(line)) {
                         McpServer.Dispatch.None -> Unit
                         is McpServer.Dispatch.Reply -> send(d.line)
-                        is McpServer.Dispatch.Call -> calls.execute {
-                            val reply = d.run()
-                            runCatching { send(reply) }
+                        is McpServer.Dispatch.RunEnd -> {
+                            val finish = synchronized(this@PhoneBridge) {
+                                if (current(token)) admitEnd(d) else null
+                            } ?: break
+                            // Cleanup is scheduled before ACK: a failed write must not strand an
+                            // accepted end intent. ACK means admission is fenced, not work drained.
+                            calls.execute { finish.finish() }
+                            send(finish.reply)
+                        }
+                        is McpServer.Dispatch.Call -> {
+                            // Admission and stop share the launch lock; queued work carries its epoch.
+                            val invoke = synchronized(this@PhoneBridge) {
+                                if (current(token)) admit(d) else null
+                            } ?: break
+                            calls.execute { runCatching { send(invoke()) } }
                         }
                     }
                 }

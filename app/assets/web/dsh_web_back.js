@@ -11,7 +11,8 @@
 //             the official modal layer and menus close on
 //   'popup'   a popover that closes on a touch elsewhere (the composer's
 //             suggestions, pickers, the Cordis panel) got one
-//   'drawer'  the app's drawer closed (phone layout, dsh_web_phone.js)
+//   'drawer'  the sidebar as a drawer closed: the app's (phone layout) or
+//             DSH Web's own (official layout, phone widths)
 //   'panel'   the right panel covering the conversation (files, terminal)
 //             folded away
 //   'page'    the main area went up a level: a plugin's page to the list, a
@@ -133,15 +134,27 @@
       }
     }
 
-    // 3. The app's drawer (phone layout).
+    // 3. The sidebar as a drawer: the app's with the phone layout, DSH Web's
+    //    own in the official layout at phone widths (its toggle in the
+    //    sidebar's logo row is the way a person folds it). Only the official
+    //    layout: with the phone layout the frame is a drawer too, and its
+    //    sidebar stays expanded inside the app's.
     var app = window.__dshApp;
-    if (app && document.documentElement.getAttribute('data-dsh-app-layout') === 'drawer' && app.sidebarOpen()) {
+    var appLayout = document.documentElement.getAttribute('data-dsh-app-layout');
+    if (app && appLayout === 'drawer' && app.sidebarOpen()) {
       app.closeSidebar();
       return 'drawer';
     }
+    var f = frame();
+    if (appLayout !== 'drawer' && f && f.hasAttribute('data-sidebar-drawer') && !f.hasAttribute('data-sidebar-collapsed')) {
+      var fold = lastShown('[data-slot="sidebar"] [class*="_logoRow"] button[class*="_iconButton"]');
+      if (fold) {
+        fold.click();
+        return 'drawer';
+      }
+    }
 
     // 4. The right panel covering the conversation.
-    var f = frame();
     if (f && f.getAttribute('data-rightbar-fullscreen') === 'true') {
       var fold = lastShown('[data-slot="rightbar"] button[data-sidebar-right-toggle]');
       if (fold) {

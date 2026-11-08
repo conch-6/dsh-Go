@@ -53,10 +53,17 @@ internal object ShareImages {
             val png = bitmap.hasAlpha()
             val name = ShareNames.replaceExtension(target.name, if (png) "png" else "jpg")
             val out = ShareNames.unique(target.parentFile!!, name)
-            out.outputStream().use {
-                bitmap.compress(if (png) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, QUALITY, it)
+            var complete = false
+            try {
+                val encoded = out.outputStream().use {
+                    bitmap.compress(if (png) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, QUALITY, it)
+                }
+                if (!encoded) return null // The caller falls back to copying the original.
+                complete = true
+                return out
+            } finally {
+                if (!complete) out.delete()
             }
-            return out
         } finally {
             bitmap.recycle()
         }

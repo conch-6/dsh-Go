@@ -1307,6 +1307,7 @@ class ChatController extends Notifier<ChatState> {
         _sent();
         return true;
       }
+      _recordSendFailure(operation, e);
       if (_outcomeUnknown(e)) {
         _unsettled = (content: content, requestId: requestId);
       }
@@ -1457,6 +1458,33 @@ class ChatController extends Notifier<ChatState> {
     _ when _imagesRefused(e) => appL10n.stateChatImageModelRequired,
     _ => chatErrorText(e, action: appL10n.stateSendFailed),
   };
+
+  /// A current send without observed acceptance reaches this diagnostic.
+  /// Keep content and arbitrary remote error text out of the process log.
+  void _recordSendFailure(_ChatOperation operation, Object error) {
+    final cause = error is _UploadFailed ? error.cause : error;
+    final stage = error is _UploadFailed ? 'attachment_upload' : 'prompt';
+    final category = switch (cause) {
+      DshRemoteException(code: 'session/writer-held') => 'session_writer_held',
+      DshRemoteException() => 'remote_other',
+      DshTransportException() => 'transport',
+      DshCarrierLostException() => 'carrier_lost',
+      DshHttpException() => 'http',
+      DshProtocolException() => 'protocol',
+      DshCarrierRefusedException() => 'carrier_refused',
+      DshClosedException() => 'closed',
+      _ => 'unknown',
+    };
+    final connection = ref.read(activeConnectionProvider).value;
+    final host = connection != null && identical(connection.client, operation.client)
+        ? connection.kind.name
+        : 'unknown';
+    appErrorLog.record(
+      AppErrorSource.session,
+      'chat_send_failure stage=$stage host=$host category=$category outcome_unknown=${_outcomeUnknown(error)}',
+      StackTrace.empty,
+    );
+  }
 
   /// The connection dropped mid-call: the prompt may have landed.
   static bool _outcomeUnknown(Object e) => switch (e is _UploadFailed ? e.cause : e) {

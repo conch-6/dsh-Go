@@ -48,13 +48,14 @@ object A11yKeeper {
         val step = plan.next(on, granted, list, connected, SystemClock.elapsedRealtime())
         try {
             when (step) {
-                KeeperPlan.Step.ADD -> write(app, plan.withMe(list), enable = true)
+                KeeperPlan.Step.ADD -> {
+                    if (!writeIfAllowed(app, plan, enable = true)) return false
+                }
                 KeeperPlan.Step.REBIND -> {
-                    write(app, plan.withoutMe(list), enable = false)
+                    if (!writeIfAllowed(app, plan, enable = false)) return false
+                    // Do not hold the master-switch lock while the system observes the removal.
                     SystemClock.sleep(REBIND_GAP_MS)
-                    // The person can turn phone control off or revoke the grant while we wait.
-                    if (!PhoneControl.switchedOn(app) || !granted(app)) return false
-                    write(app, plan.withMe(read(app)), enable = true)
+                    if (!writeIfAllowed(app, plan, enable = true)) return false
                 }
                 KeeperPlan.Step.NONE -> return granted
             }
@@ -64,6 +65,17 @@ object A11yKeeper {
         }
         return granted
     }
+
+    /** Recheck permission and merge the current list in the same short section as a master change.
+     * Off can wait for an in-flight Settings call, but never for the rebind gap or keeper backoff.
+     */
+    private fun writeIfAllowed(app: Context, plan: KeeperPlan, enable: Boolean): Boolean =
+        synchronized(PhoneControl.keeperSwitchLock) {
+            if (!PhoneControl.switchedOn(app) || !granted(app)) return@synchronized false
+            val current = read(app)
+            write(app, if (enable) plan.withMe(current) else plan.withoutMe(current), enable)
+            true
+        }
 
     private fun read(app: Context): String? =
         Settings.Secure.getString(app.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)

@@ -53,7 +53,7 @@ class FakeOverlayNative {
     calls.add(call);
     final args = call.arguments is Map ? call.arguments as Map : const {};
     switch (call.method) {
-      case 'push':
+      case 'push' || 'reloadPack':
         return null;
       case 'setEnabled':
         enabled = args['enabled'] == true;

@@ -283,8 +283,9 @@ class _ContextSection extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final dsh = DshColors.of(context);
-    final fraction = usage.contextFraction;
     final window = usage.contextWindow;
+    final tokens = usage.contextTokens;
+    final fraction = usage.contextFraction;
 
     final breakdown = [
       if (usage.systemTokens case final n? when n > 0) l10n.activityUsageSystemTokens(formatTokens(n)),
@@ -296,10 +297,18 @@ class _ContextSection extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: fraction == null || window == null
-          ? Text(l10n.activityUsageAfterMessage, style: theme.textTheme.bodyMedium?.copyWith(color: dsh.textTertiary))
+          ? Text(
+              l10n.activityUsageWaiting,
+              style: theme.textTheme.bodyMedium?.copyWith(color: dsh.textTertiary),
+            )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(
+                  usage.projectedTokens != null ? l10n.activityUsageProjected : l10n.activityUsageLastRequest,
+                  style: theme.textTheme.bodySmall?.copyWith(color: dsh.textTertiary),
+                ),
+                const SizedBox(height: 4),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.baseline,
                   textBaseline: TextBaseline.alphabetic,
@@ -311,7 +320,7 @@ class _ContextSection extends StatelessWidget {
                     ),
                     const Spacer(),
                     Text(
-                      '${formatTokens(usage.pressureTokens ?? 0)} / '
+                      '${formatTokens(tokens ?? 0)} / '
                       '${formatTokens(window)}',
                       style: AppType.tabular(theme.textTheme.bodySmall!.copyWith(color: colors.onSurfaceVariant)),
                     ),
@@ -324,6 +333,11 @@ class _ContextSection extends StatelessWidget {
                   Text(
                     breakdown.join(' · '),
                     style: AppType.tabular(theme.textTheme.bodySmall!.copyWith(color: dsh.textTertiary)),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    l10n.activityUsageBreakdownEstimate,
+                    style: theme.textTheme.bodySmall?.copyWith(color: dsh.textTertiary),
                   ),
                 ],
                 if (fraction > 0.85) ...[
@@ -398,7 +412,10 @@ class _TokenSection extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _Stat(label: l10n.activityInput, value: formatTokens(usage.input)),
+                child: _Stat(
+                  label: l10n.activityUsageCumulativeInput,
+                  value: formatTokens(usage.input),
+                ),
               ),
               Expanded(
                 child: _Stat(label: l10n.activityOutput, value: formatTokens(usage.output)),

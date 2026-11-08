@@ -12,13 +12,22 @@ bool engineUnreachable(Object error) =>
     error is TimeoutException;
 
 /// The reasons every page words the same way: the link, the sign-in, a
-/// conversation that is gone, an engine too old. Null for anything else;
+/// conversation that is gone, and recognized gateway failures. Null for anything else;
 /// each page then says it its own way, or says nothing.
 String? engineErrorReason(Object error) => switch (error) {
   _ when engineUnreachable(error) => appL10n.commonEngineUnreachable,
   DshCarrierRefusedException() || DshHttpException(statusCode: 401 || 403) => appL10n.stateEngineAuthFailed,
   DshRemoteException(code: 'session/not-found') => appL10n.stateChatMissing,
-  DshRemoteException(:final code) when code.startsWith('gateway/') && code != 'gateway/internal' =>
-    appL10n.stateEngineUnsupported,
+  DshRemoteException(
+    code: 'gateway/service-unavailable' || 'gateway/context-unavailable' || 'gateway/lookup-unavailable',
+  ) =>
+    appL10n.stateEngineServiceUnavailable,
+  DshRemoteException(
+    code: 'gateway/definition-unavailable' || 'gateway/invocation-unavailable' || 'gateway/method-unavailable',
+  ) =>
+    appL10n.stateEngineOperationUnavailable,
+  DshRemoteException(code: 'gateway/cancelled') => appL10n.commonCancelled,
+  DshRemoteException(code: 'gateway/peer-disposed') => appL10n.commonEngineUnreachable,
+  DshRemoteException(code: 'gateway/method-not-found' || 'gateway/not-found') => appL10n.stateEngineUnsupported,
   _ => null,
 };

@@ -286,7 +286,7 @@ void main() {
       expect(find.text('Deepy 小鲸鱼'), findsOneWidget);
       expect(find.text('鲸娘'), findsOneWidget);
       expect(find.text('不显示'), findsOneWidget);
-      expect(find.text('来自 DSH-TUI'), findsOneWidget);
+      expect(find.textContaining('来自 DSH-TUI'), findsOneWidget);
       expect(find.text('大小'), findsOneWidget);
       for (final s in ['小', '标准', '大']) {
         expect(find.text(s), findsOneWidget);

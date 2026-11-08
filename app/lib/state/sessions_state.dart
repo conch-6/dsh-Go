@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../companion/companion_state.dart';
 import '../runtime/runtime_state.dart';
 import 'connection_state.dart';
 import 'hosts_state.dart';
@@ -190,6 +191,11 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
       }
     });
     ref.onDispose(_retireArchives);
+    // Which conversation is the companion's is read from preferences after
+    // launch: hide it from the drawer as soon as that's known.
+    ref.listen(companionSessionFilterProvider, (_, _) {
+      if (state.hasValue && !state.isLoading) state = AsyncData(_visible());
+    });
     final seq = ++_loadSeq;
     final host = ref.watch(activeHostProvider);
     if (host != _host) {
@@ -326,13 +332,20 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
 
   List<SessionSummary> _visible() {
     final pendingIds = {for (final pending in _archives) ...pending.ids};
+    // Her conversation lives in 伙伴小屋, not the drawer.
+    final companion = ref.read(companionSessionFilterProvider);
+    final host = ref.read(activeHostProvider);
     return ref
         .read(readListCacheProvider)
         .derive(
           _rows()
               .where(
                 (s) =>
-                    !s.blank && !s.isSubagent && !_archived.contains(s.sessionId) && !pendingIds.contains(s.sessionId),
+                    !s.blank &&
+                    !s.isSubagent &&
+                    !_archived.contains(s.sessionId) &&
+                    !pendingIds.contains(s.sessionId) &&
+                    !companion(host, s.sessionId),
               )
               .toList()
             ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt)),
@@ -577,16 +590,35 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
   }
 
   /// Creates a session in the workspace the drawer shows (else the default
-  /// directory) and returns its id.
-  Future<String> create() async {
+  /// directory) and returns its id. [autoApprove] false keeps the host's
+  /// permission preset even when 自动批准命令 is on (the companion's).
+  Future<String> create({bool autoApprove = true}) async {
     final conn = ref.read(activeConnectionProvider).value;
     if (conn == null) throw StateError('not connected');
+    return createForConnection(conn, autoApprove: autoApprove, isCurrent: () => true);
+  }
+
+  /// Creates for a captured connection. The caller retires its intent through
+  /// [isCurrent]; waits and workspace fallback must not start a later write.
+  Future<String> createForConnection(
+    HostConnection conn, {
+    required bool Function() isCurrent,
+    bool autoApprove = true,
+  }) async {
+    final owner = ref;
+    void checkCurrent() {
+      if (!owner.mounted || !isCurrent()) throw const DshClosedException('session creation superseded');
+    }
+
+    checkCurrent();
     // Remote hosts: the working directory configured for that host, else the
     // workspace used last (as the official client does), else the remote DSH's
     // own default.
     var workspaceId = await workspaceForNewSession(ref);
+    checkCurrent();
     if (workspaceId == null && _hostPicksNewChatDirectory(conn)) {
       await _listsForNewChat();
+      checkCurrent();
       final sameHost = identical(ref.read(activeConnectionProvider).value?.client, conn.client);
       if (sameHost) workspaceId = _recentForNewChat(conn, ref.read(workspacesProvider), state.value)?.workspaceId;
     }
@@ -594,17 +626,20 @@ class SessionsController extends AsyncNotifier<List<SessionSummary>> {
       conn.client,
       workspaceId,
       cwd: conn.isLocal ? localWorkspaceDir : conn.workingDirectory,
+      checkCurrent: checkCurrent,
     );
+    checkCurrent();
     // Safe mode keeps the default preset: the agent there repairs the engine
     // with a full shell already, and every command should still be asked.
     final safeMode = ref.read(localRuntimeProvider).status.inSafeMode;
-    if (conn.isLocal && !safeMode && ref.read(settingsProvider).autoApproveCommands) {
+    if (autoApprove && conn.isLocal && !safeMode && ref.read(settingsProvider).autoApproveCommands) {
       try {
         await conn.client.setPermissionPreset(created.sessionId, 'danger-full-access');
       } catch (_) {
         // Keep the default preset if the command is unavailable.
       }
     }
+    checkCurrent();
     unawaited(refresh());
     return created.sessionId;
   }

@@ -128,7 +128,7 @@ class SharePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         val skipped = ArrayList<Map<String, Any?>>()
         if (share.streams.isNotEmpty()) {
             val dir = File(context.cacheDir, "share").apply { mkdirs() }
-            prune(dir)
+            ShareNames.pruneSlots(dir, KEEP_SLOTS - 1)
             val slot = File(dir, "${System.currentTimeMillis().toString(36)}-${slotSeq++}").apply { mkdirs() }
             var total = 0L
             for ((index, uri) in share.streams.withIndex()) {
@@ -242,12 +242,6 @@ class SharePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
     }
 
     private fun skip(name: String?, reason: String): Map<String, Any?> = mapOf("name" to name, "reason" to reason)
-
-    /** Keeps the last few shares (Dart reads them right away; a share code stays a while). */
-    private fun prune(dir: File) {
-        val slots = dir.listFiles()?.sortedByDescending { it.lastModified() } ?: return
-        for (old in slots.drop(KEEP_SLOTS - 1)) old.deleteRecursively()
-    }
 
     // Delivery
 

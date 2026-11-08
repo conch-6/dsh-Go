@@ -24,4 +24,8 @@
     <string name="overlay_unlock_secrets">密码和验证码</string>
     <string name="overlay_unlock_own_app">DSH Go 自身</string>
     <string name="overlay_list_separator">、</string>
+    <string name="overlay_preview_readonly">后台屏预览，仅供查看</string>
+    <string name="overlay_preview_waiting">等待后台屏画面…</string>
+    <string name="overlay_preview_protected">受保护的画面，已隐藏预览</string>
+    <string name="overlay_preview_unavailable">暂时无法预览后台屏</string>
 </resources>

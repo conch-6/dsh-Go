@@ -1,0 +1,37 @@
+package io.github.ccch1mneyyy.dsh_app.phone.background
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class BackgroundViewportTest {
+    @Test fun presetsSwapAxesWithoutChangingPixelBudget() {
+        val portrait = BackgroundPolicy.Viewport.PORTRAIT
+        val landscape = BackgroundPolicy.Viewport.LANDSCAPE
+        assertEquals(720, portrait.width); assertEquals(1600, portrait.height)
+        assertEquals(portrait.height, landscape.width); assertEquals(portrait.width, landscape.height)
+        assertEquals(1_152_000, portrait.width * portrait.height)
+        assertEquals(1_152_000, landscape.width * landscape.height)
+    }
+
+    @Test fun arbitrarySizesCaseVariantsAndWrongTypesAreNotPresets() {
+        for (value in listOf(null, "", "LANDSCAPE", "720x1600", "square", true, 1)) {
+            assertNull(BackgroundPolicy.Viewport.parse(value))
+        }
+        assertEquals(BackgroundPolicy.Viewport.PORTRAIT, BackgroundPolicy.Viewport.parse("portrait"))
+        assertEquals(BackgroundPolicy.Viewport.LANDSCAPE, BackgroundPolicy.Viewport.parse("landscape"))
+    }
+
+    @Test fun landscapeRequiresExactAdvertisedVersionAndPortraitRetainsOldPeerCompatibility() {
+        for (version in listOf(null, 0, 2, "1", 1L, 1.0, true)) {
+            assertFalse(BackgroundPolicy.supportsViewport(BackgroundPolicy.Viewport.LANDSCAPE, version))
+            assertTrue(BackgroundPolicy.supportsViewport(BackgroundPolicy.Viewport.PORTRAIT, version))
+        }
+        assertTrue(BackgroundPolicy.supportsViewport(BackgroundPolicy.Viewport.LANDSCAPE, 1))
+    }
+
+    @Test fun oldAspectRequestsKeepTheirPortraitSemantics() {
+        assertArrayEquals(intArrayOf(720, 1600), BackgroundPolicy.displaySize(720, 9, 20))
+        assertArrayEquals(intArrayOf(720, 1600), BackgroundPolicy.displaySize(720, 20, 9))
+        assertArrayEquals(intArrayOf(360, 800), BackgroundPolicy.displaySize(360, 9, 20))
+    }
+}

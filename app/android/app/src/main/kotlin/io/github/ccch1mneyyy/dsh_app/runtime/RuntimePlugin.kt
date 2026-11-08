@@ -74,7 +74,8 @@ class RuntimePlugin :
             "getStatus" -> result.success(controller.status())
             "publishDiagnostics" -> {
                 val markdown = call.argument<String>("markdown")
-                result.success(if (markdown == null || markdown.length > 256 * 1024) null else controller.publishDiagnostics(markdown))
+                val manual = call.argument<Any?>("manual") == true
+                result.success(if (markdown == null || markdown.length > 256 * 1024) null else controller.publishDiagnostics(markdown, manual = manual))
             }
             "installManagedSkill" -> {
                 val owner = managedSkillOwner
@@ -125,11 +126,11 @@ class RuntimePlugin :
             }
             "lastKnownGood" -> controller.lastKnownGoodStatus { result.success(it) }
             "restoreLastKnownGood" -> controller.restoreLastKnownGood { plan, error ->
-                if (error == null) result.success(plan) else result.error("restore_failed", error.message, null)
+                if (error == null) result.success(plan) else result.error(if (error is RuntimeNotStoppedException) "runtime_not_stopped" else "restore_failed", error.message, null)
             }
             "safePreflight" -> controller.safePreflight { result.success(it) }
             "moveAside" -> controller.moveAside(call.argument<List<String>>("paths") ?: emptyList()) { moved, error ->
-                if (error == null) result.success(moved) else result.error("move_failed", error.message, null)
+                if (error == null) result.success(moved) else result.error(if (error is RuntimeNotStoppedException) "runtime_not_stopped" else "move_failed", error.message, null)
             }
             "clearFailure" -> {
                 controller.clearFailure()
@@ -138,6 +139,18 @@ class RuntimePlugin :
             "setAutoSafe" -> {
                 controller.setAutoSafe(call.argument<Boolean>("enabled") != false)
                 result.success(null)
+            }
+            "setWorkspaceRecovery" -> {
+                val enabled = (call.arguments as? Map<*, *>)?.get("enabled") as? Boolean
+                if (enabled == null) result.error("workspace_recovery_invalid", "enabled must be a boolean", null)
+                else controller.setWorkspaceRecovery(enabled) { error ->
+                    if (error == null) result.success(null)
+                    else result.error(
+                        if (error is RuntimeNotStoppedException) "runtime_not_stopped" else "workspace_recovery_save_failed",
+                        error.message,
+                        null,
+                    )
+                }
             }
             "setDirectEngine" -> {
                 try {

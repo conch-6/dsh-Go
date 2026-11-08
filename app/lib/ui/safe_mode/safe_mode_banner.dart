@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../l10n/l10n.dart';
 import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
+import '../engine/engine_status.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'safe_mode_actions.dart';
@@ -46,6 +47,8 @@ class SafeModeBanner extends ConsumerWidget {
       _ when !safe => l10n.phoneSafeBannerProbationHint,
       RuntimePhase.starting => l10n.phoneEngineStartingSafeEllipsis,
       RuntimePhase.running => l10n.phoneSafeBannerRunningHint,
+      RuntimePhase.stopping =>
+        isLocalStartupFailure(status) ? l10n.phoneStartupFailureStopping : l10n.phoneEngineStoppingEllipsis,
       RuntimePhase.error => l10n.phoneSafeBannerFailedHint,
       _ => l10n.phoneSafeBannerStoppedHint,
     };

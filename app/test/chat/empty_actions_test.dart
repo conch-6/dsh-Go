@@ -1,7 +1,7 @@
-// The new-chat empty state in two tiers — at most one primary pill
-// (「重新连接」), everything else quiet chips of one size (the workspace chip
-// and the suggestions). Geometry is measured, not eyeballed; goldens in light
-// and dark. Regenerate with
+// The new-chat empty state — at most one primary pill (「重新连接」), quiet
+// chips of one size (the workspace chip and the new chat's options), the
+// suggestions as quiet cards and one tip line. Geometry is measured, not
+// eyeballed; goldens in light and dark. Regenerate with
 // `flutter test --update-goldens test/chat/empty_actions_test.dart`.
 
 import 'package:dsh_app/state/connection_state.dart';
@@ -64,26 +64,29 @@ Finder _pill(String label) => find.ancestor(of: find.text(label), matching: find
 
 Rect _rect(WidgetTester tester, String label) => tester.getRect(_pill(label));
 
-/// The content row inside the pill around [label].
-Rect _content(WidgetTester tester, String label) =>
-    tester.getRect(find.descendant(of: _pill(label), matching: find.byType(Row)).first);
+/// The suggestion card around [label].
+Rect _card(WidgetTester tester, String label) =>
+    tester.getRect(find.ancestor(of: find.text(label), matching: find.byType(SuggestionCard)));
+
+bool _cut(WidgetTester tester, String text) => tester.renderObject<RenderParagraph>(find.text(text)).didExceedMaxLines;
+
 
 void main() {
   setUpAll(() async {
     await loadTestFonts();
     await WhaleSprites.load();
     chatClock = () => DateTime(2026, 10, 23, 15, 20);
+    tipStart = (_) => 0;
   });
 
   group('geometry', () {
-    testWidgets('suggestions: equal chips, edge to edge with the composer', (tester) async {
+    testWidgets('suggestions: two equal columns of cards, edge to edge with the composer', (tester) async {
       await _pumpChat(tester);
       expect(tester.takeException(), isNull);
       final composer = tester.getRect(find.byType(Composer));
-      final cells = [for (final s in defaultSuggestions) _rect(tester, s.label)];
+      final cells = [for (final s in defaultSuggestions) _card(tester, s.label)];
 
       for (final c in cells) {
-        expect(c.height, moreOrLessEquals(EmptyActions.height));
         expect(c.width, moreOrLessEquals(cells[0].width, epsilon: 0.5));
       }
       // 2×2, the outer edges on the composer's (12 from the screen).
@@ -91,24 +94,28 @@ void main() {
       expect(cells[2].left, moreOrLessEquals(composer.left, epsilon: 0.5));
       expect(cells[1].right, moreOrLessEquals(composer.right, epsilon: 0.5));
       expect(cells[3].right, moreOrLessEquals(composer.right, epsilon: 0.5));
+      // Each row as tall as its taller card.
       expect(cells[0].top, cells[1].top);
+      expect(cells[0].height, moreOrLessEquals(cells[1].height, epsilon: 0.5));
       expect(cells[2].top, cells[3].top);
-      expect(cells[1].left - cells[0].right, moreOrLessEquals(EmptyActions.gap));
-      expect(cells[2].top - cells[0].bottom, moreOrLessEquals(EmptyActions.gap));
+      expect(cells[2].height, moreOrLessEquals(cells[3].height, epsilon: 0.5));
+      expect(cells[1].left - cells[0].right, moreOrLessEquals(SuggestionCardMetrics.gap));
+      expect(cells[2].top - cells[0].bottom, moreOrLessEquals(SuggestionCardMetrics.gap));
 
-      // Inside each chip the content is centred: equal room left and right
-      // once the icon's own air is counted, equal room above and below.
+      // The badge on the card's inset, the text beside it; nothing cut.
       for (final s in defaultSuggestions) {
-        final chip = _rect(tester, s.label);
-        final row = _content(tester, s.label);
+        final card = _card(tester, s.label);
+        final title = tester.getRect(find.text(s.label));
         expect(
-          row.left - chip.left + EmptyActions.leadingAir,
-          moreOrLessEquals(chip.right - row.right, epsilon: 0.5),
+          title.left - card.left,
+          moreOrLessEquals(
+            SuggestionCardMetrics.padH + SuggestionCardMetrics.badge + SuggestionCardMetrics.badgeGap,
+            epsilon: 0.5,
+          ),
           reason: s.label,
         );
-        expect(row.top - chip.top, moreOrLessEquals(chip.bottom - row.bottom, epsilon: 0.5), reason: s.label);
-        final paragraph = tester.renderObject<RenderParagraph>(find.text(s.label));
-        expect(paragraph.didExceedMaxLines, isFalse, reason: '${s.label} is cut');
+        expect(_cut(tester, s.label), isFalse, reason: '${s.label} is cut');
+        expect(_cut(tester, s.detail!), isFalse, reason: '${s.detail} is cut');
       }
     });
 
@@ -131,24 +138,33 @@ void main() {
       expect(chevron.center.dy, moreOrLessEquals(chip.center.dy, epsilon: 0.5));
     });
 
-    testWidgets('360dp with large text: one chip per row, nothing cut', (tester) async {
+    testWidgets('360dp with large text: still two columns, titles only, nothing cut', (tester) async {
       await _pumpChat(tester, size: const Size(360, 780), textScale: 1.3);
       expect(tester.takeException(), isNull);
       final composer = tester.getRect(find.byType(Composer));
-      final cells = [for (final s in defaultSuggestions) _rect(tester, s.label)];
+      final cells = [for (final s in defaultSuggestions) _card(tester, s.label)];
+      expect(cells[0].left, moreOrLessEquals(composer.left, epsilon: 0.5));
+      expect(cells[1].right, moreOrLessEquals(composer.right, epsilon: 0.5));
+      expect(cells[0].top, cells[1].top);
+      // A detail would wrap here, so every card keeps just its title.
+      for (final s in defaultSuggestions) {
+        expect(_cut(tester, s.label), isFalse, reason: s.label);
+        expect(find.text(s.detail!), findsNothing, reason: s.detail);
+      }
+      // The workspace chip grows with the text, like the chips always did.
+      expect(_rect(tester, _workspaceLabel).height, greaterThan(EmptyActions.height));
+    });
+
+    testWidgets('a cell too narrow for two lines: one card per row, full width', (tester) async {
+      await _pumpChat(tester, size: const Size(260, 700));
+      expect(tester.takeException(), isNull);
+      final composer = tester.getRect(find.byType(Composer));
+      final cells = [for (final s in defaultSuggestions) _card(tester, s.label)];
       for (final (i, c) in cells.indexed) {
         expect(c.left, moreOrLessEquals(composer.left, epsilon: 0.5));
         expect(c.right, moreOrLessEquals(composer.right, epsilon: 0.5));
-        expect(c.height, moreOrLessEquals(cells[0].height, epsilon: 0.5));
-        expect(c.height, greaterThan(EmptyActions.height), reason: 'grows with text');
-        if (i > 0) {
-          expect(c.top - cells[i - 1].bottom, moreOrLessEquals(EmptyActions.gap));
-        }
-        final paragraph = tester.renderObject<RenderParagraph>(find.text(defaultSuggestions[i].label));
-        expect(paragraph.didExceedMaxLines, isFalse);
+        if (i > 0) expect(c.top - cells[i - 1].bottom, moreOrLessEquals(SuggestionCardMetrics.gap));
       }
-      // The workspace chip grows by the same amount.
-      expect(_rect(tester, _workspaceLabel).height, moreOrLessEquals(cells[0].height, epsilon: 0.5));
     });
 
     testWidgets('no workspace chosen on a remote host: the chip names the one it falls back to', (tester) async {
@@ -206,13 +222,18 @@ void main() {
   });
 
   group('tiers', () {
-    testWidgets('connected: no primary, every control a quiet chip', (tester) async {
+    testWidgets('connected: no primary, quiet chips and cards, one tip line', (tester) async {
       await _pumpChat(tester);
       expect(find.byType(EmptyPrimaryPill), findsNothing);
-      expect(find.byType(QuietChip), findsNWidgets(defaultSuggestions.length + 1));
+      expect(find.byType(QuietChip), findsOneWidget, reason: 'the workspace chip');
+      expect(find.byType(SuggestionCard), findsNWidgets(defaultSuggestions.length));
+      expect(find.byType(TipLine), findsOneWidget);
       final theme = Theme.of(tester.element(find.byType(ChatEmptyState)));
       for (final material in tester.widgetList<Material>(
-        find.descendant(of: find.byType(QuietChip), matching: find.byType(Material)),
+        find.descendant(
+          of: find.byWidgetPredicate((w) => w is QuietChip || w is SuggestionCard),
+          matching: find.byType(Material),
+        ),
       )) {
         expect(material.color, quietChipFill(theme));
         expect(material.elevation, 0);
@@ -225,6 +246,8 @@ void main() {
       expect(find.text('没能连上引擎'), findsOneWidget);
       expect(find.byType(EmptyPrimaryPill), findsOneWidget);
       expect(find.byType(QuietChip), findsNothing);
+      expect(find.byType(SuggestionCard), findsNothing);
+      expect(find.byType(TipLine), findsNothing);
       final theme = Theme.of(tester.element(find.byType(ChatEmptyState)));
       final fill = tester.widget<Material>(
         find.descendant(of: find.byType(EmptyPrimaryPill), matching: find.byType(Material)),
@@ -242,7 +265,7 @@ void main() {
       expect(semantics.label, '重新连接');
     });
 
-    testWidgets('connecting: the chips are there but do nothing', (tester) async {
+    testWidgets('connecting: the cards are there but do nothing, no tip yet', (tester) async {
       final picked = <ChatSuggestion>[];
       await _pumpState(tester, ChatEmptyState(connected: false, connecting: true, onSuggestion: picked.add));
       expect(find.text('正在连接引擎…'), findsOneWidget);
@@ -250,14 +273,89 @@ void main() {
       await tester.tap(find.text(defaultSuggestions[0].label));
       await tester.pump();
       expect(picked, isEmpty);
+      expect(find.byType(TipLine), findsNothing);
     });
 
-    testWidgets('a chip fills in its suggestion', (tester) async {
+    testWidgets('a card fills in its suggestion and reads as one button', (tester) async {
       final picked = <ChatSuggestion>[];
       await _pumpState(tester, ChatEmptyState(connected: true, onSuggestion: picked.add));
       await tester.tap(find.text(defaultSuggestions[2].label));
       await tester.pump();
       expect(picked, [defaultSuggestions[2]]);
+      final s = defaultSuggestions[2];
+      final semantics = tester.getSemantics(find.byType(SuggestionCard).at(2));
+      expect(semantics.label, '${s.label}, ${s.detail}');
+    });
+
+    testWidgets('tip line: one tip at a time, a tap rises in the next', (tester) async {
+      await _pumpState(
+        tester,
+        ChatEmptyState(connected: true, onSuggestion: (_) {}, tips: const ['甲', '乙'], tipStart: 0),
+      );
+      expect(find.text('甲'), findsOneWidget);
+      final semantics = tester.getSemantics(find.byType(TipLine));
+      expect(semantics.label, '小技巧：甲');
+      expect(semantics.hintOverrides?.onTapHint, '下一条小技巧');
+      await tester.tap(find.byType(TipLine));
+      await pumpFrames(tester, 6);
+      expect(find.text('乙'), findsOneWidget);
+      expect(find.text('甲'), findsNothing);
+      await tester.tap(find.byType(TipLine));
+      await pumpFrames(tester, 6);
+      expect(find.text('甲'), findsOneWidget, reason: 'wraps around');
+    });
+
+    testWidgets('tips turn on their own; a tap restarts the wait', (tester) async {
+      await _pumpState(
+        tester,
+        ChatEmptyState(connected: true, onSuggestion: (_) {}, tips: const ['甲', '乙', '丙'], tipStart: 0),
+      );
+      expect(find.text('甲'), findsOneWidget);
+      await tester.pump(tipDwell - const Duration(seconds: 1));
+      expect(find.text('甲'), findsOneWidget, reason: 'not before the dwell');
+      await tester.pump(const Duration(seconds: 1));
+      await pumpFrames(tester, 6);
+      expect(find.text('乙'), findsOneWidget);
+      // A tap shows the next one now and waits a full dwell again.
+      await tester.pump(tipDwell - const Duration(seconds: 2));
+      await tester.tap(find.byType(TipLine));
+      await pumpFrames(tester, 6);
+      expect(find.text('丙'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.text('丙'), findsOneWidget);
+    });
+
+    testWidgets('with reduced motion the tip stays until tapped', (tester) async {
+      usePhoneView(tester);
+      await tester.pumpWidget(
+        testApp(
+          MediaQuery(
+            data: const MediaQueryData(disableAnimations: true, size: Size(390, 844)),
+            child: Scaffold(
+              body: Center(
+                child: ChatEmptyState(connected: true, onSuggestion: (_) {}, tips: const ['甲', '乙'], tipStart: 0),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(tipDwell * 3);
+      expect(find.text('甲'), findsOneWidget);
+      await tester.tap(find.byType(TipLine));
+      await tester.pump();
+      expect(find.text('乙'), findsOneWidget);
+    });
+
+    testWidgets('the default tips are all there, each fits two lines', (tester) async {
+      await _pumpState(tester, ChatEmptyState(connected: true, onSuggestion: (_) {}));
+      final tips = defaultTips();
+      expect(tips.toSet(), hasLength(tips.length));
+      for (var i = 0; i < tips.length; i++) {
+        expect(find.text(tips[i]), findsOneWidget);
+        expect(_cut(tester, tips[i]), isFalse, reason: tips[i]);
+        await tester.tap(find.byType(TipLine));
+        await pumpFrames(tester, 4);
+      }
     });
 
     testWidgets('workspace chip: a label and a hint, not one long sentence', (tester) async {

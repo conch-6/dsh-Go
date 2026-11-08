@@ -106,7 +106,7 @@ class InputProbeDiagnosticsTest {
 
     @Test fun acceptedReceiptSuccessIsExplicitAndDoesNotInventElapsedTime() {
         val gate = BackgroundGateState()
-        assertTrue(gate.update(gate.begin { true }!!, true, null, true, null, null))
+        assertTrue(gate.update(gate.begin { true }!!, true, null, true, null, null) is BackgroundGateState.Update.Accepted)
         assertEquals(mapOf("v" to 1, "observed" to true, "connectionFailure" to false, "result" to "success"),
             InputProbeDiagnostics.snapshot(gate.snapshot))
     }
@@ -115,12 +115,12 @@ class InputProbeDiagnosticsTest {
         val gate = BackgroundGateState()
         val old = gate.begin { true }!!
         val current = gate.begin { true }!!
-        assertTrue(gate.update(current, true, null, true, null, null))
+        assertTrue(gate.update(current, true, null, true, null, null) is BackgroundGateState.Update.Accepted)
         val before = gate.snapshot
         val detail = "probe-v1;stage=presentation_show;type=IllegalStateException;elapsedMs=7"
-        assertFalse(gate.update(old, true, null, false, "inputWindowNotReady", detail))
+        assertSame(BackgroundGateState.Update.Cancelled, gate.update(old, true, null, false, "inputWindowNotReady", detail))
         assertSame(before, gate.snapshot)
-        assertFalse(gate.update(gate.begin { true }!!, false, "probeBusy", false, "inputWindowNotReady", detail))
+        assertSame(BackgroundGateState.Update.Busy, gate.update(gate.begin { true }!!, false, "probeBusy", false, "inputWindowNotReady", detail))
         assertSame(before, gate.snapshot)
         assertEquals("success", InputProbeDiagnostics.snapshot(gate.snapshot)["result"])
     }
@@ -128,7 +128,7 @@ class InputProbeDiagnosticsTest {
     @Test fun retryConnectionFailureAndResetFollowExistingGateLifetime() {
         val gate = BackgroundGateState()
         val detail = "probe-v1;stage=presentation_show;type=IllegalStateException;elapsedMs=7"
-        assertTrue(gate.update(gate.begin { true }!!, true, null, false, "inputWindowNotReady", detail))
+        assertTrue(gate.update(gate.begin { true }!!, true, null, false, "inputWindowNotReady", detail) is BackgroundGateState.Update.Accepted)
         val retry = gate.begin { true }!!
         assertEquals("failure", InputProbeDiagnostics.snapshot(gate.snapshot)["result"])
         val channel = Any()
@@ -139,7 +139,7 @@ class InputProbeDiagnosticsTest {
         gate.connected(failed, Any())
         assertEquals(false, InputProbeDiagnostics.snapshot(gate.snapshot)["connectionFailure"])
         gate.reset()
-        assertFalse(gate.update(retry, true, null, false, "inputWindowNotReady", detail))
+        assertSame(BackgroundGateState.Update.Cancelled, gate.update(retry, true, null, false, "inputWindowNotReady", detail))
         assertEquals(mapOf("v" to 1, "observed" to false, "connectionFailure" to false),
             InputProbeDiagnostics.snapshot(gate.snapshot))
     }

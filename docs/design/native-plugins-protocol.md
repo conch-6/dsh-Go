@@ -269,6 +269,8 @@ HTTP 错误（守卫的 401/403/503 除外）的正文：
 
 ## 4. 路由
 
+**NA protocol v1 change（#656，能力缺省兼容）：** `surfaces`、`components` 查询参数分别独立处理。未提供某参数时，桥接向插件的视图回调省略对应可选字段，让 SDK 沿用原有 v1 surface / component 默认；显式空参数（例如 `surfaces=`）仍传空数组，表示该类能力均未声明，不自动回退。明确提供的列表按解析规则规范化后传递：按逗号拆分，去掉每项两端空白，丢掉空项和超过 64 个 UTF-16 代码单元的项，最多保留 64 项（例如 `surfaces=panels,,plugin` 得到 `["panels", "plugin"]`）。此规则不改变 `v` 的版本准入；`placement: "plugin"` 仍须在 `surfaces` 明确列出才保留，否则退回 `session.tab`。清单的 `contributes` 类别和 placement 是不同集合，`plugin` 不是新的清单类别。
+
 ### 4.1 `GET /dsh-go/v1/contributions`
 
 请求：`GET /dsh-go/v1/contributions?v=1&app=0.10.0&locale=zh-CN&surfaces=composer.actions,message.actions,composer.strip,panels&components=stack,row,text,…`，可带 `If-None-Match`。

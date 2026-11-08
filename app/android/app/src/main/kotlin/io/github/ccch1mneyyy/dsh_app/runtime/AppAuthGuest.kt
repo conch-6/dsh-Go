@@ -51,7 +51,7 @@ object AppAuthGuest {
 
     /**
      * Copies the bridge modules, then writes the overlay; files already up to date are left alone.
-     * False (and no overlay file) when anything could not be written, so the launch leaves it out.
+     * False when anything could not be written, so this launch leaves it out; cleanup is best effort.
      */
     fun writeFiles(context: Context, rootfs: File): Boolean {
         val patch = file(rootfs)

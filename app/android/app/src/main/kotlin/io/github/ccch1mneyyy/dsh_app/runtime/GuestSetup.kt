@@ -73,24 +73,30 @@ object GuestSetup {
         |
         |## 本机诊断
         |
-        |- 用户报障（卡顿、发热、连不上、更新失败、闪退、插件不生效、手机操控失败）时，先读 `{PATH}`。App 每次都把最新的环境快照写在这里：版本、设备、引擎状态、连接方式、性能档位、最近错误和引擎日志尾部。这是给排查用的，读之前不用问用户。
-        |- 需要更多细节时，让用户在 设置 → 诊断 里导出完整诊断包（zip）；数据不足就直说，不要凭猜测下结论。
-        |- 报告已经脱敏（key、token、手机号之类不会出现）；仍然不要把里面的路径、设备信息原样贴到聊天或 issue 里。
+        |- 用户报障（卡顿、发热、连不上、更新失败、闪退、插件不生效、手机操控失败）时，读取可用诊断：用户刚主动发布时优先读同目录的 `diagnostics-manual.md`，否则先读自动快照 `{PATH}`。核对报告时间、版本和设备，再分析引擎状态、连接方式、性能与有限日志；有一份可用就不要因另一份缺失反复要求刷新，读取前不用另问。
+        |- 用户点过「让 AI 看诊断」后，同目录的 `diagnostics-manual.md` 保留最近一次手动报告（可能含本次同意采集的输入法证据）；存在时也读它并核对采集时间。后续自动快照不会覆盖它；下一次手动发布才替换，清除 App 内存证据不会撤回已发布文件。
+        |- 需要更多细节时，让用户在 设置 → 诊断 里导出诊断包（zip）；它仍受日志数量和大小限制。数据不足就直说，不要凭猜测下结论。
+        |- 报告会尝试脱敏，但不能保证没有遗漏。外发前人工检查凭据、路径和设备信息，不把完整报告或秘密原样贴到聊天或 issue 里。
         |- 完整的排查流程（症状清单、issue 模板、隐私红线）在 `dsh-go-support` 技能里；用户报障时加载它再动手。
         |""".trimMargin()
 
     /** Where the engine's agent finds that snapshot, inside the guest. */
     private const val DIAGNOSTICS_FILE = "root/.dsh/dsh-app/diagnostics.md"
 
-    /** Writes [markdown] where the engine's file tools can read it; returns the host file. */
-    fun writeDiagnostics(rootfs: File, markdown: String, safe: Boolean = false): File {
+    /** Atomically replaces one fixed report and returns its actual host file. */
+    fun writeDiagnostics(rootfs: File, markdown: String, safe: Boolean = false, manual: Boolean = false): File {
         val path = if (safe) "${SafeMode.HOME.removePrefix("/")}/dsh-app/diagnostics.md" else DIAGNOSTICS_FILE
-        val file = File(rootfs, path)
-        val dir = file.parentFile ?: throw IOException("no diagnostics directory")
+        val main = File(rootfs, path)
+        val dir = main.parentFile ?: throw IOException("no diagnostics directory")
         if (!dir.isDirectory && !dir.mkdirs()) throw IOException("cannot create ${dir.path}")
-        val temp = File(dir, ".diagnostics.md.dsh-tmp")
-        temp.writeText(markdown)
-        if (!temp.renameTo(file)) throw IOException("cannot replace ${file.path}")
+        val file = if (manual) File(dir, "diagnostics-manual.md") else main
+        val temp = File(dir, ".${file.name}.dsh-tmp")
+        try {
+            temp.writeText(markdown)
+            if (!temp.renameTo(file)) throw IOException("cannot replace ${file.path}")
+        } finally {
+            temp.delete()
+        }
         return file
     }
 

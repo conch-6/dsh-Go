@@ -646,7 +646,7 @@ void main() {
       expect(find.text('引擎未运行'), findsOneWidget);
       await tester.tap(find.text('启动引擎'));
       expect(taps, 1);
-      expect(find.text('看看工作区有什么'), findsNothing);
+      expect(find.text('看看工作区'), findsNothing);
     });
 
     test('DeepSeek sign-in without the runtime fails at once', () async {

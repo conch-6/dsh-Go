@@ -13,8 +13,8 @@
 //  ⤓    ⇪    ↻    ⋯                          4 below, 20 icons 16 apart
 // ```
 //
-// Video (M3) is not played here yet: a video item is its poster (or a quiet
-// box) with a 「视频 · 0:05」 label, and opens in another app.
+// Video uses a supplied or locally extracted poster and opens the native viewer.
+// A remote video is downloaded only after the user opens it, never for scrolling.
 
 import 'dart:async';
 
@@ -26,6 +26,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../l10n/l10n.dart';
 import '../../../media/gallery.dart';
+import '../../../media/video.dart';
 import '../../../state/artifact_files.dart';
 import '../../../state/artifacts.dart';
 import '../../../state/features_state.dart' show jobsProvider;
@@ -43,7 +44,9 @@ import '../widgets/message_actions.dart' show copyMessage;
 import '../widgets/message_menu.dart';
 import 'media_format.dart';
 import 'media_grid.dart';
+import 'media_image_feedback.dart';
 import 'media_viewer.dart';
+import 'media_video_viewer.dart';
 
 /// What the chat lends a card: generate again, or take a picture back into
 /// generation mode. Null fields leave their actions out.
@@ -192,6 +195,15 @@ class _MediaCellState extends ConsumerState<MediaCell> {
   LoadedImage? _loaded;
   Object? _error;
   String? _path;
+  String? _sessionId;
+  CachedImageReader? _reader;
+  ImageProvider? _displayProvider;
+  int _attempt = 0;
+  Future<ImageProvider?>? _posterFuture;
+  ImageProvider? _videoPoster;
+  ArtifactFiles? _posterFiles;
+  MediaVideoChannel? _posterChannel;
+  (String?, String)? _posterSource;
 
   MediaItem get _item => widget.meta.items[widget.index];
 
@@ -213,13 +225,22 @@ class _MediaCellState extends ConsumerState<MediaCell> {
   void _resolve() {
     final sessionId = widget.sessionId;
     final path = _imagePath;
-    if (path == _path && (_future != null || _loaded != null || _error != null)) return;
+    final reader = _reader != null && sessionId == _sessionId ? _reader! : ref.read(workspaceImageReaderProvider);
+    if (path == _path &&
+        sessionId == _sessionId &&
+        identical(reader, _reader) &&
+        (_future != null || _loaded != null || _error != null)) {
+      return;
+    }
     _path = path;
+    _sessionId = sessionId;
+    _reader = reader;
+    _displayProvider = null;
+    _attempt += 1;
     _loaded = null;
     _error = null;
     _future = null;
     if (sessionId == null || path == null) return;
-    final reader = ref.read(workspaceImageReaderProvider);
     _loaded = reader.peek(sessionId, path);
     if (_loaded != null) return;
     final future = _future = reader.read(sessionId, path);
@@ -233,48 +254,117 @@ class _MediaCellState extends ConsumerState<MediaCell> {
     );
   }
 
+  void _resolveVideo(ArtifactFiles files, MediaVideoChannel channel) {
+    final source = (widget.sessionId, _item.path);
+    if (identical(files, _posterFiles) && identical(channel, _posterChannel) && source == _posterSource) return;
+    _posterFiles = files;
+    _posterChannel = channel;
+    _posterSource = source;
+    _videoPoster = null;
+    _posterFuture = null;
+    final session = widget.sessionId;
+    if (session == null || _item.poster != null) return;
+    final future = _posterFuture = mediaVideoThumbnail(files, channel, session, _item);
+    future.then(
+      (poster) {
+        if (mounted && identical(_posterFuture, future)) setState(() => _videoPoster = poster);
+      },
+      onError: (Object _) {
+        /* A missing thumbnail never prevents playback. */
+      },
+    );
+  }
+
+  Future<void> _retry() async {
+    final reader = _reader;
+    final sessionId = _sessionId;
+    final path = _path;
+    await _displayProvider?.evict();
+    if (!mounted || reader != _reader || sessionId != _sessionId || path != _path) return;
+    if (_loaded case RasterImage(:final provider)) await provider.evict();
+    if (!mounted || reader != _reader || sessionId != _sessionId || path != _path) return;
+    if (sessionId != null && path != null) reader?.forget(sessionId, path);
+    setState(() {
+      _future = null;
+      _loaded = null;
+      _error = null;
+      _resolve();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    _resolve();
     final l10n = context.l10n;
     final dsh = DshColors.of(context);
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final item = _item;
     final count = widget.meta.items.length;
+    if (item.isVideo && item.poster == null) {
+      final files = _posterFiles != null && _posterSource?.$1 == widget.sessionId
+          ? _posterFiles!
+          : ref.read(artifactFilesProvider);
+      _resolveVideo(files, ref.read(mediaVideoChannelProvider));
+    }
     final provider = switch (_loaded) {
       RasterImage(:final provider) => provider,
-      _ => null,
+      _ => item.isVideo ? _videoPoster : null,
     };
     final gone = _error != null && imageErrorText(_error!) == l10n.chatImageNotFound;
     Widget content;
     if (provider != null) {
       content = Image(
-        image: ResizeImage(provider, width: (widget.size.width * dpr).round(), policy: ResizeImagePolicy.fit),
+        key: ValueKey((_sessionId, _path, _attempt)),
+        image: _displayProvider = ResizeImage(
+          provider,
+          width: (widget.size.width * dpr).round(),
+          policy: ResizeImagePolicy.fit,
+        ),
         fit: BoxFit.cover,
         width: widget.size.width,
         height: widget.size.height,
         gaplessPlayback: true,
         frameBuilder: (context, child, frame, sync) => sync
             ? child
-            : AnimatedOpacity(
-                opacity: frame == null ? 0 : 1,
-                duration: AppMotion.of(context, AppMotion.standard),
-                curve: AppMotion.std,
-                child: child,
+            : Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (frame == null) const MediaImageFeedback(),
+                  AnimatedOpacity(
+                    opacity: frame == null ? 0 : 1,
+                    duration: AppMotion.of(context, AppMotion.standard),
+                    curve: AppMotion.std,
+                    child: child,
+                  ),
+                ],
               ),
-        errorBuilder: (_, _, _) => Center(child: Icon(AppIcons.imageBroken, size: 22, color: dsh.textTertiary)),
+        errorBuilder: (_, error, _) => MediaImageFeedback(error: imageErrorText(error), onRetry: _retry),
       );
+    } else if (item.isVideo) {
+      content = Center(child: Text(l10n.mediaVideoNoPoster, style: Theme.of(context).textTheme.labelMedium));
     } else if (gone) {
-      content = _Note(text: l10n.mediaFileGone, prompt: widget.meta.prompt);
+      content = MediaImageFeedback(error: l10n.mediaFileGone, caption: widget.meta.prompt, onRetry: _retry);
     } else if (_error != null) {
-      content = Center(child: Icon(AppIcons.imageBroken, size: 22, color: dsh.textTertiary));
+      content = MediaImageFeedback(error: imageErrorText(_error!), onRetry: _retry);
     } else {
-      content = const SizedBox.expand();
+      content = item.isVideo
+          ? Center(child: Text(l10n.mediaVideoNoPoster, style: Theme.of(context).textTheme.labelMedium))
+          : const MediaImageFeedback();
     }
     if (item.isVideo) {
       content = Stack(
         fit: StackFit.expand,
         children: [
           content,
+          const Center(
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+              child: Padding(
+                padding: EdgeInsets.all(10),
+                child: Icon(AppIcons.play, size: 28, color: Colors.white),
+              ),
+            ),
+          ),
           Positioned(left: 8, bottom: 8, child: MediaOverlayLabel(text: videoBadgeText(item))),
         ],
       );
@@ -311,10 +401,25 @@ class _MediaCellState extends ConsumerState<MediaCell> {
     if (sessionId == null) return;
     final item = _item;
     if (item.isVideo) {
-      unawaited(openMediaElsewhere(context, ref, sessionId, item));
+      unawaited(
+        openMediaVideoViewer(
+          context,
+          ref,
+          sessionId,
+          item,
+          sourceFiles:
+              _posterFiles ??
+              switch (_reader?.inner) {
+                ArtifactImageReader(:final files) => files,
+                _ => null,
+              },
+        ).then((_) {
+          if (mounted) setState(() => _posterChannel = null);
+        }),
+      );
       return;
     }
-    unawaited(openMediaViewer(context, sessionId: sessionId, meta: widget.meta, index: widget.index));
+    unawaited(openMediaViewer(context, sessionId: sessionId, meta: widget.meta, index: widget.index, reader: _reader));
   }
 
   Future<void> _menu(BuildContext context, ImageProvider provider) async {
@@ -389,47 +494,6 @@ class MediaOverlayLabel extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6),
       decoration: ShapeDecoration(color: Colors.black.withValues(alpha: 0.6), shape: Squircle.border(8)),
       child: Center(widthFactor: 1, child: Text(text, maxLines: 1, style: style)),
-    );
-  }
-}
-
-/// A file that is gone: what it was, and the description.
-class _Note extends StatelessWidget {
-  const _Note({required this.text, this.prompt});
-
-  final String text;
-  final String? prompt;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final dsh = DshColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(AppIcons.imageBroken, size: 20, color: dsh.textTertiary),
-            const SizedBox(height: 6),
-            Text(
-              text,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelMedium?.copyWith(color: dsh.textTertiary),
-            ),
-            if (prompt case final p? when p.trim().isNotEmpty) ...[
-              const SizedBox(height: 2),
-              Text(
-                p.trim(),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(color: dsh.textTertiary),
-              ),
-            ],
-          ],
-        ),
-      ),
     );
   }
 }
@@ -757,8 +821,13 @@ class _MediaActionRowState extends ConsumerState<MediaActionRow> {
 }
 
 /// The original bytes of [item] (a picture), read where the host keeps it.
-Future<Uint8List> mediaItemBytes(WidgetRef ref, String sessionId, MediaItem item) async {
-  final image = await ref.read(workspaceImageReaderProvider).read(sessionId, item.path);
+Future<Uint8List> mediaItemBytes(
+  WidgetRef ref,
+  String sessionId,
+  MediaItem item, {
+  WorkspaceImageReader? reader,
+}) async {
+  final image = await (reader ?? ref.read<CachedImageReader>(workspaceImageReaderProvider)).read(sessionId, item.path);
   return switch (image) {
     RasterImage(:final provider) => imageProviderBytes(provider),
     SvgImageBytes(:final bytes) => bytes,
@@ -766,7 +835,7 @@ Future<Uint8List> mediaItemBytes(WidgetRef ref, String sessionId, MediaItem item
 }
 
 /// 「保存到相册」 for a batch: one says 「已保存到相册」 as usual; several say
-/// how many. A video goes to 下载 (the gallery takes pictures only for now).
+/// how many. Videos stream from local materialized files into the gallery.
 Future<void> saveMediaItems(BuildContext context, WidgetRef ref, String sessionId, List<MediaItem> items) async {
   final pictures = items.where((i) => !i.isVideo).toList();
   final videos = items.where((i) => i.isVideo).toList();
@@ -781,6 +850,7 @@ Future<void> saveMediaItems(BuildContext context, WidgetRef ref, String sessionI
     return;
   }
   final media = ref.read(mediaChannelProvider);
+  final files = ref.read(artifactFilesProvider);
   var saved = 0;
   String? failure;
   for (final item in pictures) {
@@ -795,17 +865,21 @@ Future<void> saveMediaItems(BuildContext context, WidgetRef ref, String sessionI
   }
   for (final item in videos) {
     try {
-      await ref
-          .read(artifactFilesProvider)
-          .saveToDownloads(sessionId, Artifact(path: item.path, origin: ArtifactOrigin.linked, turn: 0));
+      final file = await files.materialize(
+        sessionId,
+        Artifact(path: item.path, origin: ArtifactOrigin.linked, turn: 0),
+      );
+      await media.saveVideoFile(file.path, name: item.name);
       saved++;
+    } on PlatformException catch (error) {
+      failure ??= error.code;
     } catch (_) {
       failure ??= 'failed';
     }
   }
   if (saved > 0) {
     HapticFeedback.lightImpact();
-    messenger?.showBriefNotice(l10n.mediaSavedCount(saved));
+    messenger?.showBriefNotice(videos.isEmpty ? l10n.mediaSavedCount(saved) : l10n.mediaSavedFilesCount(saved));
   }
   if (failure != null) {
     messenger?.showSnackBar(SnackBar(content: Text(gallerySaveErrorText(failure))));

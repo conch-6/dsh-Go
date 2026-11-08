@@ -135,4 +135,26 @@ void main() {
     expect(host.rpcMethods.where((m) => m == 'harness.remote.transfer.commit'), hasLength(1));
     expect(host.rpcMethods.where((m) => m == 'harness.remote.call'), isEmpty);
   });
+  for (final endpoint in ['settings/update', 'settings/replace']) {
+    test('an oversized $endpoint response is not dispatched twice', () async {
+      final client = await connect();
+      final payload = 'x' * (2 * 1024 * 1024);
+      var calls = 0;
+      host.handlers[endpoint] = (_) => result(payload, ['accepted'], ++calls);
+      Object? outcome;
+      try {
+        outcome = await client.rpc.call(endpoint, {
+          'ns': 'fixture',
+          if (endpoint == 'settings/update') 'patch': {'mode': 'A'} else 'section': {'mode': 'A'},
+          'expectedRevision': 0,
+        });
+      } catch (error) {
+        outcome = error;
+      }
+      expect(calls, 1);
+      expect(outcome, isA<DshRemoteException>().having((e) => e.code, 'code', 'RESPONSE_TOO_LARGE'));
+      expect(host.rpcMethods.where((m) => m.startsWith('harness.remote.transfer.')), isEmpty);
+    });
+  }
+
 }

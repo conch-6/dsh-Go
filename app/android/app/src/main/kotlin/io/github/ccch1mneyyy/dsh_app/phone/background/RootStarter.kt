@@ -19,14 +19,19 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
     private var pending: RootProcess? = null
     private var pendingAllowed: (() -> Boolean)? = null
 
-    fun status(): RootStatus = synchronized(guard) {
+    fun status(): RootStatus {
         discardDead()
-        state.status()
+        return synchronized(guard) { state.status() }
     }
 
-    fun connect(): PrivilegedChannel? = synchronized(guard) {
+    /** Short ownership read; never reconnects, probes, or waits for transport work. */
+    internal fun isPublished(expected: PrivilegedChannel): Boolean = synchronized(guard) {
+        channel === expected
+    }
+
+    fun connect(): PrivilegedChannel? {
         discardDead()
-        channel
+        return synchronized(guard) { channel }
     }
 
     /**
@@ -34,8 +39,8 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
      * takes, so a cancel either comes first and nothing starts, or ends this start's ticket.
      */
     fun start(mayStart: () -> Boolean = { true }): PrivilegedChannel? = synchronized(startLock) start@{
+        discardDead()
         val ticket = synchronized(guard) {
-            discardDead()
             channel?.let { return@start if (mayStart()) it else null }
             (state.beginIfAllowed(mayStart) ?: return@start null).also { pendingAllowed = mayStart }
         }
@@ -56,25 +61,43 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
             return@start null
         }
         // Registered, disconnect() closes it mid-authorization; already cancelled, it closes now.
-        synchronized(guard) { if (state.current(ticket)) pending = process else process.close() }
+        val registered = synchronized(guard) {
+            if (state.current(ticket)) { pending = process; true } else false
+        }
+        if (!registered) process.close()
+        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(START_TIMEOUT_MS)
+        fun remaining(): Long = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()).also {
+            if (it <= 0) throw IOException("rootTimeout")
+        }
+        var negotiated: String? = null
         val failure = try {
             val probe = Bundles.unmarshal(process.exchange(Bundles.marshal(Bundle().apply {
                 putString(Proto.OP, Proto.OP_PROBE)
-            }), START_TIMEOUT_MS))
+            }), remaining()))
             when {
                 !probe.getBoolean(Proto.OK) -> "rootStartFailed"
                 !RootProbe.accepted(true, probe.getInt(Proto.UID, -1), probe.getString("revision"), Proto.REVISION) -> "rootIdentityMismatch"
-                else -> null
+                else -> {
+                    negotiated = MuxProtocol.peer(probe)
+                    negotiated?.let { peer ->
+                        val ack = Bundles.unmarshal(process.exchange(Bundles.marshal(MuxProtocol.optIn(peer)), remaining()))
+                        MuxProtocol.acknowledge(ack, peer)
+                    }
+                    null
+                }
             }
         } catch (error: Exception) {
             reason(error)
         }
+        val candidate = if (failure == null) try {
+            RootChannel(process, negotiated) { channelFailed(process, it) }
+        } catch (_: Exception) { process.close(); null } else null
         val result = synchronized(guard) {
             if (state.current(ticket) && !mayStart()) state.disconnect()
             pending = null
             pendingAllowed = null
-            if (state.finish(ticket, failure) && failure == null) {
-                RootChannel(process) { channelFailed(process, it) }.also { channel = it }
+            if (state.finish(ticket, failure ?: if (candidate == null) "rootStartFailed" else null) && candidate != null) {
+                candidate.also { channel = it }
             } else null
         }
         if (result == null) process.close()
@@ -98,33 +121,33 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
 
     /** Revokes only a still-pending attempt whose own caller no longer wants it. */
     fun cancelUnwantedPending() {
+        var closing: RootProcess? = null
         val cancelled = synchronized(guard) {
             val allowed = pendingAllowed
             if (allowed == null || allowed()) false else {
-                state.disconnect()
-                pendingAllowed = null
-                pending?.close(); pending = null
+                state.disconnect(); pendingAllowed = null
+                closing = pending; pending = null
                 true
             }
         }
+        closing?.close()
         if (cancelled) onChanged()
     }
 
     fun disconnect() {
-        synchronized(guard) {
-            state.disconnect()
-            pendingAllowed = null
-            pending?.close(); pending = null
-            channel?.close(); channel = null
+        val closing = synchronized(guard) {
+            state.disconnect(); pendingAllowed = null
+            (pending to channel).also { pending = null; channel = null }
         }
+        closing.first?.close(); closing.second?.close()
         onChanged()
     }
 
     private fun discardDead() {
-        if (channel?.alive() == false) {
-            channel?.close(); channel = null
-            state.disconnect()
+        val dead = synchronized(guard) {
+            channel?.takeIf { !it.alive() }?.also { channel = null; state.disconnect() }
         }
+        dead?.close()
     }
 
     private fun channelFailed(process: RootProcess, failure: String) {
@@ -147,15 +170,23 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
 
 private class RootChannel(
     val process: RootProcess,
+    private val peer: String?,
     private val onFailure: (String) -> Unit,
 ) : PrivilegedChannel {
-    override fun alive(): Boolean = process.alive()
-    override fun close() = process.close()
-    override fun execute(request: Bundle): Bundle = try {
-        Bundles.unmarshal(process.exchange(Bundles.marshal(request), 30_000))
+    private val calls = PrivilegedCalls(if (peer == null) 1 else 3)
+    init { peer?.let { process.installMux(it, calls::retire) } }
+    override fun alive(): Boolean = calls.alive() && process.alive()
+    override fun close() { calls.retire(); process.close() }
+    override fun execute(request: Bundle, beforeSend: () -> Unit): Bundle =
+        calls.execute(MuxProtocol.global(request), beforeSend, { MuxProtocol.destroyed(request, it) }) { exchange(request) }
+    override fun tryExecute(request: Bundle): Bundle? = calls.tryPreview { exchange(request) }
+
+    private fun exchange(request: Bundle): Bundle = try {
+        if (peer == null) Bundles.unmarshal(process.exchange(Bundles.marshal(request), 30_000))
+        else process.exchangeMux(request, peer)
     } catch (error: Exception) {
         val timeout = error is IOException && error.message == "rootTimeout"
-        process.close()
+        close()
         onFailure(if (timeout) "rootTimeout" else "rootDisconnected")
         Bundle().apply {
             putBoolean(Proto.OK, false)

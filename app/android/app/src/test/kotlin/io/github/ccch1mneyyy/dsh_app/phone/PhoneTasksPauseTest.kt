@@ -33,7 +33,7 @@ class PhoneTasksPauseTest {
         val first = t.begin() as PhoneTasks.Begin.Go
         t.waive()
         t.approve("com.example")
-        t.callEnded()
+        t.callEnded(t.activeOwner())
         t.setPaused(true)
         t.addListener { seen += it }
 
@@ -54,7 +54,7 @@ class PhoneTasksPauseTest {
         assertFalse(next.newTask)
         assertEquals(first.taskId, next.taskId)
         assertFalse(t.awaitResume(0))
-        t.callEnded()
+        t.callEnded(t.activeOwner())
     }
 
     @Test fun aCallWaitingOutThePauseDoesNotGoOnByItself() {
@@ -80,7 +80,7 @@ class PhoneTasksPauseTest {
             assertTrue(t.isWaived)
         } finally {
             waiter.interrupt()
-            t.callEnded()
+            t.callEnded(t.activeOwner())
         }
     }
 
@@ -106,7 +106,7 @@ class PhoneTasksPauseTest {
         assertFalse(t.expireIdle())
         assertTrue(t.snapshot().active)
         // The clock starts when the result went back.
-        t.callEnded()
+        t.callEnded(t.activeOwner())
         now += t.idleMs
         assertFalse(t.expireIdle())
         now += 1
@@ -126,7 +126,7 @@ class PhoneTasksPauseTest {
             assertEquals(false, waiter.result.get())
         } finally {
             waiter.interrupt()
-            t.callEnded()
+            t.callEnded(t.activeOwner())
         }
     }
 
@@ -145,7 +145,7 @@ class PhoneTasksPauseTest {
             assertFalse(t.isActive)
         } finally {
             waiter.interrupt()
-            t.callEnded()
+            t.callEnded(t.activeOwner())
         }
     }
 

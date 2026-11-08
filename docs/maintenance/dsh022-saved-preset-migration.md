@@ -8,6 +8,14 @@ rc1 的 `@deepseek-ai/dsh-tool-subagent-control` 主插件已直接注册 `list_
 
 同时，子代理模型配置从 `modelSelectionSettings` 改为 `modelSelection`、`modelDiscovery`。仅修复加载错误不足以保留模型选择/发现入口。旧 `dsh-agent-tool-presentation` 的 `mode: ptc` 仍有官方兼容支持，本路径保留它。
 
+## 原文件不变的自动兼容
+
+App 运行时可在注册 preset 时兼容旧官方 standard/PTC 的**完整、未改动 delegation 子树**：包含原来的六行声明、主 control、旧 list-agents、旧 true 配置，以及官方的 group/isolate 字段。PTC 的 workflow 两行 disabled:true 也必须保持官方形状。匹配比较整个子树，包括字段、数组顺序和值；添加字段、改为 false、加入新模型字段、增删子行或调整作用域都不套用。
+
+兼容只创建内存副本，移除冗余旧声明并映射两个模型字段；原 profile/bundle 文件不写入，组外的 persona 与其它自定义配置保留。预设“查看配置”读取的是本次生效的兼容后声明，磁盘原件仍保留旧写法；回退补丁即可恢复旧加载行为。不会改写会话、迁移任意插件或把未知加载错误变成重试。
+
+`runtime/tests/preset-legacy-delegation-live.py` 用锁定官方 rc4 输入和实际 rc1 Host 验证两种旧完整 preset、新官方正控、六种未匹配形状继续失败、原文件字节不变、native/PTC executor、模型参数与只读子代理工具。未验证模型生成或 Android。其余配置仍按下文人工步骤逐项判断，不能整体覆盖 plugins 数组。
+
 ## 人工最小修改
 
 先备份实际拥有该 preset 的文件。确认没有其他程序正在编辑，并检查以下前提：

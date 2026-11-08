@@ -1,7 +1,8 @@
 // The Dart side of the out-of-app pet (MethodChannel `dsh/pet_overlay`;
 // native: android/.../pet/PetOverlayPlugin.kt). Dart pushes every new
-// [PetState]; the overlay's own switches, 「一直显示」, 「今天不再显示」 and the
-// permission live natively and are read and set here. Rules:
+// [PetState] (and says when a brought pet's files changed); the overlay's own
+// switches, 「一直显示」, 「今天不再显示」 and the permission live natively and
+// are read and set here. Rules:
 // `docs/design/pets.md` §2.7, §6.
 //
 // Every call tolerates the native side being absent (widget tests, desktop):
@@ -149,6 +150,19 @@ class PetOverlayChannel {
       // Tests, desktop: no overlay.
     } on PlatformException {
       // A bad push is not worth failing the pet over.
+    }
+  }
+
+  /// A brought pet's files changed (imported again, removed): the overlay
+  /// reads [id] from disk again if it is the one out, instead of keeping the
+  /// old picture (it keys what it loaded by id and size only).
+  Future<void> reloadPack(String id) async {
+    try {
+      await channel.invokeMethod<void>('reloadPack', {'id': id});
+    } on MissingPluginException {
+      // Tests, desktop, an older native side: nothing to reload.
+    } on PlatformException {
+      // Not worth failing an import over.
     }
   }
 

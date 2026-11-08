@@ -26,6 +26,7 @@ import '../web/local_web_screen.dart';
 import 'engine_status.dart';
 import 'local_uninstall.dart';
 import 'log_view.dart';
+import 'workspace_recovery_settings.dart';
 
 /// `rN-dsh…-HASH` → `rN · HASH8`; anything else is shown as is.
 String shortRuntimeVersion(String? v) {
@@ -46,12 +47,19 @@ String engineDetail(RuntimeStatus status) => switch (status.phase) {
         : status.tidyingFiles
         ? appL10n.phoneEngineTidyingFilesEllipsis
         : appL10n.phoneEngineStartingEllipsis,
-  RuntimePhase.stopping => appL10n.phoneEngineStoppingEllipsis,
+  RuntimePhase.stopping =>
+    isLocalStartupFailure(status)
+        ? appL10n.phoneStartupFailureStoppingDetail(
+            humanizeRuntimeError(status.error) ?? appL10n.phoneEngineErrorSeeLogs,
+          )
+        : appL10n.phoneEngineStoppingEllipsis,
   RuntimePhase.installed => status.inSafeMode ? appL10n.phoneEngineStoppedNextSafe : appL10n.commonStopped,
   RuntimePhase.installing => appL10n.phoneEngineInstallingRuntime,
   RuntimePhase.notInstalled => appL10n.phoneEngineRuntimeNotInstalled,
   RuntimePhase.error =>
-    status.failure != null
+    isLocalStartupFailure(status)
+        ? humanizeRuntimeError(status.error) ?? appL10n.phoneEngineErrorSeeLogs
+        : status.failure != null
         ? failureOneLiner(status.failure!)
         : humanizeRuntimeError(status.error) ?? appL10n.phoneEngineErrorSeeLogs,
 };
@@ -135,7 +143,11 @@ class EngineScreen extends ConsumerWidget {
             if (!missing)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                child: TerminalCard(title: l10n.phoneEngineLogs, lines: ref.watch(localRuntimeLogsProvider), height: logHeight),
+                child: TerminalCard(
+                  title: l10n.phoneEngineLogs,
+                  lines: ref.watch(localRuntimeLogsProvider),
+                  height: logHeight,
+                ),
               ),
             // Their home is 设置; the way in from here keeps the name.
             SettingsSection(
@@ -164,6 +176,8 @@ class EngineScreen extends ConsumerWidget {
                 InfoRow(label: l10n.phoneEngineArchitecture, value: status.abi ?? '—', mono: true),
               ],
             ),
+            // A way around a broken index, next to the other ways out of trouble.
+            if (!missing) const WorkspaceRecoverySettings(),
             if (!missing)
               SettingsSection(
                 children: [

@@ -12,6 +12,9 @@ import io.github.ccch1mneyyy.dsh_app.phone.SensitiveWords
 /** Vertical zone a line sits in (顶部 / 中部 / 底部). */
 enum class Region { TOP, MIDDLE, BOTTOM }
 
+/** Screen-pixel bounds, only supplied by explicit detailed background observations. */
+data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom: Int)
+
 /**
  * One rendered element: already collapsed to a TalkBack-style unit (child text merged
  * into the clickable parent). Produced by the engine, consumed by [render].
@@ -37,19 +40,48 @@ data class Element(
     val isSecretField: Boolean = false,
     val isEditable: Boolean = false,
     val viewId: String? = null,
+    /** Raw accessibility scrollability; role text alone does not establish a container. */
+    val isScrollable: Boolean = false,
+    val bounds: ElementBounds? = null,
 )
 
 object BackgroundTree {
     const val LINE_CAP = 60
     const val SCREEN_CAP = 3000
+    const val DETAIL_TEXT_BYTES = 32 * 1024
+    const val DETAIL_PARCEL_BYTES = 128 * 1024
 
-    internal data class WindowSelection(val index: Int, val complete: Boolean)
+    /** Preserve a contiguous prefix: the privileged action resolver uses the original index.
+     * Reserve 1 KiB for the bounded header, region labels, privacy and truncation notes.
+     * The separate wire-string budget avoids first allocating an oversized Parcel. The
+     * actual element Bundle is also measured before it is attached to a response. */
+    internal fun detailPrefixCount(elements: List<Element>): Int {
+        var textBytes = 1024L
+        var wireBytes = 1024L
+        for ((index, element) in elements.take(600).withIndex()) {
+            val strings = listOf(element.role, element.label, element.viewId.orEmpty()) + element.states
+            // Check length before UTF-8 conversion; never shorten an action fingerprint.
+            if (strings.any { it.length > 4096 }) return index
+            val nextWire = strings.sumOf { it.toByteArray(Charsets.UTF_8).size.toLong() + it.length * 2L + 16 } + 64
+            // A zone can change for every row. Include its newline as well as the row's.
+            val nextText = renderLine(element).toByteArray(Charsets.UTF_8).size.toLong() + 8
+            if (wireBytes + nextWire > 96 * 1024 || textBytes + nextText > DETAIL_TEXT_BYTES) return index
+            wireBytes += nextWire
+            textBytes += nextText
+        }
+        return minOf(elements.size, 600)
+    }
+
+    /** Selects the element owner and proposes the order for a full viewport privacy scan.
+     * Selection alone does not establish that any root can be completely read. */
+    internal data class WindowSelection(val index: Int, val scanOrder: List<Int>)
 
     internal fun selectApplicationWindow(packages: List<String?>, target: String): WindowSelection? {
         val index = packages.indexOfFirst { it == target }
         if (index < 0) return null
-        // A viewport image includes other application windows whose nodes we have not scanned.
-        return WindowSelection(index, packages.size == 1)
+        // Preserve the first exact target as the sole element owner. Every other
+        // application root, including one with an unknown package, still needs scanning.
+        return WindowSelection(index, listOf(index) + packages.indices.filter { it != index })
     }
 
     fun isSensitiveLabel(label: String): Boolean = SensitiveWords.confirmHit(label, null) != null
@@ -103,6 +135,8 @@ object BackgroundTree {
         background: Boolean,
         poorTree: Boolean,
         overflow: Int = 0,
+        detailed: Boolean = false,
+        treeComplete: Boolean? = null,
     ): String {
         val header = buildString {
             // l10n:keep model screen format and matchers
@@ -130,7 +164,14 @@ object BackgroundTree {
             lines.add(renderLine(e))
         }
         // l10n:keep model screen format and matchers
-        if (overflow > 0) lines.add("  …另有 $overflow 项，用 collect 或 scroll")
+        if (overflow > 0) {
+            // l10n:keep model screen format
+            if (detailed) lines.add("（本次已读取的元素中另有 $overflow 项未列出；未列出的元素没有可用编号）")
+            else lines.add("  …另有 $overflow 项，用 collect 或 scroll")
+        }
+        // This is the bounded accessibility scan, never a claim about all app/web content.
+        // l10n:keep model screen format
+        if (detailed && treeComplete == false) lines.add("（控件树扫描未完整结束；未读取的节点数量未知）")
         return lines.joinToString("\n")
     }
 
@@ -153,6 +194,8 @@ object BackgroundTree {
         val label = cap(e.label)
         if (label.isNotEmpty()) sb.append(' ').append(label)
         if (e.states.isNotEmpty()) sb.append("（").append(e.states.joinToString("，")).append("）")
+        e.bounds?.let { sb.append(" @[").append(it.left).append(',').append(it.top)
+            .append(',').append(it.right).append(',').append(it.bottom).append(']') }
         return sb.toString()
     }
 }

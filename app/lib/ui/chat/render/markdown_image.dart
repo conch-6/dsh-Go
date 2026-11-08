@@ -24,6 +24,7 @@ import '../../theme/theme.dart';
 import '../artifact_preview.dart';
 import '../media/media_paths.dart';
 import '../widgets/image_actions.dart';
+import '../widgets/image_gallery.dart' show ViewerImage;
 
 /// Largest workspace image a reply downloads from a remote Host just to show
 /// it inline (the Host's own image limit is 20 MiB).
@@ -154,6 +155,38 @@ class MarkdownImageScope extends InheritedWidget {
   @override
   bool updateShouldNotify(MarkdownImageScope oldWidget) =>
       sessionId != oldWidget.sessionId || baseDir != oldWidget.baseDir;
+}
+
+/// A single rendered Markdown body, never the entire chat or another reply.
+/// Images are collected in element order on tap, including HTML/reference images
+/// already parsed by the Markdown renderer, without scanning Markdown source.
+class MarkdownGalleryScope extends InheritedWidget {
+  const MarkdownGalleryScope({super.key, required super.child});
+
+  static List<_MarkdownImageState> _imagesOf(BuildContext context) {
+    final root = context.getElementForInheritedWidgetOfExactType<MarkdownGalleryScope>();
+    if (root == null) return const [];
+    final images = <_MarkdownImageState>[];
+    void visit(Element element) {
+      if (element.widget is MarkdownGalleryScope) return;
+      if (element is StatefulElement && element.state is _MarkdownImageState) {
+        final image = element.state as _MarkdownImageState;
+        if (image._source is WorkspaceImageSource && image._engineUrl == null
+            ? image._workspaceGallery
+            : image._galleryImage != null) {
+          images.add(image);
+        }
+        return;
+      }
+      element.visitChildElements(visit);
+    }
+
+    root.visitChildElements(visit);
+    return images;
+  }
+
+  @override
+  bool updateShouldNotify(MarkdownGalleryScope oldWidget) => false;
 }
 
 // -----------------------------------------------------------------------------
@@ -489,6 +522,12 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
   /// The resized provider last drawn: a retry evicts it as well.
   ImageProvider? _inlineProvider;
 
+  /// Original provider for a rendered bitmap; hidden/error/SVG tiles stay out.
+  ImageProvider? _galleryImage;
+
+  /// Pending workspace bitmaps can be opened lazily by the artifact preview.
+  bool _workspaceGallery = false;
+
   void _retry() {
     _inlineProvider?.evict();
     setState(() {
@@ -512,17 +551,44 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
     final source = _source;
     final sessionId = _sessionId;
     final path = _path;
+    // Workspace files keep their watcher, size gate, share and file actions.
+    // They form their own gallery, separate from web/data images in this body.
     if (source is WorkspaceImageSource && sessionId != null && path != null) {
+      final group = image == null
+          ? <_MarkdownImageState>[] // Preserve the single large-image fallback.
+          : MarkdownGalleryScope._imagesOf(context)
+                .where((state) => state._source is WorkspaceImageSource && state._sessionId == sessionId)
+                .toList();
+      final initial = group.indexOf(this);
+      final artifacts = initial < 0
+          ? null
+          : [for (final state in group) Artifact(path: state._path!, origin: ArtifactOrigin.linked, turn: 0)];
       Navigator.of(context).push(
         ArtifactPreviewPage.route(
           sessionId: sessionId,
           artifact: Artifact(path: path, origin: ArtifactOrigin.linked, turn: 0),
+          gallery: artifacts,
+          initial: initial < 0 ? 0 : initial,
         ),
       );
       return;
     }
     if (image != null) {
-      Navigator.of(context).push(ImageViewerPage.route(title: imageDisplayName(widget.url), image: image));
+      final group = MarkdownGalleryScope._imagesOf(context)
+          .where((state) => state._source is! WorkspaceImageSource || state._engineUrl != null)
+          .toList();
+      final initial = group.indexOf(this);
+      Navigator.of(context).push(
+        ImageViewerPage.galleryRoute(
+          images: initial < 0
+              ? [ViewerImage(name: imageDisplayName(widget.url), image: image)]
+              : [
+                  for (final state in group)
+                    ViewerImage(name: imageDisplayName(state.widget.url), image: state._galleryImage!),
+                ],
+          initial: initial < 0 ? 0 : initial,
+        ),
+      );
     }
   }
 
@@ -537,6 +603,8 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
       });
     });
     final l10n = context.l10n;
+    _galleryImage = null;
+    _workspaceGallery = false;
     // A media card above already shows this file: not a second time. Only
     // for a conversation already open (a previewed file never starts one).
     if (_source is WorkspaceImageSource &&
@@ -601,6 +669,12 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
           child = _raster(MemoryImage(bytes), placeholder: placeholder, failed: failed);
         }
       case WorkspaceImageSource():
+        _workspaceGallery =
+            _sessionId != null &&
+            _path != null &&
+            previewModeOf(_path!) == PreviewMode.image &&
+            _error == null &&
+            _loaded is! SvgImageBytes;
         child = read();
     }
     return Semantics(image: true, label: name, child: child);
@@ -617,6 +691,7 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
     required Widget Function() placeholder,
     required Widget Function(Object? error) failed,
   }) {
+    _galleryImage = provider;
     final resized = inlineImageProvider(provider, MediaQuery.devicePixelRatioOf(context), _hint);
     _inlineProvider = resized;
     return _SizeProbe(
@@ -631,7 +706,11 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
           if (frame == null) return placeholder();
           return _framed(image, onTap: () => _open(provider), onLongPress: () => _actions(provider));
         },
-        errorBuilder: (context, error, _) => failed(error),
+        errorBuilder: (context, error, _) {
+          _galleryImage = null;
+          _workspaceGallery = false;
+          return failed(error);
+        },
       ),
     );
   }

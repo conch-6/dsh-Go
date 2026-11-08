@@ -73,7 +73,7 @@ class _Sessions extends SessionsController {
   @override
   Future<List<SessionSummary>> build() async => list;
   @override
-  Future<String> create() async {
+  Future<String> create({bool autoApprove = true}) async {
     creates++;
     return creation?.future ?? 'new-chat';
   }

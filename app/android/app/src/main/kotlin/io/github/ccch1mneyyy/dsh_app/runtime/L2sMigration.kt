@@ -72,8 +72,8 @@ class L2sMigration(
         }
 
         val groups = LinkedHashMap<Path, Group>()
-        // A placeholder on the way to a bind target could not be read: names could hide
-        // there, so every stored file stays, named or not.
+        // An unreadable bind ancestor or a damaged store chain can hide references.
+        // In that case keep all leftovers instead of declaring them orphaned.
         var keepOrphans = false
         // Every name lies in the rootfs: PRoot moves a file into the store by rename, so a
         // file elsewhere (/sdcard, /storage) never becomes a fake link. Other unreadable
@@ -93,10 +93,15 @@ class L2sMigration(
             override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
                 tick()
                 if (attrs.isSymbolicLink) {
-                    val through = chain(file)
+                    val destination = target(file)
+                    val through = chain(destination)
                     if (through != null) groups.getOrPut(through.last()) { Group(through.last()) }.apply {
                         names.add(file)
                         chain += through.dropLast(1)
+                    } else if (destination.parent == store) {
+                        // A damaged PRoot chain can leave its content under a new
+                        // count suffix. It is not safe to call that file an orphan.
+                        keepOrphans = true
                     }
                 } else if (attrs.isRegularFile && TEMP.matches(file.fileName.toString())) {
                     Files.delete(file) // a copy from a run that was killed before its rename
@@ -168,10 +173,10 @@ class L2sMigration(
         return Result.Done(links, left.size)
     }
 
-    /** The store entries [link] leads through, ending with the stored file; null when it is not one of PRoot's. */
-    private fun chain(link: Path): List<Path>? {
+    /** The store entries starting at [first], ending with the stored file; null if not a complete store chain. */
+    private fun chain(first: Path): List<Path>? {
         val chain = ArrayList<Path>()
-        var entry = target(link)
+        var entry = first
         while (entry.parent == store && chain.size < MAX_HOPS) {
             chain.add(entry)
             val attrs = try {

@@ -106,7 +106,7 @@ class AgentPresetsPage extends ConsumerWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (agentPresetDescription(preset) case final d?)
+                    if (preset.broken ?? agentPresetDescription(preset) case final d?)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(kSheetGutter, 0, kSheetGutter, 12),
                         child: SizedBox(

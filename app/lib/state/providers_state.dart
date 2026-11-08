@@ -370,7 +370,13 @@ String describeProviderError(Object error) {
     final code = error.code;
     if (code == 'settings/conflict') return appL10n.stateProviderConflict;
     if (code == 'credential/rejected') return appL10n.stateCredentialFromEnvironment;
-    if (code.startsWith('gateway/') && code != 'gateway/internal') return appL10n.stateProviderUnsupported;
+    if (code == 'gateway/method-not-found' || code == 'gateway/not-found') {
+      return appL10n.stateProviderUnsupported;
+    }
+    if (error.isGatewayError) {
+      final reason = engineErrorReason(error);
+      if (reason != null) return reason;
+    }
     final status = RegExp(r'answered (\d{3})').firstMatch(message)?.group(1);
     if (status != null) {
       return switch (int.parse(status)) {

@@ -11,6 +11,47 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final channel = PhoneChannel();
 
+  test('task protocol parses selected identity and keeps legacy isolated', () async {
+    FakePhoneNative(status: {
+      ...phoneStatus(taskId: 9, taskActive: true),
+      'taskProtocol': 1, 'parallelLimit': 1, 'selectedTaskId': 12,
+      'tasks': [
+        {'id': 9, 'active': true, 'identity': 'legacy'},
+        {'id': 12, 'sessionId': 'A', 'runId': 'epoch:1', 'generation': 4,
+          'endedRunId': 'epoch:1', 'endedGeneration': 4, 'completion': 'other', 'pendingCalls': 0},
+      ],
+    }).install();
+    final value = await channel.status();
+    expect(value.taskProtocol, 1); expect(value.parallelLimit, 1);
+    expect(value.task.id, 12); expect(value.task.sessionId, 'A');
+    expect(value.task.endedRunId, 'epoch:1'); expect(value.task.endedGeneration, 4);
+    expect(value.task.completion, 'other'); expect(value.tasks.first.sessionId, isNull);
+    expect(PhoneTaskStatus.fromMap({'completion': 'success'}).completion, 'unknown');
+    expect(PhoneTaskStatus.fromMap({}).completion, 'unknown');
+  });
+
+  test('resource waiting parses only its own typed target and nonnegative integer elapsed time', () {
+    final known = PhoneTaskStatus.fromMap({
+      'waitingForApp': {'kind': 'known', 'packageName': 'example.app', 'uid': 10123, 'holderSession': 'private'},
+      'waitingForMs': 1501,
+    });
+    expect(known.waitingForApp!.packageName, 'example.app');
+    expect(known.waitingForMs, 1501); expect(known.waitingForResources, isTrue);
+    final unknown = PhoneTaskStatus.fromMap({'waitingForApp': {'kind': 'unknown'}});
+    expect(unknown.waitingForApp, isNotNull); expect(unknown.waitingForApp!.packageName, isNull);
+    expect(unknown.waitingForMs, 0);
+    for (final invalid in [null, 'app', {'kind': 'known'}, {'kind': 'known', 'packageName': ' '},
+      {'kind': 'unknown', 'packageName': 'invented'}, {'kind': 'future', 'packageName': 'example.app'}]) {
+      expect(PhoneTaskStatus.fromMap({'waitingForApp': invalid}).waitingForApp, isNull);
+    }
+    for (final invalid in [null, -1, 1000.5, '1000', true]) {
+      expect(PhoneTaskStatus.fromMap({'waitingForMs': invalid}).waitingForMs, 0);
+    }
+    expect(PhoneTaskStatus.fromMap({}).waitingForResources, isFalse);
+    expect(PhoneTaskStatus.fromMap({'waitingForScreen': 'main'}).waitingForResources, isTrue);
+    expect(PhoneTaskStatus.fromMap({'waitingForScreen': 'other'}).waitingForResources, isFalse);
+  });
+
   test('status parses every field of the contract', () async {
     final native = FakePhoneNative(
       status: phoneStatus(

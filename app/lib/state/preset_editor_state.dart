@@ -29,11 +29,13 @@ bool creatorAvailable(List<AgentPresetInfo>? presets) =>
 
 /// Opens a new conversation in creator mode and sends it [request]; returns
 /// the conversation to show.
-Future<String> startCreator(WidgetRef ref, String request) async {
+Future<String> startCreator(WidgetRef ref, String request, {required bool Function() isCurrent}) async {
   final conn = ref.read(activeConnectionProvider).value;
   if (conn == null) throw const DshClosedException('not connected');
-  final id = await ref.read(sessionsProvider.notifier).create();
+  final id = await ref.read(sessionsProvider.notifier).createForConnection(conn, isCurrent: isCurrent);
+  if (!isCurrent()) throw const DshClosedException('preset creation owner changed');
   await conn.client.selectAgentPreset(id, 'cordis');
+  if (!isCurrent()) throw const DshClosedException('preset creation owner changed');
   await conn.client.prompt(id, request, timeZone: ref.read(deviceTimeZoneProvider).value);
   return id;
 }

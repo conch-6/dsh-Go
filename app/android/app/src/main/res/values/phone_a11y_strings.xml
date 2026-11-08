@@ -26,4 +26,8 @@
     <string name="overlay_list_separator">", "</string>
     <!-- The ball's screen-reader action that stops the task. -->
     <item type="id" name="overlay_action_stop" />
+    <string name="overlay_preview_readonly">Background screen preview. View only.</string>
+    <string name="overlay_preview_waiting">Waiting for the background screen…</string>
+    <string name="overlay_preview_protected">Protected screen. Preview is hidden.</string>
+    <string name="overlay_preview_unavailable">Background preview is unavailable.</string>
 </resources>

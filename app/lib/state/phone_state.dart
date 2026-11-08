@@ -197,13 +197,56 @@ class PhoneController extends Notifier<PhoneState> {
 
   Future<ScreenTestResult> testScreen() => _channel.testScreen();
 
-  Future<bool> stopTask() async {
-    final ok = await _channel.stopTask();
+  Future<bool> stopTask({int? taskId}) async {
+    final id = taskId ?? (state.status.taskProtocol == 1 ? state.status.task.id : null);
+    if (state.status.taskProtocol == 1 && id == null) return false;
+    final ok = await _channel.stopTask(taskId: id);
     unawaited(refreshStatus());
     return ok;
   }
 
+  Future<bool> retryTaskCleanup(int taskId) async {
+    final ok = await _channel.retryTaskCleanup(taskId);
+    unawaited(refreshStatus());
+    return ok;
+  }
+
+  Future<bool> acknowledgeTaskInterruption(String batchToken) async {
+    final ok = await _channel.acknowledgeTaskInterruption(batchToken);
+    await refreshStatus();
+    return ok;
+  }
+
+  Future<bool> retryTaskInterruptionStorage() async {
+    final ok = await _channel.retryTaskInterruptionStorage();
+    await refreshStatus();
+    return ok;
+  }
+
+  Future<bool> resumeTask(int taskId) async {
+    final ok = await _channel.resumeTask(taskId);
+    unawaited(refreshStatus());
+    return ok;
+  }
+
+  Future<bool> pauseTask(int taskId, bool paused) async {
+    final ok = await _channel.pauseTask(taskId, paused);
+    unawaited(refreshStatus());
+    return ok;
+  }
+
+  Future<PhoneResult> retryBackgroundRecovery() =>
+      _thenRefresh(_channel.retryBackgroundRecovery());
+
+  Future<PhoneResult> retryBackgroundGateCleanup(String handle) =>
+      _thenRefresh(_channel.retryBackgroundGateCleanup(handle));
+
   Future<PhoneResult> setBackgroundMode(PhoneBackgroundMode mode) => _thenRefresh(_channel.setBackgroundMode(mode));
+
+  Future<PhoneResult> setBackgroundViewport(PhoneBackgroundViewport preset) =>
+      _thenRefresh(_channel.setBackgroundViewport(preset));
+
+  Future<bool> setBackgroundPreview(bool enabled) => _thenRefresh(_channel.setBackgroundPreview(enabled));
 
   /// Refused before any channel call when the native side doesn't offer [mode].
   Future<PhoneResult> setPrivilegedMode(PhonePrivilegedMode mode) =>
@@ -322,14 +365,15 @@ class PhoneController extends Notifier<PhoneState> {
     } catch (_) {}
   }
 
-  /// 解除限制: lifts or restores one hard rule. Lifting is refused while a task
-  /// runs (read afresh): the agent driving the phone must not widen its own
-  /// reach. False when refused or the native side said no (nothing changes).
+  /// 解除限制: lifts or restores one hard rule. Lifting is refused while any
+  /// task may act (read afresh; native refuses it too): the agent driving the
+  /// phone must not widen its own reach. False when refused or the native side
+  /// said no (nothing changes).
   Future<bool> setUnlock(PhoneUnlock unlock, bool on) async {
     if (state.policies == null) return false;
     if (on) {
       await refreshStatus();
-      if (!ref.mounted || state.status.task.active) return false;
+      if (!ref.mounted || state.status.anyTaskBusy) return false;
     }
     final ok = await _channel.setUnlock(unlock, on);
     if (!ok || !ref.mounted) return false;
@@ -343,6 +387,8 @@ class PhoneController extends Notifier<PhoneState> {
     if (ref.mounted) unawaited(refreshStatus());
     return result;
   }
+
+  Future<bool> setSkillSavePrompt(bool enabled) => _thenRefresh(_channel.setSkillSavePrompt(enabled));
 }
 
 final phoneProvider = NotifierProvider<PhoneController, PhoneState>(PhoneController.new);
@@ -384,10 +430,10 @@ final phoneConfirmPendingProvider = Provider<void>((ref) {
   }());
 });
 
-/// 停止 on the overlay or the notification ends the agent's turn too. The
-/// native side can't reach the session, so the app cancels every turn running
-/// on the local engine (phone control only drives the local engine). Kept
-/// alive by the home shell.
+/// Legacy-only launches keep the original cancel-all watcher. Modern stops are
+/// native and session-scoped; without an atomic host run-cancel protocol they
+/// refuse further phone calls but do not claim to stop host reasoning. Mixed
+/// launches never borrow legacy cancel-all to cancel another modern session.
 final phoneStopWatcherProvider = Provider<void>((ref) {
   final channel = ref.watch(phoneChannelProvider);
   StreamSubscription<PhoneStatus>? sub;
@@ -402,7 +448,9 @@ final phoneStopWatcherProvider = Provider<void>((ref) {
     if (disposed || !status.ready) return;
     var stopped = status.task.stopped;
     sub = channel.statusChanges.listen((s) {
-      if (s.task.stopped && !stopped) unawaited(_cancelLocalTurns(ref));
+      // Session-aware native owns targeted stopping. The host API has no atomic
+      // expected-run cancellation, so never cancel a later turn or every conversation.
+      if ((s.taskProtocol != 1 || !s.tasks.any((task) => task.sessionId != null)) && s.task.stopped && !stopped) unawaited(_cancelLocalTurns(ref));
       stopped = s.task.stopped;
     }, onError: (_) {});
   }());

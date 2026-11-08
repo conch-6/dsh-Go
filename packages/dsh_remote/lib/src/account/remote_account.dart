@@ -23,6 +23,15 @@ import '../transport/webrtc_transport.dart';
 import '../util/bytes.dart';
 import 'secret_store.dart';
 
+// Accounts using the same storage object and server keys share commit order.
+// An Expando does not keep an otherwise unreachable SecretStore alive.
+class _AccountStorageState {
+  Future<void> credentialWrites = Future<void>.value();
+  int signInEpoch = 0;
+}
+
+final _accountStorageStates = Expando<Map<String, _AccountStorageState>>();
+
 /// The signed-in account on one Server.
 class RemoteUser {
   const RemoteUser({required this.account, required this.deviceId, required this.serverUrl, this.provider});
@@ -272,6 +281,8 @@ class RemoteAccount {
        _socketConnector = socketConnector {
     api = RemoteServerApi(this.serverUrl, httpClient: httpClient);
     _scope = hashes.sha256.convert(utf8.encode(this.serverUrl.origin)).toString().substring(0, 24);
+    final scopes = _accountStorageStates[secrets] ??= {};
+    _storageState = scopes.putIfAbsent(_scope, _AccountStorageState.new);
   }
 
   final Uri serverUrl;
@@ -320,7 +331,8 @@ class RemoteAccount {
   _Identity? _identity;
   Future<_Identity>? _creatingIdentity;
   _Credentials? _credentials;
-  Future<void> _credentialWrites = Future<void>.value();
+  // Shared only within this storage object and normalized server scope.
+  late final _AccountStorageState _storageState;
   bool _restored = false;
   Future<void>? _restoring;
   Map<String, _Pin>? _pins;
@@ -503,6 +515,7 @@ class RemoteAccount {
     await _saveCredentials(
       _Credentials.fromTokens(identity.deviceId, account, tokens, provider: provider),
       beforeWrite: beforeCommit,
+      signIn: true,
     );
     return RemoteUser(account: account, deviceId: identity.deviceId, serverUrl: serverUrl, provider: provider);
   }
@@ -546,34 +559,43 @@ class RemoteAccount {
     return identity;
   }
 
-  Future<void> _saveCredentials(_Credentials credentials, {void Function()? beforeWrite}) {
+  Future<void> _saveCredentials(_Credentials credentials, {void Function()? beforeWrite, bool signIn = false}) {
     // SecretStore writes are atomic, but not cancellable. Serialize commits
     // so a slow older write cannot finish after a newer login's write.
-    final write = _credentialWrites.then((_) async {
+    final write = _storageState.credentialWrites.then((_) async {
       beforeWrite?.call();
       await _secrets.write(_credentialsKey, jsonEncode(credentials.toJson()));
       _credentials = credentials;
+      if (signIn) _storageState.signInEpoch++;
     });
-    _credentialWrites = write.catchError((Object _) {});
+    _storageState.credentialWrites = write.catchError((Object _) {});
     return write;
   }
 
   /// Signs out: closes the active connection, revokes this device on the
   /// Server (best effort, when [revokeDevice]) and deletes its tokens. A
   /// revoked device identity is discarded too; Host pins are kept.
+  /// A newer committed sign-in retires further cleanup from this logout;
+  /// a revoke or storage delete already issued cannot be undone here.
   Future<void> logout({bool revokeDevice = true}) async {
+    final epoch = _storageState.signInEpoch;
+    bool isCurrent() => epoch == _storageState.signInEpoch;
     await _restore();
+    if (!isCurrent()) return;
     await _active?.close();
+    if (!isCurrent()) return;
     final credentials = _credentials;
     if (revokeDevice && credentials != null) {
       try {
-        await api.revokeSelf(await accessToken());
+        final token = await accessToken();
+        if (!isCurrent()) return;
+        await api.revokeSelf(token);
       } on Object {
         // Offline or already revoked: still sign out locally.
       }
     }
-    await _dropCredentials();
-    if (revokeDevice) {
+    await _dropCredentials(isCurrent: isCurrent);
+    if (revokeDevice && isCurrent()) {
       _identity = null;
       await _secrets.delete(_identityKey);
     }
@@ -609,7 +631,7 @@ class RemoteAccount {
 
   Future<String> _rotate(_Credentials credentials) async {
     if (!credentials.refreshTokenExpiresAt.isAfter(DateTime.now())) {
-      await _dropCredentials(credentials);
+      await _dropCredentials(owner: credentials);
       throw const RemoteConnectException(
         RemoteFailure('ACCOUNT_AUTH_REQUIRED', 'The device sign-in expired; sign in again.', retryable: false),
       );
@@ -631,7 +653,7 @@ class RemoteAccount {
       if (error.retryable || error.code == 'CONNECTION_FAILED' || error.code == 'RATE_LIMITED') {
         throw RemoteConnectException(RemoteFailure(error.code, error.message, retryable: true));
       }
-      await _dropCredentials(credentials);
+      await _dropCredentials(owner: credentials);
       throw RemoteConnectException(
         RemoteFailure(
           'ACCOUNT_AUTH_REQUIRED',
@@ -642,14 +664,16 @@ class RemoteAccount {
     }
   }
 
-  Future<void> _dropCredentials([_Credentials? owner]) {
-    // Deletes share the commit queue; retired refreshes recheck their owner here.
-    final write = _credentialWrites.then((_) async {
+  Future<void> _dropCredentials({_Credentials? owner, bool Function()? isCurrent}) {
+    // Deletes share the commit queue; retired refreshes and logouts recheck
+    // their owner at the point where the mutation would actually begin.
+    final write = _storageState.credentialWrites.then((_) async {
+      if (isCurrent != null && !isCurrent()) return;
       if (owner != null && !identical(_credentials, owner)) return;
       _credentials = null;
       await _secrets.delete(_credentialsKey);
     });
-    _credentialWrites = write.catchError((Object _) {});
+    _storageState.credentialWrites = write.catchError((Object _) {});
     return write;
   }
 
@@ -780,9 +804,10 @@ class RemoteAccount {
     final previous = _active;
     _active = null;
     await previous?.close();
-    final carrier = RemoteTunnelCarrier(
+    late final RemoteTunnelCarrier carrier;
+    carrier = RemoteTunnelCarrier(
       hostId: host.id,
-      open: (last) => _openHostSession(host, last, confirmNewHost, historyMode),
+      open: (last) => _openHostSession(host, last, confirmNewHost, historyMode, () => carrier.isClosed),
       healthInterval: healthInterval,
       healthTimeout: healthTimeout,
       tracer: tracer,
@@ -830,9 +855,10 @@ class RemoteAccount {
     RemoteFailure? previous,
     HostTrustPrompt? confirm,
     _HistoryMode historyMode,
+    bool Function() isCancelled,
   ) async {
     try {
-      return await _openHostSessionOnce(host, previous, confirm, historyMode);
+      return await _openHostSessionOnce(host, previous, confirm, historyMode, isCancelled);
     } on RemoteConnectException {
       rethrow;
     } on Object catch (error) {
@@ -845,6 +871,7 @@ class RemoteAccount {
     RemoteFailure? previous,
     HostTrustPrompt? confirm,
     _HistoryMode historyMode,
+    bool Function() isCancelled,
   ) async {
     final identity = _identity;
     if (identity == null || _credentials == null) {
@@ -880,11 +907,11 @@ class RemoteAccount {
     // (refresh once when the token is refused).
     _TransportSelection selection;
     try {
-      selection = await _connectTransport(token, host.id);
+      selection = await _connectTransport(token, host.id, isCancelled);
     } on RemoteTransportException catch (error) {
       if (error.code != 'AUTH_INVALID' && error.code != 'TOKEN_EXPIRED') rethrow;
       token = await accessToken(forceRefresh: true);
-      selection = await _connectTransport(token, host.id);
+      selection = await _connectTransport(token, host.id, isCancelled);
     }
     final transport = selection.transport;
 
@@ -1029,10 +1056,13 @@ class RemoteAccount {
   /// the Host may still hold state for the old one. Noise always starts only
   /// after the final data plane is chosen. Recent failures skip the bad path
   /// for 45 seconds; a changed native network hint clears that cooldown.
-  Future<_TransportSelection> _connectTransport(String token, String hostId) async {
+  Future<_TransportSelection> _connectTransport(String token, String hostId, bool Function() isCancelled) async {
     final connector = peerConnector;
     if (connector == null) {
-      return _TransportSelection(await _connectRelay(token, hostId), RemoteNetworkFallbackReason.webrtcUnavailable);
+      return _TransportSelection(
+        await _connectRelay(token, hostId, isCancelled: isCancelled),
+        RemoteNetworkFallbackReason.webrtcUnavailable,
+      );
     }
     var preferred = RemoteTransportMode.values;
     try {
@@ -1059,8 +1089,10 @@ class RemoteAccount {
     // must not suppress a fresh lookup on the separately authorized TURN stage.
     Future<List<RemoteIceServer>> fetchIce(String id) => api.turnCredentials(token, id);
 
-    if (!wantDirect && !wantTurn) return _TransportSelection(await _connectRelay(token, hostId), reason);
-    var control = await _connectRelay(token, hostId, direct: true, preferred: preferred);
+    if (!wantDirect && !wantTurn) {
+      return _TransportSelection(await _connectRelay(token, hostId, isCancelled: isCancelled), reason);
+    }
+    var control = await _connectRelay(token, hostId, direct: true, preferred: preferred, isCancelled: isCancelled);
     if (control.directTransports.isEmpty) {
       return _TransportSelection(control, RemoteNetworkFallbackReason.webrtcUnavailable);
     }
@@ -1083,7 +1115,9 @@ class RemoteAccount {
         _directCooldown[hostId] = DateTime.now().add(const Duration(seconds: 45));
         _notifyFallback(reason);
       }
-      if (wantTurn) control = await _connectRelay(token, hostId, direct: true, preferred: preferred);
+      if (wantTurn) {
+        control = await _connectRelay(token, hostId, direct: true, preferred: preferred, isCancelled: isCancelled);
+      }
     }
     if (wantTurn) {
       try {
@@ -1111,7 +1145,7 @@ class RemoteAccount {
     } else if (!wantDirect) {
       await control.close();
     }
-    return _TransportSelection(await _connectRelay(token, hostId), reason);
+    return _TransportSelection(await _connectRelay(token, hostId, isCancelled: isCancelled), reason);
   }
 
   void _notifyFallback(RemoteNetworkFallbackReason reason) {
@@ -1125,6 +1159,7 @@ class RemoteAccount {
   Future<RelayTransport> _connectRelay(
     String token,
     String hostId, {
+    required bool Function() isCancelled,
     bool direct = false,
     List<RemoteTransportMode>? preferred,
   }) => RelayTransport.connect(
@@ -1134,6 +1169,7 @@ class RemoteAccount {
     hostDeviceId: hostId,
     clientVersion: clientVersion,
     connector: _socketConnector,
+    isCancelled: isCancelled,
     tracer: controlTracer,
     offerDirect: direct,
     preferredTransports: preferred,

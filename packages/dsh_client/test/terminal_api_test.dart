@@ -265,12 +265,12 @@ void main() {
       expect(attachment.writable, isFalse);
     });
 
-    test('carriers without uplink cannot run terminals', () async {
+    test('carriers without uplink take the follow route (terminal_follow_test.dart)', () async {
       final client = await connect();
       expect(client.supportsTerminals, isTrue);
       final relayLike = DshClient.withCarrier(_NoUplink(client.carrier));
       addTearDown(relayLike.close);
-      expect(relayLike.supportsTerminals, isFalse);
+      expect(relayLike.supportsTerminals, isTrue);
     });
   });
 

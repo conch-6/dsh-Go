@@ -13,9 +13,17 @@ Reset and uninstall both delete data on this phone; you rarely need them to fix 
 <!-- nav: commonSettings,phoneEngineDiagnostics -->
 `Settings › Diagnostics` · [Open](dshgo://open/diagnostics)
 
-To report a problem, export a diagnostics bundle here. It includes the version, device, logs and the latest crash, never keys or tokens.
+To report a problem, export a diagnostics bundle here. It includes the version, device, bounded engine logs and captured errors, not all system logs or a complete crash history. The app attempts to remove keys and tokens; still inspect the bundle before sharing it.
 
-To let the AI look into it: tap **Let the AI read diagnostics**. The app writes the same (redacted) snapshot into the engine, then ask the AI to "check the diagnostics" — the bundled `dsh-go-support` skill walks the symptoms and drafts an issue you can paste.
+To let the AI look into it, tap **Let the AI read diagnostics**. The app writes a bounded snapshot for the local engine, then ask the AI to "check the diagnostics". The bundled `dsh-go-support` skill walks the symptoms and drafts an issue you can paste.
+
+### Input-method or keyboard problems
+
+After reproducing the problem, use **Capture recent events** under **System input-method diagnostics**, read the native prompt and confirm it yourself. It only reuses an already selected and connected Shizuku, Sui, wireless-debugging or Root channel; it does not request permissions, open a background screen or operate an editor. With no channel available, **Phone-control permissions (optional)** lets you choose whether to configure one.
+
+A one-time bounded read of existing fixed-tag system logs retains up to 64 known show/hide requests or input-connection-closed events emitted by this app process from the last two minutes. Typed text, candidates and raw log lines are not exported. Android 12 and some vendor systems may have no matching records; zero events and failures do not prove that the keyboard is healthy. There is no continuous monitoring. Backgrounding the app, leaving Diagnostics or clearing cancels the request. Switching focus in multi-window mode while Diagnostics remains visible does not revoke the one short read already approved.
+
+Results stay in app memory. Only **Let the AI read diagnostics** or a manual bundle export includes them; automatic snapshots do not. Manual AI reports and automatic environment snapshots each atomically replace their own fixed file; neither overwrites the other. Clear the in-memory evidence whenever you want, or restart the app. Clearing cannot retract files already generated or shared.
 
 ## The engine stops in the background, or notifications don't arrive
 

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/l10n.dart';
 import 'connection_state.dart';
+import 'engine_error_text.dart';
 import 'models_state.dart';
 import 'providers_state.dart';
 import 'read_list_epoch.dart';
@@ -23,7 +24,13 @@ String subscriptionLabel(Subscription s) => switch (s) {
 String describeLoginError(Object error) {
   if (error is DshRemoteException) {
     final code = error.code;
-    if (code.startsWith('gateway/') && code != 'gateway/internal') return appL10n.stateSubscriptionUnsupported;
+    if (code == 'gateway/method-not-found' || code == 'gateway/not-found') {
+      return appL10n.stateSubscriptionUnsupported;
+    }
+    if (error.isGatewayError) {
+      final reason = engineErrorReason(error);
+      if (reason != null) return reason;
+    }
     if (error.message.contains('could not reach') || error.message.contains('fetch failed')) {
       return appL10n.stateSubscriptionUnreachable;
     }

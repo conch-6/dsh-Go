@@ -45,6 +45,10 @@ internal class Capture(
      */
     val unreadableWindowTitle: String? = null,
     val takenAt: Long = SystemClock.uptimeMillis(),
+    /** Whole enumeration, before the formatting loop can stop at an opaque window. */
+    val visualWindowId: Int? = null,
+    val visualComplete: Boolean = false,
+    val visualOcclusions: List<Box> = emptyList(),
 ) {
     fun native(ref: Int): AccessibilityNodeInfo? = natives.getOrNull(ref)
 
@@ -76,6 +80,7 @@ internal object TreeCapture {
         val natives = ArrayList<AccessibilityNodeInfo>(256)
         var count = 0
         var truncated = false
+        var visualComplete = true
         val rect = Rect()
     }
 
@@ -85,6 +90,33 @@ internal object TreeCapture {
         val sorted = all.orEmpty().sortedByDescending { it.layer }
         // Scan every window before the content loop can stop at an opaque app window.
         val keyboard = WindowContent.keyboardShown(all?.map { it.type }, AccessibilityWindowInfo.TYPE_INPUT_METHOD)
+        // Conservative whole-window facts. Only our own confirmed overlay is ignored; small
+        // system chrome is retained as an occluder, never silently treated as target-free space.
+        val visual = runCatching {
+            all ?: error("No window enumeration")
+            val apps = mutableListOf<Int>()
+            val occlusions = mutableListOf<Box>()
+            var complete = true
+            for (w in all) {
+                w.getBoundsInScreen(st.rect)
+                val box = Box(st.rect.left, st.rect.top, st.rect.right, st.rect.bottom).intersect(screen)
+                if (box.isEmpty) continue
+                when (w.type) {
+                    AccessibilityWindowInfo.TYPE_APPLICATION -> apps += w.id
+                    AccessibilityWindowInfo.TYPE_SYSTEM -> {
+                        if (box.area.toDouble() / screen.area.coerceAtLeast(1) >= 0.5) complete = false
+                        occlusions += box
+                    }
+                    AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> {
+                        val root = w.root
+                        try { if (root?.packageName?.toString() != ownPackage) complete = false }
+                        finally { root?.let(::release) }
+                    }
+                    else -> complete = false // IME, divider, magnifier or unknown overlay.
+                }
+            }
+            Triple(apps.singleOrNull(), complete && apps.size == 1, occlusions.toList())
+        }.getOrNull()
         val chosen = mutableListOf<UiWindow>()
         var topPackage: String? = null
         var ownFront = false
@@ -156,6 +188,10 @@ internal object TreeCapture {
             partial = partial,
             hiddenWindowTitle = hidden,
             unreadableWindowTitle = unreadable,
+            visualWindowId = visual?.first,
+            visualComplete = visual?.second == true && st.visualComplete && !st.truncated && !partial &&
+                hidden == null && unreadable == null && chosen.size == 1 && chosen.single().id == visual?.first,
+            visualOcclusions = visual?.third.orEmpty(),
         )
     }
 
@@ -197,14 +233,16 @@ internal object TreeCapture {
         st.natives += node
         st.count++
 
-        val children = ArrayList<UiNode>(node.childCount)
+        val rawChildren = node.childCount
+        val children = ArrayList<UiNode>(rawChildren)
         if (depth < MAX_DEPTH) {
-            for (i in 0 until node.childCount) {
+            for (i in 0 until rawChildren) {
                 if (st.count >= MAX_NODES || SystemClock.uptimeMillis() > st.deadline) { st.truncated = true; break }
-                val child = try { node.getChild(i) } catch (_: Throwable) { null } ?: continue
+                val child = try { node.getChild(i) } catch (_: Throwable) { null }
+                if (child == null) { st.visualComplete = false; continue }
                 convert(child, depth + 1, st)?.let(children::add)
             }
-        } else if (node.childCount > 0) st.truncated = true
+        } else if (rawChildren > 0) st.truncated = true
 
         var scroll = 0
         if (node.isScrollable) for (action in node.actionList) scrollIds[action.id]?.let { scroll = scroll or it }
@@ -238,6 +276,8 @@ internal object TreeCapture {
             rangeCurrent = range?.current,
             rangeMax = range?.max,
             children = children,
+            rawChildCount = rawChildren,
+            actionClick = node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK },
         )
     }
 }

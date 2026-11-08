@@ -53,7 +53,7 @@ class _Sessions extends SessionsController {
   Future<List<SessionSummary>> build() async => [_session('s1', '修复登录按钮重复提交'), _session('s2', '每天的构建检查')];
 
   @override
-  Future<String> create() async {
+  Future<String> create({bool autoApprove = true}) async {
     creates++;
     return 'new-1';
   }

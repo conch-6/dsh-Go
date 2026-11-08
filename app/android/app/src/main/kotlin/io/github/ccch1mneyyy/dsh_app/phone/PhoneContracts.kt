@@ -87,8 +87,12 @@ sealed interface PhoneAction {
 
     data class Key(override val screenId: String, val key: GlobalKey) : PhoneAction
 
-    /** Flash only: a point on a numbered screenshot ([screenId] is the observation it came from). Always confirmed. */
-    data class TapXY(override val screenId: String, val x: Int, val y: Int) : PhoneAction
+    /** Flash only: a point on a numbered screenshot ([screenId] is the observation it came from). Unknown targets and long/swipe remain individually confirmed. */
+    data class TapXY(override val screenId: String, val x: Int, val y: Int,
+        val gesture: CoordinateGesture = CoordinateGesture.TAP,
+        val x2: Int? = null, val y2: Int? = null, val durationMs: Long = 400) : PhoneAction
+
+    enum class CoordinateGesture { TAP, LONG, SWIPE }
 
     enum class Direction { UP, DOWN, LEFT, RIGHT }
 
@@ -101,6 +105,10 @@ data class ActionResult(
     val message: String,
     /** The screen after the action settled (new lines marked `+`), when it could be read. */
     val screen: ScreenSnapshot? = null,
+    /** Explicit fingerprint rejection before input. Refresh once; never replay the action. */
+    val staleSnapshot: Boolean = false,
+    /** Internal, this BG open only: the original peer confirmed its valid VD and full target identity. */
+    val backgroundOpenConfirmed: Boolean = false,
 )
 
 data class CollectResult(
@@ -127,7 +135,15 @@ interface PhoneDriver {
 
     fun observe(detail: Boolean, image: Boolean): ScreenSnapshot
 
+    /** Pure local commit after the current task's final image filter; not model-delivery evidence. */
+    fun acceptVisualObservation(screenId: String) {}
+
     fun collect(screenId: String, listElementId: Int, maxPages: Int, until: String?): CollectResult
+
+    /** Multi-page implementations recheck this invocation's gate before each physical scroll. */
+    fun collect(screenId: String, listElementId: Int, maxPages: Int, until: String?, allowed: () -> Boolean): CollectResult =
+        if (allowed()) collect(screenId, listElementId, maxPages, until)
+        else CollectResult(emptyList(), 0, PhoneTasks.STOPPED_MESSAGE, null)
 
     /**
      * Resolves an element of a recent snapshot for the safety rules. Null when the
@@ -136,10 +152,24 @@ interface PhoneDriver {
      */
     fun target(screenId: String, elementId: Int): TargetInfo?
 
+    /** Pure memory, tied to this exact published observation; independent of image acceptance. */
+    fun visualScope(screenId: String): VisualScope? = null
+
+    /** Only native evidence from this observation may offer a reusable ordinary coordinate tap. */
+    fun coordinateTarget(action: PhoneAction.TapXY): VisualTarget? = null
+
     fun perform(action: PhoneAction): ActionResult
 
-    /** Launches [packageName] on this screen (BACKGROUND moves the task to the virtual display). */
-    fun open(packageName: String): ActionResult
+    /** Invocation-owned pause/current check, separate from whichever task the overlay displays. */
+    fun perform(action: PhoneAction, allowed: () -> Boolean): ActionResult =
+        if (allowed()) perform(action) else ActionResult(false, PhoneTasks.STOPPED_MESSAGE)
+
+    /** The claim is pure memory under the original task lock; dispatch happens after it returns. */
+    fun perform(action: PhoneAction, allowed: () -> Boolean,
+                coordinateAdmission: ((() -> Boolean) -> Boolean)?): ActionResult = perform(action, allowed)
+
+    /** Launches the native-resolved [target] on this screen (BACKGROUND moves the task to the virtual display). */
+    fun open(target: PhoneAppIdentity): ActionResult
 
     /** Package of the app in front on this screen, if known (for per-app approval and deny lists). */
     fun foregroundPackage(): String?
@@ -158,10 +188,13 @@ data class ConfirmRequest(
      * gate that ignores it still answers correctly, just asks more.
      */
     val offerTaskWaiver: Boolean = false,
+    /** Exact native task lifetime; never inferred from the visible conversation. */
+    val owner: PhoneTasks.Owner? = null,
+    val visualScope: VisualScope? = null,
 )
 
-/** [ALLOW_ALL_FOR_TASK]: nothing else in this task is asked (only offered with [ConfirmRequest.offerTaskWaiver]). */
-enum class Decision { ALLOW_ONCE, ALLOW_APP_FOR_TASK, ALLOW_ALL_FOR_TASK, DENY, STOP, UNAVAILABLE }
+/** Ordinary task waivers do not authorize independent visual scopes or bypass hard rules. */
+enum class Decision { ALLOW_ONCE, ALLOW_APP_FOR_TASK, ALLOW_ALL_FOR_TASK, ALLOW_VISUAL_FOR_TASK, DENY, STOP, UNAVAILABLE }
 
 enum class HandoffResult { CONTINUE, STOP, TIMEOUT }
 
@@ -204,31 +237,53 @@ interface UserGate {
     /** [handoff] with the rule behind it, for the card's title; gates that can't show it ignore it. */
     fun handoff(reason: String, timeoutMs: Long, cause: HandoffCause?): HandoffResult = handoff(reason, timeoutMs)
 
+    fun handoff(reason: String, timeoutMs: Long, cause: HandoffCause?, owner: PhoneTasks.Owner): HandoffResult =
+        handoff(reason, timeoutMs, cause)
+
     /** The one-line "DSH 正在操作 · 点「路线」" status; null clears it. */
     fun status(text: String?)
+
+    /** Owner gate: only short memory writes belong inside [ifCurrent], never platform IO.
+     * Asynchronous presenters must recheck at their final UI runnable, before applying it. */
+    fun status(text: String?, ifCurrent: (() -> Unit) -> Boolean) {
+        if (ifCurrent {}) status(text)
+    }
+    /** Retire only the task status, preserving independently owned prompt tickets. */
+    fun clearStatus(ifCurrent: (() -> Unit) -> Unit) = ifCurrent { status(null) }
 
     /** Run [ifCurrent] at cleanup time; a newer task must keep its windows and pending questions. */
     fun close(ifCurrent: (() -> Unit) -> Unit = { it() }) = ifCurrent { status(null) }
 }
 
 /**
- * What the person does on the overlay outside a confirm / handoff, and the stops the
- * accessibility service itself sees. Implemented by the core (task owner), set in
- * [PhoneRegistry.controlListener]. Called on the main thread; must return quickly.
- *
- * The status bar's 暂停 / 停止 / 插话 and the stop on screen off, lock or service loss
- * reach whoever owns the task through here. While paused, MAIN actions are refused by the
- * driver as well (defence in depth).
+ * The status bar's 暂停 / 停止 / 插话 for the one task whose status they are shown with. Each acts
+ * on that task's owner only: once it stopped, ended or was replaced, an action does nothing, and
+ * it never reaches a task selected later. Main thread; must return quickly.
  */
-interface ControlListener {
-    /** 暂停 (true) / 继续 (false) on the status bar. */
-    fun onPauseChanged(paused: Boolean) {}
+interface TaskControls {
+    fun isPaused(): Boolean
 
-    /** 停止 on the status bar, screen off, keyguard, or the service going away. [reason] is Chinese. */
-    fun onStopRequested(reason: String) {}
+    /** 暂停 (true) / 继续 (false). While paused, MAIN actions are refused by the driver as well. */
+    fun setPaused(paused: Boolean)
+
+    /** [reason] is Chinese (for the agent). */
+    fun stop(reason: String)
 
     /** Text the person typed into 插话 and sent; meant for the agent as a user message. */
-    fun onInterject(text: String) {}
+    fun interject(text: String)
+}
+
+/**
+ * The overlay's way to its task's controls, and the stops the accessibility service itself
+ * sees. Implemented by the core (task owner), set in [PhoneRegistry.controlListener].
+ * Called on the main thread; must return quickly.
+ */
+interface ControlListener {
+    /** Called only inside a displayed status's own guard: the controls of the task it belongs to. */
+    fun shownControls(): TaskControls? = null
+
+    /** Device-wide boundary: screen off, lock, or loss of the accessibility service. [reason] is Chinese. */
+    fun onStopAllRequested(reason: String) {}
 
     /** The accessibility service connected or went away (for the `status` event). */
     fun onAccessibilityChanged(connected: Boolean) {}
@@ -240,7 +295,6 @@ interface ControlListener {
  */
 object PhoneRegistry {
     @Volatile var mainDriver: PhoneDriver? = null
-    @Volatile var backgroundDriver: PhoneDriver? = null
 
     /** Overlay gate when the accessibility service runs, else the notification gate. */
     @Volatile var overlayGate: UserGate? = null
@@ -257,11 +311,6 @@ object PhoneRegistry {
      * the overlay's 「已解除限制」 tag. Nothing lifted until the core says otherwise.
      */
     @Volatile var unlocks: () -> PhoneUnlocks = { PhoneUnlocks() }
-
-    fun driver(screen: PhoneScreen): PhoneDriver? = when (screen) {
-        PhoneScreen.MAIN -> mainDriver
-        PhoneScreen.BACKGROUND -> backgroundDriver
-    }
 
     fun gate(): UserGate? = overlayGate ?: notificationGate
 }

@@ -46,4 +46,13 @@ void main() {
     expect(result.decision, PhonePromptDecision.unavailable);
     expect(native.callsOf('presentPrompt'), isEmpty);
   });
+
+  test('engine prompt decoder never inherits native visual permission', () {
+    expect(PhoneDecision.parse('confirmed-visual'), PhoneDecision.allowed);
+    for (final decision in ['allowed-visual', 'allowed-app', 'allowed-task']) {
+      final result = PhonePromptResult.fromMap({'decision': decision, 'presented': 'app'});
+      expect(result.decision, PhonePromptDecision.unavailable);
+    }
+  });
+
 }

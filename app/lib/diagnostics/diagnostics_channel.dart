@@ -4,6 +4,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'system_ime_evidence.dart';
+
 /// A second content boundary for the native voice observation. Unexpected
 /// transcript/audio fields never enter an export, even from an older plugin.
 Map<String, Object?> voiceDiagnosticsFacts(Object? raw) {
@@ -84,6 +86,28 @@ class DiagnosticsChannel {
   const DiagnosticsChannel([this.channel = const MethodChannel('dsh/diagnostics')]);
 
   final MethodChannel channel;
+
+  /// Every call requires fresh consent in the native guarded dialog.
+  Future<SystemImeEvidence> collectSystemIme() async {
+    try {
+      final raw = await channel.invokeMethod<Object?>('collectSystemIme');
+      return SystemImeEvidence.fromNative(raw, now: DateTime.now());
+    } on MissingPluginException {
+      return SystemImeEvidence.failure('unsupported', DateTime.now());
+    } on PlatformException {
+      return SystemImeEvidence.failure('failed', DateTime.now());
+    }
+  }
+
+  Future<void> cancelSystemIme() async {
+    try {
+      await channel.invokeMethod<void>('cancelSystemIme');
+    } on MissingPluginException {
+      // Older apps have no pending system capture.
+    } on PlatformException {
+      // The Dart generation is revoked even when native cancellation fails.
+    }
+  }
 
   Future<NativeDiagnostics> info() async {
     try {

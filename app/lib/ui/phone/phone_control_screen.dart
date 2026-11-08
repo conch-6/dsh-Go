@@ -33,6 +33,8 @@ import 'dnd_mode_page.dart';
 import 'phone_disclosure_sheet.dart';
 import 'phone_background_guide.dart';
 import 'phone_unlock_page.dart';
+import 'phone_skill_section.dart';
+import 'phone_self_check_panel.dart';
 import 'phone_widgets.dart';
 import 'restricted_settings_guide.dart';
 import 'screen_text_sheet.dart';
@@ -82,6 +84,7 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
   /// Came back from there still off: point at the restricted-settings guide.
   bool _a11yAttemptFailed = false;
   bool _testing = false;
+  bool _interruptionBusy = false;
   bool _backgroundGuideShown = false;
 
   PhoneController get _phone => ref.read(phoneProvider.notifier);
@@ -254,9 +257,34 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
     await showScreenTextSheet(context, result);
   }
 
-  Future<void> _stopTask() async {
-    final ok = await _phone.stopTask();
+  /// Bound to the task the row showed: a tap queued before another task was
+  /// selected still stops that one, never its successor.
+  Future<void> _stopTask(int? taskId) async {
+    final ok = await _phone.stopTask(taskId: taskId);
     if (!ok && mounted) _toast(context.l10n.phoneStopFailed);
+  }
+
+  Future<void> _retryTaskCleanup(int taskId) async {
+    final ok = await _phone.retryTaskCleanup(taskId);
+    if (!ok && mounted) _toast(context.l10n.phoneCleanupRetryFailed);
+  }
+
+  Future<void> _taskInterruptionAction(String? batchToken) async {
+    if (_interruptionBusy) return;
+    setState(() => _interruptionBusy = true);
+    try {
+      final ok = batchToken == null
+          ? await _phone.retryTaskInterruptionStorage()
+          : await _phone.acknowledgeTaskInterruption(batchToken);
+      if (!ok && mounted) _toast(context.l10n.phoneInterruptionActionFailed);
+    } finally {
+      if (mounted) setState(() => _interruptionBusy = false);
+    }
+  }
+
+  Future<void> _resumeTask(int taskId) async {
+    final ok = await _phone.resumeTask(taskId);
+    if (!ok && mounted) _toast(context.l10n.phoneResumeTaskFailed);
   }
 
   @override
@@ -269,6 +297,17 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
     final ready = state.loaded && status.ready;
     final toggle = _switchHandler(state, blocker);
     final task = status.task;
+    // A stopped task is inactive. Keep an explicit, session-scoped way to allow future calls.
+    final stoppedSessions = <Object, PhoneTaskStatus>{};
+    int recoveryPriority(PhoneTaskStatus item) => item.cleanupFailed ? 3 : item.finishing || item.draining || item.retiring ? 2 : 1;
+    for (final item in status.tasks) {
+      if (item.id == null || !(item.stopped || item.finishing || item.draining)) continue;
+      if (item.sessionId == null && !item.finishing && !item.draining && !item.cleanupFailed) continue;
+      final key = item.sessionId ?? #legacyPhoneTask;
+      final previous = stoppedSessions[key];
+      // A later stopped run must not hide the old resource that still requires cleanup.
+      if (previous == null || recoveryPriority(item) >= recoveryPriority(previous)) stoppedSessions[key] = item;
+    }
     const gap = SizedBox(height: 24);
 
     return AppPage.list(
@@ -303,6 +342,32 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
               child: UnlockedTag(onTap: () => _push(const PhoneUnlockPage())),
             ),
           ),
+        if (status.taskInterruption.visible) ...[
+          const SizedBox(height: 12),
+          ListPageCard(
+            children: [
+              ListPageRow(
+                key: const ValueKey('phone-task-interruption'),
+                icon: AppIcons.paused,
+                title: l10n.phoneInterruptionTitle,
+                subtitle: status.taskInterruption.state == 'loading'
+                    ? l10n.phoneInterruptionLoading
+                    : status.taskInterruption.state == 'error'
+                    ? l10n.phoneInterruptionStorageError
+                    : l10n.phoneInterruptionHint(status.taskInterruption.count),
+                trailing: status.taskInterruption.state == 'loading'
+                    ? null
+                    : FixButton(
+                        key: const ValueKey('phone-task-interruption-action'),
+                        label: status.taskInterruption.canAcknowledge
+                            ? l10n.phoneInterruptionAcknowledge
+                            : l10n.phoneInterruptionRetry,
+                        onPressed: _interruptionBusy ? null : () => _taskInterruptionAction(status.taskInterruption.batchToken),
+                      ),
+              ),
+            ],
+          ),
+        ],
         if (task.active) ...[
           const SizedBox(height: 12),
           ListPageCard(
@@ -316,7 +381,54 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
                     : task.waived
                     ? l10n.phoneControlTaskNoConfirmHint
                     : l10n.phoneControlFloatingBarHint,
-                trailing: FixButton(label: l10n.commonStop, onPressed: _stopTask),
+                trailing: FixButton(label: l10n.commonStop, onPressed: () => _stopTask(task.id)),
+              ),
+            ],
+          ),
+        ],
+        for (final waiting in status.tasks.where((item) => item.id != null && item.waitingForResources &&
+            !item.stopped && !item.finishing && !item.draining)) ...[
+          const SizedBox(height: 12),
+          ListPageCard(
+            children: [
+              ListPageRow(
+                key: ValueKey('phone-waiting-${waiting.id}'),
+                icon: AppIcons.phoneControl,
+                title: l10n.phoneTaskWaiting(waiting.id!),
+                subtitle: waiting.waitingForApp != null
+                    ? waiting.waitingForApp!.packageName != null
+                        ? l10n.phoneTaskWaitingApp(waiting.waitingForApp!.packageName!, waiting.waitingForMs ~/ 1000)
+                        : l10n.phoneTaskWaitingUnknown(waiting.waitingForMs ~/ 1000)
+                    : l10n.phoneTaskWaitingScreen(
+                        waiting.waitingForScreen == 'background' ? l10n.phoneTaskBackgroundResource : l10n.phoneTaskMainResource,
+                        waiting.waitingForMs ~/ 1000),
+              ),
+            ],
+          ),
+        ],
+        for (final stopped in stoppedSessions.values) ...[
+          const SizedBox(height: 12),
+          ListPageCard(
+            children: [
+              ListPageRow(
+                icon: AppIcons.paused,
+                title: stopped.stopped ? l10n.phoneStoppedTask(stopped.id!) : l10n.phoneFinishingTask(stopped.id!),
+                subtitle: stopped.cleanupFailed
+                    ? l10n.phoneTaskCleanupFailedHint
+                    : stopped.retiring || stopped.draining || stopped.finishing || stopped.pendingCalls > 0
+                    ? l10n.phoneTaskDrainingHint
+                    : l10n.phoneResumeTaskHint,
+                trailing: FixButton(
+                  key: ValueKey('phone-resume-${stopped.id}'),
+                  label: stopped.cleanupFailed ? l10n.phoneCleanupRetry : l10n.phoneResumeTask,
+                  onPressed: stopped.cleanupFailed
+                      ? stopped.draining || stopped.settling || stopped.pendingCalls > 0
+                          ? null
+                          : () => _retryTaskCleanup(stopped.id!)
+                      : stopped.retiring || stopped.draining || stopped.finishing || stopped.cleanupFailed || stopped.pendingCalls > 0
+                      ? null
+                      : () => _resumeTask(stopped.id!),
+                ),
               ),
             ],
           ),
@@ -328,6 +440,12 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
           if (status.enabled) ..._setup(status) else const _WhatItDoes(),
           gap,
           ..._rules(state),
+          gap,
+          const PhoneSelfCheckPanel(),
+          if (status.skills.available) ...[
+            gap,
+            PhoneSkillSection(status: status.skills),
+          ],
           if (status.enabled) ...[
             gap,
             ListPageCard(

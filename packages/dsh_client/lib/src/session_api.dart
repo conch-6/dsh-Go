@@ -302,6 +302,11 @@ class DshClient {
       supportsEndpoint('fileUploads/upload') ||
       (carrier is WorkspaceUploadCarrier && (carrier as WorkspaceUploadCarrier).supportsWorkspaceUpload);
 
+  /// The live connection carries the workspace upload protocol
+  /// (ds-harness-remote `workspace.upload.v1`): [uploadWorkspaceFile] works.
+  bool get supportsWorkspaceUpload =>
+      carrier is WorkspaceUploadCarrier && (carrier as WorkspaceUploadCarrier).supportsWorkspaceUpload;
+
   /// Publishes a file into this session's workspace, without a receipt.
   /// The returned relative path must be included in the prompt instead.
   Future<WorkspaceUploadedFile> uploadWorkspaceFile(String sessionId, List<int> bytes, {required String name}) {

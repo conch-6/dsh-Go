@@ -27,7 +27,7 @@ class PhoneUnlocksCoreTest {
         override fun collect(screenId: String, listElementId: Int, maxPages: Int, until: String?) = error("unexpected collect")
         override fun target(screenId: String, elementId: Int) = field.copy(screenId = screenId, elementId = elementId, packageName = foreground)
         override fun perform(action: PhoneAction): ActionResult { writes++; return ActionResult(true, "done") }
-        override fun open(packageName: String) = error("unexpected open")
+        override fun open(target: PhoneAppIdentity) = error("unexpected open")
     }
 
     private val core = PhoneCore(object : PhoneEnv {

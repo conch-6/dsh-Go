@@ -48,3 +48,30 @@ Long-press the floating pet and choose Quick ask to open its input bar. The targ
 Approval bubbles show complete tool arguments when a request can be handled there. Missing or lengthy arguments and requests needing detailed interaction open the app instead. Simple single-choice questions can be answered in the bubble. Expired requests cannot be submitted.
 
 The microphone uses the phone's installed offline speech model and does not fall back to a cloud provider. If the model is unavailable, follow the setup guidance. If Android blocks background recording or returns silence, a separate foreground recording dialog brings recognized text back to the input bar. Sending still requires your action, and an existing chat draft is preserved.
+
+## Companion room
+
+The companion room is a separate full page with an animated Live2D character. It isn't the status pet above: the pet watches the agent for you, and the room is a place to spend a little time.
+
+Open the **Switch host** panel and tap **Companion room**. The first time, import an asset pack (zip). Character assets aren't part of the app and stay on this phone; you can remove them from the menu at the top right of the room.
+
+What you can do:
+
+- Touch her: stroke her head to pat it, and tap her face, body or tail for different reactions. Three quick pokes make her dizzy. None of this calls a model or spends tokens.
+- Talk to her: type or use voice in the bar at the bottom. Choose how in **How she talks** in the menu at the top right:
+  - **Light**: chat only. The phone uses the DeepSeek API key you saved in Settings to talk to the model directly, with no engine and no host. The chat stays on this phone, and **Start over** deletes it. Not available when you signed in with a DeepSeek account and saved no key.
+  - **Full**: uses DSH on the current host, in its own conversation that stays out of the chat list. **View chat history** in the menu opens it, and **Start over** begins a new conversation while the old record stays on the host. She can use the host's tools, and the phone too when phone control is on; anything that acts asks you first, and only a tap on the screen counts as yes.
+  - Until you choose, she uses Full while a host is connected and Light otherwise.
+- Zoom: pinch to zoom and move.
+- Her corner: there's a snack in the shell at the bottom left, a bubble floating on the right, and a seaweed cushion behind her. Tap the shell to give her a snack, the bubble to play, and the cushion to let her rest for a while. What she's doing shows under her name.
+- Feed her, hold her: drag a snack out of the shell dish and let go at her mouth, and she eats it. Rest a finger on her to give her a hug. Tilt the phone and the reef shifts a little.
+- Her voice: turn it on under **Her voice** in the menu and she reads her words aloud; she stops as soon as you type or use the microphone. Use the phone's own voice; pick one of the **Popular services** (Xiaomi MiMo, OpenAI, SiliconFlow, Alibaba Model Studio), add its key and choose a voice (with Xiaomi MiMo you can also clone a voice from a recording); or connect your own speech service: an OpenAI-compatible API (OpenAI, SiliconFlow, or your own GPT-SoVITS or CosyVoice server) or a custom HTTP API you describe. Tap **Preview** to check it works. With an external service, what she says is sent to it.
+- About her: under **About her** in the menu, change her name, what she calls you, and her persona: who she is, her personality, how she talks, all of it, with **Reset** to start over. The default persona includes a few boundaries you can delete; only the format of her expression marks is added by the app.
+- Getting closer: visit and pat her often and she slowly gets more familiar with you; **You two** in the menu shows how far you've come. Once you're close she hums more and has fonder words for a pat.
+- Your other chats: while the room is open, she tells you when another chat finishes, fails or waits for your approval; tap Take a look to go there.
+- Home-screen widget: add the Companion room widget to see what she's doing and the last thing she said. Tap it to visit.
+- Her invitations: when you sit quietly with her for a while, she may now and then ask, above the input bar, whether you'd like to rest on the cushion together. Tap **Sure** and she leans back on it; tap **Not now** or just leave it, and she won't ask again for a few hours. At most twice a day, and silently. To stop them, turn off **Invitations** in the menu at the top right.
+
+She notices that you visit and pat her, and slowly gets more familiar with you; staying away for a few days doesn't upset her. Write down things you want her to remember in **What she remembers** in the menu. You can edit or delete them anytime. In Full mode they stay on the current host; in Light mode, on this phone. She doesn't bring these up by herself yet, can't speak aloud and only shows text, and can't touch your files or phone.
+
+If this host's engine is older, she runs on the default preset and may ask to use tools. When "Something needs your confirmation" appears, tap it and handle the request in the regular chat.

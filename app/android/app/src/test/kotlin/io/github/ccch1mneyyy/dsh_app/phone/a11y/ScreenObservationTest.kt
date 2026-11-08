@@ -92,4 +92,43 @@ class ScreenObservationTest {
         assertFalse(after.reusableCoordinates(before))
         assertTrue(after.comparableTo(before))
     }
+
+    @Test fun unchangedSecretFieldsNeverAuthorizeCoordinatesFromTheirMaskedImage() {
+        val inputBox = Box(20, 100, 380, 180)
+        val fields = listOf(
+            UiNode(bounds = inputBox, password = true),
+            UiNode(bounds = inputBox, editable = true, hint = "验证码"),
+            UiNode(bounds = inputBox, editable = true, desc = "支付密码"),
+            UiNode(bounds = inputBox, editable = true, viewId = "example.app:id/otp_input"),
+            UiNode(bounds = inputBox, editable = true, text = "verification code", showingHint = true),
+        )
+        for (field in fields) {
+            val root = UiNode(bounds = frame, children = listOf(
+                UiNode(bounds = frame, children = listOf(field)),
+                UiNode(bounds = Box(20, 300, 380, 360), text = "Ordinary button", clickable = true),
+            ))
+            val windows = listOf(UiWindow(1, WindowKind.APP, "example.app", null, frame, root))
+            fun capture() = ScreenObservation("example.app", windows, frame, false, false, false,
+                ScreenFormat.observationKeys(windows))
+            val before = capture(); val current = capture()
+            assertEquals(listOf(inputBox), secretFieldBounds(windows))
+            assertTrue(current.sameContext(before))
+            assertFalse(current.changedFrom(before))
+            assertFalse(current.reusableCoordinates(before))
+            assertFalse(before.reusableCoordinates(current))
+        }
+    }
+
+    @Test fun ordinaryInputValuesAreNotSecretLabelsForCoordinateSafety() {
+        val field = UiNode(bounds = Box(20, 100, 380, 180), editable = true,
+            hint = "Search", text = "password verification code otp", showingHint = false)
+        val windows = listOf(UiWindow(1, WindowKind.APP, "example.app", null, frame,
+            UiNode(bounds = frame, children = listOf(field))))
+        val before = ScreenObservation("example.app", windows, frame, false, false, false,
+            ScreenFormat.observationKeys(windows))
+        val current = ScreenObservation("example.app", windows, frame, false, false, false,
+            ScreenFormat.observationKeys(windows))
+        assertTrue(secretFieldBounds(windows).isEmpty())
+        assertTrue(current.reusableCoordinates(before))
+    }
 }

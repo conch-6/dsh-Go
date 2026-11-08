@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dsh_app/diagnostics/app_error_log.dart';
 import 'package:dsh_app/diagnostics/diagnostics_bundle.dart';
 import 'package:dsh_app/diagnostics/diagnostics_channel.dart';
@@ -136,5 +138,87 @@ void main() {
     expect(text, contains('state：connected'));
     expect(text, contains('route：relay'));
     expect(text, contains('tier=high'));
+  });
+
+  String probeReport(Object? probe, {List<String> engineLog = const []}) => diagnosticsMarkdown(
+    snapshot(device: NativeDiagnostics.fromMap({'device': {'backgroundInputProbe': probe}}).device, engineLog: engineLog),
+  );
+
+  test('background probe absence and unknown schema are not pass or fail', () {
+    for (final raw in [null, 'PRIVATE_RAW', {}, {'v': 2, 'observed': true, 'result': 'success'},
+      {'v': 1.0, 'observed': true}, {'v': 1, 'observed': 'true'}]) {
+      final text = probeReport(raw);
+      expect(text, contains('后台输入探针事实（不是实时自检）：不可用或版本未知'));
+      expect(text, isNot(contains('PRIVATE_')));
+      expect(text, isNot(contains('自检）：通过')));
+      expect(text, isNot(contains('自检）：失败')));
+    }
+  });
+
+  test('an unobserved probe cannot be promoted by stale result or detail fields', () {
+    final text = probeReport({
+      'v': 1, 'observed': false, 'result': 'success', 'connectionFailure': false,
+      'stage': 'input_send', 'exceptionType': 'SecurityException', 'elapsedMs': 100,
+    });
+    expect(text, contains('未运行或无保留观察'));
+    expect(text, contains('保留连接失败事实：false（不表示当前连接状态）'));
+    expect(text, isNot(contains('自检）：通过')));
+    expect(text, isNot(contains('失败细节')));
+  });
+
+  test('last accepted success and a later connection failure remain separate facts', () {
+    final text = probeReport({
+      'v': 1, 'observed': true, 'result': 'success', 'connectionFailure': true,
+      'stage': 'input_send', 'exceptionType': 'SecurityException', 'elapsedMs': 100,
+    });
+    expect(text, contains('最近接受的后台输入探针事实（不是实时自检）：通过'));
+    expect(text, contains('保留连接失败事实：true（不表示当前连接状态）'));
+    expect(text, isNot(contains('失败细节')));
+  });
+
+  test('known native failure categories survive the actual Markdown entry', () {
+    const stages = ['precondition', 'ui_dispatch', 'presentation_create', 'presentation_configure',
+      'presentation_show', 'view_layout_wait', 'frame_commit_wait', 'target_validate', 'input_send', 'receipt_wait', 'cleanup'];
+    const types = ['none', 'SecurityException', 'IllegalStateException', 'IllegalArgumentException',
+      'InvalidDisplayException', 'BadTokenException', 'TimeoutException', 'InterruptedException', 'OtherException'];
+    for (final stage in stages) {
+      for (final type in types) {
+        final text = probeReport({
+          'v': 1, 'observed': true, 'result': 'failure', 'stage': stage, 'exceptionType': type, 'elapsedMs': 60000,
+        });
+        expect(text, contains('自检）：失败'));
+        expect(text, contains('stage=$stage · type=$type · elapsedMs=60000'));
+      }
+    }
+    expect(probeReport({'v': 1, 'observed': true, 'result': 'failure', 'elapsedMs': 0}), contains('elapsedMs=0'));
+  });
+
+  test('untrusted details and unknown fields never get stringified into the report', () {
+    for (final elapsed in [-1, 60001, 7.0, double.nan, double.infinity, 'PRIVATE_TIME', {'PRIVATE_TIME': 7}]) {
+      final text = probeReport({
+        'v': 1, 'observed': true, 'result': 'failure', 'connectionFailure': 'PRIVATE_CONNECTION',
+        'stage': 'PRIVATE_PAGE', 'exceptionType': 'PRIVATE_ERROR', 'elapsedMs': elapsed,
+        'packageName': 'PRIVATE_PACKAGE', 'message': 'PRIVATE_MESSAGE', 'imageBytes': [80, 81],
+      });
+      expect(text, contains('自检）：失败'));
+      expect(text, isNot(contains('PRIVATE_')));
+      expect(text, isNot(contains('失败细节')));
+      expect(text, isNot(contains('保留连接失败事实')));
+    }
+    final unknown = probeReport({'v': 1, 'observed': true, 'result': 'PRIVATE_RESULT', 'stage': 'input_send'});
+    expect(unknown, contains('自检）：结果未知'));
+    expect(unknown, isNot(contains('PRIVATE_')));
+    expect(unknown, isNot(contains('stage=')));
+  });
+
+  test('the probe addition still obeys the whole report UTF-8 byte budget', () {
+    final text = probeReport({
+      'v': 1, 'observed': true, 'result': 'failure', 'stage': 'presentation_show',
+      'exceptionType': 'IllegalStateException', 'elapsedMs': 17,
+    }, engineLog: List.generate(8, (_) => '汉' * 1000));
+    expect(text, contains('stage=presentation_show'));
+    expect(text, contains('已截断'));
+    expect(utf8.encode(text).length, lessThanOrEqualTo(diagnosticsMarkdownBytes));
+    expect(utf8.decode(utf8.encode(text)), text);
   });
 }

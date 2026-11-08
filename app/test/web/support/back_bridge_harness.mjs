@@ -14,6 +14,8 @@
 //   layout     'drawer' | 'desktop' | ''      (html[data-dsh-app-layout])
 //   drawer     the app's drawer is open (window.__dshApp)
 //   noPhoneLayout  no window.__dshApp at all
+//   officialDrawer  DSH Web's own sidebar is a drawer over the page (official
+//                   layout, phone widths), open
 //   rightFull  the right panel covers the conversation
 //   page       'conversation' | 'page'      what the main area shows
 //   crumb      the page has a crumb back
@@ -41,6 +43,7 @@ class El {
     this.onClick = null;
   }
   getAttribute(n) { return n in this.attrs ? String(this.attrs[n]) : null; }
+  hasAttribute(n) { return n in this.attrs; }
   getClientRects() { return this.isConnected ? [{}] : []; }
   click() { log.push('click ' + this.name); this.onClick?.(); }
   blur() { log.push('blur ' + this.name); if (document.activeElement === this) document.activeElement = document.body; }
@@ -101,6 +104,11 @@ const app = s.noPhoneLayout
     };
 
 const frame = new El('frame', s.rightFull ? { 'data-rightbar-fullscreen': 'true' } : {});
+// DSH Web as shipped at phone widths: its sidebar slides over the page as a
+// drawer, folded through the toggle in the sidebar's logo row.
+if (s.officialDrawer) frame.attrs['data-sidebar-drawer'] = '';
+const sidebarToggle = new El('sidebarToggle', { tag: 'BUTTON', class: 'x_iconButton' });
+sidebarToggle.onClick = () => { frame.attrs['data-sidebar-collapsed'] = ''; };
 const fold = new El('fold', { tag: 'BUTTON' });
 fold.onClick = () => { delete frame.attrs['data-rightbar-fullscreen']; };
 
@@ -142,6 +150,9 @@ document.querySelectorAll = (sel) => {
     return popups.filter((e) => e.isConnected);
   }
   if (sel === '[data-slot="rightbar"] button[data-sidebar-right-toggle]') return s.rightFull ? [fold] : [];
+  if (sel === '[data-slot="sidebar"] [class*="_logoRow"] button[class*="_iconButton"]') {
+    return s.officialDrawer && !frame.hasAttribute('data-sidebar-collapsed') ? [sidebarToggle] : [];
+  }
   throw new Error('document.querySelectorAll: ' + sel);
 };
 document.querySelector = (sel) => {
@@ -182,6 +193,7 @@ process.stdout.write(JSON.stringify({
   open: layers.filter((e) => e.isConnected).map((e) => e.name),
   popups: popups.filter((e) => e.isConnected).map((e) => e.name),
   drawer: drawerOpen,
+  officialDrawer: frame.hasAttribute('data-sidebar-drawer') && !frame.hasAttribute('data-sidebar-collapsed'),
   rightFull: frame.attrs['data-rightbar-fullscreen'] === 'true',
   main: mainChild.name,
 }));

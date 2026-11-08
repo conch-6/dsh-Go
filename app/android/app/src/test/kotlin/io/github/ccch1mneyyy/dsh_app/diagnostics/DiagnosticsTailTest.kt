@@ -30,6 +30,32 @@ class DiagnosticsTailTest {
     }
 
     @Test
+    fun defaultBudgetKeepsTheCompleteFirstLineAtTheBoundary() {
+        val line = "x".repeat(1023)
+        val file = dir.newFile("dsh.log").apply {
+            writeText("older\n" + (line + "\n").repeat(512))
+        }
+        val lines = DiagnosticsPlugin.tail(file, 512 * 1024)
+        assertEquals(512, lines.size)
+        assertEquals(line, lines.first())
+        assertEquals(line, lines.last())
+    }
+
+    @Test
+    fun utf8LineStartIsKeptButACutCodePointIsDropped() {
+        val file = dir.newFile("dsh.log").apply { writeText("older\n第二行\nthird\n") }
+        // Three Chinese code points (9 bytes), LF, and "third" + LF make 16 bytes.
+        assertEquals(listOf("第二行", "third"), DiagnosticsPlugin.tail(file, 16))
+        assertEquals(listOf("third"), DiagnosticsPlugin.tail(file, 15))
+    }
+
+    @Test
+    fun completeEmptyLineAtTheBoundaryIsKept() {
+        val file = dir.newFile("dsh.log").apply { writeText("older\n\nnext\n") }
+        assertEquals(listOf("", "next"), DiagnosticsPlugin.tail(file, 6))
+    }
+
+    @Test
     fun multiByteTextSurvives() {
         val file = dir.newFile("dsh.log").apply { writeText("[dsh-app] 已启动\n引擎就绪\n") }
         assertEquals(listOf("[dsh-app] 已启动", "引擎就绪"), DiagnosticsPlugin.tail(file, 4096))

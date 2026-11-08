@@ -38,7 +38,7 @@ data class EnginePhonePrompt(
 
 enum class PromptKind { APPROVAL, REVIEW, NATIVE_CONFIRM, HANDOFF }
 enum class PromptSurface(val wire: String) { NONE("none"), OVERLAY("overlay"), NOTIFICATION("notification"), APP("app") }
-enum class PromptChoice { ALLOW_ONCE, ALLOW_APP, ALLOW_TASK, REJECT, OPEN, LATER, STOP, CONTINUE }
+enum class PromptChoice { ALLOW_ONCE, ALLOW_APP, ALLOW_TASK, ALLOW_VISUAL, REJECT, OPEN, LATER, STOP, CONTINUE }
 
 /** Main-thread presenter. A handle only removes this presentation, never a successor. */
 interface PhonePromptPresenter {
@@ -47,7 +47,7 @@ interface PhonePromptPresenter {
 enum class PromptOutcome(val wire: String) {
     ALLOW_ONCE("allowed-once"), REJECT("rejected"), OPEN("open"), DISMISSED("dismissed"),
     TIMEOUT("timeout"), STOPPED("stopped"), UNAVAILABLE("unavailable"),
-    ALLOW_APP("allowed-app"), ALLOW_TASK("allowed-task"), CONTINUE("continue"),
+    ALLOW_VISUAL("allowed-visual"), ALLOW_APP("allowed-app"), ALLOW_TASK("allowed-task"), CONTINUE("continue"),
 }
 
 data class PromptContent(
@@ -65,11 +65,21 @@ data class PromptContent(
         PromptKind.REVIEW -> listOf(PromptChoice.OPEN, PromptChoice.LATER)
         PromptKind.HANDOFF -> listOf(PromptChoice.CONTINUE, PromptChoice.STOP)
         PromptKind.NATIVE_CONFIRM -> buildList {
-            if (native?.offerTaskWaiver == true) add(PromptChoice.ALLOW_TASK)
+            if (native?.visualScope != null) add(PromptChoice.ALLOW_VISUAL)
+            else if (native?.offerTaskWaiver == true) add(PromptChoice.ALLOW_TASK)
             else if (native?.firstInApp == true) add(PromptChoice.ALLOW_APP)
             add(PromptChoice.ALLOW_ONCE)
             add(PromptChoice.REJECT)
             add(PromptChoice.STOP)
+        }
+    }
+
+    /** Three notification slots retain the one-shot choice; wider visual permission stays in the full card. */
+    val notificationChoices: List<PromptChoice> get() = choices.let { all ->
+        when {
+            PromptChoice.ALLOW_VISUAL in all -> all.filterNot { it == PromptChoice.ALLOW_VISUAL }
+            all.size > 3 -> all.filterNot { it == PromptChoice.ALLOW_ONCE }
+            else -> all
         }
     }
 }
@@ -199,6 +209,7 @@ class PromptTicket internal constructor(
             PromptChoice.ALLOW_ONCE -> PromptOutcome.ALLOW_ONCE
             PromptChoice.ALLOW_APP -> PromptOutcome.ALLOW_APP
             PromptChoice.ALLOW_TASK -> PromptOutcome.ALLOW_TASK
+            PromptChoice.ALLOW_VISUAL -> PromptOutcome.ALLOW_VISUAL
             PromptChoice.REJECT -> PromptOutcome.REJECT
             PromptChoice.OPEN -> PromptOutcome.OPEN
             PromptChoice.LATER -> PromptOutcome.DISMISSED
@@ -259,7 +270,7 @@ class PromptTicket internal constructor(
         check()
         val r = synchronized(lock) { result } ?: return PromptResult(PromptOutcome.UNAVAILABLE, surface, "unavailable")
         val authorizesContinuation = when (r.outcome) {
-            PromptOutcome.ALLOW_ONCE, PromptOutcome.ALLOW_APP, PromptOutcome.ALLOW_TASK,
+            PromptOutcome.ALLOW_ONCE, PromptOutcome.ALLOW_APP, PromptOutcome.ALLOW_TASK, PromptOutcome.ALLOW_VISUAL,
             PromptOutcome.OPEN, PromptOutcome.CONTINUE -> true
             else -> false
         }
@@ -312,10 +323,17 @@ class MainThreadCall<T>(private val block: () -> T) {
     }
 }
 
-/** Input facts are supplied by Android; policies stay testable without pretending to inject a real touch. */
+/**
+ * Input facts are supplied by Android; policies stay testable without pretending to inject a real touch.
+ *
+ * The card is there so the assistant can't approve its own action, and every way the assistant reaches
+ * the screen is ours: gestures and node actions mark [io.github.ccch1mneyyy.dsh_app.phone.a11y.InjectGuard]
+ * (gestures also make the overlay untouchable), and privileged input lands on our own virtual display.
+ * A real finger on some ROMs (OPPO, realme: #608, #296) arrives with the same device id and flags as a
+ * simulated stroke, so those fields decide nothing here. adb and other apps' accessibility services are
+ * outside this guard; they already control the whole phone.
+ */
 object PromptInputPolicy {
-    fun allows(now: Long, armedAt: Long, live: Boolean, injecting: Boolean, obscured: Boolean,
-               virtualDevice: Boolean, suspiciousStroke: Boolean, touchExploration: Boolean): Boolean =
-        live && now >= armedAt && !injecting && !obscured &&
-            !(virtualDevice && suspiciousStroke && !touchExploration)
+    fun allows(now: Long, armedAt: Long, live: Boolean, injecting: Boolean, obscured: Boolean): Boolean =
+        live && now >= armedAt && !injecting && !obscured
 }

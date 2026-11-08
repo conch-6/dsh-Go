@@ -10,6 +10,8 @@ internal class ScreenObservation(
     val incomplete: Boolean,
     val elements: List<String>,
 ) {
+    // A masked screenshot does not authorize gestures on a password/code page, even after approval.
+    val hasSecretFields = secretFieldBounds(windows).isNotEmpty()
     private data class Window(val id: Int, val kind: WindowKind, val packageName: String?, val title: String?, val bounds: Box)
     private val windows = windows.map { Window(it.id, it.kind, it.packageName, it.title, it.bounds) }
 
@@ -38,6 +40,7 @@ internal class ScreenObservation(
     /** A canvas may have no numbered elements, but still has a usable, stable image viewport. */
     fun reusableCoordinates(previous: ScreenObservation): Boolean =
         !unavailable && !previous.unavailable && !incomplete && !previous.incomplete &&
+            !hasSecretFields && !previous.hasSecretFields &&
             keyboardShown != null && keyboardShown == previous.keyboardShown &&
             sameContext(previous) && elements == previous.elements
 }

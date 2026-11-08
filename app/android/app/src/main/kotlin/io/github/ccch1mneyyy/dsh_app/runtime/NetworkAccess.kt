@@ -11,6 +11,9 @@ package io.github.ccch1mneyyy.dsh_app.runtime
  * vendor's battery / background-network policy.
  */
 internal class NetworkAccess {
+    class Watch
+
+    private var activeWatch: Watch? = null
     private var blocked = false
     private var since: Long? = null
 
@@ -21,10 +24,20 @@ internal class NetworkAccess {
     val blockedAt: Long?
         @Synchronized get() = since
 
+    /** Identity is fixed before registration, including callbacks arriving during registration. */
+    @Synchronized
+    fun startWatch(): Watch = Watch().also {
+        activeWatch = it
+        blocked = false
+    }
+
+    @Synchronized
+    fun isCurrent(watch: Watch): Boolean = activeWatch === watch
+
     /** One `onBlockedStatusChanged`; the line to log when it changes what was known, else null. */
     @Synchronized
-    fun onBlocked(nowBlocked: Boolean, inForeground: Boolean, now: Long = System.currentTimeMillis()): String? {
-        if (nowBlocked == blocked) return null
+    fun onBlocked(watch: Watch, nowBlocked: Boolean, inForeground: Boolean, now: Long = System.currentTimeMillis()): String? {
+        if (activeWatch !== watch || nowBlocked == blocked) return null
         blocked = nowBlocked
         if (nowBlocked) since = now
         val where = if (inForeground) "app in foreground" else "app in background"
@@ -37,7 +50,9 @@ internal class NetworkAccess {
 
     /** The service stopped watching: nothing is known any more (no log line). */
     @Synchronized
-    fun reset() {
+    fun reset(watch: Watch) {
+        if (activeWatch !== watch) return
+        activeWatch = null
         blocked = false
     }
 

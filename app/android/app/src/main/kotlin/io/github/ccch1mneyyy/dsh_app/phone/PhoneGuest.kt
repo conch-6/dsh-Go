@@ -35,6 +35,9 @@ object PhoneGuest {
     /** DSH's per-server MCP timeout; 11 min only for `handoff`, everything else has its own native budget. */
     const val TOOL_CALL_TIMEOUT_MS = 660_000L
 
+    /** Recorded in the installed runtime's manifest only after the matching MCP schema is patched. */
+    internal const val CALLER_PATCH = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-phone-caller.diff"
+
     data class Endpoint(val abstractName: String?, val tcpPort: Int?, val token: String)
 
     /**
@@ -92,7 +95,13 @@ object PhoneGuest {
     fun writeFiles(rootfs: File) {
         val dir = realDir(guestFile(rootfs, GUEST_DIR), ownerOnly = false)
         writeAtomic(File(dir, "relay.cjs"), RELAY_JS, ownerOnly = false)
-        writeAtomic(File(dir, "phone.patch.yml"), PATCH_YAML, ownerOnly = false)
+        writeAtomic(File(dir, "phone.patch.yml"), patchYaml(rootfs), ownerOnly = false)
+    }
+
+    internal fun patchYaml(rootfs: File): String {
+        val info = runCatching { Json.parse(guestFile(rootfs, "/etc/dsh-app/runtime.json").readText()) as? Map<*, *> }.getOrNull()
+        val supported = (info?.get("dshPatches") as? List<*>)?.contains(CALLER_PATCH) == true
+        return PATCH_YAML + if (supported) "        dshGoPhoneCaller: true\n" else ""
     }
 
     /** Writes this launch's socket name and token, owner-only. */

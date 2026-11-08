@@ -16,6 +16,7 @@ import '../../forum/render/cooked.dart';
 import '../../share_code/share_link.dart';
 import '../../share_code/share_models.dart';
 import '../chat/render/markdown_body.dart';
+import '../chat/widgets/image_gallery.dart';
 import '../common/display_image.dart';
 import '../common/expand_reveal.dart';
 import '../common/pressable.dart';
@@ -90,13 +91,15 @@ class ForumBlocks extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final images = blocks.whereType<CookedImage>().toList(growable: false);
+    var imageIndex = 0;
     final children = <Widget>[
       for (final block in blocks)
         switch (block) {
           CookedMarkdown(:final markdown) => MarkdownBody(text: markdown, secondary: secondary),
           CookedQuote() => ForumQuoteBlock(quote: block, onOpenTopic: onOpenTopic),
           CookedOnebox() => ForumOneboxCard(onebox: block),
-          CookedImage() => ForumPostImage(image: block),
+          CookedImage() => ForumPostImage(image: block, gallery: images, initial: imageIndex++),
           CookedShare(:final link, :final label) => ForumShareCard(link: link, label: label),
           CookedDetails() => _DetailsBlock(details: block, onOpenTopic: onOpenTopic),
           CookedEmbed() => _EmbedRow(embed: block, fallback: postUrl),
@@ -262,9 +265,11 @@ class ForumOneboxCard extends StatelessWidget {
 // ── Pictures ─────────────────────────────────────────────────────────────────
 
 class ForumPostImage extends StatelessWidget {
-  const ForumPostImage({super.key, required this.image});
+  const ForumPostImage({super.key, required this.image, this.gallery, this.initial = 0});
 
   final CookedImage image;
+  final List<CookedImage>? gallery;
+  final int initial;
 
   /// Tallest a picture is drawn in a post; a tap shows it whole.
   static const maxHeight = 420.0;
@@ -289,7 +294,8 @@ class ForumPostImage extends StatelessWidget {
             image: true,
             label: image.alt.isEmpty ? l10n.remoteForumImage : image.alt,
             child: Pressable(
-              onTap: () => Navigator.of(context).push(ForumImageViewer.route(image)),
+              onTap: () =>
+                  Navigator.of(context).push(ForumImageViewer.route(image, gallery: gallery, initial: initial)),
               child: ClipRRect(
                 borderRadius: AppShape.radiusMd,
                 child: SizedBox(
@@ -326,14 +332,28 @@ class ForumPostImage extends StatelessWidget {
   }
 }
 
-/// A picture on black, pinch to zoom.
-class ForumImageViewer extends StatelessWidget {
-  const ForumImageViewer({super.key, required this.image});
+/// The direct pictures in one post body (quotes and details stay separate).
+class ForumImageViewer extends StatefulWidget {
+  const ForumImageViewer({super.key, required this.image, this.gallery, this.initial = 0});
 
   final CookedImage image;
+  final List<CookedImage>? gallery;
+  final int initial;
 
-  static Route<void> route(CookedImage image) =>
-      MaterialPageRoute(fullscreenDialog: true, builder: (_) => ForumImageViewer(image: image));
+  static Route<void> route(CookedImage image, {List<CookedImage>? gallery, int initial = 0}) => MaterialPageRoute(
+    fullscreenDialog: true,
+    builder: (_) => ForumImageViewer(image: image, gallery: gallery, initial: initial),
+  );
+
+  @override
+  State<ForumImageViewer> createState() => _ForumImageViewerState();
+}
+
+class _ForumImageViewerState extends State<ForumImageViewer> {
+  late final _images = List<CookedImage>.unmodifiable(
+    widget.gallery?.isNotEmpty == true ? widget.gallery! : [widget.image],
+  );
+  late int _index = widget.initial.clamp(0, _images.length - 1);
 
   @override
   Widget build(BuildContext context) {
@@ -344,25 +364,40 @@ class ForumImageViewer extends StatelessWidget {
       body: Stack(
         children: [
           Positioned.fill(
-            child: InteractiveViewer(
-              maxScale: 5,
-              child: Center(
-                child: Image.network(
-                  (image.fullSrc ?? image.src).toString(),
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => const Icon(AppIcons.imageBroken, color: Colors.white54, size: 40),
-                ),
-              ),
+            child: ImagePager(
+              initialPage: _index,
+              itemCount: _images.length,
+              onPageChanged: (index) => setState(() => _index = index),
+              itemBuilder: (context, index) {
+                final image = _images[index];
+                return Center(
+                  child: Image.network(
+                    (image.fullSrc ?? image.src).toString(),
+                    fit: BoxFit.contain,
+                    semanticLabel: image.alt.isEmpty ? l10n.remoteForumImage : image.alt,
+                    errorBuilder: (_, _, _) => const Icon(AppIcons.imageBroken, color: Colors.white54, size: 40),
+                  ),
+                );
+              },
             ),
           ),
           Positioned(
             top: padding.top + 6,
-            left: 12,
-            child: IconButton(
-              tooltip: l10n.commonClose,
-              onPressed: () => Navigator.of(context).maybePop(),
-              style: IconButton.styleFrom(backgroundColor: Colors.white.withValues(alpha: 0.14)),
-              icon: const Icon(AppIcons.close, color: Colors.white),
+            left: 12 + padding.left,
+            right: 12 + padding.right,
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: l10n.commonClose,
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  style: IconButton.styleFrom(backgroundColor: Colors.white.withValues(alpha: 0.14)),
+                  icon: const Icon(AppIcons.close, color: Colors.white),
+                ),
+                if (_images.length > 1) ...[
+                  const SizedBox(width: 12),
+                  Text(l10n.mediaPageOf(_index + 1, _images.length), style: const TextStyle(color: Colors.white)),
+                ],
+              ],
             ),
           ),
         ],

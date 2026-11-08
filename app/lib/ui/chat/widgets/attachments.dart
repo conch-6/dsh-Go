@@ -10,6 +10,7 @@ import '../../shell/page_frame.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 import 'image_actions.dart';
+import 'image_gallery.dart';
 import 'plus_panel.dart';
 import 'stream_motion.dart';
 
@@ -79,6 +80,8 @@ class ComposerTray extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final images = items.where((a) => a.isImage).toList();
+    final gallery = _draftGallery(images);
     return SizedBox(
       height: height,
       child: ListView.separated(
@@ -93,7 +96,7 @@ class ComposerTray extends StatelessWidget {
                   size: const Size.square(56),
                   heroTag: 'draft-${a.id}',
                   image: MemoryImage(a.bytes),
-                  onTap: () => openImageViewer(context, MemoryImage(a.bytes), heroTag: 'draft-${a.id}', name: a.name),
+                  onTap: () => openAttachmentGallery(context, gallery, initialPage: images.indexOf(a)),
                 )
               : FileCard(name: a.name, bytes: a.size, height: 56, tinted: true);
           final label = i < labels.length ? labels[i] : null;
@@ -114,6 +117,11 @@ class ComposerTray extends StatelessWidget {
     );
   }
 }
+
+List<ViewerImage> _draftGallery(Iterable<DraftAttachment> images) => [
+  for (final image in images)
+    ViewerImage(name: image.name, image: MemoryImage(image.bytes), heroTag: 'draft-${image.id}'),
+];
 
 /// How far the remove badge sticks out past a tray tile's corner.
 const _overhang = 8.0;
@@ -185,19 +193,20 @@ class SentAttachments extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final imageCount = drafts.where((d) => d.isImage).length + images.length;
+    final draftImages = drafts.where((d) => d.isImage).toList();
+    final gallery = _draftGallery(draftImages);
     // One image shows large at its own aspect; several become a grid of squares.
-    final single = imageCount == 1;
+    final single = draftImages.length + images.length == 1;
     final children = <Widget>[
-      for (final d in drafts)
-        if (d.isImage)
-          _Thumb(
-            size: single ? null : const Size.square(88),
-            heroTag: 'draft-${d.id}',
-            image: MemoryImage(d.bytes),
-            onTap: () => openImageViewer(context, MemoryImage(d.bytes), heroTag: 'draft-${d.id}', name: d.name),
-          ),
-      for (final img in images) _SessionImage(sessionId: sessionId!, attachment: img, single: single),
+      for (var i = 0; i < draftImages.length; i++)
+        _Thumb(
+          size: single ? null : const Size.square(88),
+          heroTag: 'draft-${draftImages[i].id}',
+          image: MemoryImage(draftImages[i].bytes),
+          onTap: () => openAttachmentGallery(context, gallery, initialPage: i),
+        ),
+      for (var i = 0; i < images.length; i++)
+        _SessionImage(sessionId: sessionId!, images: images, index: i, single: single),
       for (final d in drafts)
         if (!d.isImage) FileCard(name: d.name, bytes: d.size),
       for (final f in files) FileCard(name: f.name ?? l10n.chatFile, bytes: f.bytes),
@@ -269,31 +278,57 @@ class _Thumb extends StatelessWidget {
 }
 
 class _SessionImage extends ConsumerWidget {
-  const _SessionImage({required this.sessionId, required this.attachment, required this.single});
+  const _SessionImage({required this.sessionId, required this.images, required this.index, required this.single});
 
   final String sessionId;
-  final ImageAttachment attachment;
+  final List<ImageAttachment> images;
+  final int index;
   final bool single;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final attachment = images[index];
     final bytes = ref.watch(sessionImageProvider((sessionId, attachment)));
     final w = attachment.width, h = attachment.height;
     final aspect = (w != null && h != null && h > 0) ? w / h : 1.0;
     final box = single ? null : const Size.square(88);
     final tag = 'img-$sessionId-${attachment.attachmentId}';
+    void open() {
+      // The bubble may unmount while the viewer is open. Its lazy pages must
+      // read through the captured container, never a disposed WidgetRef.
+      final container = ProviderScope.containerOf(context, listen: false);
+      final gallery = [
+        for (final image in images)
+          ViewerImage.lazy(
+            name: image.name ?? '',
+            heroTag: 'img-$sessionId-${image.attachmentId}',
+            load: () async =>
+                MemoryImage(await container.read(sessionImageProvider((sessionId, image)).future)),
+          ),
+      ];
+      openAttachmentGallery(context, gallery, initialPage: index);
+    }
+
     return switch (bytes) {
       AsyncData(:final value) => _Thumb(
         size: box,
         aspect: aspect,
         heroTag: tag,
         image: MemoryImage(value),
-        onTap: () => openImageViewer(context, MemoryImage(value), heroTag: tag, name: attachment.name),
+        onTap: open,
         onLongPress: () =>
             showImageActions(context, image: MemoryImage(value), load: () async => value, name: attachment.name),
       ),
-      AsyncError() => _ImagePlaceholder(size: box, aspect: aspect, failed: true),
-      _ => _ImagePlaceholder(size: box, aspect: aspect),
+      _ => Semantics(
+        image: true,
+        button: true,
+        label: context.l10n.chatImage,
+        child: GestureDetector(
+          onTap: open,
+          behavior: HitTestBehavior.opaque,
+          child: _ImagePlaceholder(size: box, aspect: aspect, failed: bytes.hasError),
+        ),
+      ),
     };
   }
 }
@@ -422,10 +457,13 @@ class FileCard extends StatelessWidget {
   };
 }
 
-/// Full-screen look at one image: pinch to zoom, tap or swipe away to close;
-/// 「保存到相册」 top right, mirroring the close key; long-press for the
-/// picture's menu. [name] is what the gallery calls the saved copy.
-Future<void> openImageViewer(BuildContext context, ImageProvider image, {required Object heroTag, String? name}) {
+/// Backwards-compatible entry point for a single full-resolution picture.
+Future<void> openImageViewer(BuildContext context, ImageProvider image, {required Object heroTag, String? name}) =>
+    openAttachmentGallery(context, [ViewerImage(name: name ?? '', image: image, heroTag: heroTag)]);
+
+/// Pictures of one draft/message, including stored pictures not loaded yet.
+Future<void> openAttachmentGallery(BuildContext context, List<ViewerImage> images, {int initialPage = 0}) {
+  if (images.isEmpty) return Future.value();
   return Navigator.of(context).push(
     PageRouteBuilder<void>(
       opaque: false,
@@ -434,68 +472,108 @@ Future<void> openImageViewer(BuildContext context, ImageProvider image, {require
       reverseTransitionDuration: AppMotion.of(context, AppMotion.quick),
       pageBuilder: (context, animation, _) => FadeTransition(
         opacity: animation,
-        child: _ImageViewer(image: image, heroTag: heroTag, name: name),
+        child: _ImageViewer(images: List.unmodifiable(images), initialPage: initialPage.clamp(0, images.length - 1)),
       ),
     ),
   );
 }
 
-class _ImageViewer extends StatelessWidget {
-  const _ImageViewer({required this.image, required this.heroTag, this.name});
+class _ImageViewer extends StatefulWidget {
+  const _ImageViewer({required this.images, required this.initialPage});
 
-  final ImageProvider image;
-  final Object heroTag;
-  final String? name;
+  final List<ViewerImage> images;
+  final int initialPage;
 
-  Future<Uint8List> _bytes() => imageProviderBytes(image);
+  @override
+  State<_ImageViewer> createState() => _ImageViewerState();
+}
+
+class _ImageViewerState extends State<_ImageViewer> {
+  late int _page = widget.initialPage;
+  final _loads = <int, Future<ImageProvider>>{};
+
+  Future<ImageProvider> _image(int index) => _loads.putIfAbsent(index, () async {
+    final item = widget.images[index];
+    return item.image ?? await item.load!();
+  });
+
+  Future<Uint8List> _bytes(int index) async => imageProviderBytes(await _image(index));
+
+  Future<void> _menu(int index) async {
+    final ImageProvider image;
+    try {
+      image = await _image(index);
+    } catch (_) {
+      return; // A failed page keeps its placeholder, without an unhandled error.
+    }
+    if (!mounted || _page != index) return;
+    final name = widget.images[index].name;
+    await showImageActions(context, image: image, load: () => _bytes(index), name: name.isEmpty ? null : name);
+  }
+
+  Widget _placeholder(int index, {bool failed = false}) => Center(
+    child: failed
+        ? Icon(AppIcons.imageBroken, key: ValueKey('attachment-gallery-error-$index'), size: 36, color: Colors.white54)
+        : const CircularProgressIndicator(color: Colors.white70),
+  );
+
+  Widget _picture(BuildContext context, int index) {
+    Widget picture = FutureBuilder<ImageProvider>(
+      future: _image(index),
+      initialData: widget.images[index].image,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) return _placeholder(index, failed: true);
+        final image = snapshot.data;
+        if (image == null) return _placeholder(index);
+        return Center(
+          child: Image(
+            key: ValueKey('attachment-gallery-image-$index'),
+            image: image,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => _placeholder(index, failed: true),
+          ),
+        );
+      },
+    );
+    if (widget.images[index].heroTag case final tag?) {
+      picture = Hero(tag: tag, child: picture);
+    }
+    return picture;
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final padding = MediaQuery.paddingOf(context);
-    // Its own (see-through) Scaffold: a toast shows above the dark veil, not
-    // under it on the page behind.
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle.light.copyWith(
-          statusBarColor: Colors.transparent,
-          systemNavigationBarColor: Colors.transparent,
-        ),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: () => Navigator.of(context).maybePop(),
-                onLongPress: () => showImageActions(context, image: image, load: _bytes, name: name),
-                onVerticalDragEnd: (d) {
-                  if ((d.primaryVelocity ?? 0).abs() > 600) {
-                    Navigator.of(context).maybePop();
-                  }
-                },
-                child: InteractiveViewer(
-                  maxScale: 5,
-                  child: Center(
-                    child: Hero(
-                      tag: heroTag,
-                      child: Image(image: image, fit: BoxFit.contain),
-                    ),
-                  ),
+    final index = _page;
+    final name = widget.images[index].name;
+    // Its own (see-through) Scaffold keeps save notices above the dark veil.
+    return Theme(
+      data: buildDarkTheme(accent: DshSurfaces.of(context).accent, glassBlur: DshSurfaces.of(context).blurEnabled),
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: AnnotatedRegion<SystemUiOverlayStyle>(
+          value: SystemUiOverlayStyle.light.copyWith(
+            statusBarColor: Colors.transparent,
+            systemNavigationBarColor: Colors.transparent,
+          ),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: ImagePager(
+                  itemCount: widget.images.length,
+                  initialPage: widget.initialPage,
+                  itemBuilder: _picture,
+                  onPageChanged: (page) => setState(() => _page = page),
+                  onTap: () => Navigator.of(context).maybePop(),
+                  onLongPress: _menu,
                 ),
               ),
-            ),
-            // Close and save: the same glass key, 12 in from either side.
-            Positioned(
-              top: padding.top + 6,
-              left: 12,
-              right: 12,
-              child: Theme(
-                data: buildDarkTheme(
-                  accent: DshSurfaces.of(context).accent,
-                  glassBlur: DshSurfaces.of(context).blurEnabled,
-                ),
+              Positioned(
+                top: padding.top + 6,
+                left: 12,
+                right: 12,
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     GlassIconButton(
                       icon: AppIcons.close,
@@ -503,12 +581,39 @@ class _ImageViewer extends StatelessWidget {
                       grouped: false,
                       onPressed: () => Navigator.of(context).maybePop(),
                     ),
-                    GallerySaveButton(load: _bytes, name: name, grouped: false),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (widget.images.length > 1)
+                            Text(
+                              '${index + 1} / ${widget.images.length}',
+                              key: const ValueKey('attachment-gallery-page'),
+                              style: const TextStyle(color: Colors.white, fontSize: 14),
+                            ),
+                          if (name.isNotEmpty)
+                            Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    GallerySaveButton(
+                      key: ValueKey(index),
+                      load: () => _bytes(index),
+                      name: name.isEmpty ? null : name,
+                      grouped: false,
+                    ),
                   ],
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

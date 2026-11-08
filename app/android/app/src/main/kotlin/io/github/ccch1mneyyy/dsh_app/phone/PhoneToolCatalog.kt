@@ -5,8 +5,8 @@ package io.github.ccch1mneyyy.dsh_app.phone
  *
  * Never make this depend on permission state: names, descriptions and schemas enter every
  * request, and any change invalidates DeepSeek's KV cache from the first changed token.
- * A call that can't run right now returns an actionable explanation instead. The JVM test pins
- * a hash of [listJson]; change it only on purpose.
+ * A call that can't run right now returns an actionable explanation instead. Tests cover the
+ * fixed schema served through MCP and its actual Core parsing; change it only on purpose.
  */
 object PhoneToolCatalog {
     const val APPS = "apps"
@@ -65,7 +65,7 @@ object PhoneToolCatalog {
         Tool(
             OPEN,
             // l10n:keep agent tool catalog
-            "打开应用或链接（app 或 url 二选一）。background:true 在后台屏打开（需用户开通不打扰模式）；无障碍开着时返回新屏幕。",
+            "尝试打开应用或链接（app 或 url 二选一）。background:true 仅用于在后台屏打开应用（需用户开通不打扰模式）；可读取时返回新屏幕。启动回话不表示目标业务已经完成。",
             linkedMapOf(
                 // l10n:keep agent tool catalog
                 "app" to str("包名或应用名"),
@@ -79,7 +79,7 @@ object PhoneToolCatalog {
         Tool(
             INTENT,
             // l10n:keep agent tool catalog
-            "用系统意图办事（最后一步用户在对方界面确认），能办就别点界面。字段按 kind：" +
+            "用系统意图把事务交给处理应用，能办就别点界面；后续界面和确认由该应用决定，启动回话不证明事务完成。字段按 kind：" +
                 // l10n:keep agent tool catalog
                 "alarm(hour,minute,days?,message?)、timer(seconds,message?)、calendar(title,begin,end?,all_day?,location?,description?)、" +
                 // l10n:keep agent tool catalog
@@ -153,12 +153,12 @@ object PhoneToolCatalog {
         Tool(
             SCREEN,
             // l10n:keep agent tool catalog
-            "读当前屏幕：每行一个元素，[编号] 只在本屏有效。detail:true 附坐标；image:true 附标号截图；background:true 读后台屏。",
+            "读当前屏幕：每行一个元素，[编号] 只在本屏有效。detail:true 附坐标，结果可能截断；image:true 请求截图，安全或能力限制时可能不附图（主屏可带编号，后台图不带编号）；background:true 读后台屏。元素少或为空不表示页面安全；本机文字识别不可用时按回话提示处理，无法核对目标就 handoff。",
             linkedMapOf(
                 // l10n:keep agent tool catalog
-                "detail" to bool("附上元素坐标"),
+                "detail" to bool("附上已返回元素的坐标，不保证完整页面"),
                 // l10n:keep agent tool catalog
-                "image" to bool("附带标号截图"),
+                "image" to bool("请求附带截图；可能因安全或能力限制省略"),
                 // l10n:keep agent tool catalog
                 "background" to bool("读后台屏（不打扰模式）"),
             ),
@@ -226,14 +226,22 @@ object PhoneToolCatalog {
         Tool(
             TAP_XY,
             // l10n:keep agent tool catalog
-            "按标号截图的像素坐标点击，只在元素里找不到目标时用；每次都要用户确认。",
+            "按本任务最近一次实际返回截图的像素坐标操作，只在元素里找不到目标时用。action 默认为 tap；long 长按；swipe 从 (x,y) 滑到 (x2,y2)。主屏用 s 号、后台屏用 b 号；截图超过 30 秒或上下文核对失败要重读。每张图只供一次坐标手势；需通过安全检查与所需用户确认，长按和滑动仍逐次确认。结果可报告画面变化，但不表示目标业务成功；结果未知或未变化先读屏，不自动重试。",
             linkedMapOf(
                 // l10n:keep agent tool catalog
-                "observation" to str("那张截图的屏幕号"),
+                "observation" to str("本任务最近一次实际返回截图的屏幕号（主屏 s 号或后台屏 b 号）"),
                 // l10n:keep agent tool catalog
                 "x" to int("横坐标（像素，从 0 开始）"),
                 // l10n:keep agent tool catalog
                 "y" to int("纵坐标（像素，从 0 开始）"),
+                // l10n:keep agent tool catalog
+                "action" to enum(listOf("tap", "long", "swipe"), "操作类型，省略为 tap；long 为长按，swipe 为滑动"),
+                // l10n:keep agent tool catalog
+                "x2" to int("仅 swipe：终点横坐标（原截图像素，非负整数）"),
+                // l10n:keep agent tool catalog
+                "y2" to int("仅 swipe：终点纵坐标（原截图像素，非负整数）"),
+                // l10n:keep agent tool catalog
+                "duration_ms" to int("仅 swipe：时长 100–2000 毫秒，省略为 400"),
             ),
             listOf("observation", "x", "y"),
         ),

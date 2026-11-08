@@ -94,6 +94,22 @@ object LiveActivity {
         refresh(ctx)
     }
 
+    /**
+     * A brought pet's files changed (imported again, removed): its cached portrait is stale though
+     * its id isn't. Drawn again from the files, and a post showing it is redone. Any thread.
+     */
+    fun forgetPack(context: Context, pack: String) {
+        val ctx = attach(context)
+        handler.post {
+            if (portraitKey?.startsWith("$pack/") != true) return@post
+            portraitKey = null
+            portrait = null
+            // The post carries the old picture; the same content would not be posted again.
+            shown = null
+            refresh(ctx)
+        }
+    }
+
     /** Something it shows changed: post the latest within [MIN_GAP_MS] of the last post. Any thread. */
     fun refresh(context: Context) {
         attach(context)
@@ -175,6 +191,7 @@ object LiveActivity {
             sinceMs = phoneSince,
             packId = packId,
             mood = "working",
+            phoneTaskId = task.id,
         )
     }
 
@@ -215,9 +232,9 @@ object LiveActivity {
         } else {
             builder.setStyle(Notification.BigTextStyle().bigText(c.text))
         }
-        if (c.kind == LiveContent.Kind.PHONE) {
+        if (c.kind == LiveContent.Kind.PHONE && c.phoneTaskId != null) {
             val stop = PendingIntent.getService(
-                ctx, ID, Intent(ctx, DshService::class.java).setAction(DshService.ACTION_PHONE_STOP),
+                ctx, ID, DshService.phoneStopIntent(ctx, c.phoneTaskId),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             builder.addAction(Notification.Action.Builder(null, AppStrings.get(ctx, R.string.service_stop_phone), stop).build())

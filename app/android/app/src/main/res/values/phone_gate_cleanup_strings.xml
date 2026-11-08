@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_gate_retest">The previous settings probe needs a fresh check. Choose the channel again explicitly after cleanup.</string>
+    <string name="background_gate_cleanup_pending">The previous probe cleanup is not confirmed. New background resources remain blocked; retry cleanup of the original probe only.</string>
+    <string name="background_gate_peer_unsupported">This channel does not provide the required strict probe and cleanup receipts. Update or reconnect it explicitly; no legacy probe was sent.</string>
+    <string name="background_gate_cleanup_stale">This cleanup request no longer identifies the current pending probe. Refresh the status.</string>
+    <string name="background_gate_checking">Preparing or checking the selected channel. New background resources wait until this check and its cleanup finish.</string>
+</resources>

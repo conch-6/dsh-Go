@@ -34,6 +34,7 @@ import 'render/markdown_image.dart' show MarkdownImageScope;
 import 'widgets/artifact_card.dart' show ArtifactAction, showArtifactMenu;
 import 'widgets/change_card.dart' show copyPath;
 import 'widgets/image_actions.dart' show GallerySaveButton;
+import 'widgets/image_gallery.dart' show ImagePager, ViewerImage, ZoomableImage;
 import '../common/brief_notice.dart';
 
 /// Lines per text page, and the most a preview holds.
@@ -230,13 +231,30 @@ enum _Fix { none, retry, open }
 /// 表格固定表头。右上角:分享和更多操作(打开、存到「下载」、复制路径)。
 /// 文件变了自动刷新。
 class ArtifactPreviewPage extends ConsumerStatefulWidget {
-  const ArtifactPreviewPage({super.key, required this.sessionId, required this.artifact});
+  const ArtifactPreviewPage({
+    super.key,
+    required this.sessionId,
+    required this.artifact,
+    this.gallery,
+    this.initial = 0,
+  }) : assert(gallery == null || gallery.length > 0),
+       assert(initial >= 0),
+       assert(gallery == null ? initial == 0 : initial < gallery.length);
 
   final String sessionId;
   final Artifact artifact;
 
-  static Route<void> route({required String sessionId, required Artifact artifact}) => MaterialPageRoute<void>(
-    builder: (_) => ArtifactPreviewPage(sessionId: sessionId, artifact: artifact),
+  /// Bitmap workspace files only. File actions and the watch follow the current page.
+  final List<Artifact>? gallery;
+  final int initial;
+
+  static Route<void> route({
+    required String sessionId,
+    required Artifact artifact,
+    List<Artifact>? gallery,
+    int initial = 0,
+  }) => MaterialPageRoute<void>(
+    builder: (_) => ArtifactPreviewPage(sessionId: sessionId, artifact: artifact, gallery: gallery, initial: initial),
   );
 
   @override
@@ -261,8 +279,11 @@ class _ArtifactPreviewPageState extends ConsumerState<ArtifactPreviewPage> {
   StreamSubscription<DshWorkspaceWatchFrame>? _watch;
   Timer? _debounce;
   bool _ready = false;
+  int _watchEpoch = 0;
+  late int _index = widget.initial;
 
-  Artifact get _artifact => widget.artifact;
+  List<Artifact> get _images => widget.gallery ?? [widget.artifact];
+  Artifact get _artifact => _images[_index];
 
   @override
   void initState() {
@@ -272,19 +293,43 @@ class _ArtifactPreviewPageState extends ConsumerState<ArtifactPreviewPage> {
 
   @override
   void dispose() {
-    _debounce?.cancel();
-    unawaited(_watch?.cancel());
+    _stopFollowing();
     super.dispose();
+  }
+
+  void _stopFollowing() {
+    _watchEpoch++;
+    _debounce?.cancel();
+    _debounce = null;
+    unawaited(_watch?.cancel());
+    _watch = null;
+    _ready = false;
+  }
+
+  void _select(int index) {
+    if (index == _index) return;
+    _stopFollowing();
+    setState(() {
+      _index = index;
+      _revision = 0;
+      _gone = false;
+      _asText = false;
+      _asPdf = false;
+      _busy = false;
+    });
+    _follow();
   }
 
   /// Watches the file: a new version reloads, deletion says so.
   void _follow() {
+    final epoch = _watchEpoch;
     final source = ref.read(workspaceSourceProvider(widget.sessionId));
     if (source == null) return;
     _watch = source
         .watch(_artifact.path)
         .listen(
           (frame) {
+            if (!mounted || epoch != _watchEpoch) return;
             switch (frame) {
               case DshWorkspaceWatchReady():
                 // The first one only says the watch is on; later ones follow
@@ -318,14 +363,16 @@ class _ArtifactPreviewPageState extends ConsumerState<ArtifactPreviewPage> {
     if (_busy) return;
     if (action == ArtifactAction.preview) return;
     setState(() => _busy = true);
+    final epoch = _watchEpoch;
     try {
       await runArtifactAction(context, ref, sessionId: widget.sessionId, artifact: _artifact, action: action);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && epoch == _watchEpoch) setState(() => _busy = false);
     }
   }
 
   Future<void> _menu() async {
+    final epoch = _watchEpoch;
     final files = ref.read(artifactFilesProvider);
     final action = await showArtifactMenu(
       context,
@@ -333,7 +380,7 @@ class _ArtifactPreviewPageState extends ConsumerState<ArtifactPreviewPage> {
       canFetch: files.canFetch,
       officeToPdf: files.canConvertOffice,
     );
-    if (action != null && mounted) await _act(action);
+    if (action != null && mounted && epoch == _watchEpoch) await _act(action);
   }
 
   List<Widget> get _actions => [
@@ -369,28 +416,47 @@ class _ArtifactPreviewPageState extends ConsumerState<ArtifactPreviewPage> {
     if (mode == PreviewMode.table && _asText) mode = PreviewMode.text;
     if (mode == PreviewMode.workbook && _asPdf) mode = PreviewMode.office;
 
-    if (mode == PreviewMode.image && !_gone) {
+    if (mode == PreviewMode.image && (!_gone || _images.length > 1)) {
+      final artifact = _artifact;
+      Widget currentImage({bool zoomable = true}) => _gone
+          ? _ImageViewerFrame.message(l10n.viewArtifactMissing)
+          : _ImagePreview(
+              key: ValueKey((_index, artifact.path)),
+              sessionId: widget.sessionId,
+              artifact: artifact,
+              revision: _revision,
+              onOpen: _openElsewhere,
+              zoomable: zoomable,
+            );
       return _ImageViewerFrame(
-        title: _artifact.name,
+        title: artifact.name,
+        page: _index,
+        itemCount: _images.length,
         actions: [
-          // 「保存到相册」: the file as it is (already fetched to show it).
+          // Capture the selected file, including across an asynchronous save.
           GallerySaveButton(
-            name: _artifact.name,
+            key: ValueKey((_index, artifact.path)),
+            name: artifact.name,
             load: () async {
               final file = await ref
                   .read(artifactFilesProvider)
-                  .materialize(widget.sessionId, await _absolute(ref, widget.sessionId, _artifact));
+                  .materialize(widget.sessionId, await _absolute(ref, widget.sessionId, artifact));
               return file.readAsBytes();
             },
           ),
           ..._actions,
         ],
-        child: _ImagePreview(
-          sessionId: widget.sessionId,
-          artifact: _artifact,
-          revision: _revision,
-          onOpen: _openElsewhere,
-        ),
+        child: _images.length == 1
+            ? currentImage()
+            : ImagePager(
+                itemCount: _images.length,
+                initialPage: widget.initial,
+                onPageChanged: _select,
+                // Only the selected file is read. Changing pages resets its
+                // preview and binds the watch before loading the new pixels.
+                itemBuilder: (_, index) =>
+                    index == _index ? currentImage(zoomable: false) : const _Spinner(color: Colors.white70),
+              ),
       );
     }
     if (mode == PreviewMode.text || mode == PreviewMode.markdown) {
@@ -1286,12 +1352,20 @@ class _PdfPreviewState extends ConsumerState<_PdfPreview> {
 // ── Images ──────────────────────────────────────────────────────────────────
 
 class _ImagePreview extends ConsumerStatefulWidget {
-  const _ImagePreview({required this.sessionId, required this.artifact, required this.revision, this.onOpen});
+  const _ImagePreview({
+    super.key,
+    required this.sessionId,
+    required this.artifact,
+    required this.revision,
+    this.onOpen,
+    this.zoomable = true,
+  });
 
   final String sessionId;
   final Artifact artifact;
   final int revision;
   final VoidCallback? onOpen;
+  final bool zoomable;
 
   @override
   ConsumerState<_ImagePreview> createState() => _ImagePreviewState();
@@ -1329,8 +1403,8 @@ class _ImagePreviewState extends ConsumerState<_ImagePreview> {
       }
       final file = await files.materialize(widget.sessionId, await _absolute(ref, widget.sessionId, widget.artifact));
       if (!mounted || token != _token) return;
-      // Same path, new pixels: drop the decoded copy.
-      if (_file != null) await FileImage(file).evict();
+      // A gallery revisit may have missed changes while another file was watched.
+      await FileImage(file).evict();
       if (!mounted || token != _token) return;
       setState(() {
         _file = file;
@@ -1348,11 +1422,8 @@ class _ImagePreviewState extends ConsumerState<_ImagePreview> {
     final l10n = context.l10n;
     final file = _file;
     if (file != null) {
-      return _ZoomableImage(
-        key: ValueKey(_shown),
-        image: FileImage(file),
-        semanticLabel: widget.artifact.description ?? widget.artifact.name,
-      );
+      final image = _viewerImage(context, FileImage(file), widget.artifact.description ?? widget.artifact.name);
+      return widget.zoomable ? ZoomableImage(key: ValueKey(_shown), child: image) : image;
     }
     if (_error case final error?) {
       final problem = _problemOf(error);
@@ -1369,31 +1440,107 @@ class _ImagePreviewState extends ConsumerState<_ImagePreview> {
 
 /// 全屏看一张不在工作区里的图片(回复里的网页图片、`data:` 图片):和产物
 /// 预览的图片页同一个样子,文件操作只有「保存到相册」。
-class ImageViewerPage extends StatelessWidget {
-  const ImageViewerPage({super.key, required this.title, required this.image});
+class ImageViewerPage extends StatefulWidget {
+  const ImageViewerPage({super.key, required String this._title, required ImageProvider this._image})
+    : images = null,
+      initial = 0;
 
-  final String title;
-  final ImageProvider image;
+  const ImageViewerPage.gallery({super.key, required List<ViewerImage> images, this.initial = 0})
+    : assert(images.length > 0),
+      assert(initial >= 0 && initial < images.length),
+      images = images,
+      _title = null,
+      _image = null;
+
+  final String? _title;
+  final ImageProvider? _image;
+  final List<ViewerImage>? images;
+  final int initial;
+
+  String get title => _title ?? images![initial].name;
+  ImageProvider? get image => _image ?? images![initial].image;
 
   static Route<void> route({required String title, required ImageProvider image}) => MaterialPageRoute<void>(
     builder: (_) => ImageViewerPage(title: title, image: image),
   );
 
-  @override
-  Widget build(BuildContext context) => _ImageViewerFrame(
-    title: title,
-    actions: [GallerySaveButton(load: () => imageProviderBytes(image), name: title)],
-    child: _ZoomableImage(image: image, semanticLabel: title),
+  static Route<void> galleryRoute({required List<ViewerImage> images, int initial = 0}) => MaterialPageRoute<void>(
+    builder: (_) => ImageViewerPage.gallery(images: images, initial: initial),
   );
+
+  @override
+  State<ImageViewerPage> createState() => _ImageViewerPageState();
+}
+
+class _ImageViewerPageState extends State<ImageViewerPage> {
+  late final List<ViewerImage> _images = widget.images ?? [ViewerImage(name: widget.title, image: widget.image!)];
+  late int _index = widget.initial;
+  final _pending = <int, Future<ImageProvider>>{};
+
+  Future<ImageProvider> _resolve(int index) => _pending.putIfAbsent(index, () {
+    final source = _images[index];
+    final image = source.image;
+    return image == null ? Future<ImageProvider>.sync(source.load!) : SynchronousFuture(image);
+  });
+
+  Widget _page(BuildContext context, int index) {
+    final source = _images[index];
+    Widget imageWidget(ImageProvider image) {
+      final child = _viewerImage(context, image, source.name);
+      return source.heroTag == null ? child : Hero(tag: source.heroTag!, child: child);
+    }
+
+    if (source.image case final image?) return imageWidget(image);
+    return FutureBuilder<ImageProvider>(
+      future: _resolve(index),
+      builder: (context, snapshot) {
+        if (snapshot.data case final image?) return imageWidget(image);
+        if (snapshot.hasError) return _ImageViewerFrame.message(context.l10n.viewArtifactImageFailed);
+        return const _Spinner(color: Colors.white70);
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final index = _index;
+    final source = _images[index];
+    return _ImageViewerFrame(
+      title: source.name,
+      page: index,
+      itemCount: _images.length,
+      actions: [
+        GallerySaveButton(
+          key: ValueKey(index),
+          load: () async => imageProviderBytes(await _resolve(index)),
+          name: source.name,
+        ),
+      ],
+      child: ImagePager(
+        itemCount: _images.length,
+        initialPage: widget.initial,
+        itemBuilder: _page,
+        onPageChanged: (index) => setState(() => _index = index),
+      ),
+    );
+  }
 }
 
 /// 图片预览的外框:黑底全屏,左上返回 + 标题,右上操作。
 class _ImageViewerFrame extends StatelessWidget {
-  const _ImageViewerFrame({required this.title, required this.child, this.actions = const []});
+  const _ImageViewerFrame({
+    required this.title,
+    required this.child,
+    this.actions = const [],
+    this.page = 0,
+    this.itemCount = 1,
+  });
 
   final String title;
   final Widget child;
   final List<Widget> actions;
+  final int page;
+  final int itemCount;
 
   static Widget message(String text, {String? actionLabel, VoidCallback? onAction}) => Center(
     child: Padding(
@@ -1431,6 +1578,20 @@ class _ImageViewerFrame extends StatelessWidget {
         body: Stack(
           children: [
             Positioned.fill(child: child),
+            if (itemCount > 1)
+              Positioned(
+                bottom: padding.bottom + 16,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: Text(
+                    '${page + 1} / $itemCount',
+                    key: const ValueKey('image-gallery-page'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
             Positioned(
               top: padding.top + 6,
               left: 12,
@@ -1465,26 +1626,14 @@ class _ImageViewerFrame extends StatelessWidget {
   }
 }
 
-/// 可双指缩放的整张图片。
-class _ZoomableImage extends StatelessWidget {
-  const _ZoomableImage({super.key, required this.image, this.semanticLabel});
-
-  final ImageProvider image;
-  final String? semanticLabel;
-
-  @override
-  Widget build(BuildContext context) => InteractiveViewer(
-    maxScale: 8,
-    child: Center(
-      child: Image(
-        image: image,
-        fit: BoxFit.contain,
-        semanticLabel: semanticLabel,
-        errorBuilder: (_, _, _) => _ImageViewerFrame.message(context.l10n.viewArtifactImageFailed),
-      ),
-    ),
-  );
-}
+Widget _viewerImage(BuildContext context, ImageProvider image, String semanticLabel) => Center(
+  child: Image(
+    image: image,
+    fit: BoxFit.contain,
+    semanticLabel: semanticLabel,
+    errorBuilder: (_, _, _) => _ImageViewerFrame.message(context.l10n.viewArtifactImageFailed),
+  ),
+);
 
 /// A conversion in progress or failed, with "open with an app" instead.
 class _Waiting extends StatelessWidget {

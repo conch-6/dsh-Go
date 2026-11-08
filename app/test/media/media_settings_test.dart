@@ -144,6 +144,17 @@ void main() {
       expect(video.models, ['seedance']);
     });
 
+    test('automatic key sharing never crosses origins even for the same provider', () {
+      final image = mediaServiceFromPreset(preset: _preset(), catalog: _catalog(), existing: const [])!;
+      final next = mediaServiceFromPreset(
+        preset: _preset(),
+        catalog: _catalog(),
+        existing: [image.copyWith(baseUrl: 'https://other.example.test')],
+      )!;
+      expect(next.keyRef, isNot(image.keyRef));
+      expect(mediaKeyDonor([image.copyWith(baseUrl: 'https://other.example.test')], _preset()), isNull);
+    });
+
     test('asking for a separate account gets a distinct reference', () {
       final image = mediaServiceFromPreset(preset: _preset(), catalog: _catalog(), existing: const [])!;
       final second = mediaServiceFromPreset(

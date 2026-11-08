@@ -13,6 +13,7 @@ object MicArbiter {
 
     private var plugin: Holder? = null
     private var dictation = 0
+    private val unfinished = HashSet<Int>()
 
     /** A dictation is running (or still closing). */
     var dictating = false
@@ -24,12 +25,13 @@ object MicArbiter {
         plugin = null
         holder?.yieldMic()
         dictating = true
-        return ++dictation
+        return (++dictation).also { unfinished += it }
     }
 
-    /** Dictation [token] is over (a later one may already have started: then nothing changes). */
+    /** Each dictation keeps its claim until its own recorder has finished closing. */
     fun endDictation(token: Int) {
-        if (token == dictation) dictating = false
+        unfinished.remove(token)
+        dictating = unfinished.isNotEmpty()
     }
 
     /** A plugin may listen: false while dictation runs. */
@@ -46,6 +48,7 @@ object MicArbiter {
     /** Tests only. */
     internal fun reset() {
         plugin = null
+        unfinished.clear()
         dictating = false
     }
 }

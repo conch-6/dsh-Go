@@ -274,7 +274,7 @@ class TerminalScreenState extends ConsumerState<TerminalScreen> {
       TerminalPhase.starting => TerminalStatusBar(label: appL10n.botsTerminalStarting, busy: true),
       TerminalPhase.connecting => TerminalStatusBar(label: appL10n.botsTerminalConnecting, busy: true),
       TerminalPhase.disconnected => TerminalStatusBar(
-        label: appL10n.botsTerminalDisconnected,
+        label: tab.message ?? appL10n.botsTerminalDisconnected,
         actionLabel: appL10n.botsTerminalReconnect,
         onAction: () => _workspace.reconnect(tab.id),
       ),

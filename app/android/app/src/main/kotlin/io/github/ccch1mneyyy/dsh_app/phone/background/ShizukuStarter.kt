@@ -47,7 +47,7 @@ class ShizukuStarter(
 
     private val args0: Shizuku.UserServiceArgs
         get() = Shizuku.UserServiceArgs(ComponentName(context, PrivilegedDisplayService::class.java))
-            .tag("dsh.vdisplay").processNameSuffix("vdisplay").version(1).daemon(false)
+            .tag("dsh.vdisplay").processNameSuffix("vdisplay").version(2).daemon(false)
 
     private fun appInstalled(): Boolean =
         runCatching { context.packageManager.getApplicationInfo(PACKAGE, 0); true }.getOrDefault(false)
@@ -116,6 +116,11 @@ class ShizukuStarter(
         }
     }
 
+    /** Short ownership read; never reconnects, probes, or waits for transport work. */
+    internal fun isPublished(expected: PrivilegedChannel): Boolean = synchronized(guard) {
+        channel === expected && binding?.let { it.valid && !it.cleaning && it.worker == null } == true
+    }
+
     /** The 15 s bind wait does not impose a deadline on Binder PROBE or remote teardown. */
     fun connect(whenAvailable: (() -> Unit)? = null, mayStart: () -> Boolean = { true }): PrivilegedChannel? {
         if (!granted()) return null
@@ -160,9 +165,12 @@ class ShizukuStarter(
             val remote = IPrivilegedDisplay.Stub.asInterface(binder) ?: return null
             val probe = remote.execute(android.os.Bundle().apply { putString(Proto.OP, Proto.OP_PROBE) })
             if (!probe.getBoolean(Proto.OK) || probe.getString("revision") != Proto.REVISION) return null
+            val peer = MuxProtocol.peer(probe)
+            peer?.let { MuxProtocol.acknowledge(remote.execute(MuxProtocol.optIn(it)), it) }
+            val candidate = ShizukuChannel(remote, peer)
             return synchronized(guard) {
-                if (!owner.valid || !owner.mayStart()) return null
-                ShizukuChannel(remote).also { channel = it }
+                if (!owner.valid || !owner.mayStart()) { candidate.close(); return null }
+                candidate.also { channel = it }
             }
         } catch (e: Exception) {
             if (e is InterruptedException) Thread.currentThread().interrupt()
@@ -199,6 +207,7 @@ class ShizukuStarter(
     // Caller holds guard. A pending Binder operation must finish before its tag may be reused.
     private fun retire(owner: Binding) {
         owner.valid = false
+        channel?.close() // Memory-only admission retirement; physical unbind remains below.
         channel = null
         owner.latch.countDown()
         owner.worker?.interrupt()

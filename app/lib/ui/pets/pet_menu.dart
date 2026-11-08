@@ -74,9 +74,15 @@ Future<void> showPetMenu(BuildContext context, {required PetPack pack}) async {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SheetTitleBar(context.l10n.botsPetChange),
-              PetPicker(
-                padding: const EdgeInsets.fromLTRB(SheetTitleBar.inset, 8, SheetTitleBar.inset, 24),
-                onPicked: (_) => Navigator.pop(sheet),
+              // Brought pets add rows: past the sheet's height the grid
+              // scrolls under the title instead of pushing 不显示 off.
+              Flexible(
+                child: SingleChildScrollView(
+                  child: PetPicker(
+                    padding: const EdgeInsets.fromLTRB(SheetTitleBar.inset, 8, SheetTitleBar.inset, 24),
+                    onPicked: (_) => Navigator.pop(sheet),
+                  ),
+                ),
               ),
             ],
           ),

@@ -64,7 +64,7 @@ Future<ChatHarness> _openPanel(
   tester.view.padding = const FakeViewPadding(top: 48, bottom: 32);
   tester.view.viewPadding = const FakeViewPadding(top: 48, bottom: 32);
   addTearDown(tester.view.reset);
-  final harness = ChatHarness(session: session);
+  final harness = ChatHarness(newChatCatalogs: true, session: session);
   await tester.pumpWidget(
     testApp(
       MediaQuery.withClampedTextScaling(
@@ -252,7 +252,7 @@ void main() {
   group('permission pill', () {
     Future<ChatHarness> pumpChat(WidgetTester tester, SessionModes modes, {double scale = 1}) async {
       usePhoneView(tester);
-      final harness = ChatHarness(session: 's1');
+      final harness = ChatHarness(newChatCatalogs: true, session: 's1');
       await tester.pumpWidget(
         testApp(
           MediaQuery.withClampedTextScaling(minScaleFactor: scale, maxScaleFactor: scale, child: const ChatScreen()),
@@ -308,7 +308,7 @@ void main() {
 
     testWidgets('自动允许中 wins while this client allows everything', (tester) async {
       usePhoneView(tester);
-      final harness = ChatHarness(session: 's1', states: {'s1': const ChatState(loading: false, autoApprove: true)});
+      final harness = ChatHarness(newChatCatalogs: true, session: 's1', states: {'s1': const ChatState(loading: false, autoApprove: true)});
       await tester.pumpWidget(
         testApp(
           const ChatScreen(),
@@ -355,7 +355,7 @@ void goldens() {
 
       testWidgets('permission pill ($suffix)', (tester) async {
         usePhoneView(tester);
-        final harness = ChatHarness(session: 's1');
+        final harness = ChatHarness(newChatCatalogs: true, session: 's1');
         await tester.pumpWidget(
           testApp(
             const ChatScreen(),

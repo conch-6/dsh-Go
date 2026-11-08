@@ -4,6 +4,50 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PrivilegedKeepStateTest {
+    @Test fun taskSelectionTicketDoesNotRequireKeepConsent() {
+        val s = PrivilegedKeepState("off", true, true)
+        s.select("sui")
+        val selected = s.selectionTicket()
+        assertEquals("sui", selected.mode)
+        assertFalse(s.enabled)
+        assertTrue(s.selectionCurrent(selected))
+        assertFalse(s.current(selected))
+    }
+
+    @Test fun returningToTheSameModeDoesNotReviveAnOldTaskSelection() {
+        val s = enabled("sui")
+        val old = s.selectionTicket()
+        s.select("adb")
+        assertFalse(s.selectionCurrent(old))
+        s.select("sui")
+        assertFalse(s.selectionCurrent(old))
+        assertTrue(s.selectionCurrent(s.selectionTicket()))
+    }
+
+    @Test fun keepChangeRevokesOldTasksButNewTasksStillHaveTheSelectedMode() {
+        val s = enabled("root")
+        val old = s.selectionTicket()
+        val off = s.configure("off")
+        assertFalse(s.selectionCurrent(old))
+        val fresh = s.selectionTicket()
+        assertEquals("root", fresh.mode)
+        assertTrue(s.selectionCurrent(fresh))
+        assertTrue(s.saved(off, true))
+        assertTrue(s.selectionCurrent(fresh))
+        assertFalse(s.enabled)
+    }
+
+    @Test fun sameEnabledModePreservesSelectionButOffIntentAlwaysRevokesIt() {
+        val s = enabled("sui")
+        val old = s.selectionTicket()
+        s.select("sui")
+        assertTrue(s.selectionCurrent(old))
+        s.select("off")
+        val off = s.selectionTicket()
+        s.select("off")
+        assertFalse(s.selectionCurrent(off))
+    }
+
     private fun enabled(mode: String = "root") = PrivilegedKeepState(mode, true, true)
     @Test fun onlyAnExplicitValidSavedModeRestoresSelection() {
         assertEquals("off", PrivilegedKeepState("off", true, true).mode)

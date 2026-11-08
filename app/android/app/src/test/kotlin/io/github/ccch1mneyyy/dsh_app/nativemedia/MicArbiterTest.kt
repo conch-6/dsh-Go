@@ -30,4 +30,28 @@ class MicArbiterTest {
         assertTrue(MicArbiter.dictating)
         assertFalse(MicArbiter.acquire { })
     }
+
+    @Test fun newerDictationEndingDoesNotFreeAnOlderRecorderStillClosing() {
+        val olderClosing = MicArbiter.beginDictation()
+        val newer = MicArbiter.beginDictation()
+        MicArbiter.endDictation(newer)
+        assertTrue("the older recorder still owns its close", MicArbiter.dictating)
+        assertFalse(MicArbiter.acquire { })
+        MicArbiter.endDictation(olderClosing)
+        assertFalse(MicArbiter.dictating)
+        assertTrue(MicArbiter.acquire { })
+    }
+
+    @Test fun duplicateOrUnknownEndCannotReleaseAnotherDictationsClose() {
+        val olderClosing = MicArbiter.beginDictation()
+        val newer = MicArbiter.beginDictation()
+        MicArbiter.endDictation(newer)
+        MicArbiter.endDictation(newer)
+        MicArbiter.endDictation(newer + 1) // never issued
+        assertTrue(MicArbiter.dictating)
+        assertFalse(MicArbiter.acquire { })
+        MicArbiter.endDictation(olderClosing)
+        assertFalse(MicArbiter.dictating)
+    }
+
 }

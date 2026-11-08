@@ -76,7 +76,7 @@ class _ProbeSessions extends SessionsController {
   @override
   Future<List<SessionSummary>> build() async => [session(probeSession, title: 'Pet probe')];
   @override
-  Future<String> create() async => (await client.createSession(cwd: '/probe')).sessionId;
+  Future<String> create({bool autoApprove = true}) async => (await client.createSession(cwd: '/probe')).sessionId;
 }
 
 /// Observes the real MethodChannel handler; never supplies a fake success.

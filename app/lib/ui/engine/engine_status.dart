@@ -9,6 +9,12 @@ import '../common/status_dot.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 
+/// The local start failure currently being cleaned up or reported. This wire
+/// prefix is separate from ordinary classified exits, whose failure stays useful.
+bool isLocalStartupFailure(RuntimeStatus status) =>
+    (status.phase == RuntimePhase.stopping || status.phase == RuntimePhase.error) &&
+    (status.error?.trim().startsWith('start failed:') ?? false);
+
 /// How the local engine's state reads in the UI. Colour is never the
 /// only signal: every dot comes with one of these labels.
 class EngineStatusView {
@@ -19,6 +25,7 @@ class EngineStatusView {
 
   factory EngineStatusView.of(LocalRuntimeState state) {
     final status = state.status;
+    final startupFailure = isLocalStartupFailure(status);
     return switch (status.phase) {
       RuntimePhase.notInstalled => EngineStatusView(StatusTone.idle, appL10n.phoneEngineNotInstalled),
       RuntimePhase.installing => EngineStatusView(
@@ -46,15 +53,23 @@ class EngineStatusView {
                 StatusTone.ok,
                 status.onProbation ? appL10n.phoneEngineRunningProbation : appL10n.commonRunning,
               ),
-      RuntimePhase.stopping => EngineStatusView(StatusTone.busy, appL10n.commonStopping),
-      RuntimePhase.error => EngineStatusView(StatusTone.error, switch (status.failure?.kind) {
-        FailureKind.launchFailed => appL10n.phoneFailureLaunch,
-        FailureKind.startupFailed => appL10n.phoneEngineStartupFailed,
-        FailureKind.crashedEarly || FailureKind.crashedLate => appL10n.phoneEngineCrashed,
-        FailureKind.killed => appL10n.phoneEngineKilled,
-        FailureKind.noSpace => appL10n.commonStorageFull,
-        null => appL10n.phoneEngineError,
-      }),
+      RuntimePhase.stopping => EngineStatusView(
+        startupFailure ? StatusTone.error : StatusTone.busy,
+        startupFailure ? appL10n.phoneStartupFailureStopping : appL10n.commonStopping,
+      ),
+      RuntimePhase.error => EngineStatusView(
+        StatusTone.error,
+        startupFailure
+            ? appL10n.phoneEngineStartupFailed
+            : switch (status.failure?.kind) {
+                FailureKind.launchFailed => appL10n.phoneFailureLaunch,
+                FailureKind.startupFailed => appL10n.phoneEngineStartupFailed,
+                FailureKind.crashedEarly || FailureKind.crashedLate => appL10n.phoneEngineCrashed,
+                FailureKind.killed => appL10n.phoneEngineKilled,
+                FailureKind.noSpace => appL10n.commonStorageFull,
+                null => appL10n.phoneEngineError,
+              },
+      ),
     };
   }
 }
@@ -67,15 +82,17 @@ String? humanizeRuntimeError(String? raw) {
   for (final prefix in const ['install failed: ', 'start failed: ']) {
     if (text.startsWith(prefix)) text = text.substring(prefix.length);
   }
-  // l10n:keep native engine error prefix
-  if (text.startsWith('存储空间不足')) {
-    if (!AppLocale.isEnglish) return text;
-    // l10n:keep native engine error format
-    final sizes = RegExp(r'^存储空间不足：需要约 (.+) MB，当前可用 (.+) MB$').firstMatch(text);
-    return sizes == null
-        ? appL10n.commonStorageFull
-        : appL10n.phoneEngineStorageDetails(sizes.group(1)!, sizes.group(2)!);
+  if (text == 'no startup token received within 180s') return appL10n.phoneStartupTokenTimeout;
+  if (RegExp(r'^token seen but port [0-9]+ never accepted connections$').hasMatch(text)) {
+    return appL10n.phoneStartupPortNotReady;
   }
+  // l10n:keep native engine error prefix
+  if (text == '存储空间不足') return appL10n.commonStorageFull;
+  // RuntimeInstaller supplies integer MB values. Unknown exception text must
+  // not be echoed just because it begins like this known native message.
+  // l10n:keep native engine error format
+  final sizes = RegExp(r'^存储空间不足：需要约 ([0-9]+) MB，当前可用 ([0-9]+) MB$').firstMatch(text);
+  if (sizes != null) return appL10n.phoneEngineStorageDetails(sizes.group(1)!, sizes.group(2)!);
   // l10n:keep native engine checksum error marker
   if (text.contains('校验失败')) return appL10n.phoneEngineRuntimeCorrupt;
   if (text.contains('No space left') || text.contains('ENOSPC')) {

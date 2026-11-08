@@ -24,6 +24,8 @@ Tap the plus button next to the composer and choose **Photos**, **Take photo** o
 - On DSH Remote, **File** appears when the host's Remote plugin supports uploads. The app adds no separate 20 MB limit; the normal 200 MB attachment limit still applies. The host decides whether it can accept the file based on its plugin version and current network path (Relay/TURN typically allow up to 20 MB). Files are uploaded in chunks to the current chat's working directory when you send. Existing files are never overwritten; the host assigns a new name on collision. If an upload fails, the question is not sent. Older hosts accept images only; update their Remote plugin and reconnect.
 - If the current model can't view images, they're sent to the AI as files. Switch to a model that can view images to let the AI see them.
 
+Tap an image to view it full screen. Pinch to zoom in or out, up to 8x; double-tap to zoom to 2.5x around the touch point, then double-tap again to fit. Swipe left or right through images in the same attachment group, reply or tool output; the page count is shown. Workspace and web images in a reply form separate groups. While zoomed in, dragging pans the picture instead of turning pages; return to fit before swiping. Save and the long-press menu apply to the current picture.
+
 When the composer is empty and speech recognition is available, the send button becomes a microphone. Tap it and speak; your words fill the composer so you can check them before sending. When the recognition service isn't available, **Change** on the notice opens the voice input settings.
 
 ## Create images and video
@@ -32,7 +34,7 @@ When the current host has the image and video plugin, the plus panel has a **Cre
 
 Add reference images from the plus panel as usual. For video, the first image is the **First** frame and the second the **Last** frame.
 
-Created images appear in the chat with a line that says **AI-generated**, the model and the aspect, plus an estimated cost when the price is reliable. Tap an image to view it full screen and swipe through the batch. Under the images you can save to Photos, share or **Regenerate**; More has **Edit**, **Copy prompt** and **Details**. When a description doesn't pass content review, tap **Revise** on the card to get it back in the composer. Videos open in another app for now.
+Created images appear in the chat with a line that says **AI-generated**, the model and the aspect, plus an estimated cost when the price is reliable. Tap an image to view it full screen and swipe through the batch. Under the images you can save to Photos, share or **Regenerate**; More has **Edit**, **Copy prompt** and **Details**. When a description doesn't pass content review, tap **Revise** on the card to get it back in the composer. If an image fails to load, **Reload image** reads the file again without generating again or incurring generation charges. Tap a video for in-App playback, pause and seeking; opening in another app remains available if playback fails. Images and videos can both be saved to the gallery. Local videos without a poster get a first-frame preview; remote videos download only when you open them, never just for scrolling previews.
 
 If the host doesn't have the plugin yet, **Create** offers **Install on this host**. Services and API keys are set under Capabilities in [Settings](10-settings.md).
 

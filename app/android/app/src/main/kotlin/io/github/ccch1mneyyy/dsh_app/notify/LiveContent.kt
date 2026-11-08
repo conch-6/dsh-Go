@@ -27,6 +27,8 @@ data class LiveContent(
     val sessionId: String? = null,
     val host: String? = null,
     val eventId: String? = null,
+    /** Phone control: the task its 停止操作 stops (never whichever is selected at tap time). */
+    val phoneTaskId: Long? = null,
 ) {
     enum class Kind(val wire: String) {
         PHONE("phone"),

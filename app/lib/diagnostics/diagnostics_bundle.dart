@@ -29,6 +29,8 @@ import '../state/voice_settings.dart';
 import 'diagnostics_channel.dart';
 import 'app_error_log.dart';
 import 'redact.dart';
+import 'system_ime_diagnostics.dart';
+import 'system_ime_evidence.dart';
 import 'zip_writer.dart';
 
 /// Most engine log lines a bundle carries (the native in-memory log's size).
@@ -48,6 +50,7 @@ class DiagnosticsSnapshot {
     this.engineLog = const [],
     this.failureLog = const [],
     this.appErrors = const [],
+    this.systemIme,
   });
 
   final DateTime at;
@@ -66,6 +69,9 @@ class DiagnosticsSnapshot {
   final List<String> engineLog;
   final List<String> failureLog;
   final List<AppErrorRecord> appErrors;
+
+  /// Only a deliberate manual publication/export includes retained opt-in evidence.
+  final SystemImeEvidence? systemIme;
 }
 
 abstract final class DiagnosticsBundle {
@@ -173,6 +179,7 @@ abstract final class DiagnosticsBundle {
     return [
       jsonFile('summary.json', summary(s)),
       jsonFile('settings.json', settingsSummary(s.settings)),
+      if (s.systemIme case final evidence?) jsonFile('system-ime.json', evidence.toJson()),
       if (crash != null) jsonFile('crash.json', crash),
       if (s.engineLog.isNotEmpty) text('engine.log', log(s.engineLog)),
       if (s.failureLog.isNotEmpty) text('failure.log', log(s.failureLog)),
@@ -185,12 +192,13 @@ abstract final class DiagnosticsBundle {
 
 /// Reads a [DiagnosticsSnapshot] from the app's state and Android. Every
 /// source is optional: a part that can't be read is left out.
-Future<DiagnosticsSnapshot> collectDiagnostics(Ref ref, DateTime at) async {
+Future<DiagnosticsSnapshot> collectDiagnostics(Ref ref, DateTime at, {bool includeSystemIme = false}) async {
   final runtime = ref.read(localRuntimeProvider);
   final logs = ref.read(localRuntimeLogsProvider);
   final settings = ref.read(settingsProvider);
   final bridge = ref.read(runtimeBridgeProvider);
   final channel = ref.read(diagnosticsChannelProvider);
+  final systemIme = includeSystemIme ? ref.read(systemImeDiagnosticsProvider) : null;
   const wait = Duration(seconds: 5);
 
   Future<T> attempt<T>(Future<T> Function() read, T fallback) async {
@@ -227,5 +235,6 @@ Future<DiagnosticsSnapshot> collectDiagnostics(Ref ref, DateTime at) async {
     engineLog: engineLog,
     failureLog: failureLog,
     appErrors: appErrorLog.snapshot(),
+    systemIme: systemIme?.evidence,
   );
 }

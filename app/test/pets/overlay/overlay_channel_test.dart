@@ -65,6 +65,13 @@ void main() {
       channel.setActionHandler(null);
     });
 
+    test('a brought pet whose files changed: the overlay is told to read it again', () async {
+      final native = FakeOverlayNative()..install();
+      await PetOverlayChannel().reloadPack('user-cat');
+      expect(native.methods, ['reloadPack']);
+      expect(native.calls.single.arguments, {'id': 'user-cat'});
+    });
+
     test('reads the status map', () async {
       FakeOverlayNative(permission: 'blocked', enabled: true, alwaysShow: true, snoozed: true, sdk: 34).install();
       final s = await PetOverlayChannel().status();
@@ -86,6 +93,7 @@ void main() {
       removeOverlayNative();
       final channel = PetOverlayChannel();
       await channel.push(const PetState());
+      await channel.reloadPack('user-cat');
       expect((await channel.status()).native, isFalse);
       expect((await channel.setEnabled(true)).native, isFalse);
       expect(await channel.requestPermission(), isFalse);

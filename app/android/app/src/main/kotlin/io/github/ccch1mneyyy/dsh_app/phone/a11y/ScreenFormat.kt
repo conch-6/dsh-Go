@@ -71,7 +71,7 @@ class ScreenElement(
     val listId: Int?,
     /** Enclosing row's id, for a control inside a row (路线 inside a POI card). */
     val parentId: Int?,
-    /** Re-verified before every action: window | bounds | role | text (| checked). */
+    /** Re-verified before every action: window | bounds | role | text / view id (| checked). */
     val fingerprint: String,
     /** What `+` compares with the previous snapshot. */
     val key: String,
@@ -274,7 +274,7 @@ object ScreenFormat {
             val identity = when (kind) {
                 ElementKind.LIST -> "${node.className}|${node.viewId}|$label"
                 ElementKind.INPUT -> "$label|${node.viewId}|${node.password}"
-                ElementKind.ITEM -> label
+                ElementKind.ITEM -> "$label|${node.viewId}"
             }
             return "w${window.id}|${node.bounds}|$role|$identity" + (checkedState?.let { "|c=$it" } ?: "")
         }

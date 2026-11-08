@@ -96,6 +96,9 @@ class FakeTerminalBackend implements TerminalBackend {
   @override
   bool supported;
 
+  @override
+  bool offOnHost = false;
+
   /// Terminals the Host keeps (id → info JSON).
   final Map<String, Map<String, Object?>> host = {};
   final calls = <String>[];

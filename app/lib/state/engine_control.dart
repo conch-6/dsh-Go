@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../runtime/runtime_bridge.dart';
@@ -10,18 +11,33 @@ import '../runtime/runtime_state.dart';
 /// They take the [ProviderContainer] (not a WidgetRef) so they keep working after
 /// the screen that started them is popped.
 abstract final class EngineControl {
-  /// Stops the local DSH, waits until the process has actually exited, then starts it again.
+  /// Stops the local DSH, waits for exit, then requests a new start.
+  /// An incomplete stop leaves the engine stopping; no new start is requested.
   /// [mode] null keeps the current mode (a restart in safe mode stays in safe mode).
-  static Future<void> restart(ProviderContainer container, {EngineMode? mode}) async {
+  /// Returns false when the stop did not finish, so no start was requested.
+  static Future<bool> restart(ProviderContainer container, {EngineMode? mode}) => _restart(container, mode: mode);
+
+  static Future<bool> _restart(ProviderContainer container, {EngineMode? mode}) async {
     final runtime = container.read(localRuntimeProvider.notifier);
     final phase = container.read(localRuntimeProvider).status.phase;
     if (phase == RuntimePhase.running || phase == RuntimePhase.starting || phase == RuntimePhase.stopping) {
-      await _stopAndWait(container);
+      if (!await _stopAndWait(container)) return false;
     }
     if (mode == null) {
       await runtime.start();
     } else {
       await runtime.startIn(mode);
+    }
+    return true;
+  }
+
+  /// Changes the local index mode only after stopping, then requests a start
+  /// in the existing normal/safe profile. A rejected stop or write cannot start.
+  static Future<void> setWorkspaceRecovery(ProviderContainer container, {required bool enabled}) async {
+    if (!await _stopAndWait(container)) throw PlatformException(code: 'runtime_not_stopped');
+    await container.read(runtimeBridgeProvider).setWorkspaceRecovery(enabled);
+    if (!await _restart(container)) {
+      throw PlatformException(code: 'runtime_not_stopped_after_recovery');
     }
   }
 
@@ -40,12 +56,17 @@ abstract final class EngineControl {
   static bool shouldAutoStart(RuntimeStatus status) =>
       !(status.safeState == SafeModeState.off && !status.autoSafe && status.strikes >= 2);
 
-  /// Restarts in safe mode, first renaming the given home-level files out of the way.
+  /// Stops before renaming home-level files, then starts the safe profile.
   static Future<void> enterSafeMode(ProviderContainer container, {List<String> moveAside = const []}) async {
-    if (moveAside.isNotEmpty) {
-      await container.read(runtimeBridgeProvider).moveAside(moveAside);
+    if (moveAside.isEmpty) {
+      if (!await _restart(container, mode: EngineMode.safe)) throw PlatformException(code: 'runtime_not_stopped');
+      return;
     }
-    await restart(container, mode: EngineMode.safe);
+    if (!await _stopAndWait(container)) throw PlatformException(code: 'runtime_not_stopped');
+    await container.read(runtimeBridgeProvider).moveAside(moveAside);
+    if (!await _restart(container, mode: EngineMode.safe)) {
+      throw PlatformException(code: 'runtime_not_stopped_after_recovery');
+    }
   }
 
   /// Back to the user's own profile; failing again within two minutes returns to safe mode.
@@ -59,26 +80,38 @@ abstract final class EngineControl {
         status.phase == RuntimePhase.running ||
         status.phase == RuntimePhase.starting ||
         status.phase == RuntimePhase.stopping;
-    // A normal-mode DSH must not be running on the profile being rewritten; a safe one may.
-    if (busy && !status.inSafeMode) await _stopAndWait(container);
+    // Only a currently running safe profile may keep running during this write.
+    final safeRunning = status.inSafeMode && status.phase == RuntimePhase.running;
+    if (busy && !safeRunning && !await _stopAndWait(container)) {
+      throw PlatformException(code: 'runtime_not_stopped');
+    }
     final changed = await container.read(runtimeBridgeProvider).restoreLastKnownGood();
-    await restart(container, mode: EngineMode.normal);
+    if (!await _restart(container, mode: EngineMode.normal)) {
+      throw PlatformException(code: 'runtime_not_stopped_after_recovery');
+    }
     return changed;
   }
 
-  static Future<void> _stopAndWait(ProviderContainer container) async {
-    final stopped = Completer<void>();
+  static Future<bool> _stopAndWait(ProviderContainer container) async {
+    bool stoppedNow() {
+      final phase = container.read(localRuntimeProvider).status.phase;
+      return !phase.isBusy && phase != RuntimePhase.running;
+    }
+
+    final stopped = Completer<bool>();
     final sub = container.listen<RuntimePhase>(localRuntimeProvider.select((s) => s.status.phase), (_, next) {
       if (!next.isBusy && next != RuntimePhase.running && !stopped.isCompleted) {
-        stopped.complete();
+        stopped.complete(true);
       }
     });
     try {
+      if (stoppedNow()) return true;
       if (container.read(localRuntimeProvider).status.phase != RuntimePhase.stopping) {
         await container.read(localRuntimeProvider.notifier).stop();
       }
-      // DshProcess sends SIGTERM and escalates on its own; don't wait forever.
-      await stopped.future.timeout(const Duration(seconds: 20), onTimeout: () {});
+      if (stoppedNow()) return true;
+      // This bounds the UI wait, not native cleanup. Native recovery rechecks ownership.
+      return await stopped.future.timeout(const Duration(seconds: 20), onTimeout: () => false);
     } finally {
       sub.close();
     }

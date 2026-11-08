@@ -215,6 +215,41 @@ class L2sMigrationTest {
         assertTrue(regular("root/c") && regular("root/d"))
     }
 
+    @Test fun aStaleIntermediateKeepsTheRenamedBackingForRecovery() {
+        assertDamagedChainKeepsBacking(removeIntermediate = false)
+    }
+
+    @Test fun aMissingIntermediateKeepsTheRenamedBackingForRecovery() {
+        assertDamagedChainKeepsBacking(removeIntermediate = true)
+    }
+
+    private fun assertDamagedChainKeepsBacking(removeIntermediate: Boolean) {
+        file("root/staged", "recoverable")
+        link("root/staged", "root/published")
+        val intermediate = Files.readSymbolicLink(File(root, "root/published").toPath())
+        val backing = Files.readSymbolicLink(intermediate)
+        val renamedBacking = Paths.get(backing.toString().dropLast(4) + "0001")
+        // .98 decrements before unlink: the backing has moved, but updating
+        // the intermediate either has not happened or failed after its unlink.
+        Files.move(backing, renamedBacking)
+        if (removeIntermediate) Files.delete(intermediate)
+        assertFalse(Files.exists(File(root, "root/published").toPath()))
+        file("root/healthy", "healthy")
+        link("root/healthy", "root/healthy2")
+
+        assertEquals(L2sMigration.Result.Done(links = 2, removed = 0), migrate())
+        assertTrue(regular("root/healthy") && regular("root/healthy2"))
+        assertEquals("healthy", text("root/healthy2"))
+        assertEquals("recoverable", String(Files.readAllBytes(renamedBacking), Charsets.UTF_8))
+        assertTrue(symlink("root/staged") && symlink("root/published"))
+        assertEquals(!removeIntermediate, Files.isSymbolicLink(intermediate))
+        assertEquals(DirectLaunch.INCOMPATIBLE, DirectLaunch.compatibilityReason(root))
+        val beforeRetry = storeEntries()
+        assertEquals(L2sMigration.Result.Done(links = 0, removed = 0), migrate())
+        assertEquals(beforeRetry, storeEntries())
+        assertEquals("recoverable", String(Files.readAllBytes(renamedBacking), Charsets.UTF_8))
+    }
+
     @Test fun aLinkMadeToAStoredFileItselfNestsAndStillResolves() {
         file("root/a", "nested")
         link("root/a", "root/b")

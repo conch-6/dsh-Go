@@ -71,7 +71,7 @@ class SafePolicyTest {
             assertFalse(Files.isSymbolicLink(home.toPath()))
             assertFalse(File(root, "root/.dsh").exists())
             val saved = File(home, "sessions/previous-rescue.jsonl")
-            saved.parentFile.mkdirs()
+            saved.parentFile!!.mkdirs()
             val bytes = "existing rescue data\n".toByteArray()
             saved.writeBytes(bytes)
             SafeMode.prepare(root, briefing())
@@ -84,7 +84,7 @@ class SafePolicyTest {
         val root = kotlin.io.path.createTempDirectory("safe-home-original").toFile()
         try {
             val original = File(root, "root/.dsh")
-            original.parentFile.mkdirs()
+            original.parentFile!!.mkdirs()
             val bytes = "original home is damaged\n".toByteArray()
             original.writeBytes(bytes)
             SafeMode.prepare(root, briefing())
@@ -98,7 +98,7 @@ class SafePolicyTest {
         val root = kotlin.io.path.createTempDirectory("safe-home-file").toFile()
         try {
             val home = File(root, "var/lib/dsh-app/safe-mode/home")
-            home.parentFile.mkdirs()
+            home.parentFile!!.mkdirs()
             val bytes = "do not overwrite this rescue home path\n".toByteArray()
             home.writeBytes(bytes)
             try {
@@ -120,7 +120,7 @@ class SafePolicyTest {
             val sentinel = File(original, "keep.txt")
             val bytes = "original data stays original\n".toByteArray()
             sentinel.writeBytes(bytes)
-            home.parentFile.mkdirs()
+            home.parentFile!!.mkdirs()
             Files.createSymbolicLink(home.toPath(), original.toPath())
             val target = Files.readSymbolicLink(home.toPath())
             try {

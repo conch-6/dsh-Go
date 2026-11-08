@@ -342,12 +342,43 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend {
     }
   }
 
+  // The server supplies arbitrary text; only known protocol codes cross into diagnostics.
+  static HostLinkDiagnosticCode _diagnosticCode(String code) => switch (code) {
+    'HOST_OFFLINE' => HostLinkDiagnosticCode.remoteHostOffline,
+    'ACCOUNT_AUTH_REQUIRED' => HostLinkDiagnosticCode.remoteAccountAuthRequired,
+    'DEVICE_REVOKED' => HostLinkDiagnosticCode.remoteDeviceRevoked,
+    'TOKEN_EXPIRED' => HostLinkDiagnosticCode.remoteTokenExpired,
+    'PEER_IDENTITY_MISMATCH' => HostLinkDiagnosticCode.remotePeerIdentityMismatch,
+    'HOST_NOT_TRUSTED' => HostLinkDiagnosticCode.remoteHostNotTrusted,
+    'CONNECTION_REPLACED' => HostLinkDiagnosticCode.remoteConnectionReplaced,
+    'CONNECTION_REJECTED' => HostLinkDiagnosticCode.remoteConnectionRejected,
+    'MEMBERSHIP_REQUIRED' => HostLinkDiagnosticCode.remoteMembershipRequired,
+    'DEVICE_NOT_FOUND' => HostLinkDiagnosticCode.remoteDeviceNotFound,
+    'HARNESS_VERSION_INCOMPATIBLE' => HostLinkDiagnosticCode.remoteHarnessVersionIncompatible,
+    'PROTOCOL_MISMATCH' => HostLinkDiagnosticCode.remoteProtocolMismatch,
+    'UNSUPPORTED_VERSION' => HostLinkDiagnosticCode.remoteUnsupportedVersion,
+    'CAPABILITY_NOT_SUPPORTED' => HostLinkDiagnosticCode.remoteCapabilityNotSupported,
+    'FRAME_TOO_LARGE' => HostLinkDiagnosticCode.remoteFrameTooLarge,
+    'INVALID_MESSAGE' => HostLinkDiagnosticCode.remoteInvalidMessage,
+    'SECURE_CHANNEL_FAILED' => HostLinkDiagnosticCode.remoteSecureChannelFailed,
+    'RPC_TIMEOUT' => HostLinkDiagnosticCode.remoteRpcTimeout,
+    'CONNECTION_FAILED' => HostLinkDiagnosticCode.remoteConnectionFailed,
+    'RATE_LIMITED' => HostLinkDiagnosticCode.remoteRateLimited,
+    'HISTORY_MODE_CHANGED' => HostLinkDiagnosticCode.remoteHistoryModeChanged,
+    _ => HostLinkDiagnosticCode.unknown,
+  };
+
   /// Chinese UI text for a `RemoteFailure.code` (see dsh_remote `state.dart`).
   static HostLinkError describe(remote.RemoteFailure failure, [String? hostName]) {
     final name = hostName == null ? appL10n.remoteHostFallback : appL10n.remoteQuotedHostName(hostName);
     final detail = '${failure.code}: ${failure.message}';
-    HostLinkError e(HostLinkErrorKind kind, String message, {bool? retryable}) =>
-        HostLinkError(kind, message, detail: detail, retryable: retryable ?? failure.retryable);
+    HostLinkError e(HostLinkErrorKind kind, String message, {bool? retryable}) => HostLinkError(
+      kind,
+      message,
+      detail: detail,
+      retryable: retryable ?? failure.retryable,
+      diagnosticCode: _diagnosticCode(failure.code),
+    );
     return switch (failure.code) {
       'HOST_OFFLINE' => e(HostLinkErrorKind.hostOffline, appL10n.remoteErrHostOffline, retryable: true),
       'DEVICE_NOT_FOUND' => e(HostLinkErrorKind.other, appL10n.remoteErrHostRemoved(name)),
@@ -386,7 +417,12 @@ class DshRemoteRelayBackend implements RelayBackend, RelayNetworkBackend {
 
 /// dsh_remote's secret-store interface over the app's (Keystore-backed) one.
 class _Secrets implements remote.SecretStore {
-  _Secrets(this._inner);
+  factory _Secrets(SecretStore inner) => _adapters[inner] ??= _Secrets._(inner);
+
+  _Secrets._(this._inner);
+
+  // Backend replacements still use the same package storage ownership scope.
+  static final _adapters = Expando<_Secrets>();
 
   final SecretStore _inner;
 

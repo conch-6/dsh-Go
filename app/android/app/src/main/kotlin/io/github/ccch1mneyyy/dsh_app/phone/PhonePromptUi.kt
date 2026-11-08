@@ -50,6 +50,7 @@ internal object PhonePromptUi {
         PromptChoice.ALLOW_ONCE -> R.string.phone_prompt_allow_once
         PromptChoice.ALLOW_APP -> R.string.phone_prompt_allow_app
         PromptChoice.ALLOW_TASK -> R.string.phone_prompt_allow_task
+        PromptChoice.ALLOW_VISUAL -> R.string.phone_prompt_allow_visual
         PromptChoice.REJECT -> R.string.phone_prompt_reject
         PromptChoice.OPEN -> R.string.phone_prompt_open
         PromptChoice.LATER -> R.string.phone_prompt_later
@@ -95,9 +96,9 @@ internal object PhonePromptUi {
         p.ticket.onFinished { main.removeCallbacks(tick) }
         val armedAt = SystemClock.elapsedRealtime() + 600
         for (choice in p.ticket.content.choices) {
-            val primary = choice in setOf(PromptChoice.ALLOW_ONCE, PromptChoice.ALLOW_APP, PromptChoice.ALLOW_TASK,
+            val primary = choice in setOf(PromptChoice.ALLOW_ONCE, PromptChoice.ALLOW_APP, PromptChoice.ALLOW_TASK, PromptChoice.ALLOW_VISUAL,
                 PromptChoice.OPEN, PromptChoice.CONTINUE)
-            val b = PromptButton(ctx, armedAt, p).apply {
+            val b = PromptButton(ctx, armedAt) { p.live }.apply {
                 text = label(ctx, choice)
                 textSize = 15f; typeface = Typeface.DEFAULT_BOLD
                 setTextColor(if (primary) onAccent else ink)
@@ -150,17 +151,15 @@ internal object PhonePromptUi {
     private fun dp(ctx: Context, value: Int) = (ctx.resources.displayMetrics.density * value).toInt()
 
     /** Same injected/obscured-input boundary as ControlOverlay, also used by the Activity fallback. */
-    private class PromptButton(ctx: Context, private val armedAt: Long, private val p: PromptPresentation) : TextView(ctx) {
+    internal class PromptButton(ctx: Context, private val armedAt: Long, private val live: () -> Boolean) : TextView(ctx) {
         private val a11y = ctx.getSystemService(AccessibilityManager::class.java)
         private var rejected = false
         init { filterTouchesWhenObscured = true; isClickable = true; isFocusable = true; gravity = Gravity.CENTER }
 
         override fun dispatchTouchEvent(event: MotionEvent): Boolean {
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                rejected = !PromptInputPolicy.allows(SystemClock.elapsedRealtime(), armedAt, p.live, InjectGuard.active(),
-                    event.flags and (MotionEvent.FLAG_WINDOW_IS_OBSCURED or MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED) != 0,
-                    event.deviceId <= 0, event.flags and 0x800 != 0 || event.getToolType(0) == MotionEvent.TOOL_TYPE_UNKNOWN,
-                    a11y.isTouchExplorationEnabled)
+                rejected = !PromptInputPolicy.allows(SystemClock.elapsedRealtime(), armedAt, live(), InjectGuard.active(),
+                    event.flags and (MotionEvent.FLAG_WINDOW_IS_OBSCURED or MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED) != 0)
             }
             if (rejected) {
                 if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) isPressed = false
@@ -169,9 +168,14 @@ internal object PhonePromptUi {
             return super.dispatchTouchEvent(event)
         }
 
+        override fun performClick(): Boolean {
+            if (!PromptInputPolicy.allows(SystemClock.elapsedRealtime(), armedAt, live(), InjectGuard.active(), false)) return false
+            return super.performClick()
+        }
+
         override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
             if ((action == AccessibilityNodeInfo.ACTION_CLICK || action == AccessibilityNodeInfo.ACTION_LONG_CLICK) &&
-                (!p.live || SystemClock.elapsedRealtime() < armedAt || InjectGuard.active() || !a11y.isTouchExplorationEnabled)) return false
+                (!live() || SystemClock.elapsedRealtime() < armedAt || InjectGuard.active() || !a11y.isTouchExplorationEnabled)) return false
             return super.performAccessibilityAction(action, arguments)
         }
     }

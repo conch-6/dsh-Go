@@ -104,6 +104,22 @@ class AdbFramedSessionTest {
         } finally { firstMayExit.countDown(); session.close(); peer.close(); input.close(); first.interrupt(); second.interrupt(); join(first); join(second) }
     }
 
+    @Test fun muxRequestWithoutReplyRetiresAtItsDeadlineWhileTheStreamStaysOpen() {
+        val input = PipedInputStream(1024); val peer = PipedOutputStream(input)
+        peer.write(Frames.MAGIC + frame(bytes("probe reply"))); peer.flush()
+        val retired = CountDownLatch(1); val closed = CountDownLatch(1)
+        val session = AdbFramedSession(input, CountingOutput(), { true }, { closed.countDown() })
+        assertArrayEquals(bytes("probe reply"), session.exchange(bytes("probe")))
+        val mux = session.installMux("peer", { retired.countDown() }, deadlineMs = 100)
+        val failure = AtomicReference<Throwable?>()
+        // Binary request bytes stand in for the Bundle codec; no reply is ever written and the pipe stays open.
+        val caller = worker { try { mux.exchange { id -> bytes("request $id") } } catch (error: Throwable) { failure.set(error) } }
+        try {
+            join(caller); assertTrue(failure.get() is IOException)
+            await(retired); await(closed); assertFalse(session.alive()); assertFalse(mux.alive())
+        } finally { session.close(); peer.close(); input.close(); join(caller) }
+    }
+
     @Test fun eofBeforeMagicRetiresWithoutWriting() {
         val output = CountingOutput(); val session = AdbFramedSession(ByteArrayInputStream(bytes("noise")), output, { true }, {})
         assertNull(session.exchange(bytes("one"))); assertFalse(session.alive()); assertNull(session.exchange(bytes("two")))

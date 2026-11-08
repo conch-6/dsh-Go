@@ -13,13 +13,37 @@ import java.io.OutputStream
 // accepts only this fixed verb set — no shell commands, paths or display ids from callers.
 
 object Proto {
-    const val REVISION = "dsh-vdisplay-1"
+    const val REVISION = "dsh-vdisplay-2"
+    const val RESOURCE_RECOVERY_VERSION = "resourceRecoveryVersion"
+    const val RECOVERY_PEER = "recoveryPeer"
+    const val RECOVERY_BOOT = "recoveryBoot"
+    const val RECOVERY_PID = "recoveryPid"
+    const val RECOVERY_UID = "recoveryUid"
+    const val RECOVERY_PID_NS_DEV = "recoveryPidNsDev"
+    const val RECOVERY_PID_NS_INO = "recoveryPidNsIno"
+    const val ALLOCATION_PURPOSE = "allocationPurpose"
+    const val RECOVERY_KIND = "recoveryKind"
+    const val OP_ALLOCATE = "allocate"
+    const val OP_RECOVERY_RETIRE = "recoveryRetire"
+    const val OP_RECOVERY_CHECK = "recoveryCheck"
 
     // request keys
     const val OP = "op"
     const val OWNER = "owner"
+    const val OWNER_SCOPE_VERSION = "ownerScopeVersion"
+    const val SCOPE_LIMIT = "scopeLimit"
+    const val SCOPE_ACCEPTED = "scopeAccepted"
+    const val REQUEST_MUX_VERSION = "requestMuxVersion"
+    const val MAX_IN_FLIGHT = "maxInFlight"
+    const val PEER_INSTANCE = "peerInstance"
+    const val REQUEST_ID = "requestId"
     const val CALL = "call"
     const val PKG = "pkg"
+    const val TARGET_IDENTITY_VERSION = "targetIdentityVersion"
+    const val BACKGROUND_OPEN_EVIDENCE = "backgroundOpenEvidenceVersion"
+    const val TARGET_UID = "targetUid"
+    const val VIEWPORT_VERSION = "viewportVersion"
+    const val VIEWPORT_PRESET = "viewportPreset"
     const val SHORT_SIDE = "shortSide"
     const val ASPECT_W = "aspectW"
     const val ASPECT_H = "aspectH"
@@ -38,17 +62,79 @@ object Proto {
     const val DETAIL = "detail"
 
     // ops
+    const val OP_PREVIEW = "preview"
+    const val PREVIEW_VERSION = "previewVersion"
+    const val PREVIEW_ENABLED = "previewEnabled"
+    const val PREVIEW_AFTER_SEQUENCE = "previewAfterSequence"
+    const val PREVIEW_STATE = "previewState"
+    const val PREVIEW_GENERATION = "previewGeneration"
+    const val PREVIEW_SEQUENCE = "previewSequence"
+    const val PREVIEW_REASON = "previewReason"
+    const val PREVIEW_BYTES = "previewBytes"
+    const val PREVIEW_WIDTH = "previewWidth"
+    const val PREVIEW_HEIGHT = "previewHeight"
+
     const val OP_PROBE = "probe"
+    const val OP_SELF_CHECK_PROBE = "selfCheckProbe"
+    const val SELF_CHECK_PROBE_VERSION = "selfCheckProbeVersion"
+    const val SELF_CHECK_DISPLAY_READY = "selfCheckDisplayReady"
+    const val OP_SELF_CHECK_TARGET_CREATE = "selfCheckTargetCreate"
+    const val OP_SELF_CHECK_TARGET_READ = "selfCheckTargetRead"
+    const val OP_SELF_CHECK_TARGET_TAP = "selfCheckTargetTap"
+    const val SELF_CHECK_TARGET_VERSION = "selfCheckTargetVersion"
+    const val SELF_CHECK_TARGET_C2_VERSION = "selfCheckTargetC2Version"
+    const val OP_SELF_CHECK_TARGET_TEXT_ASCII = "selfCheckTargetTextAscii"
+    const val OP_SELF_CHECK_TARGET_TEXT_ZH = "selfCheckTargetTextZh"
+    const val OP_SELF_CHECK_TARGET_CAPTURE = "selfCheckTargetCapture"
+    const val OP_SELF_CHECK_TARGET_CONTINUITY = "selfCheckTargetContinuity"
+    const val TEXT_MATCHED = "textMatched"
+    const val FRAME_MATCHED = "frameMatched"
+    const val MAIN_VECTOR_RESULT = "mainVectorResult"
+    const val GLOBAL_FOCUS_RESULT = "globalFocusResult"
+    const val SELF_CHECK_FINAL_MAIN = "selfCheckFinalMain"
+    const val RELEASE_NONCE = "releaseNonce"
+    const val FINAL_MAIN_VECTOR = "finalMainVector"
+    const val FINAL_GLOBAL_FOCUS = "finalGlobalFocus"
+    const val TARGET_RUN = "targetRun"
+    const val STEP_NONCE = "stepNonce"
+    const val TARGET_MATCHED = "targetMatched"
+    const val INITIAL_COUNTER_MATCHED = "initialCounterMatched"
+    const val ACTION_ATTEMPTED = "actionAttempted"
+    const val COUNTER_MATCHED = "counterMatched"
     const val OP_CREATE = "create"
     const val OP_LAUNCH = "launch"
     const val OP_OBSERVE = "observe"
+    // Optional local summary only; independent of image delivery.
+    const val LOCAL_VISUAL = "localVisual"
+    const val VISUAL_CHANGE = "visualChange"
+    const val COORDINATE_SCOPE_VERSION = "coordinateScopeVersion"
+    const val COORDINATE_SCOPE_KNOWN = "coordinateScopeKnown"
+    const val COORDINATE_TARGETS_VERSION = "coordinateTargetsVersion"
+    const val COORDINATE_TARGET_INDICES = "coordinateTargetIndices"
+    const val COORDINATE_TARGET_BOUNDS = "coordinateTargetBounds"
+    const val BACKGROUND_COORDINATES = "backgroundCoordinates"
+    const val COORDINATE_OBSERVATION = "coordinateObservation"
+    const val COORDINATE_WIDTH = "coordinateWidth"
+    const val COORDINATE_HEIGHT = "coordinateHeight"
+    const val OP_COORDINATE = "coordinate"
+    const val GESTURE = "gesture"
+    const val X = "x"
+    const val Y = "y"
+    const val X2 = "x2"
+    const val Y2 = "y2"
+    const val DURATION_MS = "durationMs"
     const val OP_TAP = "tap"
     const val OP_SCROLL = "scroll"
     const val OP_KEY = "key"
     const val OP_TEXT = "text"
+    const val RELEASE_RECEIPT = "releaseReceipt"
+    const val TASK_SCOPE_EMPTY = "taskScopeEmpty"
     const val OP_RELEASE = "release"
     const val OP_DESTROY = "destroy"
     const val OP_GATE = "gate"
+    const val OP_COLLECT_SYSTEM_IME = "collectSystemIme"
+    const val IME_PID = "imePid"
+    const val IME_REQUESTED_AT = "imeRequestedAt"
 
     /** 自动恢复无障碍: grants [APP_PACKAGE] WRITE_SECURE_SETTINGS in [USER]; nothing else is grantable. */
     const val OP_GRANT_SECURE_SETTINGS = "grantSecureSettings"
@@ -87,6 +173,10 @@ object Proto {
     //                                     4 longClickable, 5 scrollable, 6 sensitiveWord, 7 focused
     const val A_REGION = "region"       // 0 top, 1 middle, 2 bottom
     const val A_INDENT = "indent"
+    /** Optional detailed-observation fields. Absence on older peers means unknown. */
+    const val A_BOUNDS = "bounds" // flattened left, top, right, bottom for each emitted element
+    const val ELEMENT_OVERFLOW = "elementOverflow" // read primary elements minus emitted prefix
+    const val TREE_COMPLETE = "treeComplete" // bounded accessibility/privacy scan only
 
     const val FLAG_PASSWORD = 1
     const val FLAG_SECRET = 1 shl 1
@@ -100,11 +190,42 @@ object Proto {
 
 /** Stable reason codes → one short Chinese sentence for the model (after Phase's set). */
 object Reasons {
-    fun of(code: String?, detail: String?): String = withDetail(of(code), detail)
+    fun of(code: String?, detail: String?, textAccepted: Boolean = false): String {
+        if (textAccepted) {
+            // l10n:keep agent input receipt
+            if (code == "treeCleanupPending") return "输入框已接受文字请求，但树连接清理未确认。请先结束任务或重试清理，不要自动重复输入或提交。"
+            val after = when (code) {
+                // l10n:keep agent input receipt
+                "textTargetChanged" -> "随后输入框或焦点发生变化"
+                // l10n:keep agent input receipt
+                "textReadbackMismatch" -> "回读与预期不一致"
+                // l10n:keep agent input receipt
+                else -> "后续核验或提交未确认"
+            }
+            // No text/readback is included, and an accepted request is not a verified write.
+            // l10n:keep agent input receipt
+            return "输入框已接受文字请求，但$after。请先重新观察，不要自动重复输入或提交。"
+        }
+        return withDetail(of(code), detail)
+    }
 
     fun withDetail(reason: String, detail: String?): String = reason + detail?.let { "（$it）" }.orEmpty()
 
     fun of(code: String?): String = when (code) {
+        // l10n:keep agent resource protocol
+        "scopeUnsupported" -> "所选后台服务不支持任务资源归属，请更新并显式重新连接；未发送新的资源请求"
+        // l10n:keep agent resource protocol
+        "scopeBusy", "scopeCapacity" -> "后台资源正在占用或清理，请等待原任务收尾后再开始"
+        // l10n:keep agent resource protocol
+        "scopeHistoryFull" -> "本次后台服务已保留256个任务的收尾记录，请先清理全部任务，再关闭通道并重新选择；不会自动重启"
+        // l10n:keep agent resource protocol
+        "scopeModeMismatch" -> "后台服务仍采用原兼容模式，请先清理并关闭通道，再显式重新连接"
+        // l10n:keep agent resource protocol
+        "scopeIdentityUnavailable" -> "后台回复归属未确认，请保留原任务并尝试清理，不要重发动作"
+        // l10n:keep agent background protocol
+        "viewportUnsupported" -> "当前特权端不支持横屏视口，请更新或重新连接后重试；未打开应用"
+        // l10n:keep agent background protocol
+        "viewportConflict" -> "当前后台屏的视口与新设置不同，请先结束或交还后台屏，再新建；未改变当前视口"
         null -> ""
         // l10n:keep privileged protocol
         "identityChanged" -> "特权通道身份已改变，请重新开始任务"
@@ -126,6 +247,12 @@ object Reasons {
         "displayMissing" -> "本次任务还没有后台屏，请先启动目标应用"
         // l10n:keep privileged protocol
         "displayTargetChanged" -> "后台屏前台任务不属于目标应用，未继续操作"
+        // l10n:keep agent target identity
+        "targetIdentityUnsupported" -> "当前后台服务不支持目标应用身份核验，请更新并重新连接；未派发新的启动请求"
+        // l10n:keep agent target identity
+        "targetIdentityChanged" -> "目标应用身份已变化，已停止后续操作。先重新打开应用或结束任务；不要自动重复刚才的输入或动作"
+        // l10n:keep agent target identity
+        "targetIdentityUnavailable" -> "无法确认目标应用身份，已停止后续操作。先重新打开应用或结束任务；先前动作是否完成需核对，不要自动重试"
         // l10n:keep privileged protocol
         "secureWindow" -> "此页面受保护（支付或密码），请交还用户在主屏完成"
         // l10n:keep privileged protocol
@@ -138,6 +265,8 @@ object Reasons {
         "textUnsupported" -> "此输入框不支持直接写入文字"
         // l10n:keep privileged protocol
         "textConnectionUnavailable" -> "后台屏文字输入服务不可用"
+        // l10n:keep privileged protocol
+        "treeCleanupPending" -> "后台屏树连接清理未确认，请先结束任务或重试清理；不要自动重复刚才动作"
         // l10n:keep privileged protocol
         "textFocusMissing" -> "后台屏上没有已聚焦的输入框"
         // l10n:keep privileged protocol

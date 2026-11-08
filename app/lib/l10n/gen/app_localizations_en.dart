@@ -1276,6 +1276,22 @@ class L10nEn extends L10n {
   String get activityUsageAfterMessage => 'Appears after you send a message';
 
   @override
+  String get activityUsageWaiting => 'Waiting for context usage data';
+
+  @override
+  String get activityUsageProjected => 'Estimated next request';
+
+  @override
+  String get activityUsageLastRequest => 'Last request';
+
+  @override
+  String get activityUsageBreakdownEstimate =>
+      'Breakdown items are independent estimates and may differ from the total';
+
+  @override
+  String get activityUsageCumulativeInput => 'Total input';
+
+  @override
   String get activityUsageContextFull => 'Context nearly full. Send /compact to compact it';
 
   @override
@@ -2711,6 +2727,63 @@ class L10nEn extends L10n {
   String get botsPetSource => 'From DSH-TUI';
 
   @override
+  String get botsPetImport => 'Import';
+
+  @override
+  String get botsPetImportHint =>
+      'Bring your own pixel pet: a zip with pack.json and PNG frame sheets; the format is in docs/design/pets.md in the repository. Long-press an imported pet to delete it.';
+
+  @override
+  String botsPetImportDone(String name) {
+    return '$name is here';
+  }
+
+  @override
+  String botsPetImportReplaced(String name) {
+    return '$name was updated';
+  }
+
+  @override
+  String get botsPetImportNotZip => 'That isn\'t a zip file';
+
+  @override
+  String get botsPetImportNoPack => 'There\'s no pack.json in the zip';
+
+  @override
+  String botsPetImportBadPack(String detail) {
+    return 'pack.json has a problem: $detail';
+  }
+
+  @override
+  String botsPetImportMissingSheet(String name) {
+    return 'The zip is missing the sheet $name';
+  }
+
+  @override
+  String botsPetImportBadSheet(String name) {
+    return 'A sheet isn\'t right: $name (a complete PNG, at most 4096 pixels a side, every frame inside it)';
+  }
+
+  @override
+  String get botsPetImportTooLarge => 'This pet pack is too big';
+
+  @override
+  String get botsPetImportStorage => 'Couldn\'t save it on the phone. Try again';
+
+  @override
+  String botsPetRemoveTitle(String name) {
+    return 'Delete $name?';
+  }
+
+  @override
+  String get botsPetRemoveBody => 'You can import it again later.';
+
+  @override
+  String botsPetRemoveFailed(String name) {
+    return 'Couldn\'t delete $name. Try again';
+  }
+
+  @override
   String get botsPetSize => 'Size';
 
   @override
@@ -2781,7 +2854,7 @@ class L10nEn extends L10n {
   String get botsTerminalUnsupported => 'Terminal isn’t available on this connection';
 
   @override
-  String get botsTerminalSupportedHosts => 'Available on this phone or an SSH host';
+  String get botsTerminalSupportedHosts => 'Available on this phone, an SSH host or a Remote computer';
 
   @override
   String get botsTerminalOpening => 'Opening terminal…';
@@ -4750,6 +4823,869 @@ class L10nEn extends L10n {
     });
     return '$_temp0 $day';
   }
+
+  @override
+  String get companionTitle => 'Companion room';
+
+  @override
+  String get companionEntrySubtitle => 'Spend some time with her';
+
+  @override
+  String get companionDefaultName => 'her';
+
+  @override
+  String companionInputHint(String name) {
+    return 'Say something to $name';
+  }
+
+  @override
+  String get companionMenu => 'More';
+
+  @override
+  String get companionVoice => 'Voice';
+
+  @override
+  String get companionStop => 'Ask her to stop';
+
+  @override
+  String get companionSend => 'Send';
+
+  @override
+  String get companionNotConnected => 'I can\'t reach the engine right now. Tell me again in a bit?';
+
+  @override
+  String get companionSendFailed => 'That didn\'t get through. Say it again?';
+
+  @override
+  String get companionLogTitle => 'Log';
+
+  @override
+  String get companionLogEmpty => 'Nothing said yet.';
+
+  @override
+  String get companionLogYou => 'You';
+
+  @override
+  String get companionLogOpenChat => 'Open in chat';
+
+  @override
+  String get companionLogOlder => 'Load earlier messages';
+
+  @override
+  String get companionMenuHistory => 'View chat history';
+
+  @override
+  String get companionMenuRestart => 'Start over';
+
+  @override
+  String get companionMenuRestartHint => 'Begin a new conversation';
+
+  @override
+  String get companionMenuRestartConfirm =>
+      'She will forget this conversation. The old record stays on the host and is not deleted.';
+
+  @override
+  String get companionMenuRemovePack => 'Remove assets';
+
+  @override
+  String get companionMenuRemoveConfirm =>
+      'The character assets on this phone will be deleted. Chats aren\'t affected. You\'ll need to import them again next time.';
+
+  @override
+  String companionCreditAuthor(String name) {
+    return 'By $name';
+  }
+
+  @override
+  String get companionSetupTitle => 'Bring her home';
+
+  @override
+  String get companionSetupBody =>
+      'Character assets aren\'t part of the app and only land on your phone when you want them. Import an asset pack (zip) to meet her.';
+
+  @override
+  String get companionSetupImport => 'Import asset pack';
+
+  @override
+  String get companionFailedTitle => 'She couldn\'t come out';
+
+  @override
+  String companionFailedBody(String reason) {
+    return 'Loading failed on this phone ($reason). You can import the asset pack again and retry.';
+  }
+
+  @override
+  String get companionPackBroken => 'This file can\'t be opened. It may not be an asset pack, or it may be damaged.';
+
+  @override
+  String get companionPackRuntimeMismatch => 'The runtime in this pack doesn\'t match this version of the app.';
+
+  @override
+  String get companionPackNoRuntime =>
+      'This pack only has a character and there\'s no runtime on this phone yet. Import a full asset pack first.';
+
+  @override
+  String get companionPackNoModel =>
+      'No Live2D model (.model3.json) found in the pack. Zip the model\'s whole folder and try again.';
+
+  @override
+  String get companionPackUnsafe => 'The pack has files or paths that aren\'t allowed, so it wasn\'t imported.';
+
+  @override
+  String get companionPackTooLarge => 'This asset pack is too large.';
+
+  @override
+  String get companionPackStorage => 'Couldn\'t write the files. Check your phone\'s free storage.';
+
+  @override
+  String companionGreetFirst(String name) {
+    return 'Hi, I\'m $name. I live here now, nice to meet you.';
+  }
+
+  @override
+  String get companionGreetMorning => 'Morning! Don\'t skip breakfast today.';
+
+  @override
+  String get companionGreetNoon => 'It\'s noon already. Have you eaten?';
+
+  @override
+  String get companionGreetAfternoon => 'Good afternoon. I was just daydreaming.';
+
+  @override
+  String get companionGreetEvening => 'Good evening. How was your day?';
+
+  @override
+  String get companionGreetLate => 'Still up this late?';
+
+  @override
+  String get companionGreetLong => 'It\'s been a while! I thought you\'d forgotten me.';
+
+  @override
+  String get companionGreetBack => 'Hm? Back again.';
+
+  @override
+  String get companionWake => 'Mm... I wasn\'t asleep. Just resting my eyes.';
+
+  @override
+  String get companionPat1 => 'Hehe... you can keep going a little longer.';
+
+  @override
+  String get companionPat2 => 'Mmm, that\'s nice.';
+
+  @override
+  String get companionPat3 => 'You\'re messing up my hair.';
+
+  @override
+  String get companionTapHead1 => 'What\'s up?';
+
+  @override
+  String get companionTapHead2 => 'Hm?';
+
+  @override
+  String get companionTapFace1 => 'Don\'t poke my face.';
+
+  @override
+  String get companionTapFace2 => 'Whoa, your hands are cold.';
+
+  @override
+  String get companionTapFace3 => 'Is there something on my face?';
+
+  @override
+  String get companionTapBody1 => 'Oh! You startled me.';
+
+  @override
+  String get companionTapBody2 => 'What is it?';
+
+  @override
+  String get companionTapBody3 => 'I just washed this apron!';
+
+  @override
+  String get companionTapTail1 => 'Tails are not for touching!';
+
+  @override
+  String get companionTapTail2 => 'Eek, that tickles.';
+
+  @override
+  String get companionTapTail3 => 'This is a very important tail.';
+
+  @override
+  String get companionTapLegs1 => 'Is something on the floor?';
+
+  @override
+  String get companionTapLegs2 => 'Where are you looking?';
+
+  @override
+  String get companionTease1 => 'Stop it, I\'m getting dizzy.';
+
+  @override
+  String get companionTease2 => 'One more poke and I\'m ignoring you!';
+
+  @override
+  String get companionTease3 => 'Don\'t you have anything better to do?';
+
+  @override
+  String get companionStatusIdle => 'Daydreaming';
+
+  @override
+  String get companionStatusListening => 'Listening';
+
+  @override
+  String get companionStatusThinking => 'Thinking';
+
+  @override
+  String get companionStatusSpeaking => 'Talking';
+
+  @override
+  String get companionStatusSleeping => 'Asleep';
+
+  @override
+  String get companionStatusAway => 'Away';
+
+  @override
+  String get companionListening => 'Listening…';
+
+  @override
+  String get companionTouchHint => 'Try patting her head';
+
+  @override
+  String get companionArriving => 'She\'s swimming over…';
+
+  @override
+  String get companionPrivacyLine => 'Assets stay on this phone. Chats go through the current host.';
+
+  @override
+  String get companionMemoryTitle => 'What she remembers';
+
+  @override
+  String companionMemoryScope(String host) {
+    return 'Kept on $host. She doesn\'t bring these up by herself yet; a later version will.';
+  }
+
+  @override
+  String get companionMemoryAdd => 'Add';
+
+  @override
+  String get companionMemoryEdit => 'Edit';
+
+  @override
+  String get companionMemorySave => 'Save';
+
+  @override
+  String get companionMemoryHint => 'For example: I like unsweetened tea and don\'t drink coffee';
+
+  @override
+  String get companionMemoryForget => 'Forget';
+
+  @override
+  String get companionMemoryForgetTitle => 'Have her forget this?';
+
+  @override
+  String get companionMemoryEmpty => 'Nothing saved yet';
+
+  @override
+  String get companionMemoryEmptyHint =>
+      'Write down what you\'d like her to remember. It stays on the current host, and you can edit or delete it anytime.';
+
+  @override
+  String get companionMemoryUnsupported => 'This host can\'t keep her memories yet';
+
+  @override
+  String get companionMemoryUnsupportedHint =>
+      'It isn\'t available over the DSH Remote relay, or this host\'s dsh-go bridge is older.';
+
+  @override
+  String get companionMemoryLoadFailed => 'Couldn\'t load';
+
+  @override
+  String get companionMemoryRetry => 'Retry';
+
+  @override
+  String get companionMemoryConflict => 'It was just changed elsewhere, so it\'s been refreshed';
+
+  @override
+  String get companionMemoryFull => 'The list is full. Delete some first';
+
+  @override
+  String get companionMemorySaveFailed => 'Couldn\'t save. Try again?';
+
+  @override
+  String get companionStatusSnacking => 'Having a snack';
+
+  @override
+  String get companionStatusPlaying => 'Playing with the bubble';
+
+  @override
+  String get companionStatusResting => 'Resting on the cushion';
+
+  @override
+  String get companionSnack1 => 'Nom! So good!';
+
+  @override
+  String get companionSnack2 => 'Seaweed flavour. Thank you.';
+
+  @override
+  String get companionSnack3 => 'Mm... can I have another?';
+
+  @override
+  String get companionPlay1 => 'Hey, got it!';
+
+  @override
+  String get companionPlay2 => 'The bubble is so squishy. Fun!';
+
+  @override
+  String get companionPlay3 => 'It floated back again.';
+
+  @override
+  String get companionRest1 => 'I\'ll lean here for a while, then.';
+
+  @override
+  String get companionRest2 => 'Go on, I\'m listening.';
+
+  @override
+  String get companionTouchHintHome => 'Tap the shell, the bubble and the cushion, or drag a snack to her mouth';
+
+  @override
+  String get companionMenuMode => 'How she talks';
+
+  @override
+  String get companionModeLight => 'Light';
+
+  @override
+  String get companionModeLightHint => 'Chat only. The phone talks to the model; no engine';
+
+  @override
+  String get companionModeFull => 'Full';
+
+  @override
+  String get companionModeFullHint => 'DSH on the host, with tools and phone control';
+
+  @override
+  String get companionLightNoKey => 'Light mode needs a DeepSeek API key. Add one in Settings and we can talk.';
+
+  @override
+  String get companionLightBadKey => 'The API key seems wrong, or it is no longer valid.';
+
+  @override
+  String get companionLightBusy => 'It is busy over there. Tell me again in a bit?';
+
+  @override
+  String get companionNotConnectedTryLight =>
+      'I can\'t reach the host right now. If you just want to chat, switch to Light in the menu at the top right.';
+
+  @override
+  String get companionMenuRestartLightHint => 'Clear the chat on this phone';
+
+  @override
+  String get companionMenuRestartLightConfirm =>
+      'She will forget this conversation, and the chat on this phone is deleted.';
+
+  @override
+  String get companionInviteRest => 'Rest on the cushion with me for a bit?';
+
+  @override
+  String get companionInviteAccept => 'Sure';
+
+  @override
+  String get companionInviteDecline => 'Not now';
+
+  @override
+  String get companionInviteYes1 => 'Hehe, just for a little while.';
+
+  @override
+  String get companionInviteYes2 => 'I\'ll get comfy. You relax too.';
+
+  @override
+  String get companionMenuInvite => 'Invitations';
+
+  @override
+  String get companionMenuInviteHint => 'When you sit quietly with her, she may now and then ask you to rest together';
+
+  @override
+  String get companionSetupBundled => 'Bring her home';
+
+  @override
+  String get companionSetupBodyBundled =>
+      'She comes with the app: one tap and she\'s here, unpacked only on this phone. You can also import another asset pack, or zip up a Live2D model\'s folder and import that.';
+
+  @override
+  String get companionSetupImportOther => 'Import another pack';
+
+  @override
+  String get companionMenuRemoveConfirmBundled =>
+      'The character assets unpacked on this phone will be deleted. Chats aren\'t affected. You can bring her back anytime.';
+
+  @override
+  String get companionHug1 => 'Mm... a hug.';
+
+  @override
+  String get companionHug2 => 'I feel safe like this.';
+
+  @override
+  String get companionHug3 => 'A little longer, just a little.';
+
+  @override
+  String get companionBondTitle => 'You two';
+
+  @override
+  String get companionBond0 => 'Just met';
+
+  @override
+  String get companionBond1 => 'Getting to know each other';
+
+  @override
+  String get companionBond2 => 'Close';
+
+  @override
+  String get companionBond3 => 'Very close';
+
+  @override
+  String get companionCloser1 => 'I think... I\'m not so nervous anymore.';
+
+  @override
+  String get companionCloser2 => 'Being with you feels easier and easier.';
+
+  @override
+  String get companionCloser3 => 'Keep coming back, okay? I\'ll miss you.';
+
+  @override
+  String get companionPatClose => 'I love it when you pat my head.';
+
+  @override
+  String get companionHugClose => 'You can hold me tighter, you know.';
+
+  @override
+  String companionTaskDone(String title) {
+    return '\"$title\" is done over there.';
+  }
+
+  @override
+  String get companionTaskDoneUntitled => 'Your task over there is done.';
+
+  @override
+  String companionTaskFailed(String title) {
+    return '\"$title\" seems to have hit an error. Take a look?';
+  }
+
+  @override
+  String get companionTaskFailedUntitled => 'Your task over there seems to have hit an error. Take a look?';
+
+  @override
+  String companionTaskApproval(String title) {
+    return '\"$title\" is waiting for your approval.';
+  }
+
+  @override
+  String get companionTaskApprovalUntitled => 'Something over there is waiting for your approval.';
+
+  @override
+  String companionTaskQuestion(String title) {
+    return '\"$title\" has a question for you.';
+  }
+
+  @override
+  String get companionTaskQuestionUntitled => 'There\'s a question waiting for you over there.';
+
+  @override
+  String get companionTaskOpen => 'Take a look';
+
+  @override
+  String get companionMenuVoice => 'Her voice';
+
+  @override
+  String get companionMenuVoiceHint => 'Reads her words aloud with the phone\'s own voice';
+
+  @override
+  String get companionVoiceHello => 'Hi, this is my voice. Keep it on if you like it.';
+
+  @override
+  String get companionVoiceUnavailable =>
+      'This phone has no Chinese voice to use. You can add one under Text-to-speech in system settings.';
+
+  @override
+  String get companionWidgetWaiting => 'Waiting for you in the room';
+
+  @override
+  String get companionVoiceOn => 'Let her speak';
+
+  @override
+  String get companionVoiceOffHint => 'When you turn it on, she says hello in the chosen voice first.';
+
+  @override
+  String get companionVoiceOff => 'Off';
+
+  @override
+  String get companionVoiceSource => 'Voice';
+
+  @override
+  String get companionVoiceSystem => 'The phone\'s own';
+
+  @override
+  String get companionVoiceSystemHint => 'System text-to-speech, works offline';
+
+  @override
+  String get companionVoiceOpenai => 'OpenAI-compatible API';
+
+  @override
+  String get companionVoiceOpenaiHint =>
+      'OpenAI, SiliconFlow, and most self-hosted GPT-SoVITS, CosyVoice or edge-tts servers';
+
+  @override
+  String get companionVoiceCustom => 'Custom HTTP';
+
+  @override
+  String get companionVoiceCustomHint => 'Anything else: describe the request and the reply';
+
+  @override
+  String get companionVoiceApi => 'API';
+
+  @override
+  String get companionVoiceBase => 'Address';
+
+  @override
+  String get companionVoiceBaseHelper => 'Up to /v1; the app adds /audio/speech';
+
+  @override
+  String get companionVoiceKeyHelper => 'Kept in this phone\'s secure storage';
+
+  @override
+  String get companionVoiceModel => 'Model';
+
+  @override
+  String get companionVoiceVoice => 'Voice';
+
+  @override
+  String get companionVoiceVoiceHelper => 'The service\'s voice name, like alloy, or a speaker on your own server';
+
+  @override
+  String get companionVoiceRequest => 'Request';
+
+  @override
+  String get companionVoiceUrl => 'Request URL';
+
+  @override
+  String get companionVoiceUrlHelper => '{text} works in the URL too';
+
+  @override
+  String get companionVoiceMethod => 'Method';
+
+  @override
+  String get companionVoiceHeaders => 'Headers';
+
+  @override
+  String get companionVoiceHeadersHelper => 'One per line; kept in secure storage';
+
+  @override
+  String get companionVoiceBody => 'Body';
+
+  @override
+  String get companionVoiceBodyHelper => '{text} becomes what she says';
+
+  @override
+  String get companionVoiceField => 'Audio field';
+
+  @override
+  String get companionVoiceFieldHelper =>
+      'If the reply is JSON: where the audio is (base64 or a link), like data.audio. Leave empty when it returns audio';
+
+  @override
+  String get companionVoicePrivacy => 'What she says is sent to the service you enter.';
+
+  @override
+  String get companionVoicePreview => 'Preview';
+
+  @override
+  String get companionVoicePreviewing => 'Requesting…';
+
+  @override
+  String get companionVoicePreviewOk => 'It works. Did you hear her?';
+
+  @override
+  String companionVoicePreviewFailed(String reason) {
+    return 'Didn\'t work: $reason';
+  }
+
+  @override
+  String get companionVoiceNotSetUp => 'Fill in the address above first.';
+
+  @override
+  String get companionVoiceFallback => 'Couldn\'t reach her voice service, so the phone\'s own voice stood in';
+
+  @override
+  String get companionGreetFirstNameless => 'Hi, I live here now. Nice to meet you.';
+
+  @override
+  String companionRenamed(String name) {
+    return '\"$name\"... okay, that\'s my name from now on.';
+  }
+
+  @override
+  String get companionVoicePreset => 'Popular services';
+
+  @override
+  String get companionVoicePresetHint => 'Xiaomi MiMo, OpenAI, SiliconFlow, Alibaba Model Studio: just add a key';
+
+  @override
+  String get companionVoiceService => 'Service';
+
+  @override
+  String companionVoiceKeyWhere(String site) {
+    return 'Get one at $site; kept in this phone\'s secure storage';
+  }
+
+  @override
+  String get companionVoiceVoiceCustomHelper => 'Pick one, or type a voice ID the service gave you';
+
+  @override
+  String get companionVoiceStyle => 'Speaking style';
+
+  @override
+  String get companionVoiceStyleHelper =>
+      'Describe her tone and the service reads in it; leave empty for the default gentle girl\'s voice';
+
+  @override
+  String get companionVoiceFemale => 'female';
+
+  @override
+  String get companionVoiceMale => 'male';
+
+  @override
+  String get companionClonePreset => 'Preset voices';
+
+  @override
+  String get companionCloneMine => 'Clone a voice';
+
+  @override
+  String get companionVoicePresetVoice => 'Preset voice';
+
+  @override
+  String get companionCloneRecording => 'Recording';
+
+  @override
+  String get companionCloneHelper =>
+      '5–30 seconds of one person speaking with no background noise, mp3 or wav, up to 7 MB. Only use your own voice, or one whose owner agreed. Every line she says sends this recording to Xiaomi.';
+
+  @override
+  String get companionCloneNone => 'No recording yet';
+
+  @override
+  String companionCloneReady(String detail) {
+    return 'Uploaded · $detail';
+  }
+
+  @override
+  String companionCloneSeconds(int n) {
+    return '$n s';
+  }
+
+  @override
+  String get companionClonePick => 'Choose a recording';
+
+  @override
+  String get companionCloneReplace => 'Replace';
+
+  @override
+  String get companionCloneTooLarge => 'The recording is too large (7 MB at most). Trim it and try again.';
+
+  @override
+  String get companionCloneNotAudio => 'Only mp3 or wav recordings work.';
+
+  @override
+  String get companionCloneFailed => 'Couldn\'t read that recording.';
+
+  @override
+  String get companionMenuPersona => 'About her';
+
+  @override
+  String get companionPersonaName => 'Name';
+
+  @override
+  String get companionPersonaNameHelper => 'Leave empty for the pack\'s name';
+
+  @override
+  String get companionPersonaCallMe => 'What she calls you';
+
+  @override
+  String get companionPersonaCallMeHint => 'e.g. Sam';
+
+  @override
+  String get companionPersonaCallMeHelper => 'Leave empty for nothing in particular';
+
+  @override
+  String get companionPersonaText => 'Persona';
+
+  @override
+  String get companionPersonaTextLabel => 'Who she is and how she talks';
+
+  @override
+  String get companionPersonaTextHelper =>
+      'Her personality, who she is, how she talks, what she won\'t say: all yours to write or delete. Only the format of her expression marks is added by the app.';
+
+  @override
+  String get companionPersonaReset => 'Reset';
+
+  @override
+  String get companionPersonaFooter =>
+      'Light mode uses it from her next reply; full mode tells her with your next message.';
+
+  @override
+  String get companionMenuMoves => 'Moves and faces';
+
+  @override
+  String get companionMovesHint =>
+      'These come with the model. The ones switched on are offered to the AI (up to 24 expressions and 24 motions, in list order) and she uses them in her replies; tap a name to give it a clearer one, tap ▶ to try it on her.';
+
+  @override
+  String get companionMovesNone =>
+      'This model brings no expressions or motions of its own; she uses her built-in ones.';
+
+  @override
+  String get companionMovesRename => 'Rename';
+
+  @override
+  String get companionMovesTry => 'Try it';
+
+  @override
+  String get companionPackLegacyModel =>
+      'This is an old Cubism 2 model (.moc and model.json); the runtime on the phone only reads .moc3 from Cubism 3 on. Open it in Cubism Editor, export it as moc3 and import that.';
+
+  @override
+  String companionFailedMocVersion(String version, String latest) {
+    return 'This model was exported by a newer Cubism (moc version $version); the runtime on the phone reads up to $latest. Export it for an older version in Cubism Editor and import that.';
+  }
+
+  @override
+  String get companionMenuAdapt => 'Fit this model';
+
+  @override
+  String get companionAdaptHint =>
+      'Your own model (your key, billed per request) reads this character and matches up her head, eyes, expressions and where she can be touched. Sent: the model\'s name, its parameter list, the names of its expressions, motions and parts, what you write below and the current fitting. Never the model files or textures.';
+
+  @override
+  String get companionAdaptOffer =>
+      'This model needs fitting: your own model reads its parameter list and the names of its expressions and motions (never the model files), using your key once. New models after this are fitted on their own; you can turn that off in the menu.';
+
+  @override
+  String get companionAdaptOfferYes => 'Fit it';
+
+  @override
+  String get companionAdaptOfferNo => 'Not now';
+
+  @override
+  String get companionAdaptNote => 'What\'s off? (optional)';
+
+  @override
+  String get companionAdaptNoteHint =>
+      'For example: patting her head does nothing, her face goes dark when she\'s happy';
+
+  @override
+  String get companionAdaptRun => 'Let the AI fit it';
+
+  @override
+  String get companionAdaptUndo => 'Undo the fitting';
+
+  @override
+  String get companionAdaptAuto => 'Fit new models when they\'re imported';
+
+  @override
+  String get companionAdaptStart => 'Let me get used to this new body…';
+
+  @override
+  String get companionAdaptDone => 'There, I\'ve got the hang of this body.';
+
+  @override
+  String companionAdaptDoneNote(String note) {
+    return 'There, I\'ve got the hang of this body. $note';
+  }
+
+  @override
+  String get companionAdaptUndone => 'OK, back to how I was.';
+
+  @override
+  String get companionAdaptNoKey => 'To fit me with your model, add an API key in Settings first.';
+
+  @override
+  String companionAdaptFailed(String reason) {
+    return 'That didn\'t work ($reason). You can try again from Fit this model in the menu.';
+  }
+
+  @override
+  String get companionAdaptUnreadable => 'the model\'s answer made no sense';
+
+  @override
+  String get companionAdaptEmpty => 'the model found nothing to match';
+
+  @override
+  String get companionAdaptNetwork => 'no connection';
+
+  @override
+  String get systemImeTitle => 'System input-method diagnostics';
+
+  @override
+  String get systemImeCollect => 'Capture recent events';
+
+  @override
+  String get systemImePrivacy =>
+      'Reproduce first. Each attempt needs native confirmation: fixed events from the last 120 seconds, up to 64; no input contents or raw logs. Permissions are never requested automatically.';
+
+  @override
+  String get systemImeEvidenceLimits =>
+      'Show/hide requests do not prove keyboard visibility. Empty or failed capture does not mean the system behaved normally.';
+
+  @override
+  String get systemImeNotCollected => 'Not collected';
+
+  @override
+  String get systemImeCollecting => 'Awaiting this attempt’s consent or result';
+
+  @override
+  String get systemImeRetained => 'Evidence retained';
+
+  @override
+  String get systemImeNoEvents => 'No matching events found';
+
+  @override
+  String get systemImeUnavailable => 'No selected, live privileged channel';
+
+  @override
+  String get systemImeUnsupported => 'This version or channel does not support capture';
+
+  @override
+  String get systemImeDenied => 'This attempt was not approved';
+
+  @override
+  String get systemImeCancelled => 'This attempt was cancelled';
+
+  @override
+  String get systemImeBusy => 'Channel busy; try again later';
+
+  @override
+  String get systemImeTimeout => 'Capture timed out; try again';
+
+  @override
+  String get systemImeLimitExceeded => 'Capture limit exceeded; no events retained';
+
+  @override
+  String get systemImeFailed => 'Capture failed or response was invalid';
+
+  @override
+  String get systemImeEventCount => 'Retained events';
+
+  @override
+  String get systemImeCapturedAt => 'Captured at';
+
+  @override
+  String get systemImePermissions => 'Phone-control permissions (optional)';
+
+  @override
+  String get systemImePermissionsHint =>
+      'Configure a privileged channel only if you wish; it is not required for diagnostics. Existing phone permissions are not consent for this capture.';
+
+  @override
+  String get systemImeClear => 'Clear evidence and cancel capture';
+
+  @override
+  String get systemImeMemory =>
+      'Memory only; cleared on restart. A new capture replaces old evidence. Included only in manual AI diagnostics or ZIP exports. Clearing does not retract snapshots or files already exported.';
 
   @override
   String get engineNewChatDefaultsLast => 'New chat defaults (last choice)';
@@ -7276,6 +8212,25 @@ class L10nEn extends L10n {
   String get fileChatFallback => 'chat';
 
   @override
+  String get fileUploadToHost => 'Send files to the computer';
+
+  @override
+  String get fileUploadToHostHint => 'Into this conversation’s workspace on the computer, uncompressed';
+
+  @override
+  String fileUploadProgress(int done, int total, String name) {
+    return 'Sending $done/$total: $name';
+  }
+
+  @override
+  String fileUploadDone(String names) {
+    return 'Sent to the computer: $names';
+  }
+
+  @override
+  String get fileUploadFailed => 'Couldn’t send to the computer';
+
+  @override
   String get hostDetailsConnectionType => 'Connection type';
 
   @override
@@ -8794,6 +9749,109 @@ class L10nEn extends L10n {
   String get mediaSettingsEnabledHint => 'Turns this service off for generation';
 
   @override
+  String get mediaConfigKeySaved => 'Saved · not verified';
+
+  @override
+  String get mediaConfigKeyUnknown => 'Status unavailable';
+
+  @override
+  String get mediaConfigKeyNote =>
+      'Key presence is reported by the host. Saving a key does not verify authentication or model access.';
+
+  @override
+  String mediaConfigConsumers(String services) {
+    return 'Media services using this key: $services. Changing or removing it affects all of them; other host integrations may also use it.';
+  }
+
+  @override
+  String get mediaConfigCheck => 'Check saved configuration';
+
+  @override
+  String get mediaConfigCheckNote =>
+      'Local snapshot only; no provider request or generation charge. Does not verify the key, connectivity, balance, model access, or region. The host remains the authority on accepted settings.';
+
+  @override
+  String get mediaConfigCheckReady => 'No local configuration issues found';
+
+  @override
+  String get mediaConfigCheckMissingKey => 'The host has not reported a saved key.';
+
+  @override
+  String get mediaConfigCheckModels =>
+      'No selected models, or some selected models are missing or use a different protocol.';
+
+  @override
+  String get mediaConfigCheckDisabled => 'This service is switched off.';
+
+  @override
+  String get mediaConfigUrlInvalid =>
+      'Enter an HTTPS API root with a host, without credentials, query, fragment, or whitespace.';
+
+  @override
+  String get mediaConfigUrlEndpoint =>
+      'This looks like a request endpoint. Enter the API root instead; the host appends the request path.';
+
+  @override
+  String get mediaConfigUrlRoot => 'This protocol needs the origin only (https://host), without an API path.';
+
+  @override
+  String get mediaConfigUrlHint =>
+      'Enter the API root, not a generation endpoint. OpenAI-compatible roots keep their prefix (for example /v1).';
+
+  @override
+  String get mediaConfigPreview => 'Create request preview';
+
+  @override
+  String get mediaConfigPreviewNote =>
+      'Generation/create request only; edits and status requests may use different paths. Preview is not proof of connectivity or host acceptance.';
+
+  @override
+  String get mediaConfigPreviewUnavailable => 'Request path unavailable in this host catalogue.';
+
+  @override
+  String get mediaConfigTargetTitle => 'Reuse key at a different target?';
+
+  @override
+  String mediaConfigTargetBody(String before, String after) {
+    return 'Target changes from $before to $after. Future requests may send the referenced key to the new target. Only continue if you trust it. The host still validates the change.';
+  }
+
+  @override
+  String get mediaConfigTargetConfirm => 'Trust target and continue';
+
+  @override
+  String get mediaVideoLoading => 'Loading video…';
+
+  @override
+  String get mediaVideoCannotPlay => 'This video could not be played here. Retry or open it in another app.';
+
+  @override
+  String get mediaVideoPlay => 'Play';
+
+  @override
+  String get mediaVideoPause => 'Pause';
+
+  @override
+  String get mediaVideoSaveFailed => 'Couldn’t save the video. Try again.';
+
+  @override
+  String get mediaImageLoading => 'Loading image';
+
+  @override
+  String get mediaImageReload => 'Reload image';
+
+  @override
+  String get mediaImageReloadHint => 'Reads the file again; does not generate again or incur generation charges';
+
+  @override
+  String get mediaVideoNoPoster => 'Tap to play video';
+
+  @override
+  String mediaSavedFilesCount(int count) {
+    return 'Saved $count files to gallery';
+  }
+
+  @override
   String get nearbyThisChat => 'This chat';
 
   @override
@@ -9954,6 +11012,14 @@ class L10nEn extends L10n {
   String get phoneSafeRestoreFailed => 'Couldn’t restore';
 
   @override
+  String get phoneSafeStopIncomplete =>
+      'Could not confirm that the engine has stopped. Configuration was not changed. Check the engine logs before trying again.';
+
+  @override
+  String get phoneSafeRestartIncomplete =>
+      'The configuration operation finished, but the engine has not stopped or restarted. Wait for it to stop before starting it again.';
+
+  @override
   String get phoneSafeRestoreIntro => 'DSH will restore the last working configuration:';
 
   @override
@@ -10384,6 +11450,282 @@ class L10nEn extends L10n {
       'On the main Wireless debugging settings page, find “IP address & port” and enter the port after the colon. Do not use the pairing-code dialog’s port.';
 
   @override
+  String get phonePreviewTitle => 'Live background preview';
+
+  @override
+  String get phonePreviewDescription =>
+      'Frames are read only while the preview is visible and stay on this device. The preview is view-only.';
+
+  @override
+  String get phonePreviewOpen => 'View background screen';
+
+  @override
+  String get phonePreviewOff => 'The task ended or preview is off';
+
+  @override
+  String get phonePreviewUnavailable => 'Preview is unavailable or the screen is protected';
+
+  @override
+  String get phonePreviewWaiting => 'Waiting for a new background frame';
+
+  @override
+  String get phoneViewportTitle => 'Background viewport';
+
+  @override
+  String get phoneViewportDescription =>
+      'Applies when the next background screen is created. The current screen stays unchanged; recreating it after handoff uses the new setting. This does not force apps to rotate.';
+
+  @override
+  String get phoneViewportPortrait => 'Portrait';
+
+  @override
+  String get phoneViewportLandscape => 'Landscape';
+
+  @override
+  String get phoneResumeTask => 'Allow phone control again';
+
+  @override
+  String get phoneResumeTaskHint =>
+      'Allow future phone actions in this conversation. Finished actions will not be replayed.';
+
+  @override
+  String get phoneResumeTaskFailed => 'Could not resume. The previous action may still be finishing.';
+
+  @override
+  String phoneStoppedTask(int task) {
+    return 'Phone task $task stopped';
+  }
+
+  @override
+  String get phoneTaskDrainingHint => 'Waiting for the previous action and background screen cleanup to finish.';
+
+  @override
+  String get phoneTaskCleanupFailedHint =>
+      'Background screen cleanup could not be confirmed. Phone control remains blocked.';
+
+  @override
+  String phoneFinishingTask(int task) {
+    return 'Phone task $task is finishing';
+  }
+
+  @override
+  String get phoneCleanupRetry => 'Retry cleanup';
+
+  @override
+  String get phoneCleanupRetryFailed =>
+      'The previous background screen is still unconfirmed. Its screen access remains reserved.';
+
+  @override
+  String get phoneSelfCheckTitle => 'Local phone self-check';
+
+  @override
+  String get phoneSelfCheckPartial => 'Partial check — only observed items have results';
+
+  @override
+  String get phoneSelfCheckScope =>
+      'Uses the selected connected channel and a temporary presentation display. App launch, text input, screenshots, OCR and MAIN disturbance are not tested. Cleanup alone does not prove a display was created.';
+
+  @override
+  String get phoneSelfCheckStart => 'Start partial check';
+
+  @override
+  String get phoneSelfCheckCancel => 'Request cancellation';
+
+  @override
+  String get phoneSelfCheckRetry => 'Retry cleanup only';
+
+  @override
+  String get phoneSelfCheckRefresh => 'Refresh status';
+
+  @override
+  String get phoneSelfCheckSave => 'Save sanitized report';
+
+  @override
+  String get phoneSelfCheckSaving => 'Saving…';
+
+  @override
+  String get phoneSelfCheckSaved => 'Report saved to Downloads/DSH-Go.';
+
+  @override
+  String get phoneSelfCheckSaveFailed => 'Could not save the report.';
+
+  @override
+  String get phoneSelfCheckReportHint =>
+      'Save only when you choose. The local report contains fixed results, with no screenshots, recognized text, logs, account data or run identifier.';
+
+  @override
+  String phoneSelfCheckRunState(String state) {
+    String _temp0 = intl.Intl.selectLogic(state, {
+      'idle': 'Not started',
+      'running': 'Running partial check',
+      'cleaning': 'Cleaning up; cancellation does not undo sent input',
+      'done': 'Execution and cleanup ended; inspect each result below',
+      'cancelled': 'Cancelled; observed actions remain recorded',
+      'cleanup_pending': 'Cleanup unconfirmed — resources remain reserved',
+      'other': 'Status unavailable',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String phoneSelfCheckStepState(String state) {
+    String _temp0 = intl.Intl.selectLogic(state, {
+      'not_run': 'Not run / no observation',
+      'running': 'Running',
+      'pass': 'Observed pass',
+      'fail': 'Failed',
+      'skipped': 'Skipped',
+      'unknown': 'Unconfirmed',
+      'cancelled': 'Cancelled',
+      'other': 'Unconfirmed',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String phoneSelfCheckStage(String stage) {
+    String _temp0 = intl.Intl.selectLogic(stage, {
+      'device': 'Device preconditions',
+      'channel': 'Selected channel',
+      'display': 'Temporary background display',
+      'input_probe': 'Touch receiver',
+      'launch': 'App launch',
+      'tree': 'Accessibility tree',
+      'tap': 'App button tap',
+      'scroll': 'App scrolling',
+      'back': 'App back action',
+      'text_ascii': 'Fixed ASCII input',
+      'text_zh': 'Fixed Chinese input',
+      'capture': 'Local pattern capture',
+      'continuity': 'Limited controlled refresh',
+      'main': 'Limited MAIN observations',
+      'ocr': 'Local OCR',
+      'cleanup': 'Strict cleanup',
+      'other': 'Unknown item',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String phoneSelfCheckReason(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'busy': 'The phone or channel is busy.',
+      'unsupported': 'This device or peer does not support this check.',
+      'cancelled': 'This request was cancelled or retired.',
+      'disabled': 'Phone control is turned off.',
+      'locked': 'The device is locked.',
+      'identity': 'The original run or channel no longer matches.',
+      'invalid': 'The request or result could not be verified.',
+      'display': 'The temporary display could not be verified.',
+      'input': 'Input acceptance or delivery was not confirmed. Sent input is not retried.',
+      'cleanup': 'Resource cleanup is unconfirmed. Retry only cleanup.',
+      'denied': 'The system denied the operation.',
+      'timeout': 'The operation timed out; sent work may still complete.',
+      'unavailable': 'The local status or selected channel is unavailable.',
+      'target_unavailable': 'The fixed target could not be verified. Finish cleanup before starting again.',
+      'target_changed': 'The original target changed. Continue only with cleanup.',
+      'target_cleanup': 'Target cleanup is unconfirmed. Retry only cleanup.',
+      'target_main': 'The target was observed on MAIN. Further steps stopped; complete cleanup.',
+      'target_readback': 'The fixed target count or text did not match. Do not repeat the action; complete cleanup.',
+      'tree_cleanup': 'Tree connection cleanup is unconfirmed. Retry only cleanup.',
+      'target_launch': 'Target launch was denied or unconfirmed. Check the device and complete cleanup.',
+      'frame_unavailable': 'No usable local pattern frame was observed. Complete cleanup before a new check.',
+      'frame_mismatch': 'The actual frame did not match this target and phase. Complete cleanup.',
+      'continuity': 'The limited controlled refresh sequence was not confirmed. This is not a frame-rate result.',
+      'main_changed':
+          'MAIN samples changed; this may include user actions. Complete cleanup. This does not establish the cause.',
+      'main_unchanged': 'No change was seen at these finite sampling points. Disturbance between them remains unknown.',
+      'main_incomplete': 'MAIN samples are incomplete. They cannot establish absence of disturbance.',
+      'not_installed': 'No local OCR recognizer is installed. OCR was not tested.',
+      'other': 'An unrecognized result was received.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get phoneSelfCheckTargetScope =>
+      'Uses an ordinary temporary display and a fixed local target for launch, tree reading and one button tap. Text, scrolling, screenshots and OCR are not tested. MAIN can only record an observed failure, never a pass. Cleanup alone does not prove a display was created.';
+
+  @override
+  String get phoneSelfCheckProfileChoice => 'Choose the next check (does not change the report below)';
+
+  @override
+  String phoneSelfCheckProfile(String profile) {
+    String _temp0 = intl.Intl.selectLogic(profile, {
+      'probe_b': 'Input receiver check (B)',
+      'target_c1': 'Fixed target check (C1)',
+      'target_c2': 'Fixed input and frames (C2)',
+      'other': 'Unknown profile',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String phoneSelfCheckReportProfile(String profile) {
+    String _temp0 = intl.Intl.selectLogic(profile, {
+      'probe_b': 'Report profile: input receiver (B)',
+      'target_c1': 'Report profile: fixed target (C1)',
+      'target_c2': 'Report profile: fixed input and frames (C2)',
+      'other': 'Report profile: unconfirmed',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get phoneSelfCheckTargetC2Scope =>
+      'Uses a fixed local target for launch, tree reading, one button tap, ASCII and Chinese ACTION_SET_TEXT replacement/readback, local pattern capture and limited controlled refresh. This does not measure FPS or smoothness. Finite MAIN samples cannot prove there was no disturbance between samples. OCR is not installed; touch receiver, scrolling and back are not tested. Cleanup alone does not prove a display was created.';
+
+  @override
+  String phoneTaskWaiting(int taskId) {
+    return 'Task $taskId · Waiting for resources';
+  }
+
+  @override
+  String phoneTaskWaitingApp(String packageName, int seconds) {
+    return 'Waiting for app $packageName · $seconds seconds elapsed.';
+  }
+
+  @override
+  String phoneTaskWaitingUnknown(int seconds) {
+    return 'Waiting for the interface (app identity unconfirmed) · $seconds seconds elapsed.';
+  }
+
+  @override
+  String phoneTaskWaitingScreen(String screen, int seconds) {
+    return 'Waiting for $screen · $seconds seconds elapsed.';
+  }
+
+  @override
+  String get phoneTaskMainResource => 'the main screen';
+
+  @override
+  String get phoneTaskBackgroundResource => 'the background screen';
+
+  @override
+  String get phoneInterruptionTitle => 'Previous phone tasks did not confirm completion';
+
+  @override
+  String get phoneInterruptionLoading => 'Reading interrupted task records…';
+
+  @override
+  String get phoneInterruptionStorageError =>
+      'Task completion records could not be saved or read. Retry; this does not mean background resources were released.';
+
+  @override
+  String phoneInterruptionHint(int count) {
+    return '$count tasks were interrupted or could not save completion. Actions may already have taken effect. Check first. Acknowledging only confirms you saw this notice; it does not resume actions or prove background resources were released.';
+  }
+
+  @override
+  String get phoneInterruptionAcknowledge => 'I checked the interruption notice';
+
+  @override
+  String get phoneInterruptionRetry => 'Retry saving or reading';
+
+  @override
+  String get phoneInterruptionActionFailed => 'Task records are not confirmed yet. Please retry.';
+
+  @override
   String get phoneTaskResultReady => 'Task complete · View result';
 
   @override
@@ -10460,6 +11802,26 @@ class L10nEn extends L10n {
       'Your root manager (Magisk, KernelSU or APatch) will ask you. If you allow it, DSH Go runs its own background service as root. It asks again on its own after a disconnect or restart only with “Keep root channel” on.';
 
   @override
+  String get phoneGateCleanupTitle => 'Probe cleanup not confirmed';
+
+  @override
+  String get phoneGateCleanupUnknown =>
+      'New background resources are blocked. Retry only the original cleanup if its channel is still available. This does not rerun the probe.';
+
+  @override
+  String get phoneGateCleanupRunning =>
+      'Waiting for the original probe and its cleanup. The channel stays pinned until cleanup is confirmed.';
+
+  @override
+  String get phoneGateCleanupRetry => 'Retry cleanup only';
+
+  @override
+  String get phoneGateCleanupDone => 'Cleanup confirmed. Choose the channel again explicitly to run a fresh check.';
+
+  @override
+  String get phoneGateRetest => 'Check this channel again';
+
+  @override
   String phoneKeepTitle(String mode) {
     String _temp0 = intl.Intl.selectLogic(mode, {
       'shizuku': 'Keep Shizuku channel',
@@ -10503,6 +11865,128 @@ class L10nEn extends L10n {
 
   @override
   String get phoneKeepFailed => 'Couldn’t reconnect. Tries again when you open the app or start a task.';
+
+  @override
+  String get phoneResourceRecoveryTitle => 'Background resources need verification';
+
+  @override
+  String get phoneResourceRecoveryRunning =>
+      'Checking the original resource records. New phone tasks will wait until this finishes.';
+
+  @override
+  String get phoneResourceRecoveryStorage =>
+      'The resource record could not be read or saved. Retry saving or reading it. A confirmed release is not repeated, and past actions are not replayed.';
+
+  @override
+  String get phoneResourceRecoveryPending =>
+      'Old background resources have not been verified. New phone tasks are blocked. Choose the original authorized channel and retry; if verification remains unavailable, restart the device and check again. Past actions may already have happened. Reading the task interruption notice does not clear these resources.';
+
+  @override
+  String get phoneResourceRecoveryRetry => 'Retry resource verification';
+
+  @override
+  String get phoneSkillSectionTitle => 'Completed tasks and skills';
+
+  @override
+  String get phoneSkillAskAfterSuccess => 'Ask to save a skill after a successful task';
+
+  @override
+  String get phoneSkillAskAfterSuccessHint =>
+      'Off by default. A newly completed task asks once while this page is visible. You can also choose a task manually.';
+
+  @override
+  String phoneSkillTask(int taskId, int steps) {
+    return 'Task $taskId · $steps steps';
+  }
+
+  @override
+  String get phoneSkillCandidateHint =>
+      'Check the actual result first; successful tool calls do not prove that your goal was achieved.';
+
+  @override
+  String get phoneSkillSaveAction => 'Save as a skill';
+
+  @override
+  String get phoneSkillConfirmGoal => 'Did this task achieve your goal?';
+
+  @override
+  String get phoneSkillConfirmGoalBody =>
+      'Check the actual result. Your confirmation creates a draft that you can review and edit before saving.';
+
+  @override
+  String get phoneSkillGoalDone => 'Goal achieved · Review draft';
+
+  @override
+  String get phoneSkillPrivacyHint =>
+      'The draft stays on this device. Do not enter passwords, keys, or verification codes. In this version, free text becomes parameters; removing or reordering steps is kept. Review the final preview.';
+
+  @override
+  String get phoneSkillGoal => 'Goal';
+
+  @override
+  String get phoneSkillPrerequisites => 'Requirements (app, version, sign-in state)';
+
+  @override
+  String phoneSkillStep(int number) {
+    return 'Original step $number';
+  }
+
+  @override
+  String get phoneSkillCheckpoint => 'What should appear after this step';
+
+  @override
+  String get phoneSkillMoveUp => 'Move step up';
+
+  @override
+  String get phoneSkillMoveDown => 'Move step down';
+
+  @override
+  String get phoneSkillUpdatePreview => 'Update the redacted preview';
+
+  @override
+  String get phoneSkillPreviewTitle => 'Complete content to be saved';
+
+  @override
+  String get phoneSkillParameterizedHint =>
+      'Free text has been replaced with parameters to fill in and check when using this skill.';
+
+  @override
+  String get phoneSkillFinalConfirmation =>
+      'I have reviewed the complete current preview and agree to save this version.';
+
+  @override
+  String get phoneSkillSavedBody =>
+      'The file was written to the local skills directory. The engine’s refreshed skill list has not been verified; check the Skills page.';
+
+  @override
+  String get phoneSkillWriting => 'Writing the skill';
+
+  @override
+  String get phoneSkillCannotCancel =>
+      'The write may have reached its commit stage and cannot be guaranteed to cancel. Closing only closes this page; a committed file will still be saved.';
+
+  @override
+  String get phoneSkillKeepWaiting => 'Keep viewing';
+
+  @override
+  String get phoneSkillCheckWrite => 'Check write result';
+
+  @override
+  String get phoneSkillStale => 'This draft is no longer current. Close it and choose the task again.';
+
+  @override
+  String get phoneSkillSensitive => 'The edit contains sensitive content. Remove it before updating the preview.';
+
+  @override
+  String get phoneSkillInvalid =>
+      'The edit or step order exceeds the limits. Shorten the text and keep at least one step.';
+
+  @override
+  String get phoneSkillWriteFailed =>
+      'The file could not be written. Check the local runtime and storage; edit and update the preview before confirming another save.';
+
+  @override
+  String get phoneSkillUnavailable => 'Skill drafts are unavailable. Check the local engine state and try again.';
 
   @override
   String get phoneModeTitle => 'How DSH confirms';
@@ -14605,6 +16089,9 @@ class L10nEn extends L10n {
   String get searchKwEngineUninstall => 'uninstall,remove,free space';
 
   @override
+  String get searchKwWorkspaceRecovery => 'workspace,index,recovery,rescue,missing chats,chats won\'t open';
+
+  @override
   String get searchKwAddProvider => 'add model,new provider,custom model,base url';
 
   @override
@@ -15851,6 +17338,22 @@ class L10nEn extends L10n {
   String get starSettingsTitle => 'Star DSH Go on GitHub';
 
   @override
+  String get phoneStartupFailureStopping => 'Startup failed; stopping';
+
+  @override
+  String phoneStartupFailureStoppingDetail(String reason) {
+    return 'Startup failed; stopping. $reason';
+  }
+
+  @override
+  String get phoneStartupTokenTimeout =>
+      'Startup timed out: no startup token arrived within 180 seconds. Check the logs.';
+
+  @override
+  String get phoneStartupPortNotReady =>
+      'The startup token arrived, but the local service port did not become ready. Check the logs.';
+
+  @override
   String get stateDiagnosticsSubject => 'DSH Go diagnostics bundle';
 
   @override
@@ -16363,6 +17866,14 @@ class L10nEn extends L10n {
   String get stateEngineUnsupported => 'Not supported by this engine version';
 
   @override
+  String get stateEngineServiceUnavailable =>
+      'The required engine service is not ready. Check the engine logs or export diagnostics.';
+
+  @override
+  String get stateEngineOperationUnavailable =>
+      'The engine cannot run this operation right now. Check the engine logs.';
+
+  @override
   String get stateSettingsRefreshed => 'Changed elsewhere. Refreshed.';
 
   @override
@@ -16766,6 +18277,10 @@ class L10nEn extends L10n {
 
   @override
   String get stateTerminalStartFailed => 'Couldn’t start terminal';
+
+  @override
+  String get stateTerminalDisabledOnHost =>
+      'This computer turned off the remote terminal. Turn on “Terminal” in Remote settings on the computer, then try again.';
 
   @override
   String get stateTileDuotone => 'Duotone';
@@ -18060,25 +19575,159 @@ class L10nEn extends L10n {
       'Check what files and projects are in the workspace and give me a brief overview.';
 
   @override
-  String get viewSuggestWordCount => 'Count words';
+  String get viewSuggestWordCount => 'Write a script';
 
   @override
   String get viewSuggestWordCountPrompt =>
       'Write a Python script that finds the 20 most frequent words in a text file, then run it and show me the results.';
 
   @override
-  String get viewSuggestNode => 'Start Node.js';
+  String get viewSuggestNode => 'New project';
 
   @override
   String get viewSuggestNodePrompt =>
       'Create a Node.js project in the workspace with TypeScript and a minimal unit test.';
 
   @override
-  String get viewSuggestGit => 'Rebase or merge';
+  String get viewSuggestGit => 'Explain Git';
 
   @override
   String get viewSuggestGitPrompt =>
       'Use a concrete example to explain the difference between git rebase and git merge, and when to use each.';
+
+  @override
+  String get viewSuggestWorkspaceHint => 'List files and projects';
+
+  @override
+  String get viewSuggestWordCountHint => 'Count words, then run it';
+
+  @override
+  String get viewSuggestNodeHint => 'Node.js with tests';
+
+  @override
+  String get viewSuggestGitHint => 'Rebase or merge?';
+
+  @override
+  String get viewTipNext => 'Next tip';
+
+  @override
+  String viewTipLabel(String value) {
+    return 'Tip: $value';
+  }
+
+  @override
+  String get viewTipSteer => 'While it works, long-press Send to steer, queue or interrupt';
+
+  @override
+  String get viewTipMidRun => 'You can message mid-run — it reads it at the next step';
+
+  @override
+  String get viewTipSlash => 'Type / for commands: compact the context, switch models and more';
+
+  @override
+  String get viewTipMention => 'Type @ to reference a workspace file or another chat';
+
+  @override
+  String get viewTipReplyMenu => 'Long-press a reply to copy, quote or regenerate it';
+
+  @override
+  String get viewTipEditResend => 'Long-press your own message to edit and resend — the original stays';
+
+  @override
+  String get viewTipQuote => 'Select part of a reply and tap Quote to ask about just that';
+
+  @override
+  String get viewTipTitleDetails => 'Tap the chat title for changes, files and a terminal';
+
+  @override
+  String get viewTipContextRing => 'The ring by Send shows context use — tap it for details';
+
+  @override
+  String get viewTipDrawerMenu => 'Long-press a chat in the sidebar to pin, rename or archive it';
+
+  @override
+  String get viewTipSearch => 'Where the host supports it, chat search matches message content, not just titles';
+
+  @override
+  String get viewTipSettingsSearch => 'Long-press Settings in the sidebar to search settings';
+
+  @override
+  String get viewTipQuickPanel => 'Swipe left on a chat to open the quick panel';
+
+  @override
+  String get viewTipFolderNewChat => 'Long-press a folder in the sidebar to start a chat inside it';
+
+  @override
+  String get viewTipSwitchHost => 'Tap the host name at the sidebar\'s foot to switch to DSH on your computer';
+
+  @override
+  String get viewTipPasteImage => 'Screenshots and stickers from your keyboard can go straight into the composer';
+
+  @override
+  String get viewTipLauncher => 'Long-press the app icon to ask by voice or start a new chat';
+
+  @override
+  String get viewTipPetBubble => 'When the pet pops a bubble, tap it to jump to the chat that\'s waiting';
+
+  @override
+  String get viewTipPetPlay => 'Tap the pet three times to tickle it; long-press to swap it';
+
+  @override
+  String get viewTipActivityStrip => 'While it works, tap the status strip to see this turn\'s full trace';
+
+  @override
+  String get viewTipImageZoom => 'In the image viewer, double-tap or pinch to zoom; long-press to save';
+
+  @override
+  String get viewTipQueuedRecall => 'A queued message can be pulled back into the composer to edit';
+
+  @override
+  String get viewTipKeyboard => 'With a keyboard: Ctrl+Enter sends, Esc twice stops';
+
+  @override
+  String get viewTipShareIn => 'Share text or images to DSH Go from another app to start a new chat with them';
+
+  @override
+  String get viewTipShareSelect => 'When sharing a chat, long-press and slide to pick several messages at once';
+
+  @override
+  String get viewTipChartDrag => 'Drag across a chart in a reply to read each point';
+
+  @override
+  String get viewTipCopyPath => 'Long-press a file in a changes card to copy its path';
+
+  @override
+  String get viewTipCompanion => 'The Companion Room lives in the Switch Host sheet';
+
+  @override
+  String get viewTipAnswerInline => 'When the AI asks you something, just type the answer in the composer';
+
+  @override
+  String get viewTipWallpaper => 'Wallpapers can be dragged, zoomed, blurred and dimmed';
+
+  @override
+  String get viewTipModelHere => 'Pick the model, preset and permissions right here — for this chat only';
+
+  @override
+  String get viewNewChatFolder => 'Folder';
+
+  @override
+  String get viewNewChatPresetTitle => 'Preset for this chat';
+
+  @override
+  String get viewNewChatPermissionTitle => 'Permissions for this chat';
+
+  @override
+  String get viewNewChatDefault => 'Default';
+
+  @override
+  String get viewNewChatUnavailable => 'Unavailable';
+
+  @override
+  String get viewNewChatChange => 'Change';
+
+  @override
+  String get viewNewChatModesFailed => 'Couldn’t set the preset or permissions. The message wasn’t sent.';
 
   @override
   String get viewGreetingMorning => 'Good morning';
@@ -19298,4 +20947,54 @@ class L10nEn extends L10n {
   String webConnectHostFirst(String name) {
     return 'Connect to “$name” to open DSH Web';
   }
+
+  @override
+  String get workspaceRecoveryTitle => 'Workspace index recovery';
+
+  @override
+  String get workspaceRecoveryEnable => 'Use a recovery workspace index';
+
+  @override
+  String get workspaceRecoveryDisable => 'Use the original index again';
+
+  @override
+  String get workspaceRecoveryHint =>
+      'This phone only: use a separate index to access readable conversations when the original workspace index fails.';
+
+  @override
+  String get workspaceRecoveryActive =>
+      'The separate recovery index is selected. Both the original and recovery indexes are retained.';
+
+  @override
+  String get workspaceRecoveryWorking => 'Working…';
+
+  @override
+  String get workspaceRecoveryEnableBody =>
+      'The local engine will stop, switch to a separate recovery index, and start again. The original workspace index stays untouched. Conversation files, plugins, and credentials are not deleted.\n\nOn first use, the new index is built from readable conversations whose folders still exist. Old workspace names, order, defaults, archived state, and pins are not inherited automatically. Empty workspaces and conversations with missing folders may not appear. Original local grouping and pin preferences are retained.\n\nThe recovery index is retained and reused the next time you enable it. This bypasses the original index failure; it does not repair the original index.';
+
+  @override
+  String get workspaceRecoveryDisableBody =>
+      'The local engine will stop, switch back to the original workspace index, and start again. The original failure may return.\n\nConversation files created during recovery and the recovery index are both retained. Workspace membership and order do not sync between the two indexes. Some conversations created during recovery may not appear with the original index. Enable the recovery index again to continue using it.';
+
+  @override
+  String get workspaceRecoveryEnableStart => 'Enable and restart';
+
+  @override
+  String get workspaceRecoveryDisableStart => 'Use original and restart';
+
+  @override
+  String get workspaceRecoveryUnavailable =>
+      'This version does not support workspace index recovery. Check the local engine status and update the app.';
+
+  @override
+  String get workspaceRecoveryRestartIncomplete =>
+      'The index mode changed, but the engine has not been confirmed stopped or restarted. Wait for it to stop before starting it again.';
+
+  @override
+  String get workspaceRecoverySaveFailed =>
+      'The index mode could not be saved. No new start was requested. Check the local engine status and logs.';
+
+  @override
+  String get workspaceRecoveryFailed =>
+      'The operation did not finish. Check the local engine status and logs. This page shows whether the index mode changed.';
 }

@@ -127,7 +127,7 @@ class _PhoneUnlockPageState extends ConsumerState<PhoneUnlockPage> {
     if (_busy != null) return;
     final l10n = context.l10n;
     if (on) {
-      if (ref.read(phoneProvider).status.task.active) {
+      if (ref.read(phoneProvider).status.anyTaskBusy) {
         showBriefNotice(context, l10n.phoneUnlockBusy);
         return;
       }
@@ -149,7 +149,7 @@ class _PhoneUnlockPageState extends ConsumerState<PhoneUnlockPage> {
     final l10n = context.l10n;
     final state = ref.watch(phoneProvider);
     final policies = state.policies;
-    final busyTask = state.status.task.active;
+    final busyTask = state.status.anyTaskBusy;
     return AppPage.list(
       title: l10n.phoneUnlockTitle,
       subtitle: Text(l10n.phoneUnlockSubtitle),
@@ -258,7 +258,7 @@ class _PhoneUnlockConfirmPageState extends ConsumerState<PhoneUnlockConfirmPage>
     }
     setState(() => _saving = false);
     final l10n = context.l10n;
-    final busy = ref.read(phoneProvider).status.task.active;
+    final busy = ref.read(phoneProvider).status.anyTaskBusy;
     showBriefNotice(context, busy ? l10n.phoneUnlockBusy : l10n.phoneConfirmSaveFailed);
   }
 
@@ -266,7 +266,7 @@ class _PhoneUnlockConfirmPageState extends ConsumerState<PhoneUnlockConfirmPage>
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final unlock = widget.unlock;
-    final busyTask = ref.watch(phoneProvider.select((s) => s.status.task.active));
+    final busyTask = ref.watch(phoneProvider.select((s) => s.status.anyTaskBusy));
     const gap = SizedBox(height: 24);
     final page = AppPage.list(
       title: unlock.confirmTitle(l10n),

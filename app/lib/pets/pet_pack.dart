@@ -105,10 +105,16 @@ class PetPack {
     this.idlePool = const [],
     this.idleEvery = const PetEvery(),
     this.bonus = const {},
+    this.dir,
   });
 
-  /// Folder name under `assets/pets/`.
+  /// Folder name under `assets/pets/`, or under the brought pets' folder
+  /// (pet_library.dart).
   final String id;
+
+  /// Where a brought pet's sheets are on disk; null for the built-in ones,
+  /// which come from the app's assets.
+  final String? dir;
   final String name;
   final String? author;
   final String? license;
@@ -242,7 +248,7 @@ class PetPack {
 
   /// Parses pack.json. A pack that fails its checks throws [FormatException]
   /// (a broken pack is not loaded at all).
-  factory PetPack.parse(Map<String, Object?> json) {
+  factory PetPack.parse(Map<String, Object?> json, {String? dir}) {
     if (json['schema'] != schema) throw const FormatException('pack.json: schema');
     final id = _string(json['id']);
     if (id == null || id.isEmpty) throw const FormatException('pack.json: id');
@@ -378,6 +384,7 @@ class PetPack {
         max: (_num(every['max']) ?? 300000).round(),
       ),
       bonus: bonus,
+      dir: dir,
     );
   }
 

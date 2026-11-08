@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_resource_recovery_pending">Old background resources or their records are not yet verified. Open background resource recovery before starting a new phone task.</string>
+</resources>

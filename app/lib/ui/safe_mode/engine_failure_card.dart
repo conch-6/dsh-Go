@@ -9,6 +9,7 @@ import '../../runtime/runtime_state.dart';
 import '../../state/safe_mode_state.dart';
 import '../common/status_chip.dart';
 import '../engine/diagnostics_export_card.dart';
+import '../engine/engine_status.dart';
 import '../remote/remote_screen.dart';
 import '../settings/background_guide_page.dart';
 import '../theme/theme.dart';
@@ -131,7 +132,9 @@ class EngineFailureCard extends ConsumerWidget {
   final EdgeInsetsGeometry padding;
 
   static bool visibleFor(RuntimeStatus status) =>
-      status.failure != null && (status.phase == RuntimePhase.error || status.phase == RuntimePhase.installed);
+      status.failure != null &&
+      !isLocalStartupFailure(status) &&
+      (status.phase == RuntimePhase.error || status.phase == RuntimePhase.installed);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

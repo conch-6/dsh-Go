@@ -1,0 +1,119 @@
+import 'package:dsh_app/companion/companion_reply.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  group('parseCompanionReply', () {
+    test('takes marks out of the words, in order', () {
+      final reply = parseCompanionReply('[表情:开心]今天不错。[动作:点头]你呢？');
+      expect(reply.words, '今天不错。你呢？');
+      expect(reply.marks, const [
+        CompanionMark(CompanionMarkKind.emotion, 'happy'),
+        CompanionMark(CompanionMarkKind.action, 'nod'),
+      ]);
+    });
+
+    test('takes the variants models actually write', () {
+      expect(parseCompanionReply('【表情：害羞】嗯').marks.single.name, 'shy');
+      expect(parseCompanionReply('[表情: 难过 ]嗯').marks.single.name, 'sad');
+      expect(parseCompanionReply('[emotion:Happy] hi').marks.single.name, 'happy');
+      expect(parseCompanionReply('[ACTION:wave] hi').marks.single.name, 'wave');
+    });
+
+    test('an unknown name still disappears from the words', () {
+      final reply = parseCompanionReply('[表情:翻白眼]算了。');
+      expect(reply.words, '算了。');
+      expect(reply.marks, isEmpty);
+    });
+
+    test('leaves brackets that are not marks alone', () {
+      expect(parseCompanionReply('看 [这里] 和 [1:2]').words, '看 [这里] 和 [1:2]');
+      expect(parseCompanionReply('数组 a[0]').words, '数组 a[0]');
+    });
+
+    test('holds back a mark still arriving, only while streaming', () {
+      for (final partial in ['你好[', '你好[表', '你好[表情', '你好[表情:', '你好[表情:开', '你好【动作：点', '你好[emot']) {
+        expect(parseCompanionReply(partial, streaming: true).words, '你好', reason: partial);
+      }
+      expect(parseCompanionReply('你好[表情:开', streaming: false).words, '你好[表情:开');
+      // Not the start of a mark: shown straight away.
+      expect(parseCompanionReply('看 [这', streaming: true).words, '看 [这');
+    });
+
+    test('the same text gives the same marks on every streaming update', () {
+      const text = '[表情:开心]你好呀[动作:挥手]，今天';
+      final seen = <CompanionMark>[];
+      for (var i = 1; i <= text.length; i++) {
+        final reply = parseCompanionReply(text.substring(0, i), streaming: true);
+        expect(reply.words, isNot(contains('[')), reason: text.substring(0, i));
+        seen
+          ..clear()
+          ..addAll(reply.marks);
+      }
+      expect(seen.map((m) => m.name), ['happy', 'wave']);
+    });
+  });
+
+  group('companionAside', () {
+    test('says the time and what just happened', () {
+      expect(
+        companionAside(now: DateTime(2026, 11, 6, 9, 5), notes: const ['对方刚才摸了摸你的头']),
+        '〔11月6日 周五 09:05，对方刚才摸了摸你的头〕',
+      );
+    });
+
+    test('nothing to say, no aside', () {
+      expect(companionAside(), isNull);
+    });
+  });
+
+  group('companionSaidText', () {
+    final aside = companionAside(now: DateTime(2026, 11, 8, 13, 20), notes: const ['对方刚才摸了摸你的头'])!;
+
+    test('what the person typed, without what the page put in front', () {
+      expect(companionSaidText('$aside\n今天好累'), '今天好累');
+      expect(
+        companionSaidText(
+          ['（你现在的名字是「小鲸」，是对方给你起的。自称时用这个名字。）', '（对方给你改了设定。从现在起按下面这份来：\n多说点话）', aside, '第一行\n第二行'].join('\n'),
+        ),
+        '第一行\n第二行',
+      );
+    });
+
+    test('a message without an aside is all theirs, brackets and all', () {
+      expect(companionSaidText('〔笑〕早上好'), '〔笑〕早上好');
+      expect(companionSaidText('（小声）在吗'), '（小声）在吗');
+    });
+  });
+
+  group('companionGreeting', () {
+    final evening = DateTime(2026, 11, 6, 21);
+
+    test('first time', () {
+      expect(companionGreeting(evening, null), CompanionGreeting.firstTime);
+    });
+
+    test('just left', () {
+      expect(companionGreeting(evening, evening.subtract(const Duration(minutes: 5))), CompanionGreeting.justNow);
+    });
+
+    test('follows the clock', () {
+      final before = DateTime(2026, 11, 5, 21);
+      expect(companionGreeting(DateTime(2026, 11, 6, 8), before), CompanionGreeting.morning);
+      expect(companionGreeting(DateTime(2026, 11, 6, 12), before), CompanionGreeting.noon);
+      expect(companionGreeting(DateTime(2026, 11, 6, 15), before), CompanionGreeting.afternoon);
+      expect(companionGreeting(evening, before), CompanionGreeting.evening);
+      expect(companionGreeting(DateTime(2026, 11, 6, 2), before), CompanionGreeting.lateNight);
+      expect(companionGreeting(DateTime(2026, 11, 6, 23, 30), before), CompanionGreeting.lateNight);
+    });
+
+    test('a long time away is news, whatever the hour', () {
+      expect(companionGreeting(evening, evening.subtract(const Duration(days: 4))), CompanionGreeting.longAbsence);
+    });
+  });
+
+  test('a note with a line break keeps the aside on one line', () {
+    final aside = companionAside(now: DateTime(2026, 11, 8, 9, 0), notes: const ['「整理\n照片」那边跑完了'])!;
+    expect(aside, isNot(contains('\n')));
+    expect(companionSaidText('$aside\n在吗'), '在吗');
+  });
+}

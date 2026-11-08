@@ -33,15 +33,15 @@ class PhoneEngineExitTest {
         override fun backgroundUnavailable() = "unavailable"
         override fun zone() = ZoneId.of("UTC")
         override fun notifyFix(kind: String) {}
-        override fun beforeHandoff(screen: PhoneScreen): String? = null
+        override fun beforeHandoff(screen: PhoneScreen, owner: PhoneTasks.Owner): String? = null
         override fun sleep(ms: Long) {}
         override fun system() = object : SystemApi {
-            override fun apps() = listOf(AppEntry("Example", "example.app"))
+            override fun apps() = listOf(AppEntry("Example", PhoneAppIdentity("example.app", 10123)))
             override fun isInstalled(pkg: String) = true
-            override fun launch(app: AppEntry) = error("unexpected launch")
-            override fun urlTarget(url: String) = error("unexpected URL")
-            override fun openUrl(url: String, target: UrlTarget) = error("unexpected URL open")
-            override fun intent(spec: IntentSpec, shareTo: AppEntry?) = error("unexpected intent")
+            override fun prepareLaunch(app: AppEntry): Either<String, SystemLaunch> = Either.Right(TestSystemLaunch(SystemTarget.Known(app)))
+            override fun launch(plan: SystemLaunch, dispatch: PhoneTasks.SystemDispatch) = error("unexpected launch")
+            override fun prepareUrl(url: String): Either<String, SystemLaunch> = error("unexpected URL")
+            override fun prepareIntent(spec: IntentSpec, selectedApp: AppEntry?): Either<String, SystemLaunch> = error("unexpected intent")
             override fun notify(title: String, text: String): SysResult {
                 notifications.incrementAndGet()
                 synchronized(workerThreads) { workerThreads += Thread.currentThread().name }
@@ -70,7 +70,7 @@ class PhoneEngineExitTest {
         }
         override fun target(screenId: String, elementId: Int): TargetInfo? = null
         override fun perform(action: PhoneAction) = error("unexpected action")
-        override fun open(packageName: String) = error("unexpected open")
+        override fun open(target: PhoneAppIdentity) = error("unexpected open")
     }
 
     private fun collect() = core.call(PhoneToolCatalog.COLLECT, mapOf("screen" to "s1", "list" to 1, "max_pages" to 3))

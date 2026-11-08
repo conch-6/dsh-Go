@@ -9,6 +9,7 @@ import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/performance/performance_state.dart';
 import 'package:dsh_app/pets/pet_sheets.dart';
 import 'package:dsh_app/state/locale_state.dart';
+import 'package:dsh_app/ui/chat/empty_actions.dart' show tipStart;
 
 import 'support/english_preview.dart';
 import 'support/quiet_performance.dart';
@@ -20,6 +21,9 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   // (test/pets/): elsewhere a sheet decoding in a stray real-async window
   // would make screens flicker between with and without a pet.
   PetSheets.enabled = false;
+  // The new-chat tip line starts on a random tip in the app; tests (and the
+  // goldens that show the new-chat page) start on the first one.
+  tipStart = (_) => 0;
   // No device facts in tests: the app reads "unavailable" at once.
   PerformanceChannel.create = QuietPerformanceChannel.new;
   // Tests run in Chinese (goldens and finders were made in it); English

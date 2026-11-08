@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="phone_background_cleanup_busy">The background screen is finishing. Try again shortly.</string>
+    <string name="phone_background_cleanup_before_switch">The background screen could not be cleaned up. Stop the task and retry cleanup before switching channels.</string>
+</resources>

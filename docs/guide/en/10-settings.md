@@ -30,7 +30,7 @@ Shows your DeepSeek account or API key and balance; tap it to open your account.
 - **Phone control**: see [Phone control](04-phone-control.md).
 - **Web search**: the current host's web search: fill in an API key, or switch to the **New search API**.
 - **Plugins**: see [Plugins](08-plugins.md). Some plugins add their own rows below.
-- **Images and video**: the current host's generation services, API keys and default models, from the image and video plugin. Pick a provider to add a service, then enter its API key once; a provider's image and video services share that key. Without the plugin you can **Install on this host**. How to use it: see [Chat](01-chat.md).
+- **Images and video**: the current host's generation services, API keys and default models, from the image and video plugin. Pick a provider to add a service, then enter its API key once; image and video services for the same provider and target origin can share that key, with consumers listed in service details. Enter the API root rather than a complete generation endpoint; editing previews the request URL, and changing origin or reusing a key across origins needs confirmation. Saved does not mean authenticated: **Check saved configuration** inspects saved settings only, without checking the key, balance or model permissions over the network. Without the plugin you can **Install on this host**. How to use it: see [Chat](01-chat.md).
 
 ## Appearance
 

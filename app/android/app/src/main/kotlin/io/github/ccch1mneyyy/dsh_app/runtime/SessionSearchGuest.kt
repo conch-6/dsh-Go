@@ -42,7 +42,7 @@ object SessionSearchGuest {
 
     fun file(rootfs: File) = File(rootfs, PATCH.removePrefix("/"))
 
-    /** Writes the overlay; false (and no file) when it could not be written, so the launch leaves it out. */
+    /** Writes the overlay; false when it could not be written, so this launch leaves it out. Cleanup is best effort. */
     fun writeFiles(rootfs: File): Boolean {
         val target = file(rootfs)
         return try {

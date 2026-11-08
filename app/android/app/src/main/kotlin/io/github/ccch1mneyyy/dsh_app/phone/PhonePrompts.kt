@@ -17,10 +17,11 @@ class PhonePrompts(
     private val locked: () -> Boolean,
     private val notifications: NotificationGate,
     private val reopen: (String?, String?) -> Boolean,
+    private val displaySelection: PhoneDisplaySelection,
+    private val resolveTask: (Long, String?) -> PhoneTasks? = { id, _ -> tasks.takeIf { it.snapshot().id == id } },
 ) : UserGate {
     private val main = Handler(Looper.getMainLooper())
     private val arbiter = PromptArbiter(SystemClock::elapsedRealtime)
-    private val nativeOwner = Any()
     private var activityOwner: Any? = null
     private var activity: Activity? = null
     private var display: Pair<PromptTicket, () -> Unit>? = null
@@ -39,11 +40,13 @@ class PhonePrompts(
     fun present(request: EnginePhonePrompt, owner: Any, sourceCurrent: () -> Boolean = { true },
                 reply: (Map<String, Any?>) -> Unit) {
         if (!enabled()) { reply(unavailable("disabled")); return }
-        val taskOwner = if (request.taskId == null) tasks.beforeTaskOwner() else tasks.activeOwner(request.taskId)
+        val bound = request.taskId?.let { resolveTask(it, request.sessionId) } ?: if (request.taskId == null) tasks else null
+        if (bound == null) { reply(unavailable("stale")); return }
+        val taskOwner = if (request.taskId == null) bound.beforeTaskOwner() else bound.activeOwner(request.taskId)
         if (taskOwner == null || locked()) { reply(unavailable("stale")); return }
         val ticket = arbiter.begin(request.requestId, owner,
             PromptContent(request.kind, request.text, sessionId = request.sessionId, host = request.host), 30_000,
-            { sourceCurrent() && enabled() && !locked() && tasks.isCurrent(taskOwner) })
+            { sourceCurrent() && enabled() && !locked() && bound.isCurrent(taskOwner) })
         if (ticket == null) { reply(unavailable("busy")); return }
         ticket.onFinished {
             onMain {
@@ -63,17 +66,22 @@ class PhonePrompts(
     fun stopAll() = arbiter.stopAll()
     fun check() = arbiter.check()
 
-    override fun confirm(request: ConfirmRequest): Decision {
+    override fun confirm(request: ConfirmRequest): Decision = confirmFor(tasks, null, request)
+
+    private fun confirmFor(task: PhoneTasks, sessionId: String?, request: ConfirmRequest): Decision {
         if (Looper.myLooper() == Looper.getMainLooper()) return Decision.UNAVAILABLE
-        val taskOwner = tasks.activeOwner() ?: return Decision.STOP
-        val ticket = arbiter.begin(null, nativeOwner,
-            PromptContent(PromptKind.NATIVE_CONFIRM, request.sentence.take(4096), request), request.timeoutMs.coerceIn(1, 30_000),
-            { enabled() && !locked() && tasks.isCurrent(taskOwner) }) ?: return Decision.UNAVAILABLE
+        val taskOwner = request.owner ?: task.activeOwner() ?: return Decision.STOP
+        if (!task.isCurrent(taskOwner)) return Decision.STOP
+        val shown = if (sessionId == null) request else request.copy(sentence = "[$sessionId]\n${request.sentence}")
+        val ticket = arbiter.begin(null, task,
+            PromptContent(PromptKind.NATIVE_CONFIRM, shown.sentence.take(4096), shown, sessionId = sessionId), request.timeoutMs.coerceIn(1, 30_000),
+            { enabled() && !locked() && task.isCurrent(taskOwner) }) ?: return Decision.UNAVAILABLE
         schedule(ticket)
         return when (ticket.await().outcome) {
             PromptOutcome.ALLOW_ONCE -> Decision.ALLOW_ONCE
             PromptOutcome.ALLOW_APP -> Decision.ALLOW_APP_FOR_TASK
             PromptOutcome.ALLOW_TASK -> Decision.ALLOW_ALL_FOR_TASK
+            PromptOutcome.ALLOW_VISUAL -> Decision.ALLOW_VISUAL_FOR_TASK
             PromptOutcome.STOPPED -> Decision.STOP
             PromptOutcome.UNAVAILABLE -> Decision.UNAVAILABLE
             else -> Decision.DENY
@@ -82,11 +90,18 @@ class PhonePrompts(
 
     override fun handoff(reason: String, timeoutMs: Long): HandoffResult = handoff(reason, timeoutMs, null)
 
-    override fun handoff(reason: String, timeoutMs: Long, cause: HandoffCause?): HandoffResult {
+    override fun handoff(reason: String, timeoutMs: Long, cause: HandoffCause?): HandoffResult =
+        handoffFor(tasks, null, reason, timeoutMs, cause, tasks.activeOwner())
+
+    override fun handoff(reason: String, timeoutMs: Long, cause: HandoffCause?, owner: PhoneTasks.Owner): HandoffResult =
+        handoffFor(tasks, null, reason, timeoutMs, cause, owner)
+
+    private fun handoffFor(task: PhoneTasks, sessionId: String?, reason: String, timeoutMs: Long, cause: HandoffCause?, owner: PhoneTasks.Owner?): HandoffResult {
         if (Looper.myLooper() == Looper.getMainLooper()) return HandoffResult.STOP
-        val taskOwner = tasks.activeOwner() ?: return HandoffResult.STOP
-        val ticket = arbiter.begin(null, nativeOwner, PromptContent(PromptKind.HANDOFF, reason.take(4096), cause = cause),
-            timeoutMs.coerceIn(1, 600_000), { enabled() && !locked() && tasks.isCurrent(taskOwner) }) ?: return HandoffResult.STOP
+        val taskOwner = owner ?: return HandoffResult.STOP
+        if (!task.isCurrent(taskOwner)) return HandoffResult.STOP
+        val ticket = arbiter.begin(null, task, PromptContent(PromptKind.HANDOFF, (if (sessionId == null) reason else "[$sessionId]\n$reason").take(4096), cause = cause, sessionId = sessionId),
+            timeoutMs.coerceIn(1, 600_000), { enabled() && !locked() && task.isCurrent(taskOwner) }) ?: return HandoffResult.STOP
         schedule(ticket)
         return when (ticket.await().outcome) {
             PromptOutcome.CONTINUE -> HandoffResult.CONTINUE
@@ -95,13 +110,41 @@ class PhonePrompts(
         }
     }
 
-    override fun status(text: String?) {
-        notifications.status(text)
-        PhoneRegistry.overlayGate?.status(text)
+    /** One UI arbiter, but every native ticket retains its own task and conversation. */
+    fun scoped(task: PhoneTasks, sessionId: String?): UserGate = object : UserGate {
+        override fun confirm(request: ConfirmRequest): Decision = confirmFor(task, sessionId, request)
+        override fun handoff(reason: String, timeoutMs: Long): HandoffResult =
+            handoffFor(task, sessionId, reason, timeoutMs, null, task.activeOwner())
+        override fun handoff(reason: String, timeoutMs: Long, cause: HandoffCause?, owner: PhoneTasks.Owner): HandoffResult =
+            handoffFor(task, sessionId, reason, timeoutMs, cause, owner)
+        override fun status(text: String?) = status(text, displaySelection.currentGuard(task))
+        override fun status(text: String?, ifCurrent: (() -> Unit) -> Boolean) =
+            publishStatus(text, displaySelection.scoped(task, ifCurrent))
+        override fun close(ifCurrent: (() -> Unit) -> Unit) = closeTask(task, ifCurrent)
     }
 
-    override fun close(ifCurrent: (() -> Unit) -> Unit) {
-        onMain { ifCurrent { arbiter.stopAll(); clearDisplay(); status(null) } }
+    fun stopTask(task: PhoneTasks) = arbiter.cancelOwner(task)
+
+    override fun status(text: String?) = status(text, displaySelection.currentGuard(tasks))
+
+    override fun status(text: String?, ifCurrent: (() -> Unit) -> Boolean) =
+        publishStatus(text, displaySelection.scoped(tasks, ifCurrent))
+
+    private fun publishStatus(text: String?, ifCurrent: (() -> Unit) -> Boolean) {
+        notifications.status(text, ifCurrent)
+        PhoneRegistry.overlayGate?.status(text, ifCurrent)
+    }
+
+    override fun close(ifCurrent: (() -> Unit) -> Unit) = closeTask(tasks, ifCurrent)
+
+    private fun closeTask(task: PhoneTasks, ifCurrent: (() -> Unit) -> Unit) {
+        val captured = arbiter.current()?.takeIf { it.owner === task }
+        onMain {
+            var accepted = false
+            ifCurrent { accepted = true }
+            // A ticket, not a reusable task reference; callbacks/UI run outside the task lock.
+            if (accepted) captured?.stop()
+        }
     }
 
     private fun schedule(ticket: PromptTicket) {

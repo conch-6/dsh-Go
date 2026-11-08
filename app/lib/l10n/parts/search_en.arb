@@ -79,6 +79,7 @@
   "searchKwAutoSafe": "safe mode,automatic safe mode",
   "searchKwEngineReset": "reset,wipe,restore",
   "searchKwEngineUninstall": "uninstall,remove,free space",
+  "searchKwWorkspaceRecovery": "workspace,index,recovery,rescue,missing chats,chats won't open",
   "searchKwAddProvider": "add model,new provider,custom model,base url",
   "searchKwSubagentDepth": "depth,levels",
   "searchKwParallelCalls": "parallel,concurrent calls",

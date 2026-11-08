@@ -21,6 +21,17 @@ Map<String, Object?> lifted({bool system = false, bool secrets = false, bool own
   'unlocks': {'systemPages': system, 'secretFields': secrets, 'ownApp': ownApp},
 };
 
+/// The selected task (12) has ended; another conversation's (13) is [other].
+Map<String, Object?> twoSessions(Map<String, Object?> other) => {
+  ...phoneStatus(a11y: true),
+  'taskProtocol': 1,
+  'selectedTaskId': 12,
+  'tasks': [
+    {'id': 12, 'sessionId': 'A', 'runId': '1', 'active': false},
+    {'id': 13, 'sessionId': 'B', 'runId': '1', ...other},
+  ],
+};
+
 Switch switchOf(WidgetTester tester, PhoneUnlock unlock) => tester.widget<Switch>(
   find.descendant(of: find.byKey(ValueKey('unlock-${unlock.name}')), matching: find.byType(Switch)),
 );
@@ -163,6 +174,42 @@ void main() {
       ]);
     });
 
+    for (final (what, other) in [
+      ('still active', {'active': true}),
+      ('with a call waiting to start', {'pendingCalls': 1}),
+      ('still draining its last call', {'draining': true, 'stopped': true}),
+    ]) {
+      testWidgets('another conversation\'s task $what while the selected one ended: nothing turns on', (tester) async {
+        final native = FakePhoneNative(status: twoSessions(other), policies: lifted(ownApp: true));
+        await pumpPhone(tester, const PhoneUnlockPage(), native: native);
+        expect(find.byKey(const ValueKey('unlock-busy')), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('unlock-systemPages')));
+        await tester.pumpAndSettle();
+        expect(find.byType(PhoneUnlockConfirmPage), findsNothing);
+        expect(unlockWrites(native), isEmpty);
+        await tester.tap(find.byKey(const ValueKey('unlock-ownApp')));
+        await settlePhone(tester);
+        expect(unlockWrites(native), [
+          {'ownApp': false},
+        ]);
+      });
+    }
+
+    testWidgets('another conversation\'s task: the hold goes dead, and a late one refuses the write', (tester) async {
+      final h = await pumpPhone(tester, const PhoneUnlockConfirmPage(unlock: PhoneUnlock.secretFields));
+      h.native!.status = twoSessions({'active': true});
+      await hold(tester, const Duration(milliseconds: 1600));
+      expect(unlockWrites(h.native!), isEmpty);
+      expect(find.byType(PhoneUnlockConfirmPage), findsOneWidget);
+      expect(find.text('任务进行中，结束后才能开启'), findsWidgets);
+      h.native!.push(twoSessions({'active': false}));
+      await settlePhone(tester);
+      expect(tester.widget<HoldToConfirmButton>(find.byType(HoldToConfirmButton)).enabled, isTrue);
+      h.native!.push(twoSessions({'active': true}));
+      await settlePhone(tester);
+      expect(tester.widget<HoldToConfirmButton>(find.byType(HoldToConfirmButton)).enabled, isFalse);
+    });
+
     testWidgets('a task that starts while the page is open: the hold goes dead', (tester) async {
       final h = await pumpPhone(tester, const PhoneUnlockConfirmPage(unlock: PhoneUnlock.ownApp));
       h.native!.push(phoneStatus(a11y: true, taskActive: true));
@@ -198,8 +245,12 @@ void main() {
     testWidgets('nothing lifted: no tag, the usual footnote, 未开启 on the row', (tester) async {
       await pumpPhone(tester, const PhoneControlScreen());
       expect(find.byType(UnlockedTag), findsNothing);
-      expect(find.text('密码、验证码、付款和系统设置都由你来'), findsOneWidget);
       expect(find.text('均未开启'), findsOneWidget);
+      // The self-check panel makes the lazy list taller; build the footer by scrolling to it.
+      final footnote = find.text('密码、验证码、付款和系统设置都由你来');
+      await tester.scrollUntilVisible(footnote, 200, scrollable: find.byType(Scrollable).first);
+      await settlePhone(tester);
+      expect(footnote, findsOneWidget);
     });
 
     testWidgets('something lifted: the tag under the overview opens 解除限制', (tester) async {

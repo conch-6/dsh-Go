@@ -19,7 +19,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../l10n/l10n.dart';
 import '../../../state/connection_state.dart';
 import '../../../state/features_state.dart';
+import '../../../state/hosts_state.dart';
 import '../../../state/preset_editor_state.dart';
+import '../../../state/read_list_identity.dart';
 import '../../common/discard_guard.dart';
 import '../../common/smooth_size.dart';
 import '../../providers/provider_widgets.dart';
@@ -78,7 +80,8 @@ class _PresetEditorPageState extends ConsumerState<PresetEditorPage> {
   Set<String> _enabled = const {};
   bool _complete = false;
 
-  bool _saving = false;
+  Object? _saveAttempt;
+  bool get _saving => _saveAttempt != null;
   Map<_F, String> _errors = const {};
   String? _formError;
 
@@ -152,6 +155,7 @@ class _PresetEditorPageState extends ConsumerState<PresetEditorPage> {
   }
 
   Future<void> _save(List<AgentPresetInfo> presets) async {
+    if (_saving) return;
     final composition = _composition;
     if (composition == null) return;
     FocusManager.instance.primaryFocus?.unfocus();
@@ -184,14 +188,60 @@ class _PresetEditorPageState extends ConsumerState<PresetEditorPage> {
         complete: composition.hasPersona ? _complete : null,
       ),
     );
-    setState(() => _saving = true);
+    final connection = ref.read(readListLiveConnectionProvider);
+    if (connection == null) return;
+    final selected = ref.read(activeHostProvider);
+    final client = connection.client;
+    final generation = client.mux.generation;
+    final ready = client.mux.lastReadyGenerationNumber;
+    final route = ModalRoute.of(context);
+    final attempt = Object();
+    var retired = false;
+    final selection = ref.listenManual(activeHostProvider, (_, next) {
+      if (next != selected) retired = true;
+    });
+    final connectionChanges = ref.listenManual(activeConnectionProvider, (_, next) {
+      if (!identical(readListConnection(next, selected)?.client, client)) retired = true;
+    });
+    final muxChanges = client.mux.states.listen((state) {
+      if (state == DshConnectionState.reconnecting ||
+          state == DshConnectionState.unauthorized ||
+          state == DshConnectionState.closed) {
+        retired = true;
+      }
+    });
+    bool ownsSave() {
+      if (!mounted || retired || !identical(_saveAttempt, attempt) || (route != null && !route.isCurrent)) return false;
+      if (!identical(ref.read(readListLiveConnectionProvider)?.client, client)) return false;
+      final state = client.mux.state;
+      if (state == DshConnectionState.reconnecting ||
+          state == DshConnectionState.unauthorized ||
+          state == DshConnectionState.closed) {
+        return false;
+      }
+      final current = client.mux.generation;
+      // Local HTTP can already work while its first mux ready is pending.
+      // That first ready is not a reconnect; later generations retire this save.
+      return (identical(current, generation) && client.mux.lastReadyGenerationNumber == ready) ||
+          (generation == null && ready == 0 && current != null && client.mux.lastReadyGenerationNumber == 1);
+    }
+
+    setState(() => _saveAttempt = attempt);
     try {
-      final session = await startCreator(ref, bundle.request(replacing: _isEdit ? widget.bundle?.name : null));
-      if (mounted) openSessionInChat(context, ref, session);
+      final session = await startCreator(
+        ref,
+        bundle.request(replacing: _isEdit ? widget.bundle?.name : null),
+        isCurrent: ownsSave,
+      );
+      if (mounted && ownsSave()) openSessionInChat(context, ref, session);
     } on Object {
-      if (mounted) setState(() => _formError = context.l10n.featuresCreatorOpenFailed);
+      if (ownsSave()) setState(() => _formError = context.l10n.featuresCreatorOpenFailed);
     } finally {
-      if (mounted) setState(() => _saving = false);
+      selection.close();
+      connectionChanges.close();
+      unawaited(muxChanges.cancel());
+      // Publication may have retired while this attempt still owns its spinner.
+      if (mounted && identical(_saveAttempt, attempt)) setState(() => _saveAttempt = null);
     }
   }
 
@@ -201,7 +251,7 @@ class _PresetEditorPageState extends ConsumerState<PresetEditorPage> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final colors = DshColors.of(context);
-    final connected = ref.watch(activeConnectionProvider).value != null;
+    final connected = ref.watch(readListLiveConnectionProvider) != null;
     final presets = ref.watch(agentPresetsProvider).value ?? const <AgentPresetInfo>[];
     final taken = {for (final p in presets) p.id};
     final doc = ref.watch(agentPresetDocumentProvider(_base));

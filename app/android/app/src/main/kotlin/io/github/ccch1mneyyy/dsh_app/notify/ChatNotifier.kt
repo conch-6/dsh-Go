@@ -283,12 +283,18 @@ class ChatNotifier(private val app: Context) {
 
     /**
      * A tap that opens [sessionId] on [host], the way a chat notification's does (it carries the
-     * secret [takeTap] checks). Extras don't make PendingIntents distinct: give each notification
-     * its own [requestCode].
+     * secret [takeTap] checks). Full route data distinguishes PendingIntents even when their
+     * [requestCode] hashes collide; extras alone do not participate in identity.
      */
     fun sessionIntent(sessionId: String, host: String, kind: String, eventId: String?, requestCode: Int): PendingIntent {
         val intent = Intent(app, MainActivity::class.java)
             .setAction(ACTION_OPEN)
+            .setData(Uri.Builder().scheme("dsh-notify").authority("open")
+                .appendQueryParameter("host", host)
+                .appendQueryParameter("session", sessionId)
+                .appendQueryParameter("kind", kind)
+                .apply { if (eventId != null) appendQueryParameter("event", eventId) }
+                .build())
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(EXTRA_TOKEN, token())
             .putExtra(EXTRA_SESSION, sessionId)

@@ -15,7 +15,6 @@ import android.graphics.Typeface
 import android.os.Build
 import android.os.SystemClock
 import android.view.Display
-import io.github.ccch1mneyyy.dsh_app.phone.SensitiveWords
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
@@ -25,21 +24,19 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** Maps image pixels back to the screen: screen = origin + image / scale. */
-internal class ImageGeometry(val originX: Int, val originY: Int, val scaleX: Float, val scaleY: Float, val width: Int, val height: Int) {
-    fun toScreen(x: Int, y: Int): Pair<Int, Int>? {
-        if (x < 0 || y < 0 || x >= width || y >= height) return null
-        return (originX + x / scaleX).roundToInt() to (originY + y / scaleY).roundToInt()
-    }
-}
-
 internal class Shot(
     val bytes: ByteArray?, val mime: String?, val geometry: ImageGeometry?, val secure: Boolean, val error: String?,
     /** When the system took the frame (device clock, ms), from [AccessibilityService.ScreenshotResult.getTimestamp]. */
     val takenAtMillis: Long? = null,
+    val observation: ImageObservation? = null,
+    val localText: LocalOcrResult = LocalOcrResult.Unavailable(LocalOcrResult.Reason.NO_FRAME),
 )
 
-internal class ScreenShooter(private val service: AccessibilityService, private val overlay: ControlOverlay) {
+internal class ScreenShooter(private val service: AccessibilityService, private val overlay: ControlOverlay,
+    private val localOcr: LocalOcr = NoLocalOcr) {
+    /** Querying an absent backend must not capture a frame just to report its absence. */
+    fun localTextWithoutFrame(): LocalOcrResult = LocalOcrResult.Unavailable(
+        localOcr.unavailableReason ?: LocalOcrResult.Reason.NO_FRAME)
     private val captureLock = Any()
     private var closed = false
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "dsh-a11y-shot") }
@@ -62,9 +59,12 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
     /**
      * Captures [window] (API 34+, overlay excluded by construction) or the whole display
      * (API 30–33, overlay hidden for the moment of capture), then greys out [secrets] (see
-     * [sensitiveBounds]) and draws [marks].
+     * [secretFieldBounds]) and draws [marks].
      */
-    fun shoot(window: UiWindow?, screen: Box, marks: List<ScreenElement>, secrets: List<Box>, timeoutMs: Long): Shot {
+    fun shoot(window: UiWindow?, screen: Box, marks: List<ScreenElement>, secrets: List<Box>, timeoutMs: Long, image: Boolean = true,
+        readLocalText: Boolean = false, localTextPrivacyAllowed: Boolean = false,
+        localTextCancelled: () -> Boolean = { false }): Shot {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
         // l10n:keep agent screenshot result
         if (Build.VERSION.SDK_INT < 30) return Shot(null, null, null, false, "本机系统低于 Android 11，不支持无障碍截图")
         val useWindow = Build.VERSION.SDK_INT >= 34 && window != null
@@ -81,11 +81,25 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
         try {
             // l10n:keep agent screenshot result
             if (looksBlack(bitmap)) return Shot(null, null, null, true, "截图全黑，可能是禁止截图的页面")
+            val cancelled = { Thread.currentThread().isInterrupted || localTextCancelled() ||
+                synchronized(captureLock) { closed } }
+            val localText = LocalOcrBoundary.read(readLocalText && image, localTextPrivacyAllowed,
+                bitmap.width, bitmap.height, deadline, SystemClock::uptimeMillis, cancelled) {
+                localOcr.recognize(bitmap, deadline, cancelled)
+            }
             val takenAt = raw.takenAtMillis
             val origin = if (useWindow) window.bounds else screen
+            val frame = VisualFrame.capture(bitmap.width, bitmap.height) { y, row ->
+                bitmap.getPixels(row, 0, bitmap.width, 0, y, bitmap.width, 1)
+            }
             val factor = minOf(1f, 1300f / max(bitmap.width, bitmap.height))
             val w = (bitmap.width * factor).roundToInt().coerceAtLeast(1)
             val h = (bitmap.height * factor).roundToInt().coerceAtLeast(1)
+            val sx = w.toFloat() / origin.width.coerceAtLeast(1)
+            val sy = h.toFloat() / origin.height.coerceAtLeast(1)
+            val geometry = ImageGeometry(origin.left, origin.top, sx, sy, w, h)
+            val observation = ImageObservation(geometry, raw.capturedUptimeMs, frame)
+            if (!image) return Shot(null, null, geometry, false, null, takenAt, observation)
             var scaled = if (factor < 1f) Bitmap.createScaledBitmap(bitmap, w, h, true) else bitmap
             if (scaled === bitmap || !scaled.isMutable) {
                 val mutable = scaled.copy(Bitmap.Config.ARGB_8888, true)
@@ -93,20 +107,20 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
                 scaled = mutable
             }
             try {
-                val sx = w.toFloat() / origin.width.coerceAtLeast(1)
-                val sy = h.toFloat() / origin.height.coerceAtLeast(1)
                 draw(scaled, marks, secrets, origin, sx, sy)
                 val out = ByteArrayOutputStream()
                 scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
-                return Shot(out.toByteArray(), "image/jpeg", ImageGeometry(origin.left, origin.top, sx, sy, w, h), false, null, takenAt)
+                return Shot(out.toByteArray(), "image/jpeg", geometry, false, null, takenAt,
+                    observation, localText)
             } finally { scaled.recycle() }
         } finally { bitmap.recycle() }
     }
 
-    private class Raw(val bitmap: Bitmap?, val secure: Boolean, val error: String?, val takenAtMillis: Long? = null)
+    private class Raw(val bitmap: Bitmap?, val secure: Boolean, val error: String?, val takenAtMillis: Long? = null, val capturedUptimeMs: Long = 0)
 
     private fun capture(timeoutMs: Long, start: (AccessibilityService.TakeScreenshotCallback) -> Unit): Raw {
         if (Build.VERSION.SDK_INT < 30) return Raw(null, false, "unsupported")
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
         repeat(2) { attempt ->
             val latch = CountDownLatch(1)
             var accepting = true
@@ -134,7 +148,7 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
                             // l10n:keep agent screenshot result
                             // ScreenshotResult.getTimestamp(): milliseconds on the uptime clock.
                             val wallClock = ScreenshotClock.wallTime(screenshot.timestamp, SystemClock.uptimeMillis(), System.currentTimeMillis())
-                            Raw(software, false, if (software == null) "截图失败" else null, wallClock)
+                            Raw(software, false, if (software == null) "截图失败" else null, wallClock, screenshot.timestamp)
                         } catch (_: Throwable) {
                             // l10n:keep agent screenshot result
                             Raw(null, false, "截图失败")
@@ -160,7 +174,8 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
                 if (synchronized(captureLock) { closed }) return Raw(null, false, "截图失败")
                 start(callback)
                 // l10n:keep agent screenshot result
-                if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) return Raw(null, false, "截图超时")
+                val remaining = deadline - SystemClock.uptimeMillis()
+                if (remaining <= 0 || !latch.await(remaining, TimeUnit.MILLISECONDS)) return Raw(null, false, "截图超时")
                 synchronized(captureLock) {
                     if (!closed) {
                         received = result
@@ -177,7 +192,9 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
             }
             // l10n:keep agent screenshot result
             if (!retry || attempt == 1) return received ?: Raw(null, false, "截图失败")
-            Thread.sleep(1_050) // the system allows one screenshot per second
+            // The retry shares the original budget, including the system interval wait.
+            if (deadline - SystemClock.uptimeMillis() <= 1_050) return received ?: Raw(null, false, "截图超时")
+            Thread.sleep(1_050)
         }
         // l10n:keep agent screenshot result
         return Raw(null, false, "截图失败")
@@ -222,22 +239,4 @@ internal class ScreenShooter(private val service: AccessibilityService, private 
         }
     }
 
-    companion object {
-        /**
-         * Password and verification-code fields anywhere in [windows], including ones the text
-         * listing left out for length: the screenshot must not show what the text hides.
-         */
-        fun sensitiveBounds(windows: List<UiWindow>): List<Box> {
-            val bounds = ArrayList<Box>()
-            fun visit(node: UiNode) {
-                val hint = node.hint?.takeIf { it.isNotBlank() } ?: node.text?.takeIf { node.showingHint }
-                if (node.password || (node.editable && SensitiveWords.secretHit(hint, node.desc, node.viewId) != null)) {
-                    bounds += node.bounds
-                }
-                node.children.forEach(::visit)
-            }
-            windows.forEach { it.root?.let(::visit) }
-            return bounds
-        }
-    }
 }

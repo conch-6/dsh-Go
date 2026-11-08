@@ -12,12 +12,10 @@ import java.nio.file.StandardOpenOption.WRITE
  */
 internal object LegacyDownloads {
     fun copy(source: InputStream, directory: File, name: String): File {
-        val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
-        val stem = name.substring(0, dot)
-        val extension = name.substring(dot)
+        val initialName = boundedName(name, "")
         var number = 1
         while (true) {
-            val target = File(directory, if (number == 1) name else "$stem ($number)$extension")
+            val target = File(directory, if (number == 1) initialName else boundedName(initialName, " ($number)"))
             val output = try {
                 Files.newOutputStream(target.toPath(), CREATE_NEW, WRITE)
             } catch (_: FileAlreadyExistsException) {
@@ -38,5 +36,36 @@ internal object LegacyDownloads {
                 throw error
             }
         }
+    }
+
+    /** Bound the first exclusive-open candidate as well as every numbered retry. */
+    private fun boundedName(name: String, suffix: String): String {
+        val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
+        val stem = name.substring(0, dot)
+        val extension = name.substring(dot)
+        val budget = 255 - suffix.length // The numeric suffix is ASCII.
+        val extensionBytes = extension.toByteArray(Charsets.UTF_8).size
+        val prefix = utf8Prefix(stem, budget - extensionBytes)
+        // A numbered name remains usable with an empty stem; keep its complete extension when it fits.
+        return if (prefix.isNotEmpty() || (suffix.isNotEmpty() && extensionBytes <= budget)) "$prefix$suffix$extension"
+            else utf8Prefix(stem + extension, budget) + suffix
+    }
+
+    private fun utf8Prefix(text: String, budget: Int): String {
+        var end = 0
+        var bytes = 0
+        while (end < text.length) {
+            val point = text.codePointAt(end)
+            val size = when {
+                point <= 0x7f -> 1
+                point <= 0x7ff -> 2
+                point <= 0xffff -> 3
+                else -> 4
+            }
+            if (bytes + size > budget) break
+            bytes += size
+            end += Character.charCount(point)
+        }
+        return text.substring(0, end)
     }
 }

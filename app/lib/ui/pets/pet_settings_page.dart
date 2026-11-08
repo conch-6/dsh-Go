@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../pets/pet_library.dart';
+import '../../pets/pet_pack.dart';
 import '../../pets/pet_prefs.dart';
 import '../../pets/pet_signals.dart';
 import '../../pets/pet_state.dart';
@@ -58,7 +60,10 @@ class PetSettingsPage extends ConsumerWidget {
     return AppPage.list(
       title: l10n.botsPets,
       children: [
-        SettingsSection(footer: Text(l10n.botsPetSource), children: const [PetPicker()]),
+        SettingsSection(
+          footer: Text(_source(l10n, prefs.packId, ref.watch(petPackProvider(prefs.packId)).value)),
+          children: const [PetPicker(importable: true)],
+        ),
         ExpandReveal(
           open: prefs.enabled,
           child: Column(
@@ -95,6 +100,15 @@ class PetSettingsPage extends ConsumerWidget {
         ),
       ],
     );
+  }
+
+  /// Who made the chosen pet, as its pack says (docs/design/pets.md §9), and
+  /// how to bring your own.
+  static String _source(L10n l10n, String id, PetPack? pack) {
+    final made = !isUserPet(id)
+        ? l10n.botsPetSource
+        : [?pack?.author, ?pack?.license].where((s) => s.trim().isNotEmpty).join(' · ');
+    return [if (made.isNotEmpty) made, l10n.botsPetImportHint].join('\n');
   }
 
   static String _clock(DateTime t) => '${t.hour}:${t.minute.toString().padLeft(2, '0')}';

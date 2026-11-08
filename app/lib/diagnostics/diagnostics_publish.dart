@@ -24,28 +24,32 @@ class PublishedDiagnostics {
 }
 
 class DiagnosticsPublisher {
-  DiagnosticsPublisher({required this.collect});
+  DiagnosticsPublisher({required this.collect, this.collectManual});
 
   static const channel = MethodChannel('dsh/runtime');
 
   final Future<DiagnosticsSnapshot> Function(DateTime at) collect;
+  final Future<DiagnosticsSnapshot> Function(DateTime at)? collectManual;
   Completer<PublishedDiagnostics?>? _pending;
   bool Function()? _pendingOwner;
+  bool _pendingIncludeSystemIme = false;
   bool _publishing = false;
   bool _disposed = false;
 
   /// Collects, renders and writes the snapshot. Requests made while one is in
   /// flight share one later collection, so an old report cannot finish last.
   /// Null when the owner is disposed, the runtime is absent or writing fails.
-  Future<PublishedDiagnostics?> publish({bool Function()? isCurrent}) {
+  Future<PublishedDiagnostics?> publish({bool Function()? isCurrent, bool includeSystemIme = false}) {
     if (_disposed || isCurrent?.call() == false) return Future.value(null);
     if (_pending case final pending?) {
       // An explicit request is not revoked by a coalesced automatic refresh.
       if (_pendingOwner != null) _pendingOwner = isCurrent;
+      _pendingIncludeSystemIme |= includeSystemIme;
       return pending.future;
     }
     final pending = _pending = Completer<PublishedDiagnostics?>();
     _pendingOwner = isCurrent;
+    _pendingIncludeSystemIme = includeSystemIme;
     unawaited(_drain());
     return pending.future;
   }
@@ -57,10 +61,12 @@ class DiagnosticsPublisher {
       while (_pending != null) {
         final pending = _pending!;
         final owner = _pendingOwner;
+        final includeSystemIme = _pendingIncludeSystemIme;
         _pending = null;
         _pendingOwner = null;
+        _pendingIncludeSystemIme = false;
         try {
-          pending.complete(_disposed ? null : await _publish(owner));
+          pending.complete(_disposed ? null : await _publish(owner, includeSystemIme));
         } catch (error, stack) {
           pending.completeError(error, stack);
         }
@@ -72,13 +78,17 @@ class DiagnosticsPublisher {
 
   void dispose() => _disposed = true;
 
-  Future<PublishedDiagnostics?> _publish(bool Function()? isCurrent) async {
+  Future<PublishedDiagnostics?> _publish(bool Function()? isCurrent, bool includeSystemIme) async {
     if (isCurrent?.call() == false) return null;
-    final snapshot = await collect(DateTime.now());
+    final read = includeSystemIme ? collectManual ?? collect : collect;
+    final snapshot = await read(DateTime.now());
     if (_disposed || isCurrent?.call() == false) return null;
     final markdown = diagnosticsMarkdown(snapshot);
     try {
-      final reply = await channel.invokeMapMethod<Object?, Object?>('publishDiagnostics', {'markdown': markdown});
+      final reply = await channel.invokeMapMethod<Object?, Object?>('publishDiagnostics', {
+        'markdown': markdown,
+        'manual': includeSystemIme,
+      });
       if (reply == null) return null;
       final bytes = reply['bytes'];
       return PublishedDiagnostics(
@@ -105,11 +115,15 @@ final diagnosticsPublisherProvider = Provider<DiagnosticsPublisher>((ref) {
   ref.listen(localRuntimeProvider.select((runtime) => runtime.status.phase), (previous, next) {
     if (previous != next) engineRun = Object();
   });
+  Future<DiagnosticsSnapshot> collect(DateTime at, {bool includeSystemIme = false}) {
+    // Both collection paths advance the observed key at collection start, never
+    // after an await: connection changes during either path still queue a refresh.
+    requested = key();
+    return collectDiagnostics(ref, at, includeSystemIme: includeSystemIme);
+  }
   final publisher = DiagnosticsPublisher(
-    collect: (at) {
-      requested = key();
-      return collectDiagnostics(ref, at);
-    },
+    collect: (at) => collect(at),
+    collectManual: (at) => collect(at, includeSystemIme: true),
   );
   Timer? refresh;
   void refreshObserved() {

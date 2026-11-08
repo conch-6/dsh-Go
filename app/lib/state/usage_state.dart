@@ -85,11 +85,15 @@ class SessionUsage {
   /// the first request.
   double? get cacheHitRate => input == 0 ? null : cacheRead / input;
 
-  /// Fraction of the context window in use; null until DSH knows the window.
+  /// Estimated next request, or the most recent provider sample as a fallback.
+  int? get contextTokens => projectedTokens ?? pressureTokens;
+
+  /// Fraction of the context window in use, when both values are available.
   double? get contextFraction {
     final window = contextWindow;
-    if (window == null || window <= 0) return null;
-    return ((pressureTokens ?? 0) / window).clamp(0.0, 1.0);
+    final tokens = contextTokens;
+    if (window == null || window <= 0 || tokens == null) return null;
+    return (tokens / window).clamp(0.0, 1.0);
   }
 
   bool get hasTokens => input > 0 || output > 0;

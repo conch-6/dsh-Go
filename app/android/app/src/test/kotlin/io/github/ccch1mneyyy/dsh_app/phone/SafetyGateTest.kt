@@ -93,6 +93,20 @@ class SafetyGateTest {
         assertEquals(both, PhonePolicies.fromMap(stored))
     }
 
+    @Test fun liftingARuleIsRefusedWhileAnyTaskMayActButTighteningNeverIs() {
+        val base = PhonePolicies(unlocks = PhoneUnlocks(ownApp = true))
+        val lift = mapOf("unlocks" to mapOf("secretFields" to true))
+        assertNull(PhonePolicies.update(lift, base) { true })
+        assertEquals(PhoneUnlocks(secretFields = true, ownApp = true), PhonePolicies.update(lift, base) { false }!!.unlocks)
+        assertNull(PhonePolicies.update(mapOf("unlocks" to mapOf("ownApp" to false, "systemPages" to true)), base) { true })
+        var asked = false
+        val busy = { asked = true; true }
+        assertEquals(PhoneUnlocks(), PhonePolicies.update(mapOf("unlocks" to mapOf("ownApp" to false)), base, busy)!!.unlocks)
+        assertEquals(base.unlocks, PhonePolicies.update(mapOf("unlocks" to mapOf("ownApp" to true)), base, busy)!!.unlocks)
+        assertEquals(listOf("a.b"), PhonePolicies.update(mapOf("denyPackages" to listOf("a.b")), base, busy)!!.denyPackages)
+        assertFalse(asked)
+    }
+
     @Test fun handoffCauseComesOnlyFromHardRefusals() {
         assertEquals(HandoffCause.SECRET, HandoffCause.ofDecision("refused:secret-field"))
         assertEquals(HandoffCause.SYSTEM, HandoffCause.ofDecision("refused:system-page"))
@@ -141,4 +155,43 @@ class SafetyGateTest {
         assertNull(secure.image)
         assertFalse(secure.text.contains("ordinary"))
     }
+    @Test fun unknownCoordinatesAndLongSwipeIgnoreOrdinaryWaivers() {
+        for (mode in ConfirmMode.entries) {
+            val tasks = PhoneTasks().apply { begin(); waive() }
+            val gate = SafetyGate({ PhonePolicies(confirmMode = mode) }, tasks, { null })
+            for (gesture in listOf(PhoneAction.CoordinateGesture.LONG, PhoneAction.CoordinateGesture.SWIPE)) {
+                val action = PhoneAction.TapXY("s1", 10, 20, gesture, 30, 40, 400)
+                repeat(2) {
+                    val verdict = gate.checkWrite(WriteKind.TAP_XY, null, "example.app", "Example",
+                        point = 10 to 20, coordinate = action) as SafetyGate.Verdict.Confirm
+                    assertFalse(verdict.request.firstInApp)
+                    assertFalse(verdict.request.offerTaskWaiver)
+                }
+            }
+            assertTrue(gate.checkWrite(WriteKind.TAP_XY, null, "example.app", "Example",
+                point = 10 to 20, coordinate = PhoneAction.TapXY("s1", 10, 20)) is SafetyGate.Verdict.Confirm)
+        }
+    }
+
+    @Test fun backgroundCoordinatesAlwaysAskEvenAfterAppAndTaskApprovalInEveryMode() {
+        for (mode in ConfirmMode.entries) {
+            val tasks = PhoneTasks().apply { begin(); waive(); approve("example.app") }
+            val gate = SafetyGate({ PhonePolicies(confirmMode = mode) }, tasks, { null })
+            for (gesture in PhoneAction.CoordinateGesture.entries) {
+                val action = PhoneAction.TapXY("b1", 10, 20, gesture, 30, 40, 400)
+                repeat(2) {
+                    val verdict = gate.checkWrite(WriteKind.TAP_XY, null, "example.app", "Example",
+                        point = 10 to 20, coordinate = action, screen = PhoneScreen.BACKGROUND) as SafetyGate.Verdict.Confirm
+                    assertFalse(verdict.request.offerTaskWaiver)
+                    assertFalse(verdict.request.firstInApp)
+                    assertTrue(verdict.request.sentence.contains("本机文字识别未安装"))
+                }
+            }
+            assertTrue(gate.checkWrite(WriteKind.TAP_XY, null, SafetyRules.DEFAULT_DENY.first(), "Blocked",
+                coordinate = PhoneAction.TapXY("b1", 1, 1), screen = PhoneScreen.BACKGROUND) is SafetyGate.Verdict.Refuse)
+            assertTrue(gate.checkWrite(WriteKind.TAP_XY, null, "com.android.settings", "Settings",
+                coordinate = PhoneAction.TapXY("b1", 1, 1), screen = PhoneScreen.BACKGROUND) is SafetyGate.Verdict.Refuse)
+        }
+    }
+
 }

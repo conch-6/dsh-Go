@@ -29,9 +29,17 @@ import kotlin.concurrent.thread
  *   rotated `dsh.log.1` before it), which outlives the app process. Lines were already
  *   masked when written (`CrashClassifier.redact`); Dart masks them again.
  *
- * Nothing here reads user content, keys or tokens.
+ * System IME capture returns only allowlisted events; raw lines are confined to the
+ * privileged parser and are never returned, persisted or sent to the engine log.
  */
-class DiagnosticsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
+class DiagnosticsPlugin : FlutterPlugin, io.flutter.embedding.engine.plugins.activity.ActivityAware, MethodChannel.MethodCallHandler {
+
+    private val systemIme = SystemImePrompt()
+
+    override fun onAttachedToActivity(binding: io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding) = systemIme.attach(binding.activity)
+    override fun onReattachedToActivityForConfigChanges(binding: io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding) = systemIme.attach(binding.activity)
+    override fun onDetachedFromActivityForConfigChanges() = systemIme.detach()
+    override fun onDetachedFromActivity() = systemIme.detach()
 
     private var methods: MethodChannel? = null
     private lateinit var context: Context
@@ -43,6 +51,7 @@ class DiagnosticsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        systemIme.detach()
         methods?.setMethodCallHandler(null)
         methods = null
     }
@@ -50,6 +59,8 @@ class DiagnosticsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "info" -> background(result) { mapOf("app" to app(), "device" to device(), "manifest" to manifest(), "voice" to VoiceDiagnostics.snapshot(context)) }
+            "collectSystemIme" -> systemIme.collect(result)
+            "cancelSystemIme" -> { systemIme.cancel(); result.success(null) }
             "engineLog" -> {
                 val maxBytes = (call.argument<Int>("maxBytes") ?: DEFAULT_LOG_BYTES).coerceIn(1024, MAX_LOG_BYTES)
                 background(result) { engineLog(maxBytes) }
@@ -160,11 +171,16 @@ class DiagnosticsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 val length = raf.length()
                 val start = (length - maxBytes).coerceAtLeast(0)
                 val bytes = ByteArray((length - start).toInt())
+                var cutFirstLine = false
+                if (start > 0) {
+                    raf.seek(start - 1)
+                    cutFirstLine = raf.read() != '\n'.code
+                }
                 raf.seek(start)
                 raf.readFully(bytes)
                 val lines = String(bytes, Charsets.UTF_8).split('\n')
-                // A cut first line is half a line: drop it.
-                val whole = if (start > 0) lines.drop(1) else lines
+                // Drop only a clipped first line; an exact line boundary is complete.
+                val whole = if (cutFirstLine) lines.drop(1) else lines
                 whole.dropLastWhile { it.isEmpty() }
             }
         }

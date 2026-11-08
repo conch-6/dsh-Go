@@ -192,6 +192,12 @@ class FakePhoneNative {
   /// Private engine-approval UI; production PhoneChannel still encodes/parses.
   Future<Map<String, Object?>> Function(Map<String, Object?>)? onPresentPrompt;
 
+  /// Gate cleanup's asynchronous native response, without rerunning a probe.
+  Future<Map<String, Object?>> Function(Map<String, Object?>)? onRetryGateCleanup;
+
+  Future<bool> Function(String)? onAcknowledgeInterruption;
+  Future<bool> Function()? onRetryInterruption;
+
   /// The 悬浮条 settings as the native side keeps them.
   Map<String, Object?> overlay = {'idleOpacity': 0.7, 'autoCollapse': false};
 
@@ -248,10 +254,22 @@ class FakePhoneNative {
       case 'setEnabled':
         if (accept) status = {...status, 'enabled': args['enabled']};
         return accept;
-      case 'openAccessibilitySettings' || 'openAppDetails' || 'stopTask':
+      case 'openAccessibilitySettings' || 'openAppDetails' || 'stopTask' || 'resumeTask' || 'retryTaskCleanup':
         return true;
+      case 'acknowledgeTaskInterruption':
+        return onAcknowledgeInterruption?.call(args['batchToken'] as String) ?? false;
+      case 'retryTaskInterruptionStorage':
+        return onRetryInterruption?.call() ?? false;
       case 'testScreen':
         return screen;
+      case 'setBackgroundViewport':
+        final viewportResult = results[call.method] ?? {'ok': true};
+        if (viewportResult['ok'] == true) {
+          status = {...status, 'background': {..._background, 'viewport': {'v': 1, 'preset': args['preset']}}};
+        }
+        return viewportResult;
+      case 'retryBackgroundGateCleanup':
+        return onRetryGateCleanup?.call(args) ?? results[call.method] ?? {'ok': false};
       case 'setBackgroundMode':
         final r = results[call.method] ?? {'ok': true};
         if (r['ok'] == true) {

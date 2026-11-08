@@ -49,6 +49,66 @@ class ShareNamesTest {
         }
     }
 
+    @Test fun safeNameDoesNotSplitAnEmojiAtItsUtf16Limit() {
+        assertEquals("a".repeat(119), ShareNames.safeName("a".repeat(119) + "😀"))
+        assertEquals("a".repeat(118) + "😀", ShareNames.safeName("a".repeat(118) + "😀"))
+    }
+
+    @Test fun finalNamesBudgetAddedExtensionsAndEveryCollision() {
+        val dir = Files.createTempDirectory("share-names").toFile()
+        try {
+            val shown = ShareNames.withExtension(ShareNames.safeName("界".repeat(120)), "dshgo")
+            val created = mutableSetOf<String>()
+            for (n in 1..10) {
+                val file = ShareNames.unique(dir, shown)
+                assertTrue(file.name.toByteArray(Charsets.UTF_8).size <= 255)
+                assertTrue(file.name.endsWith(".dshgo"))
+                if (n > 1) assertTrue(file.name.endsWith(" ($n).dshgo"))
+                assertTrue(created.add(file.name))
+                file.writeBytes(byteArrayOf(n.toByte()))
+                assertArrayEquals(byteArrayOf(n.toByte()), file.readBytes())
+            }
+            assertEquals(10, dir.listFiles()!!.size)
+            val atLimit = ShareNames.withExtension("界".repeat(85), "jpg")
+            val image = ShareNames.unique(dir, atLimit)
+            assertTrue(image.name.toByteArray(Charsets.UTF_8).size <= 255)
+            assertTrue(image.name.endsWith(".jpg"))
+            image.writeBytes(byteArrayOf(42))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun replacingAnExtensionIsBudgetedAgainAtTheActualOutput() {
+        val dir = Files.createTempDirectory("share-image-name").toFile()
+        try {
+            val original = ShareNames.unique(dir, "界".repeat(84) + "a.x")
+            assertEquals(255, original.name.toByteArray(Charsets.UTF_8).size)
+            original.writeBytes(byteArrayOf(1))
+            val converted = ShareNames.unique(dir, ShareNames.replaceExtension(original.name, "jpg"))
+            assertTrue(converted.name.endsWith(".jpg"))
+            assertTrue(converted.name.toByteArray(Charsets.UTF_8).size <= 255)
+            converted.writeBytes(byteArrayOf(2))
+            assertArrayEquals(byteArrayOf(1), original.readBytes())
+            assertArrayEquals(byteArrayOf(2), converted.readBytes())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun oversizedExtensionFallsBackWithoutSplittingCodePoints() {
+        val dir = Files.createTempDirectory("share-long-extension").toFile()
+        try {
+            val name = "😀." + "😀".repeat(90)
+            for (n in 1..10) {
+                val file = ShareNames.unique(dir, name)
+                val suffix = if (n == 1) "" else " ($n)"
+                assertTrue(file.name.endsWith(suffix))
+                val prefix = file.name.removeSuffix(suffix)
+                assertFalse(Character.isHighSurrogate(prefix.last()))
+                assertTrue(file.name.toByteArray(Charsets.UTF_8).size <= 255)
+                file.writeBytes(byteArrayOf(n.toByte()))
+            }
+            assertEquals(10, dir.listFiles()!!.size)
+        } finally { dir.deleteRecursively() }
+    }
+
     @Test fun fitKeepsTheAspectUnderTheLongSide() {
         assertEquals(1080 to 2400, ShareImages.fit(1080, 2400))
         assertEquals(2560 to 1920, ShareImages.fit(4000, 3000))

@@ -11,18 +11,15 @@ import android.view.Display
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import java.util.concurrent.FutureTask
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 /** Inert touch receiver on the gate's disposable display; never opens a user app. */
 internal class BackgroundInputProbe(private val context: Context, private val display: Display) : AutoCloseable {
     private val ui = Handler(Looper.getMainLooper())
-    private val closed = AtomicBoolean(false)
     private val probe = InputProbe(display.displayId, SystemClock::uptimeMillis)
     var failureDetail: String? = null
         private set
     private var presentation: Presentation? = null // Main looper only.
+    private val cleanup = ProbeCleanup { presentation?.dismiss(); presentation = null }
 
     fun verify(send: (InputProbe.Target, Long) -> Unit) {
         try {
@@ -38,7 +35,7 @@ internal class BackgroundInputProbe(private val context: Context, private val di
             throw probe.failure("inputWindowNotReady")
         probe.entered(InputProbeDiagnostics.Stage.UI_DISPATCH)
         if (!ui.post {
-            if (closed.get()) return@post
+            if (cleanup.isSealed) return@post
             try {
                 probe.entered(InputProbeDiagnostics.Stage.PRESENTATION_CREATE)
                 val dialog = Presentation(context, display, android.R.style.Theme_Material_Light_NoActionBar)
@@ -63,7 +60,7 @@ internal class BackgroundInputProbe(private val context: Context, private val di
                         probe.entered(InputProbeDiagnostics.Stage.FRAME_COMMIT_WAIT)
                         viewTreeObserver.registerFrameCommitCallback {
                             ui.post {
-                                if (!closed.get() && isAttachedToWindow && targetDisplay.isValid &&
+                                if (!cleanup.isSealed && isAttachedToWindow && targetDisplay.isValid &&
                                     this.display?.displayId == targetDisplay.displayId) {
                                     probe.entered(InputProbeDiagnostics.Stage.TARGET_VALIDATE)
                                     val location = IntArray(2)
@@ -76,7 +73,7 @@ internal class BackgroundInputProbe(private val context: Context, private val di
                     }
 
                     override fun onTouchEvent(event: MotionEvent): Boolean {
-                        if (!closed.get()) probe.accept(this.display?.displayId ?: Display.INVALID_DISPLAY,
+                        if (!cleanup.isSealed) probe.accept(this.display?.displayId ?: Display.INVALID_DISPLAY,
                             event.downTime, event.actionMasked, event.rawX, event.rawY)
                         return true
                     }
@@ -91,22 +88,18 @@ internal class BackgroundInputProbe(private val context: Context, private val di
             }
         }) throw probe.failure("inputWindowNotReady")
         probe.verify(now = SystemClock::uptimeMillis, send = { target, time ->
-            if (closed.get() || !display.isValid) throw probe.failure("inputWindowNotReady")
+            if (cleanup.isSealed || !display.isValid) throw probe.failure("inputWindowNotReady")
             send(target, time)
         })
     }
 
     override fun close() {
-        if (!closed.compareAndSet(false, true)) return
         probe.entered(InputProbeDiagnostics.Stage.CLEANUP)
-        val cleanup = FutureTask<Unit> { presentation?.dismiss(); presentation = null }
-        // A timed-out creation cannot outlive cleanup in this same queue. The core releases
-        // the display even if this acknowledgement times out; never report that as success.
+        // A queued creation sees the sealed gate; an in-flight creation precedes this job.
+        // Timeout is not a cleanup acknowledgement; strict owners retain this probe for release.
         var interrupted = Thread.interrupted()
         try {
-            if (Looper.myLooper() == ui.looper) cleanup.run()
-            else if (!ui.post(cleanup)) throw probe.failure("inputProbeCleanupFailed")
-            cleanup.get(2000, TimeUnit.MILLISECONDS)
+            cleanup.close(onUiThread = Looper.myLooper() == ui.looper, post = { ui.post(it) })
         } catch (e: InterruptedException) {
             interrupted = true
             val failure = probe.failure("inputProbeCleanupFailed", e)

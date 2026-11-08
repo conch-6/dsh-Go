@@ -21,12 +21,17 @@ interface IPrivilegedDisplay : IInterface {
             if (code == TXN_EXECUTE) {
                 data.enforceInterface(DESCRIPTOR)
                 val request = data.readBundle(javaClass.classLoader) ?: Bundle()
-                val result = execute(request)
-                reply?.writeNoException()
-                reply?.writeBundle(result)
+                executeReply(request) { result ->
+                    reply?.writeNoException()
+                    reply?.writeBundle(result)
+                }
                 return true
             }
             return super.onTransact(code, data, reply, flags)
+        }
+
+        protected open fun executeReply(request: Bundle, writeReply: (Bundle) -> Unit) {
+            writeReply(execute(request))
         }
 
         private class Proxy(private val remote: IBinder) : IPrivilegedDisplay {

@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:dsh_app/diagnostics/diagnostics_bundle.dart';
 import 'package:dsh_app/diagnostics/diagnostics_channel.dart';
+import 'package:dsh_app/diagnostics/diagnostics_export.dart';
+import 'package:dsh_app/diagnostics/system_ime_diagnostics.dart';
+import 'package:dsh_app/diagnostics/system_ime_evidence.dart';
 import 'package:dsh_app/diagnostics/diagnostics_publish.dart';
 import 'package:dsh_app/runtime/runtime_bridge.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
@@ -15,6 +18,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'support/system_ime_fixture.dart';
 
 class _Runtime extends LocalRuntimeController {
   @override
@@ -58,6 +63,19 @@ class _Channel extends DiagnosticsChannel {
 
   @override
   Future<List<String>> engineLog({int maxBytes = 512 * 1024}) async => const [];
+}
+
+class _SystemChannel extends DiagnosticsChannel {
+  int collections = 0;
+
+  @override
+  Future<SystemImeEvidence> collectSystemIme() async {
+    collections++;
+    return systemImeEvidence();
+  }
+
+  @override
+  Future<void> cancelSystemIme() async {}
 }
 
 class _Phone extends PhoneChannel {
@@ -135,15 +153,27 @@ Future<void> _flush(WidgetTester tester) async {
 
 void main() {
   final written = <String>[];
+  final manualFlags = <bool>[];
+  final reports = <String, String>{};
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     written.clear();
+    manualFlags.clear();
+    reports.clear();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
       DiagnosticsPublisher.channel,
       (call) async {
         if (call.method != 'publishDiagnostics') return null;
-        final markdown = (call.arguments as Map<Object?, Object?>)['markdown'] as String;
+        final arguments = call.arguments as Map<Object?, Object?>;
+        // Automatic calls run inside pump's async guard. The messenger converts
+        // ordinary expect's guard error into PlatformException, hiding the write.
+        expectSync(arguments.keys, ['markdown', 'manual']);
+        final markdown = arguments['markdown'] as String;
+        final manual = arguments['manual'];
+        expectSync(manual, isA<bool>(), reason: 'the channel flag must be a fixed Boolean, not a filename');
+        manualFlags.add(manual as bool);
         written.add(markdown);
+        reports[manual == true ? 'diagnostics-manual.md' : 'diagnostics.md'] = markdown;
         return {'bytes': markdown.length};
       },
     );
@@ -325,6 +355,134 @@ void main() {
     expect(await first, isA<StateError>());
     expect(await second, isA<PublishedDiagnostics>());
     expect(written.single, contains('- state：connected'));
+  });
+
+  testWidgets('automatic snapshots omit retained IME evidence; manual publication and ZIP opt in', (tester) async {
+    final channel = _SystemChannel();
+    final evidence = SystemImeDiagnostics(channel);
+    addTearDown(evidence.dispose);
+    await evidence.collect(isCurrent: () => true);
+    final f = _Fixture(extra: [systemImeDiagnosticsProvider.overrideWithValue(evidence)]);
+    await f.publisher.publish();
+    expect(written.single, isNot(contains('System IME evidence')));
+    expect(manualFlags, [false]);
+    expect(reports.keys, ['diagnostics.md']);
+    await f.publisher.publish(includeSystemIme: true);
+    expect(written.last, contains('System IME evidence'));
+    expect(reports['diagnostics.md'], written.first, reason: 'manual publication must not update the main report');
+    final zipSnapshot = await f.container.read(diagnosticsExporterProvider).collect(systemImeAt);
+    expect(zipSnapshot.systemIme, same(evidence.evidence));
+    expect(DiagnosticsBundle.entries(zipSnapshot).map((e) => e.name), contains('system-ime.json'));
+    final manualReport = reports['diagnostics-manual.md'];
+    evidence.clear();
+    await f.publisher.publish();
+    expect(written.last, isNot(contains('System IME evidence')));
+    expect(manualFlags, [false, true, false]);
+    expect(reports['diagnostics.md'], written.last);
+    expect(reports['diagnostics-manual.md'], manualReport, reason: 'clearing memory cannot retract a published report');
+    expect(manualReport, contains('System IME evidence'));
+    expect(channel.collections, 1, reason: 'publication/export cannot start a new capture');
+  });
+
+  testWidgets('a first manual collection still tracks connection changes during its await', (tester) async {
+    final hold = Completer<VoiceMode>();
+    final evidence = SystemImeDiagnostics(_SystemChannel());
+    addTearDown(evidence.dispose);
+    await evidence.collect(isCurrent: () => true);
+    final f = _Fixture(
+      voice: _Voice(hold),
+      extra: [systemImeDiagnosticsProvider.overrideWithValue(evidence)],
+    )..observe();
+    final manual = f.publisher.publish(includeSystemIme: true);
+    await _flush(tester);
+    expect(reports, isEmpty);
+    f.ready.complete(f.connected);
+    await _flush(tester);
+    hold.complete(VoiceMode.auto);
+    await manual;
+    await _flush(tester);
+    expect(written, hasLength(2));
+    expect(written.first, contains('System IME evidence'));
+    expect(written.last, contains('- state：connected'));
+    expect(written.last, isNot(contains('System IME evidence')));
+    expect(manualFlags, [true, false]);
+    expect(reports['diagnostics.md'], written.last, reason: 'automatic refresh must still update connection facts');
+    expect(reports['diagnostics-manual.md'], written.first, reason: 'queued refresh cannot discard manual IME evidence');
+  });
+
+  testWidgets('clearing during manual collection cannot put old evidence in the eventual snapshot', (tester) async {
+    final hold = Completer<VoiceMode>();
+    final evidence = SystemImeDiagnostics(_SystemChannel());
+    addTearDown(evidence.dispose);
+    await evidence.collect(isCurrent: () => true);
+    final voice = _Voice(hold);
+    final f = _Fixture(
+      voice: voice,
+      extra: [systemImeDiagnosticsProvider.overrideWithValue(evidence)],
+    );
+    final manual = f.publisher.publish(includeSystemIme: true);
+    await _flush(tester);
+    expect(voice.reads, 1);
+    evidence.clear();
+    hold.complete(VoiceMode.auto);
+    await manual;
+    expect(written.single, isNot(contains('System IME evidence')));
+    expect(reports.keys, ['diagnostics-manual.md'], reason: 'manual-only publication must not create a main report');
+  });
+
+  for (final manualFirst in [true, false]) {
+    testWidgets('queued manual opt-in survives coalesced automatic owner changes (manualFirst=$manualFirst)', (tester) async {
+      final held = Completer<DiagnosticsSnapshot>();
+      var collections = 0;
+      var manualCollections = 0;
+      var current = true;
+      final publisher = DiagnosticsPublisher(
+        collect: (_) => ++collections == 1 ? held.future : Future.value(_snapshot('connected')),
+        collectManual: (_) async {
+          manualCollections++;
+          return DiagnosticsSnapshot(
+            at: systemImeAt,
+            status: const RuntimeStatus(phase: RuntimePhase.running),
+            settings: const AppSettings(),
+            systemIme: systemImeEvidence(),
+          );
+        },
+      );
+      addTearDown(publisher.dispose);
+      final initial = publisher.publish();
+      final first = manualFirst ? publisher.publish(includeSystemIme: true) : publisher.publish(isCurrent: () => current);
+      final second = manualFirst ? publisher.publish(isCurrent: () => current) : publisher.publish(includeSystemIme: true);
+      current = false;
+      held.complete(_snapshot('connecting'));
+      await initial;
+      expect(await first, isA<PublishedDiagnostics>());
+      expect(await second, isA<PublishedDiagnostics>());
+      expect(written, hasLength(2));
+      expect(manualCollections, 1);
+      expect(written.first, isNot(contains('System IME evidence')));
+      expect(written.last, contains('System IME evidence'));
+      await publisher.publish();
+      expect(written.last, isNot(contains('System IME evidence')));
+      expect(manualCollections, 1, reason: 'manual opt-in must reset after draining the queue');
+      expect(manualFlags, [false, true, false]);
+      expect(reports['diagnostics-manual.md'], written[1]);
+    });
+  }
+
+  testWidgets('a failed native manual publication does not report a saved copy', (tester) async {
+    final flags = <Object?>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+      DiagnosticsPublisher.channel,
+      (call) async {
+        if (call.method != 'publishDiagnostics') return null;
+        flags.add((call.arguments as Map<Object?, Object?>)['manual']);
+        return null;
+      },
+    );
+    final f = _Fixture();
+    expect(await f.publisher.publish(includeSystemIme: true), isNull);
+    expect(flags, [true]);
+    expect(reports, isEmpty);
   });
 
   testWidgets('disposing the publisher owner during the final collection await prevents a late write', (tester) async {

@@ -208,6 +208,15 @@
             android:taskAffinity=""
             android:theme="@android:style/Theme.NoDisplay" />
 
+        <!-- Local self-check only: App UID starts this fixed inert target on its leased display. -->
+        <activity
+            android:name=".phone.selfcheck.PhoneSelfCheckTargetActivity"
+            android:exported="false"
+            android:launchMode="standard"
+            android:taskAffinity="${applicationId}.phone.selfcheck"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+
         <!-- Quick Settings tile 「新对话」 (tile/NewChatTileService.kt). -->
         <service
             android:name=".tile.NewChatTileService"
@@ -273,6 +282,19 @@
             </intent-filter>
         </receiver>
 
+        <!-- 伙伴小屋 on the home screen (companion/CompanionWidget.kt). -->
+        <receiver
+            android:name=".companion.CompanionWidgetProvider"
+            android:exported="false"
+            android:label="@string/companion_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/companion_widget_info" />
+        </receiver>
+
         <receiver android:name=".notify.NotifyActionReceiver" android:exported="false" />
         <receiver android:name=".phone.a11y.A11yKeeper$Receiver" android:exported="false">
             <intent-filter>
@@ -315,6 +337,11 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- 伙伴小屋's voice (CompanionVoicePlugin): finding the system's speech engine once the
+             target SDK reaches 30. Harmless at 28. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
         </intent>
     </queries>
 </manifest>

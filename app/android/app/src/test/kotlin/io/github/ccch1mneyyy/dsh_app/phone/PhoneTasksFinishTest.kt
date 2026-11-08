@@ -46,18 +46,18 @@ class PhoneTasksFinishTest {
         assertEquals(1, t.callsInFlight)
         assertFalse(t.finish())
         assertTrue(t.snapshot().active)
-        t.callEnded()
+        t.callEnded(t.activeOwner())
         assertEquals(0, t.callsInFlight)
         assertTrue(t.finish())
     }
 
     @Test fun callEndsNeverGoNegative() {
         val t = tasks()
-        t.callEnded()
+        t.callEnded(t.activeOwner())
         assertEquals(0, t.callsInFlight)
         t.callStarted()
         t.callStarted()
-        t.callEnded()
+        t.callEnded(t.activeOwner())
         assertEquals(1, t.callsInFlight)
     }
 

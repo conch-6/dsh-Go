@@ -10,6 +10,7 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.github.ccch1mneyyy.dsh_app.notify.LiveActivity
 
 /**
  * MethodChannel `dsh/pet_overlay` (Dart: `lib/pets/overlay_channel.dart`).
@@ -19,6 +20,8 @@ import io.flutter.plugin.common.MethodChannel
  *   ask?: {eventId, kind, text, approvable, choices}}, sessionId?, host?, active, foreground, packId,
  *   size, canStop, hosts: [{ref, label, current}]}`: the state PetMood reduced; nothing is reduced
  *   again here (`foreground` is read from the activity lifecycle instead);
+ * - `reloadPack {id}`: a brought pet's files changed (imported again, removed); the overlay and the
+ *   live activity's portrait read it again;
  * - `setEnabled {enabled}`, `setAlwaysShow {on}`, `unsnooze` → status;
  * - `status` → status; `permissionStatus` → status after adding a test window (the real check);
  * - `requestPermission` → bool: opens 「显示在其他应用上层」 for this app;
@@ -94,6 +97,13 @@ class PetOverlayPlugin : FlutterPlugin, ActivityAware {
         when (call.method) {
             "push" -> {
                 (call.arguments as? Map<*, *>)?.let(PetOverlay::push)
+                result.success(null)
+            }
+            "reloadPack" -> {
+                call.argument<String>("id")?.let { id ->
+                    PetOverlay.reloadPack(id)
+                    LiveActivity.forgetPack(context, id)
+                }
                 result.success(null)
             }
             "setEnabled" -> result.success(PetOverlay.setEnabled(call.argument<Boolean>("enabled") == true))

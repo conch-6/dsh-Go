@@ -17,7 +17,6 @@ import '../../../state/engine_settings_state.dart';
 import '../../../state/media_catalog.dart';
 import '../../../state/media_generation.dart' show GenerateKind, mediaCatalogProvider;
 import '../../../state/media_settings.dart';
-import '../../common/app_dialog.dart';
 import '../../engine_settings/field_row.dart';
 import '../../engine_settings/field_sheets.dart';
 import '../../engine_settings/schema_form.dart';
@@ -26,11 +25,7 @@ import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 import '../settings_widgets.dart';
 import 'media_shared.dart';
-
-/// A service's API root must be an HTTPS URL; the plugin additionally pins the
-/// host per protocol and refuses credentials in the URL (the Host's error is
-/// then shown on the page after the save).
-const _baseUrlPattern = r'^https://\S+$';
+import 'media_url_sheet.dart';
 
 /// The plugin's `keyRef` / credential-name pattern.
 const _credentialRefPattern = r'^[A-Za-z_][A-Za-z0-9_]{0,127}$';
@@ -95,6 +90,10 @@ class _MediaServiceDetailBody extends ConsumerWidget {
     // checked with the host once the write is through; reused refs are in the
     // snapshot already.
     Future<bool> saveKeyRef(MediaServiceConfig next) async {
+      for (final donor in services.where((row) => row.keyRef == next.keyRef && row.id != service.id)) {
+        if (!await confirmMediaTarget(context, donor.baseUrl, next.baseUrl)) return false;
+        if (!context.mounted) return false;
+      }
       final ok = await save(next);
       if (ok && !settings.credentials.containsKey(next.keyRef)) {
         unawaited(ref.read(engineSettingsProvider.notifier).refresh());
@@ -117,7 +116,11 @@ class _MediaServiceDetailBody extends ConsumerWidget {
           : !writable && configured
           ? l10n.engineFieldFromEnvironment
           : service.keyRef,
-      value: configured ? l10n.engineFieldConfigured : l10n.engineFieldNotConfigured,
+      value: configured
+          ? l10n.mediaConfigKeySaved
+          : credential == null
+          ? l10n.mediaConfigKeyUnknown
+          : l10n.engineFieldNotConfigured,
       valueColor: configured ? null : colors.textTertiary,
       enabled: writable,
       onTap: writable
@@ -254,14 +257,14 @@ class _MediaServiceDetailBody extends ConsumerWidget {
       enabled: editable,
       onTap: editable
           ? () => unawaited(
-              editText(
-                title: l10n.mediaSettingsBaseUrl,
-                current: service.baseUrl,
-                pattern: _baseUrlPattern,
-                patternMessage: l10n.mediaSettingsBaseUrlInvalid,
-                keyboardType: TextInputType.url,
-                onSubmit: (value) => save(service.copyWith(baseUrl: value)),
-                onReset: () => save(service.copyWith(baseUrl: preset?.baseUrl ?? service.baseUrl)),
+              showFieldSheet<void>(
+                context,
+                (_) => MediaUrlSheet(
+                  service: service,
+                  catalog: mediaCatalogMetaOf(view),
+                  defaultUrl: preset?.baseUrl,
+                  onSave: (value) => save(service.copyWith(baseUrl: value)),
+                ),
               ),
             )
           : null,
@@ -342,7 +345,58 @@ class _MediaServiceDetailBody extends ConsumerWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (error != null) MediaInlineError(error),
-        SettingsSection(children: [keyRow, reuseRow, enabledRow]),
+        SettingsSection(
+          footer: Text(
+            [
+              l10n.mediaConfigKeyNote,
+              l10n.mediaConfigConsumers(
+                [
+                  for (final namespace in settings.namespaces.values)
+                    for (final row in mediaServicesOf(namespace.value['services']))
+                      if (row.keyRef == service.keyRef)
+                        '${mediaServiceTitle(row, mediaPresetsOf(namespace), english: english)} (${namespace.ns}/${row.id})',
+                ].join(', '),
+              ),
+            ].join('\n'),
+          ),
+          children: [keyRow, reuseRow, enabledRow],
+        ),
+        SettingsSection(
+          children: [
+            EngineFieldRow(
+              title: l10n.mediaConfigCheck,
+              subtitle: l10n.mediaConfigCheckNote,
+              onTap: () {
+                final issues = <String>[
+                  ?mediaUrlIssueText(l10n, mediaBaseUrlIssue(service.baseUrl, service.profile)),
+                  if (!configured) l10n.mediaConfigCheckMissingKey,
+                  if (!service.enabled) l10n.mediaConfigCheckDisabled,
+                  if (!mediaCatalogReady(catalog)) ?catalogNote,
+                  if (service.models.isEmpty ||
+                      service.models.any((id) => catalog.modelOf(id)?.profile != service.profile))
+                    l10n.mediaConfigCheckModels,
+                ];
+                unawaited(
+                  showDialog<void>(
+                    context: context,
+                    builder: (dialog) => AlertDialog(
+                      title: Text(l10n.mediaConfigCheck),
+                      content: SingleChildScrollView(
+                        child: Text(
+                          [
+                            ...issues.isEmpty ? [l10n.mediaConfigCheckReady] : issues,
+                            l10n.mediaConfigCheckNote,
+                          ].join('\n\n'),
+                        ),
+                      ),
+                      actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: Text(l10n.commonDone))],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
         SettingsSection(
           title: l10n.mediaSettingsModels,
           footer: catalogNote == null ? null : Text(catalogNote),
@@ -379,7 +433,7 @@ class _MediaServiceDetailBody extends ConsumerWidget {
     String title,
   ) async {
     final l10n = context.l10n;
-    final confirmed = await showAppDialog<bool>(
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(l10n.mediaSettingsDeleteTitle(title)),

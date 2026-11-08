@@ -99,7 +99,8 @@ try {
       assert.equal(changes.readRecord,expectedRead,`${label}: read only changed JSON`);
       assert.equal(changes.recordSchemaParses,expectedRead,`${label}: parse only changed JSON`);
       assert.equal(changes.statRecord,shrunk ? 1 : 500,`${label}: one stat per cold record`);
-      assert.equal(changes.persistenceStat,mode==='fallback' ? records.length : 0);
+      // A cold record with no reusable hint is stat'ed by observeSession itself, so the first list adds none.
+      assert.equal(changes.persistenceStat,mode==='fallback' && !first ? records.length : 0);
       assert.equal(changes.observeSession,expectedObserve,`${label}: reuse unchanged log revisions`);
       assert.equal(list.coldHints.size,mode==='fallback' ? records.length : 0);
       const row={label,elapsedMs:elapsed,...changes,retainedHints:list.coldHints.size,rowCount:rows.length,rowsSha256:createHash('sha256').update(JSON.stringify(rows)).digest('hex')};

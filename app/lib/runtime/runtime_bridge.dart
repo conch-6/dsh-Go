@@ -153,6 +153,7 @@ class RuntimeStatus {
     this.managedSkillGeneration,
     this.error,
     this.mode = EngineMode.normal,
+    this.workspaceRecovery = false,
     this.safeState = SafeModeState.off,
     this.safeReason,
     this.strikes = 0,
@@ -192,6 +193,10 @@ class RuntimeStatus {
 
   /// Mode of the running process, or the mode the next start will use.
   final EngineMode mode;
+
+  /// Uses the persistent independent workspace index on this local runtime.
+  /// This is a launch setting, not evidence that workspace services are ready.
+  final bool workspaceRecovery;
   final SafeModeState safeState;
 
   /// Why safe mode is on: `manual`, `auto` (two failures in a row) or `probation` (normal mode failed again).
@@ -274,6 +279,7 @@ class RuntimeStatus {
     },
     error: map['error'] as String?,
     mode: EngineMode.parse(map['mode']),
+    workspaceRecovery: map['workspaceRecovery'] == true,
     safeState: SafeModeState.parse(map['safeState']),
     safeReason: map['safeReason'] as String?,
     strikes: (map['strikes'] as num?)?.toInt() ?? 0,
@@ -605,6 +611,11 @@ class RuntimeBridge {
   Future<void> clearFailure() => _methods.invokeMethod<void>('clearFailure');
 
   Future<void> setAutoSafe(bool enabled) => _methods.invokeMethod<void>('setAutoSafe', {'enabled': enabled});
+
+  /// Selects the local workspace index for subsequent starts. Native code
+  /// verifies the engine is stopped; this call does not start or stop it.
+  Future<void> setWorkspaceRecovery(bool enabled) =>
+      _methods.invokeMethod<void>('setWorkspaceRecovery', {'enabled': enabled});
 
   /// Takes effect on the next start; native code rejects changes while active.
   Future<void> setDirectEngine(bool enabled) => _methods.invokeMethod<void>('setDirectEngine', {'enabled': enabled});

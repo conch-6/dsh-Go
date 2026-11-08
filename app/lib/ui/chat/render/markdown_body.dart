@@ -665,7 +665,7 @@ class _MarkdownBodyState extends State<MarkdownBody> {
     markdown = ScrollConfiguration(behavior: const EdgeFadeScrollBehavior(), child: markdown);
     if (widget.reveal) markdown = _RevealStreaming(streaming: widget.streaming, blocks: _blocks, child: markdown);
     if (widget.selectable) markdown = SelectionArea(child: markdown);
-    return markdown;
+    return MarkdownGalleryScope(child: markdown);
   }
 }
 

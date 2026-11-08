@@ -955,6 +955,13 @@ abstract final class Spots {
     altTitle: (l) => l.phoneSafeLeave,
     keywords: (l) => l.searchKwSafeMode,
   );
+  static final workspaceRecovery = SettingSpot(
+    'workspace-recovery',
+    page: SettingsPageId.engine,
+    title: (l) => l.workspaceRecoveryEnable,
+    altTitle: (l) => l.workspaceRecoveryDisable,
+    keywords: (l) => l.searchKwWorkspaceRecovery,
+  );
   static final engineReset = SettingSpot(
     'engine-reset',
     page: SettingsPageId.engine,
@@ -1105,6 +1112,7 @@ final _rows = <SettingSpot>[
   Spots.autoStart,
   Spots.autoSafe,
   Spots.safeMode,
+  Spots.workspaceRecovery,
   Spots.engineReset,
   Spots.engineUninstall,
   Spots.addSshHost,

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_resource_recovery_pending">旧后台资源或资源记录尚未核验，请先处理后台资源恢复，再开始新的手机任务。</string>
+</resources>

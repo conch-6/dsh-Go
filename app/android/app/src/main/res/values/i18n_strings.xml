@@ -16,6 +16,7 @@
     <string name="background_requires_android">Background mode needs Android 14 or later</string>
     <string name="background_unknown_mode">Unknown mode</string>
     <string name="background_not_ready">Privileged connection isn’t ready</string>
+    <string name="background_provider_mismatch">The selected %1$s channel does not match the current interface, which is provided by %2$s. Select %2$s and enable it again, or restore the %1$s service first.</string>
     <string name="background_no_response">Privileged connection isn’t responding</string>
     <string name="background_injection_denied">Could not confirm background input. Check channel permission and device support.</string>
     <string name="background_input_window_not_ready">The input test window was not ready. No test tap was sent.</string>
@@ -217,13 +218,15 @@
     <string name="phone_share_chooser">Share to</string>
     <string name="phone_open_channel">Open from DSH</string>
     <string name="phone_open_notice">DSH · %1$s</string>
-    <string name="phone_tap_open">Tap to open</string>
+    <string name="phone_tap_open">Return to DSH to check the task. The action will not be repeated.</string>
     <string name="phone_reminder_channel">DSH reminders</string>
     <string name="phone_log_apps">List apps</string>
     <string name="phone_log_apps_filtered">List apps (filtered)</string>
     <string name="phone_log_open_url">Open link</string>
     <string name="phone_log_open_url_scheme">Open link %1$s:</string>
     <string name="phone_log_open_app">Open %1$s</string>
+    <string name="phone_log_system_returned_success">%1$s (system returned success; follow-up stopped)</string>
+    <string name="phone_log_system_returned_failure">%1$s (system returned failure; follow-up stopped)</string>
     <string name="phone_log_open_background">Open %1$s in background</string>
     <string name="phone_log_notify">Notification</string>
     <string name="phone_log_clipboard_read">Read clipboard</string>
@@ -319,4 +322,6 @@
     <string name="background_selection_cancelled">The channel selection was cancelled</string>
     <string name="background_keep_phone_disabled">Turn on phone control before keeping this connection.</string>
     <string name="background_keep_save_failed">Could not save the connection preference. Check it before restarting the app.</string>
+    <string name="background_viewport_invalid">Unknown background viewport preset</string>
+    <string name="background_viewport_save_failed">Could not save the background viewport preference.</string>
 </resources>

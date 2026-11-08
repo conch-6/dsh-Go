@@ -1,8 +1,9 @@
 // The back bridge (assets/web/dsh_web_back.js): what one press of back does
 // inside DSH Web, run against a page model under node
 // (test/web/support/back_bridge_harness.mjs). Topmost first — a dialog or
-// menu, a popover, the app's drawer, the right panel, a level up inside the
-// main area, a full page back to its conversation — one step per press, and
+// menu, a popover, the sidebar as a drawer (the app's, or DSH Web's own in the
+// official layout), the right panel, a level up inside the main area, a full
+// page back to its conversation — one step per press, and
 // nothing that stays open can hold back forever. Needs `node` on PATH;
 // skipped without it.
 
@@ -47,6 +48,31 @@ void main() {
     expect(out['open'], isEmpty);
     expect(out['drawer'], false);
     expect(out['idempotent'], true);
+  }, skip: skip);
+
+  test("DSH Web's own sidebar drawer: one press folds it with its own toggle", () async {
+    final out = await back({
+      'officialDrawer': true,
+      'noPhoneLayout': true,
+      'layout': '',
+      'rightFull': true,
+      'presses': presses(3),
+    });
+    // The drawer first, then the panel under it, then the page.
+    expect(out['steps'], ['drawer', 'panel', 'none']);
+    expect(out['officialDrawer'], false);
+    expect(out['rightFull'], false);
+    // Folded through the toggle in the sidebar's logo row: what a person taps
+    // (the app's marker has stepped aside while the drawer is up).
+    expect((out['log'] as List).cast<String>(), contains('click sidebarToggle'));
+  }, skip: skip);
+
+  test("with the app's phone layout the frame is a drawer too, but back leaves it to the app's drawer", () async {
+    // The official frame at phone widths, its sidebar expanded inside the
+    // app's drawer (dsh_web_phone.js): not the sidebar over the page.
+    final out = await back({'officialDrawer': true, 'presses': presses(1)});
+    expect(out['steps'], ['none']);
+    expect((out['log'] as List).cast<String>(), isNot(contains('click sidebarToggle')));
   }, skip: skip);
 
   test('a menu over a dialog: the menu first, one layer per press', () async {

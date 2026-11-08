@@ -11,6 +11,7 @@ import 'package:dsh_app/ui/workspace/workspace_switcher.dart';
 import 'package:dsh_app/ui/workspace/workspaces_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../shell/golden_harness.dart';
 import 'support.dart';
@@ -41,6 +42,8 @@ Future<void> _open(WidgetTester tester) async {
 }
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   // The drawer on dsh-app: the switcher, a pinned conversation, then days.
   goldenBoth(
     'drawer_workspace',

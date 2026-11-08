@@ -108,6 +108,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
 
     // ---- main-thread state ----
     private var statusText: String? = null
+    private val statusOwnership = StatusOwnership()
     private var line: StatusLine? = null
     private val steps = StepHistory()
     private var stoppedNote = false
@@ -115,6 +116,15 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
     /** 「已发给 DSH：…」 for a moment after 插话, in the line's place. */
     private var steerNote: String? = null
     private var pill: OverlayCapsule? = null
+    private val previewOwner = Any()
+    private var previewTaskId: Long? = null
+    private var previewPill: OverlayCapsule? = null
+    @Volatile private var destroying = false
+    private val previewDecoder = OverlayPreviewDecoder { bitmap ->
+        val target = previewPill
+        if (target == null || destroying) bitmap?.recycle()
+        else target.showPreview(bitmap, s(if (bitmap == null) R.string.overlay_preview_unavailable else R.string.overlay_preview_readonly))
+    }
     private var confirmCard: Card? = null
     private var handoffCard: Card? = null
     private var pendingConfirm: Pending<Decision>? = null
@@ -166,21 +176,47 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
 
     // ---- UserGate --------------------------------------------------------------------------------
 
-    override fun status(text: String?) {
+    override fun status(text: String?) = status(text) { update -> update(); true }
+
+    override fun status(text: String?, ifCurrent: (() -> Unit) -> Boolean) {
         main.post {
+            // This runnable and close apply on the same queue. Never hold the task lock
+            // over WindowManager work or enqueue a second, unguarded status runnable.
+            // The pill's 暂停 / 停止 / 插话 are bound to this status's own task, captured inside its guard.
+            if (!statusOwnership.publish(ifCurrent) { PhoneRegistry.controlListener?.shownControls() }) return@post
             statusText = text
+            paused = statusOwnership.controls?.isPaused() == true
             setStopped(false)
             if (text == null) {
+                statusOwnership.clear()
                 paused = false
                 line = null
                 steps.clear()
-                removePill(animated = true)
+                removePill(animated = true, preservePrompts = true)
             } else {
-                // The core's formats in the app language: the prefixes it puts on, taken off here.
                 val l = StatusLines(AppStrings.get(service, R.string.phone_waived_status), AppStrings.get(service, R.string.phone_acting)).parse(text)
                 line = l
                 steps.add(l)
                 showPill()
+            }
+        }
+    }
+
+    override fun clearStatus(ifCurrent: (() -> Unit) -> Unit) {
+        main.post {
+            // The displayed status can be stale even if this cleanup request lost selection.
+            // Prompt cards and their CONFIRM/HANDOFF holds belong to separate tickets.
+            val stale = statusOwnership.takeStale()
+            var accepted = false
+            ifCurrent { accepted = true }
+            if (stale || accepted) {
+                statusOwnership.clear()
+                statusText = null
+                line = null
+                steps.clear()
+                setStopped(false)
+                paused = false
+                removePill(animated = true, preservePrompts = true)
             }
         }
     }
@@ -191,7 +227,18 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         val confirm = pendingConfirm
         val handoff = pendingHandoff
         main.post {
-            ifCurrent {
+            // A -> stop -> B can invalidate A's cleanup ticket while A's status is
+            // still displayed. Retire that status by its own owner, without touching B's cards.
+            if (statusOwnership.takeStale()) {
+                statusText = null
+                line = null
+                steps.clear()
+                setStopped(false)
+                removePill(animated = false, preservePrompts = true)
+            }
+            var cleanupCurrent = false
+            ifCurrent { cleanupCurrent = true }
+            if (cleanupCurrent) {
                 // A new pre-tool engine prompt can share an inactive task id. Remove only the
                 // questions captured by this cleanup, even when the task itself has not started.
                 if (sharedPrompt === shared) {
@@ -206,6 +253,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
                     handoff?.resolve(HandoffResult.STOP)
                     dismissHandoff()
                 }
+                statusOwnership.clear()
                 statusText = null
                 line = null
                 steps.clear()
@@ -319,6 +367,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
             if (sharedPrompt == null && pendingConfirm === confirm) { confirm?.resolve(Decision.STOP); dismissConfirm() }
             if (pendingHandoff === handoff) { handoff?.resolve(HandoffResult.STOP); dismissHandoff() }
             paused = false
+            clearPreview()
             endEditing()
             if (statusText != null) { setStopped(true); renderPill(); clearStoppedLater() }
         }
@@ -397,15 +446,56 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
     }
 
     fun destroy() {
+        destroying = true
         sharedPrompt?.ticket?.stop()
         pendingConfirm?.resolve(Decision.STOP)
         pendingHandoff?.resolve(HandoffResult.STOP)
         overlayPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         main.post {
+            clearPreview()
             dismissConfirm()
             dismissHandoff()
             removePill(animated = false)
         }
+    }
+
+    /** Subscription visibility follows the existing card, never the mere existence of its View. */
+    private fun syncPreview() {
+        val p = pill
+        val control = PhoneControl.peek()
+        val taskId = if (!destroying && p != null && p.root.isAttachedToWindow && fold.expanded &&
+            !ballShown && !captureHidden && !stoppedNote && !waiting() &&
+            confirmCard == null && handoffCard == null && pendingHandoff == null)
+            control?.liveTask()?.id else null
+        if (taskId == previewTaskId && (taskId == null || previewPill === p)) return
+        clearPreview()
+        if (taskId == null || p == null || control == null) return
+        previewTaskId = taskId
+        previewPill = p
+        control.preview.addConsumer(previewOwner, taskId) { frame ->
+            if (destroying || previewTaskId != taskId || previewPill !== p) return@addConsumer
+            when (frame["state"]) {
+                "frame" -> (frame["imageBytes"] as? ByteArray)?.let(previewDecoder::offer)
+                else -> {
+                    previewDecoder.clear()
+                    val label = when (frame["state"]) {
+                        "off" -> null
+                        "protected" -> s(R.string.overlay_preview_protected)
+                        "waiting" -> s(R.string.overlay_preview_waiting)
+                        else -> s(R.string.overlay_preview_unavailable)
+                    }
+                    p.showPreview(null, label)
+                }
+            }
+        }
+    }
+
+    private fun clearPreview() {
+        PhoneControl.peek()?.preview?.removeConsumer(previewOwner)
+        previewDecoder.clear()
+        previewPill?.showPreview(null, null)
+        previewPill = null
+        previewTaskId = null
     }
 
     // ---- capsule ----------------------------------------------------------------------------------
@@ -481,6 +571,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
             badge = u.any && !stoppedNote,
             stopLabel = if (stoppedNote) null else s(R.string.overlay_stop_description),
         )
+        syncPreview()
     }
 
     /** 「已解除限制」 in bold over what is lifted (「系统设置、密码和验证码」), a size smaller. */
@@ -501,12 +592,17 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
     }
 
     /** Takes the control away; [animated]: it fades first (a task that ended, not a rebuild). */
-    private fun removePill(animated: Boolean) {
+    private fun removePill(animated: Boolean, preservePrompts: Boolean = false) {
+        clearPreview()
         val p = pill ?: return
         endEditing()
         main.removeCallbacks(foldTick)
         main.removeCallbacks(shrinkTick)
         fold.reset()
+        if (preservePrompts) {
+            if (waiting()) fold.hold(FoldClock.Hold.CONFIRM, now())
+            if (handoffCard != null) fold.hold(FoldClock.Hold.HANDOFF, now())
+        }
         val b = ball
         pill = null
         ball = null
@@ -550,6 +646,12 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
             override fun inputDone() = endEditing()
         }
         capsule = OverlayCapsule(service, c, strings, actions) { update(capsule.root, capsule.params) }
+        capsule.root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) = Unit
+            override fun onViewDetachedFromWindow(view: View) {
+                if (previewPill === capsule) clearPreview()
+            }
+        })
         capsule.params = params(top = true, keepScreenOn = true)
         placeCapsule(capsule)
         return capsule
@@ -573,9 +675,10 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
 
     private fun togglePause() {
         if (stoppedNote) return
-        paused = !paused
+        val controls = statusOwnership.controls
+        paused = !(controls?.isPaused() ?: paused)
         renderPill()
-        PhoneRegistry.controlListener?.onPauseChanged(paused)
+        controls?.setPaused(paused)
         announce(s(if (paused) R.string.overlay_paused_short else R.string.overlay_resume_description))
     }
 
@@ -594,7 +697,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         clearStoppedLater()
         announce(s(R.string.overlay_stopped))
         // l10n:keep agent stop reason
-        PhoneRegistry.controlListener?.onStopRequested("你在悬浮条上点了停止")
+        statusOwnership.controls?.stop("你在悬浮条上点了停止")
     }
 
     private fun announce(text: String) {
@@ -649,7 +752,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         if (text.isEmpty()) return
         p.input.setText("")
         endEditing()
-        PhoneRegistry.controlListener?.onInterject(text)
+        statusOwnership.controls?.interject(text)
         val note = s(R.string.overlay_steer_sent, text)
         steerNote = note
         // Back to the capsule: the note shows where the line is.
@@ -732,8 +835,16 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         // 本任务免确认: the main choice waives the rest of the task. Otherwise, on the first action
         // in an app, the main choice allows that app for the rest of the task so later steps there
         // don't ask again. "Only this step" stays available as the quieter option either way.
-        val wide = request.offerTaskWaiver || request.firstInApp
-        if (request.offerTaskWaiver) {
+        val wide = request.visualScope != null || request.offerTaskWaiver || request.firstInApp
+        if (request.visualScope != null) {
+            val visual = GuardedButton(service, armedAt).apply {
+                text = AppStrings.get(service, R.string.phone_prompt_allow_visual)
+                style(this, c.accent, c.onAccent, c)
+                setOnClickListener { decide(Decision.ALLOW_VISUAL_FOR_TASK) }
+            }
+            guarded += visual
+            card.addView(visual, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)).apply { bottomMargin = dp(8) })
+        } else if (request.offerTaskWaiver) {
             val all4task = GuardedButton(service, armedAt).apply {
                 text = AppStrings.get(service, R.string.overlay_allow_remaining)
                 style(this, c.accent, c.onAccent, c)
@@ -884,15 +995,13 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
      *  - not in its first [ARM_MS] (a tap already in flight when the card appeared);
      *  - not while this service is injecting a gesture (InjectGuard);
      *  - not when the touch came through another window on top (tapjacking, FLAG_WINDOW_IS_OBSCURED);
-     *  - not when it looks like an accessibility service's stroke: a virtual device (id ≤ 0) and
-     *    either FLAG_IS_ACCESSIBILITY_EVENT (0x800) or tool type UNKNOWN — unless TalkBack-style
-     *    touch exploration is on, whose double-tap takes that same path;
-     *  - ACTION_CLICK from any accessibility service is refused unless touch exploration is on.
+     *  - ACTION_CLICK from an accessibility service only while touch exploration (TalkBack) is on,
+     *    and never while this service is acting itself.
      * And the Actuator makes the overlay untouchable for every stroke it injects.
-     * Measured on the API 35 emulator (debug probe): our dispatchGesture tap = flags 0x800,
-     * device -1, tool UNKNOWN; a hardware-touchscreen tap = flags 0x800 (!), device 12, tool FINGER;
-     * shell `input tap` = flags 0, device -1, tool FINGER. So 0x800 alone would lock real fingers
-     * out; the device id is what separates them.
+     * Event fields don't decide: on OPPO / realme a real finger arrives with device -1 and flags
+     * 0x800, like our own dispatchGesture tap (#608, #296), so guessing from them locked real users
+     * out. What the card guards against is the assistant, and every input it sends is ours and marked
+     * (PromptInputPolicy has the full rule).
      */
     private inner class GuardedButton(context: Context, private val armedAt: Long) : TextView(context) {
         private var rejected = false
@@ -914,7 +1023,8 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         }
 
         override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
-            if ((action == AccessibilityNodeInfo.ACTION_CLICK || action == AccessibilityNodeInfo.ACTION_LONG_CLICK) && !a11y.isTouchExplorationEnabled) {
+            if ((action == AccessibilityNodeInfo.ACTION_CLICK || action == AccessibilityNodeInfo.ACTION_LONG_CLICK) &&
+                (!a11y.isTouchExplorationEnabled || InjectGuard.active() || SystemClock.uptimeMillis() < armedAt)) {
                 lastGuardVerdict = "accessibility-action"
                 Log.i(TAG, "guarded '$text': refused accessibility click")
                 return false
@@ -926,8 +1036,6 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
             SystemClock.uptimeMillis() < armedAt -> "too-early"
             InjectGuard.active() && !debugIgnoreInjectGuard -> "injecting"
             event.flags and MotionEvent.FLAG_WINDOW_IS_OBSCURED != 0 -> "obscured"
-            event.deviceId <= 0 && (event.flags and FLAG_IS_ACCESSIBILITY_EVENT != 0 || event.getToolType(0) == MotionEvent.TOOL_TYPE_UNKNOWN) &&
-                !a11y.isTouchExplorationEnabled -> "accessibility-injected"
             else -> null
         }
     }
@@ -943,6 +1051,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
     private fun now() = SystemClock.uptimeMillis()
 
     private fun scheduleFold() {
+        syncPreview()
         main.removeCallbacks(foldTick)
         if (debugFreeze) return
         val at = fold.nextAt ?: return
@@ -1136,6 +1245,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
      * touches, so the hidden one is never in the way.
      */
     private fun syncWindows() {
+        syncPreview()
         val p = pill ?: return
         val handoff = handoffCard != null
         val shown = if (captureHidden) View.INVISIBLE else View.VISIBLE
@@ -1315,8 +1425,5 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         /** Going idle is slow and quiet; a touch brings it back at once. */
         private const val DIM_FADE_MS = 400L
         private const val UNDIM_FADE_MS = 120L
-
-        /** MotionEvent.FLAG_IS_ACCESSIBILITY_EVENT (hidden, API 31+). Not decisive alone, see GuardedButton. */
-        private const val FLAG_IS_ACCESSIBILITY_EVENT = 0x800
     }
 }

@@ -149,6 +149,12 @@ String get diagnosticsBundleNote => appL10n.phoneDiagnosticsNote;
 /// so the toast isn't left under the sheet.
 Future<void> showDiagnosticsExportSheet(BuildContext context) {
   final messenger = ScaffoldMessenger.maybeOf(context);
+  // The export can outlive the sheet (swiped away mid-export): close it only
+  // while it is still the top route, and keep the saved notice either way.
+  void close(BuildContext sheet) {
+    if (sheet.mounted && (ModalRoute.of(sheet)?.isCurrent ?? false)) Navigator.of(sheet).pop();
+  }
+
   return showAppSheet<void>(
     context,
     builder: (sheet) => SafeArea(
@@ -161,10 +167,10 @@ Future<void> showDiagnosticsExportSheet(BuildContext context) {
           DiagnosticsExportCard(
             margin: const EdgeInsets.symmetric(horizontal: kSheetGutter),
             onSaved: (where) {
-              Navigator.of(sheet).pop();
-              messenger?.showBriefNotice(diagnosticsSavedText(where));
+              close(sheet);
+              if (messenger?.mounted ?? false) messenger!.showBriefNotice(diagnosticsSavedText(where));
             },
-            onShared: () => Navigator.of(sheet).pop(),
+            onShared: () => close(sheet),
           ),
           const DiagnosticsBundleNote(inset: kSheetGutter + 8),
           const SizedBox(height: 16),

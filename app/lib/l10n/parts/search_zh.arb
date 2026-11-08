@@ -79,6 +79,7 @@
   "searchKwAutoSafe": "安全模式,自动安全模式",
   "searchKwEngineReset": "重置,清空,恢复",
   "searchKwEngineUninstall": "卸载,删除运行环境,释放空间",
+  "searchKwWorkspaceRecovery": "工作区,索引,救援,对话打不开,对话不见了,恢复对话",
   "searchKwAddProvider": "添加模型,新渠道,自定义模型,Base URL",
   "searchKwSubagentDepth": "递归深度,层数",
   "searchKwParallelCalls": "并行,同时调用",

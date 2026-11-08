@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../performance/performance_state.dart';
+import 'pet_library.dart';
 import 'pet_state.dart';
 
 /// The pets that ship with the app, in picker order.
@@ -111,7 +112,9 @@ class PetPrefsController extends Notifier<PetPrefs> {
       await performanceReady(ref);
       if (!ref.mounted) return;
       final pack = prefs.getString(keys.pack);
-      final explicit = pack == noPetId || builtInPets.contains(pack);
+      // A brought pet stays chosen; removing it here picks the default
+      // (UserPetsController.remove).
+      final explicit = pack == noPetId || builtInPets.contains(pack) || (pack != null && isUserPet(pack));
       final hidden = prefs.getInt(keys.hidden);
       state = PetPrefs(
         packId: explicit
@@ -150,6 +153,12 @@ class PetPrefsController extends Notifier<PetPrefs> {
         await p.setString(keys.pack, id);
         await p.remove(keys.hidden);
       });
+
+  /// The pet changed for the person, not by them (theirs is being removed):
+  /// unlike [setPack], 「藏起来 1 小时」 stays as it was.
+  Future<void> replacePack(String id) =>
+      _save((s) => s.copyWith(packId: id, packExplicit: true), (p) => p.setString(keys.pack, id));
+
   /// First run's 「桌宠与悬浮窗」 was picked: the default pet, unless a pet
   /// (or 「不显示」) was chosen already. Without it a light phone, whose
   /// default is no pet, would turn on 「App 外显示」 with nothing to show.

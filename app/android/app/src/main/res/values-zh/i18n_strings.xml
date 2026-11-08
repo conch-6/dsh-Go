@@ -15,6 +15,7 @@
     <string name="background_requires_android">不打扰模式需要 Android 14 或更高版本</string>
     <string name="background_unknown_mode">未知模式</string>
     <string name="background_not_ready">特权通道未就绪</string>
+    <string name="background_provider_mismatch">当前选择的是 %1$s 通道，但接口实际由 %2$s 提供。请改选 %2$s 并重新开启，或先恢复 %1$s 的服务。</string>
     <string name="background_no_response">特权通道未响应</string>
     <string name="background_injection_denied">未能确认后台屏输入结果，请检查通道授权和设备支持情况</string>
     <string name="background_input_window_not_ready">输入测试窗口未就绪，未发送测试点击</string>
@@ -211,14 +212,16 @@
     <string name="phone_notice_settings">打开设置</string>
     <string name="phone_share_chooser">分享到</string>
     <string name="phone_open_channel">DSH 想打开的界面</string>
-    <string name="phone_open_notice">DSH 想%1$s</string>
-    <string name="phone_tap_open">点这里打开</string>
+    <string name="phone_open_notice">DSH · %1$s</string>
+    <string name="phone_tap_open">返回 DSH 核对任务；不会重复刚才的操作。</string>
     <string name="phone_reminder_channel">DSH 的提醒</string>
     <string name="phone_log_apps">列出应用</string>
     <string name="phone_log_apps_filtered">列出应用（筛选）</string>
     <string name="phone_log_open_url">打开链接</string>
     <string name="phone_log_open_url_scheme">打开链接 %1$s:</string>
     <string name="phone_log_open_app">打开 %1$s</string>
+    <string name="phone_log_system_returned_success">%1$s（系统返回成功；后续停止）</string>
+    <string name="phone_log_system_returned_failure">%1$s（系统返回失败；后续停止）</string>
     <string name="phone_log_open_background">后台屏打开 %1$s</string>
     <string name="phone_log_notify">通知</string>
     <string name="phone_log_clipboard_read">读剪贴板</string>
@@ -312,4 +315,6 @@
     <string name="background_selection_cancelled">通道选择已取消</string>
     <string name="background_keep_phone_disabled">请先开启手机操控，再保持此通道。</string>
     <string name="background_keep_save_failed">未能保存通道保持设置，请在重启 App 前确认。</string>
+    <string name="background_viewport_invalid">未知的后台视口预设</string>
+    <string name="background_viewport_save_failed">无法保存后台视口设置。</string>
 </resources>

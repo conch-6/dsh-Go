@@ -333,6 +333,8 @@
   "phoneSafeRestoreStart": "恢复并启动",
   "phoneSafeRestoredStarting": "已恢复上次正常的配置，正在启动…",
   "phoneSafeRestoreFailed": "没能恢复",
+  "phoneSafeStopIncomplete": "还无法确认引擎已停止，未更改配置。请查看引擎日志后重试。",
+  "phoneSafeRestartIncomplete": "配置操作已完成，但引擎还未停止，暂未重启。请等待停止完成后再启动。",
   "phoneSafeRestoreIntro": "DSH 会回到上次正常运行时的配置：",
   "phoneSafeRestoreSettings": "• 设置恢复到当时的版本（现在的另存为备份）",
   "phoneSafeRestoreNote": "不会卸载任何插件，也不需要联网。停用的插件以后可以重新打开。",
@@ -662,5 +664,155 @@
   },
   "phoneDndManualConnect": "按端口连接",
   "phoneDndConnectPortLabel": "连接端口",
-  "phoneDndConnectPortHint": "在系统「无线调试」首页查看「IP 地址和端口」，填写冒号后的端口。请不要使用配对码页面的端口。"
+  "phoneDndConnectPortHint": "在系统「无线调试」首页查看「IP 地址和端口」，填写冒号后的端口。请不要使用配对码页面的端口。",
+  "phonePreviewTitle": "实时查看后台屏",
+  "phonePreviewDescription": "仅在预览可见时取帧。画面只留在本机；预览不可点击。",
+  "phonePreviewOpen": "查看后台屏",
+  "phonePreviewOff": "任务已结束或预览已关闭",
+  "phonePreviewUnavailable": "画面暂不可预览，或受到保护",
+  "phonePreviewWaiting": "等待后台屏的新画面",
+  "phoneViewportTitle": "后台视口",
+  "phoneViewportDescription": "下次新建后台屏时生效；当前后台屏不变，交还后重建会采用新设置。视口方向不会强制应用旋转。",
+  "phoneViewportPortrait": "竖屏",
+  "phoneViewportLandscape": "横屏",
+  "phoneResumeTask": "重新允许手机操控",
+  "phoneResumeTaskHint": "允许此对话之后的手机操作，不重放已经结束的动作。",
+  "phoneResumeTaskFailed": "暂时没能恢复，上一动作可能仍在收尾。",
+  "phoneStoppedTask": "手机任务 {task} 已停止",
+  "phoneTaskDrainingHint": "正在等待上一动作退出并清理后台屏。",
+  "phoneTaskCleanupFailedHint": "未能确认后台屏已清理，手机操控仍被阻挡。",
+  "@phoneStoppedTask": {
+    "placeholders": {
+      "task": {
+        "type": "int"
+      }
+    }
+  },
+  "phoneFinishingTask": "手机任务 {task} 正在收尾",
+  "@phoneFinishingTask": {
+    "placeholders": {
+      "task": {
+        "type": "int"
+      }
+    }
+  },
+  "phoneCleanupRetry": "重试清理",
+  "phoneCleanupRetryFailed": "仍未能确认上一后台屏已清理，屏幕占用继续保留。",
+  "phoneSelfCheckTitle": "本机手机自检",
+  "phoneSelfCheckPartial": "部分自检：仅已观察的项目有结果",
+  "phoneSelfCheckScope": "使用已选择并连接的通道和临时展示屏。应用启动、文字输入、截图、OCR及主屏受扰情况均未测试。清理通过不代表展示屏创建成功。",
+  "phoneSelfCheckStart": "开始部分自检",
+  "phoneSelfCheckCancel": "请求取消",
+  "phoneSelfCheckRetry": "仅重试清理",
+  "phoneSelfCheckRefresh": "刷新状态",
+  "phoneSelfCheckSave": "保存脱敏报告",
+  "phoneSelfCheckSaving": "保存中…",
+  "phoneSelfCheckSaved": "报告已存入下载/DSH-Go。",
+  "phoneSelfCheckSaveFailed": "报告保存失败。",
+  "phoneSelfCheckReportHint": "仅在你点击保存时导出。本机报告只含固定结果，不含截图、识别文字、日志、账户数据或运行标识。",
+  "phoneSelfCheckRunState": "{state, select, idle{尚未开始} running{部分自检进行中} cleaning{正在清理；取消不代表已撤销派发的输入} done{执行和清理已结束，请逐项查看下方结果} cancelled{已取消，已观察到的操作仍保留} cleanup_pending{清理尚未确认，资源仍保留} other{状态不可用}}",
+  "@phoneSelfCheckRunState": {
+    "placeholders": {
+      "state": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneSelfCheckStepState": "{state, select, not_run{未运行／无观察} running{进行中} pass{已观察通过} fail{失败} skipped{已跳过} unknown{未确认} cancelled{已取消} other{未确认}}",
+  "@phoneSelfCheckStepState": {
+    "placeholders": {
+      "state": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneSelfCheckStage": "{stage, select, device{设备前置条件} channel{已选通道} display{临时后台屏创建} input_probe{触摸接收核验} launch{应用启动} tree{控件树} tap{应用按钮点按} scroll{应用滚动} back{应用返回} text_ascii{固定 ASCII 输入} text_zh{固定中文输入} capture{本地图样截图} continuity{有限受控刷新} main{有限主屏观察} ocr{本机OCR} cleanup{严格清理} other{未知项目}}",
+  "@phoneSelfCheckStage": {
+    "placeholders": {
+      "stage": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneSelfCheckReason": "{reason, select, busy{手机或通道正忙。} unsupported{设备或特权端不支持这项自检。} cancelled{本次请求已取消或退役。} disabled{手机操控尚未开启。} locked{设备已锁定。} identity{原运行或通道身份已改变。} invalid{请求或结果无法验证。} display{临时展示屏未能确认。} input{输入受理或送达未确认，不会重放已派发输入。} cleanup{资源清理未确认，仅可重试清理。} denied{系统拒绝了操作。} timeout{操作超时，已派发工作仍可能完成。} unavailable{本机状态或已选通道不可用。} target_unavailable{无法核实固定目标，请完成清理后再开始。} target_changed{原目标已变化，请仅继续清理。} target_cleanup{目标清理未确认，请仅重试清理。} target_main{目标曾出现在主屏，已停止后续步骤，请完成清理。} target_readback{固定目标计数或文本回读不符，不要重复操作，请完成清理。} tree_cleanup{树连接清理未确认，请仅重试清理。} target_launch{目标启动被拒绝或未确认，请检查设备并完成清理。} frame_unavailable{未取得可用的本地图样帧，请完成清理后再开始新的自检。} frame_mismatch{实际画面与本次目标及阶段不符，请完成清理。} continuity{有限受控刷新序列未确认；这不是帧率结果。} main_changed{主屏采样点发生变化，也可能包含用户操作；请完成清理，不能据此判定原因。} main_unchanged{这些有限采样点未见变化，采样之间是否受扰仍未知。} main_incomplete{主屏样本不完整，不能据此证明没有受扰。} not_installed{未安装本机 OCR 识别器，未执行 OCR 测试。} other{收到无法识别的结果。}}",
+  "@phoneSelfCheckReason": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneSelfCheckTargetScope": "使用普通临时后台屏和固定本地目标，检查启动、控件树及一次按钮点击。文字、滚动、截图和 OCR 未测试；主屏只记录实际观察到的受扰失败，不提供通过结论。仅清理完成不证明曾创建后台屏。",
+  "phoneSelfCheckProfileChoice": "选择下次自检（不会改变下方报告）",
+  "phoneSelfCheckProfile": "{profile, select, probe_b{输入接收探针（B）} target_c1{固定目标自检（C1）} target_c2{固定输入与画面自检（C2）} other{未知模式}}",
+  "@phoneSelfCheckProfile": {
+    "placeholders": {
+      "profile": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneSelfCheckReportProfile": "{profile, select, probe_b{本次报告：输入接收探针（B）} target_c1{本次报告：固定目标（C1）} target_c2{本次报告：固定输入与画面（C2）} other{本次报告模式未确认}}",
+  "@phoneSelfCheckReportProfile": {
+    "placeholders": {
+      "profile": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneSelfCheckTargetC2Scope": "使用固定本机目标核验启动、控件树、单次按钮点按、ASCII／中文 ACTION_SET_TEXT 整框替换与回读、本地图样截图和有限受控刷新；不衡量 FPS 或流畅度。有限主屏样本不能证明采样间全程无扰。OCR 未安装；触摸接收探针、滚动和返回不在本次范围。仅清理完成也不证明曾创建展示屏。",
+  "phoneTaskWaiting": "任务 {taskId} · 等待资源",
+  "phoneTaskWaitingApp": "等待应用 {packageName}，已等待 {seconds} 秒。",
+  "phoneTaskWaitingUnknown": "等待界面资源（应用身份未确认），已等待 {seconds} 秒。",
+  "phoneTaskWaitingScreen": "等待{screen}，已等待 {seconds} 秒。",
+  "phoneTaskMainResource": "主屏",
+  "phoneTaskBackgroundResource": "后台屏",
+  "@phoneTaskWaiting": {
+    "placeholders": {
+      "taskId": {
+        "type": "int"
+      }
+    }
+  },
+  "@phoneTaskWaitingApp": {
+    "placeholders": {
+      "packageName": {
+        "type": "String"
+      },
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "@phoneTaskWaitingUnknown": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "@phoneTaskWaitingScreen": {
+    "placeholders": {
+      "screen": {
+        "type": "String"
+      },
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "phoneInterruptionTitle": "上次手机任务未确认结束",
+  "phoneInterruptionLoading": "正在读取任务中断记录…",
+  "phoneInterruptionStorageError": "无法保存或读取任务结束记录。请重试；这不表示后台资源已清理。",
+  "phoneInterruptionHint": "有 {count} 个任务中断或未能保存结束状态，操作结果可能已发生。请先核对；确认仅表示看过提示，不会恢复操作或证明后台资源已清理。",
+  "phoneInterruptionAcknowledge": "已核对中断提示",
+  "phoneInterruptionRetry": "重试保存或读取",
+  "phoneInterruptionActionFailed": "任务记录尚未确认，请重试",
+  "@phoneInterruptionHint": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
 }

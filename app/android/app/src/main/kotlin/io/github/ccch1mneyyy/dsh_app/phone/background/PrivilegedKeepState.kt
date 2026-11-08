@@ -18,6 +18,14 @@ internal class PrivilegedKeepState(savedMode: String, phoneEnabled: Boolean, sup
     val keptMode: String get() = selection.kept
     val enabled: Boolean get() = selection.active
 
+    /** A task's selected transport, independent of whether keeping it was enabled/saved. */
+    fun selectionTicket(): Ticket = selection.let { Ticket(it.generation, it.mode) }
+
+    /** Lock-free: starter guards must not acquire the controller's keep guard. */
+    fun selectionCurrent(ticket: Ticket): Boolean = selection.let {
+        it.generation == ticket.generation && it.mode == ticket.mode
+    }
+
     /** Called under a starter's guard: only one volatile snapshot, never a keeper lock. */
     fun current(ticket: Ticket): Boolean = selection.let {
         it.generation == ticket.generation && it.mode == ticket.mode && it.kept == ticket.mode && it.saved
@@ -73,6 +81,10 @@ internal class PrivilegedKeepState(savedMode: String, phoneEnabled: Boolean, sup
         wirelessAttempted = true
         return true
     }
+
+    /** Unknown/retrying is not failure; completed failure or loss needs a live replacement. */
+    @Synchronized fun connectionUnavailable(alive: Boolean): Boolean =
+        selection.active && !alive && (phase == "failed" || phase == "connected")
 
     @Synchronized fun map(alive: Boolean): Map<String, Any?> {
         val s = selection

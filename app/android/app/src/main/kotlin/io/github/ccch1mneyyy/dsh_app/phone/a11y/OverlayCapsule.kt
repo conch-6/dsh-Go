@@ -6,6 +6,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Canvas
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
@@ -29,6 +30,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.TextView
 import io.github.ccch1mneyyy.dsh_app.pet.Side
 import kotlin.math.roundToInt
@@ -309,6 +311,36 @@ internal class OverlayCapsule(
         setOnClickListener { actions.mark() }
     }
 
+    private val previewImage = ImageView(ctx).apply {
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+    private val previewLabel = TextView(ctx).apply {
+        gravity = Gravity.CENTER
+        textSize = 12f
+        setTextColor(c.muted)
+        setPadding(ctx.dp(12), ctx.dp(8), ctx.dp(12), ctx.dp(8))
+    }
+    private val previewFrame = FrameLayout(ctx).apply {
+        visibility = View.GONE
+        setBackgroundColor(c.field)
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        addView(previewImage, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        addView(previewLabel, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+    }
+
+    /** Read-only fixed-size viewport. A new frame never changes the card's dimensions. */
+    fun showPreview(bitmap: Bitmap?, label: String?) {
+        previewImage.setImageBitmap(bitmap)
+        previewImage.visibility = if (bitmap == null) View.GONE else View.VISIBLE
+        previewLabel.text = label.orEmpty()
+        previewLabel.visibility = if (bitmap == null) View.VISIBLE else View.GONE
+        previewFrame.contentDescription = label
+        previewFrame.visibility = if (label == null) View.GONE else View.VISIBLE
+        // Previously displayed bitmaps belong to Android's renderer until its display lists retire;
+        // dropping the drawable reference lets GC reclaim them without recycling a still-drawn image.
+    }
+
     private val body = object : LinearLayout(ctx) {
         private val rule = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c.faint; alpha = 0x40; strokeWidth = ctx.dpf(1f) }
 
@@ -324,6 +356,9 @@ internal class OverlayCapsule(
         setPadding(0, 0, 0, ctx.dp(8))
         visibility = View.GONE
         addView(meta)
+        addView(previewFrame, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ctx.dp(144)).apply {
+            setMargins(ctx.dp(BODY_INSET_DP), ctx.dp(8), ctx.dp(BODY_INSET_DP), ctx.dp(8))
+        })
         stepRows.forEach { addView(it) }
         val m = ctx.dp(BODY_INSET_DP)
         addView(unlocks, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(m, ctx.dp(8), m, 0) })

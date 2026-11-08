@@ -380,7 +380,117 @@ void main() {
     expect(calls, hasLength(1));
     expect(calls.single, {'ref': 'DSH_MEDIA_ARK_API_KEY', 'value': 'sk-ark-1'});
     expect(host.credentials['DSH_MEDIA_ARK_API_KEY'], 'sk-ark-1');
-    expect(find.text(_zh.engineFieldConfigured), findsOneWidget);
+    expect(find.text(_zh.mediaConfigKeySaved), findsOneWidget);
+  });
+
+  testWidgets('saved key is not verification and local checks never call the host', (tester) async {
+    await open(
+      tester,
+      describe: _describe(
+        services: [
+          _service(),
+          _service(id: 'other', label: 'Shared media'),
+        ],
+      ),
+      credentials: const {'DSH_MEDIA_ARK_API_KEY': 'fake-key'},
+    );
+    await tester.tap(find.text('火山方舟'));
+    await flush(tester);
+    expect(find.text(_zh.mediaConfigKeySaved), findsOneWidget);
+    expect(find.textContaining('Shared media (dsh-media/other)'), findsOneWidget);
+    final calls = host.calls.length;
+    await tester.tap(find.text(_zh.mediaConfigCheck));
+    await settle(tester);
+    expect(find.textContaining(_zh.mediaConfigCheckReady), findsOneWidget);
+    expect(find.text(_zh.mediaConfigCheckNote), findsWidgets);
+    expect(host.calls.length, calls, reason: 'only the saved snapshot is inspected');
+    expect(find.text('fake-key'), findsNothing);
+  });
+
+  testWidgets('URL editor previews root and rejects an endpoint without saving', (tester) async {
+    await open(
+      tester,
+      describe: _describe(
+        services: [_service(profile: 'openai-compatible', baseUrl: 'https://example.test/v1')],
+      ),
+    );
+    await tester.tap(find.text('火山方舟'));
+    await flush(tester);
+    await tester.scrollUntilVisible(find.text(_zh.mediaSettingsBaseUrl), 250);
+    await tester.tap(find.text(_zh.mediaSettingsBaseUrl));
+    await settle(tester);
+    expect(find.text('POST https://example.test/v1/images/generations'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('media-url-input')), 'https://example.test/v1/images/generations');
+    await tester.pump();
+    expect(find.text(_zh.mediaConfigUrlEndpoint), findsOneWidget);
+    final done = tester.widget<FilledButton>(find.widgetWithText(FilledButton, _zh.commonDone));
+    expect(done.onPressed, isNull);
+    expect(host.mutates(), isEmpty);
+  });
+
+  testWidgets('target-origin change requires confirmation before host mutation', (tester) async {
+    await open(
+      tester,
+      describe: _describe(
+        services: [_service(profile: 'openai-compatible', baseUrl: 'https://old.test/v1')],
+      ),
+      credentials: const {'DSH_MEDIA_ARK_API_KEY': 'fake-key'},
+    );
+    await tester.tap(find.text('火山方舟'));
+    await flush(tester);
+    await tester.scrollUntilVisible(find.text(_zh.mediaSettingsBaseUrl), 250);
+    await tester.tap(find.text(_zh.mediaSettingsBaseUrl));
+    await settle(tester);
+    await tester.enterText(find.byKey(const ValueKey('media-url-input')), 'https://new.test/v1');
+    await tester.pump();
+    await tester.tap(find.text(_zh.commonDone));
+    await settle(tester);
+    expect(find.text(_zh.mediaConfigTargetTitle), findsOneWidget);
+    expect(host.mutates(), isEmpty);
+    await tester.tap(find.text(_zh.commonCancel));
+    await settle(tester);
+    expect(host.mutates(), isEmpty);
+    expect(find.byKey(const ValueKey('media-url-input')), findsOneWidget);
+    await tester.tap(find.text(_zh.commonDone));
+    await settle(tester);
+    await tester.tap(find.text(_zh.mediaConfigTargetConfirm));
+    await flush(tester);
+    final rows = lastOp()['value']! as List;
+    expect((rows.first as Map)['baseUrl'], 'https://new.test/v1');
+  });
+
+  testWidgets('URL host rejection stays a failure, not a successful local check', (tester) async {
+    await open(
+      tester,
+      describe: _describe(
+        services: [_service(profile: 'openai-compatible', baseUrl: 'https://example.test/v1')],
+      ),
+    );
+    await tester.tap(find.text('火山方舟'));
+    await flush(tester);
+    await tester.scrollUntilVisible(find.text(_zh.mediaSettingsBaseUrl), 250);
+    await tester.tap(find.text(_zh.mediaSettingsBaseUrl));
+    await settle(tester);
+    host.writable = false;
+    await tester.enterText(find.byKey(const ValueKey('media-url-input')), 'https://example.test/v2');
+    await tester.pump();
+    await tester.tap(find.text(_zh.commonDone));
+    await flush(tester);
+    expect(find.text(_zh.commonSaveFailed), findsOneWidget);
+    expect(find.byKey(const ValueKey('media-url-input')), findsOneWidget);
+    expect((host.namespaces['dsh-media']!.value['services']! as List).first['baseUrl'], 'https://example.test/v1');
+  });
+
+  testWidgets('local checks report missing key and disabled service without claiming verification', (tester) async {
+    await open(tester, describe: _describe(services: [_service(enabled: false)]));
+    await tester.tap(find.text('火山方舟'));
+    await flush(tester);
+    await tester.tap(find.text(_zh.mediaConfigCheck));
+    await settle(tester);
+    expect(find.textContaining(_zh.mediaConfigCheckMissingKey), findsOneWidget);
+    expect(find.textContaining(_zh.mediaConfigCheckDisabled), findsOneWidget);
+    expect(find.textContaining(_zh.mediaConfigCheckReady), findsNothing);
+    expect(host.mutates(), isEmpty);
   });
 
   testWidgets('a reused credential owned by another setting is reference-only', (tester) async {
