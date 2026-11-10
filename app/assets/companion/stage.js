@@ -781,8 +781,6 @@
     camera.y = Number(adapter?.framing?.y ?? character.framing?.y) || 0;
   }
 
-  const round3 = (v) => Math.round(v * 1000) / 1000;
-
   /** What the model is, for the app's check and the person's AI (companion_adapt.dart). */
   function probeReport() {
     const raw = model.core.getModel();
@@ -797,9 +795,11 @@
         id,
         name: info.get(id)?.Name ?? null,
         group: groupName.get(info.get(id)?.GroupId) ?? null,
-        min: round3(raw.parameters.minimumValues[i]),
-        max: round3(raw.parameters.maximumValues[i]),
-        def: round3(raw.parameters.defaultValues[i]),
+        // These are contract facts, not display labels. Rounding can collapse
+        // a valid small native range and lose an existing affine calibration.
+        min: raw.parameters.minimumValues[i],
+        max: raw.parameters.maximumValues[i],
+        def: raw.parameters.defaultValues[i],
       });
     }
     return {
@@ -817,7 +817,13 @@
       expressions: [...model.expressions.keys()],
       motions: [...model.motions.keys()],
       hitAreas: model.hitAreas,
+      // linked describes the CURRENT adapter too. It does not prove that an
+      // alias survives adapt(), which starts afresh from ruleAlias.
       linked: Object.fromEntries([...model.alias].map(([name, link]) => [name, link.ids])),
+      ruleAliasVersion: 1,
+      ruleAliases: Object.fromEntries([...model.ruleAlias].map(([name, link]) => [name, {
+        ids: [...link.ids], scale: link.scale, offset: link.offset,
+      }])),
       missing: model.missingNow ?? model.missing,
       zones,
       zonesFrom,

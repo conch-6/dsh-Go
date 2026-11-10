@@ -32,8 +32,11 @@ internal class MainVisualState(private val driverEpoch: Any) {
      * scope (and so the per-app visual permission) survives; only a different observed window renews it.
      */
     @Synchronized fun windowChanged() { transitions++; imageId = null; accepted = false }
-    @Synchronized fun candidate(id: String) {
-        if (published?.first == id) { imageId = id; accepted = false }
+    @Synchronized fun candidate(id: String, capturedTransitions: Long): Boolean {
+        if (published?.first != id || transitions != capturedTransitions) return false
+        imageId = id
+        accepted = false
+        return true
     }
     @Synchronized fun accept(id: String) { if (imageId == id && published?.first == id) accepted = true }
     @Synchronized fun imageAccepted(id: String): Boolean = accepted && imageId == id && published?.first == id

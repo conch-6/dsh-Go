@@ -23,6 +23,7 @@ import '../../state/chat_state.dart';
 import '../../state/commands_state.dart';
 import '../../state/compose_inbox.dart';
 import '../../state/composer_insert.dart';
+import '../../state/phone_skill_use.dart';
 import '../../state/composer_quote.dart';
 import '../../state/connection_state.dart';
 import '../../state/draft_store.dart';
@@ -215,6 +216,51 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   /// The open conversation's id, or `new`.
   late String _draftKey;
 
+  PreparedPhoneSkill? _preparedPhoneSkill;
+  PreparedPhoneSkill? _sendingPhoneSkill;
+  bool get _phoneSkillSending => _sendingPhoneSkill != null;
+
+  void _dropPreparedPhoneSkill() {
+    final prepared = _preparedPhoneSkill;
+    _preparedPhoneSkill = null;
+    // If send is waiting, its final source predicate will reject. If it already
+    // dispatched, only its own completion can report what was accepted.
+    if (prepared != null && !identical(prepared, _sendingPhoneSkill)) unawaited(prepared.discard());
+  }
+
+  bool _phoneSkillCurrent(PreparedPhoneSkill prepared) => mounted &&
+      identical(_preparedPhoneSkill, prepared) &&
+      prepared.origin.current(ProviderScope.containerOf(context, listen: false));
+
+  Future<void> _sendPhoneSkill() async {
+    final prepared = _preparedPhoneSkill;
+    if (prepared == null || _phoneSkillSending) return;
+    if (!_phoneSkillCurrent(prepared)) {
+      setState(_dropPreparedPhoneSkill);
+      _composerToast(appL10n.phoneSkillReplaySourceChanged);
+      return;
+    }
+    setState(() => _sendingPhoneSkill = prepared);
+    final chat = ref.read(chatProvider(prepared.origin.sessionId).notifier);
+    bool ok = false;
+    try {
+      // No ordinary input, quote or attachments are consumed. Queue rather than
+      // steer an existing turn; the final predicate runs beside client.prompt.
+      ok = await chat.send(prepared.text, mode: SendMode.queue,
+        deliveryAllowed: () => _phoneSkillCurrent(prepared));
+    } finally {
+      if (!ok) unawaited(prepared.discard());
+      if (mounted) {
+        final showReceipt = _phoneSkillCurrent(prepared);
+        setState(() {
+          if (identical(_preparedPhoneSkill, prepared)) _preparedPhoneSkill = null;
+          if (identical(_sendingPhoneSkill, prepared)) _sendingPhoneSkill = null;
+        });
+        if (showReceipt) _composerToast(ok ? appL10n.phoneSkillReplayQueued : appL10n.phoneSkillReplaySendUncertain);
+      }
+    }
+  }
+
   void _saveDraft() => _draftStore.save(_draftKey, _input.text, _drafts);
 
   /// Attachments first: setting the text saves both.
@@ -232,6 +278,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   void _switchDraft(String? sessionId) {
     final key = sessionId ?? 'new';
     if (key == _draftKey) return;
+    _dropPreparedPhoneSkill();
     _draftScope = Object();
     _creating = null;
     _syncWait = null;
@@ -285,6 +332,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     _input.addListener(_saveDraft);
     ref.listenManual(currentSessionProvider, (_, next) => _switchDraft(next));
     ref.listenManual(activeConnectionProvider.select((c) => c.value?.client), (_, _) {
+      _dropPreparedPhoneSkill();
       _draftScope = Object();
       if (_creating != null || _syncWait != null) {
         setState(() {
@@ -332,6 +380,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   void _takeComposerInsert() {
     final insert = ref.read(composerInsertProvider.notifier).take();
     if (insert == null || !mounted) return;
+    if (insert.phoneSkill case final prepared?) {
+      if (!prepared.origin.current(ProviderScope.containerOf(context, listen: false)) ||
+          insert.sessionId != prepared.origin.sessionId) {
+        unawaited(prepared.discard());
+        _composerToast(appL10n.phoneSkillReplaySourceChanged);
+        return;
+      }
+      setState(() { _dropPreparedPhoneSkill(); _preparedPhoneSkill = prepared; });
+      return;
+    }
     if (ref.read(currentSessionProvider) != insert.sessionId) {
       ref.read(currentSessionProvider.notifier).select(insert.sessionId);
     }
@@ -379,6 +437,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
 
   @override
   void dispose() {
+    _dropPreparedPhoneSkill();
     WidgetsBinding.instance.removeObserver(this);
     _endInteraction?.call();
     _endInteraction = null;
@@ -1947,6 +2006,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                       strip: false,
                                     ),
                                   ),
+                                if (_preparedPhoneSkill case final prepared?)
+                                  Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(l10n.phoneSkillReplayReview),
+                                      SelectableText(prepared.text),
+                                      Row(children: [
+                                        TextButton(onPressed: _phoneSkillSending ? null : () => setState(_dropPreparedPhoneSkill),
+                                          child: Text(l10n.commonClose)),
+                                        FilledButton(onPressed: _phoneSkillSending || readOnly || !connected ? null : _sendPhoneSkill,
+                                          child: Text(l10n.phoneSkillReplayQueue)),
+                                      ]),
+                                    ],
+                                  ))),
                                 if (readOnly)
                                   const ReadOnlyBar()
                                 else

@@ -5,7 +5,8 @@ internal object InputProbeDiagnostics {
     enum class Stage(val wire: String) {
         PRECONDITION("precondition"), UI_DISPATCH("ui_dispatch"),
         PRESENTATION_CREATE("presentation_create"), PRESENTATION_CONFIGURE("presentation_configure"),
-        PRESENTATION_SHOW("presentation_show"), VIEW_LAYOUT_WAIT("view_layout_wait"),
+        PRESENTATION_SHOW("presentation_show"), ACTIVITY_START("activity_start"),
+        ACTIVITY_READY_WAIT("activity_ready_wait"), VIEW_LAYOUT_WAIT("view_layout_wait"),
         FRAME_COMMIT_WAIT("frame_commit_wait"), TARGET_VALIDATE("target_validate"),
         INPUT_SEND("input_send"), RECEIPT_WAIT("receipt_wait"), CLEANUP("cleanup"),
     }

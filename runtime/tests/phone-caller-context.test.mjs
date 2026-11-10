@@ -16,7 +16,7 @@ const { NativeToolExecutor } = await load('dsh-tool-executor-native');
 const { PtcExecutor } = await load('dsh-tool-executor-ptc');
 let serial = 0;
 
-async function fixture(t, { enabled = true, supported = true, lifecycle = false, reconnect = false, extra = [] } = {}) {
+async function fixture(t, { enabled = true, supported = true, lifecycle = false, reconnect = false, extra = [], toolCallTimeoutMs } = {}) {
   const ctx = new Context();
   t.after(() => ctx.fiber.dispose());
   for (const name of ['dsh-session', 'dsh-session-projection', 'dsh-agent', 'dsh-llm',
@@ -26,6 +26,7 @@ async function fixture(t, { enabled = true, supported = true, lifecycle = false,
     serverName: 'phone', transport: 'stdio', command: process.execPath,
     args: [fileURLToPath(new URL('./fixtures/phone-caller-mcp.mjs', import.meta.url)), lifecycle ? 'lifecycle' : supported ? 'supported' : 'legacy', ...extra],
     dshGoPhoneCaller: enabled, failOnStartupError: true,
+    ...(toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs }),
     reconnect: reconnect ? { enabled: true, initialDelayMs: 10, maxDelayMs: 50, maxAttempts: 100 } : { enabled: false },
   });
   const native = new NativeToolExecutor(ctx);
@@ -182,6 +183,99 @@ test('an end lost before its ACK is kept and delivered once on the next connecti
   await f.run(a, 2); // A later phone call flushes only ends that are still unacknowledged.
   a.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
   assert.deepEqual((await f.probe()).ends, expected);
+});
+
+test('a dropped end is retried on the same live connection without another owned call', async t => {
+  const f = await fixture(t, { lifecycle: true, reconnect: false, toolCallTimeoutMs: 5_000,
+    extra: [`--first-end=drop:${marker(t)}`] });
+  const a = await f.create(), first = await f.run(a, 1);
+  // Only the host timer is virtual. The child peer and stdio are real; unowned probes
+  // cannot invoke onPhoneCall or flush retained ends.
+  const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout;
+  const probe = async () => {
+    let watchdog;
+    try {
+      return await Promise.race([f.probe(), new Promise((_, reject) => {
+        watchdog = realSetTimeout(() => reject(new Error('real stdio probe stalled')), 10_000);
+      })]);
+    } finally { realClearTimeout(watchdog); }
+  };
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const barrier = async done => {
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const value = await probe();
+      if (value !== undefined && done(value)) return value;
+      if (Date.now() >= deadline) assert.fail('stdio barrier did not observe the expected end state');
+    }
+  };
+  try {
+    a.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+    const expected = { v: 1, sessionId: a.session.id, runId: first.caller.runId, completion: 'completed' };
+    const dropped = await barrier(value => value.dropped.length === 1);
+    assert.equal(dropped.pid, first.pid);
+    assert.deepEqual(dropped.dropped, [expected]);
+    assert.deepEqual(dropped.ends, []);
+    t.mock.timers.tick(5_000); // Actual SDK RequestTimeout, not a simulated request rejection.
+    await probe(); // Drain the rejection microtask before advancing the retry delay.
+    t.mock.timers.tick(1_000);
+    const delivered = await barrier(value => value.ends.length === 1);
+    assert.equal(delivered.pid, first.pid);
+    assert.deepEqual(delivered.ends, [expected]);
+    t.mock.timers.tick(6_000);
+    const acked = await probe();
+    assert.deepEqual(acked.ends, [expected], 'ACK must retire the retry, not duplicate the end');
+    assert.deepEqual(acked.dropped, [expected]);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('disposing a plugin cancels its pending same-connection end retry', async t => {
+  const f = await fixture(t, { lifecycle: true, toolCallTimeoutMs: 5_000,
+    extra: [`--first-end=drop:${marker(t)}`] });
+  const a = await f.create();
+  await f.run(a, 1);
+  const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout;
+  const bounded = async promise => {
+    let watchdog;
+    try {
+      return await Promise.race([promise, new Promise((_, reject) => {
+        watchdog = realSetTimeout(() => reject(new Error('real stdio/disposal stalled')), 10_000);
+      })]);
+    } finally { realClearTimeout(watchdog); }
+  };
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const fakeSetTimeout = globalThis.setTimeout, fakeClearTimeout = globalThis.clearTimeout;
+  const retries = [], cleared = new Set();
+  const set = t.mock.method(globalThis, 'setTimeout', (callback, ms, ...args) => {
+    const handle = fakeSetTimeout(callback, ms, ...args);
+    if (ms === 1_000) retries.push(handle);
+    return handle;
+  });
+  const clear = t.mock.method(globalThis, 'clearTimeout', handle => {
+    cleared.add(handle);
+    return fakeClearTimeout(handle);
+  });
+  try {
+    a.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const value = await bounded(f.probe());
+      if (value?.dropped.length === 1) break;
+      if (Date.now() >= deadline) assert.fail('peer did not receive the first end');
+    }
+    t.mock.timers.tick(5_000);
+    await bounded(f.probe());
+    assert.equal(retries.length, 1, 'one plugin retry timer after actual SDK timeout');
+    await bounded(f.ctx.fiber.dispose());
+    assert.equal(cleared.has(retries[0]), true, 'dispose must cancel the actual retry timer');
+    t.mock.timers.tick(1_000);
+    assert.equal(retries.length, 1, 'disposed retry must not schedule another wakeup');
+  } finally {
+    set.mock.restore(); clear.mock.restore();
+    t.mock.timers.reset();
+  }
 });
 
 test('a peer refusal is final and later ends still flow', async t => {

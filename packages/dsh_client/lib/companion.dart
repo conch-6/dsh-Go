@@ -2,5 +2,8 @@
 library;
 
 export 'src/companion_api.dart';
+export 'src/companion_recall_api.dart';
+export 'src/companion_signals.dart';
+export 'src/companion_signals_api.dart';
 export 'src/companion_local_store.dart';
 export 'src/errors.dart' show DshRemoteException;

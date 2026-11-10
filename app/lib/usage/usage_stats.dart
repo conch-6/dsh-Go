@@ -47,11 +47,15 @@ final usageClockProvider = Provider<DateTime Function()>((ref) => DateTime.now);
 final usageHttpProvider = Provider<UsageHttp>((ref) => const IoUsageHttp());
 final usageEndpointProvider = Provider<Uri>((ref) => usageEndpoint);
 final usageDeviceProvider = Provider<Future<UsageDevice> Function()>((ref) => const UsageDeviceChannel().read);
-final usageLanguageProvider = Provider<String Function()>((ref) => () => AppLocale.current.languageCode);
+final usageLanguageProvider = Provider<String Function()>(
+  (ref) =>
+      () => AppLocale.current.languageCode,
+);
 
 /// Calls back each time the app comes to the front; returns how to stop.
 final usageResumesProvider = Provider<VoidCallback Function(VoidCallback onResume)>(
-  (ref) => (onResume) => AppLifecycleListener(onResume: onResume).dispose,
+  (ref) =>
+      (onResume) => AppLifecycleListener(onResume: onResume).dispose,
 );
 
 /// A phone control task began between [before] and [now]: a new number, or
@@ -60,7 +64,8 @@ bool phoneTaskStarted(PhoneTaskStatus before, PhoneTaskStatus now) =>
     now.active && (!before.active || (now.id != null && now.id != before.id));
 
 /// The on-device engine's launch while it runs (`direct`, `proot`).
-String? _engineMode(LocalRuntimeState s) => s.status.phase == RuntimePhase.running ? s.status.currentExecutionMode : null;
+String? _engineMode(LocalRuntimeState s) =>
+    s.status.phase == RuntimePhase.running ? s.status.currentExecutionMode : null;
 
 class UsageStatsController extends Notifier<UsageStatsState> {
   static const enabledKey = 'usage_stats_enabled';
@@ -79,6 +84,9 @@ class UsageStatsController extends Notifier<UsageStatsState> {
   String? _iid;
   DateTime? _iidSince;
   DateTime? _failedAt;
+
+  /// The share host refused a v2 body: v1 until the app starts again.
+  bool _v1Only = false;
 
   /// The local day the share host said it collects nothing (404).
   String? _closedDay;
@@ -245,7 +253,9 @@ class UsageStatsController extends Notifier<UsageStatsState> {
     for (final day in due) {
       final record = _ledger.days[day];
       if (record == null) continue;
-      final payload = usagePayload(iid: iid, day: day, record: record, device: device, lang: lang);
+      Map<String, Object> body({required bool v2}) =>
+          usagePayload(iid: iid, day: day, record: record, device: device, lang: lang, v2: v2);
+      var payload = body(v2: !_v1Only);
       // The host would refuse it (400): not worth a request.
       if (usageProblem(payload, now) != null) {
         _ledger.drop(day);
@@ -254,6 +264,13 @@ class UsageStatsController extends Notifier<UsageStatsState> {
       int? status;
       try {
         status = await http.post(endpoint, jsonEncode(payload), timeout: timeout);
+        // A host from before v2 refuses the model and system: the same day
+        // again as v1, and v1 for the rest of this run of the app.
+        if (status == 400 && payload['v'] == 2 && ref.mounted && state.collecting) {
+          _v1Only = true;
+          payload = body(v2: false);
+          status = await http.post(endpoint, jsonEncode(payload), timeout: timeout);
+        }
       } catch (_) {
         // Quietly: tried again the next time the app comes to the front.
       }

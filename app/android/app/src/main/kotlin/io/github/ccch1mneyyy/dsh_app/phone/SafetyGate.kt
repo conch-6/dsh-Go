@@ -189,7 +189,8 @@ class SafetyGate(
     sealed interface Verdict {
         object Allow : Verdict
         class Refuse(val message: String, val rule: String) : Verdict
-        class Confirm(val request: ConfirmRequest, val packageName: String?, val reason: String) : Verdict
+        class Confirm(val request: ConfirmRequest, val packageName: String?, val reason: String,
+                      internal val onlyOnce: Boolean = false) : Verdict
     }
 
     /** The outcome of asking (or of not needing to ask). */
@@ -203,8 +204,13 @@ class SafetyGate(
     fun labelOf(pkg: String?, appLabel: String?) = appLabel ?: pkg ?: "当前应用"
 
     /** Reads (screen, collect, the screen attached to results): own app and deny list refuse. */
-    fun checkRead(pkg: String?, appLabel: String?): Verdict.Refuse? {
-        val p = policies()
+    fun checkRead(pkg: String?, appLabel: String?): Verdict.Refuse? = checkRead(policies(), pkg, appLabel)
+
+    /** Shares the caller's final result snapshot with screen filtering; per-page gates stay live. */
+    internal fun checkReadSources(p: PhonePolicies, packages: Iterable<String?>): Verdict.Refuse? =
+        packages.firstNotNullOfOrNull { checkRead(p, it, null) }
+
+    private fun checkRead(p: PhonePolicies, pkg: String?, appLabel: String?): Verdict.Refuse? {
         if (pkg == ownPackage && !p.unlocks.ownApp) return Verdict.Refuse(OWN_APP, "own-app")
         if (pkg != null && pkg in p.denyPackages) return Verdict.Refuse(denied(labelOf(pkg, appLabel)), "deny-list")
         return null
@@ -261,7 +267,7 @@ class SafetyGate(
         val actionApp = appLabel ?: pkg ?: uiText.get("phone_current_app", "当前应用") // l10n:keep test default
         val action = describe(kind, target, actionApp, if (secret) SafetyRules.MASK else typed, submit, point, coordinate) +
             if (kind == WriteKind.TAP_XY && screen == PhoneScreen.BACKGROUND)
-                uiText.get("phone_confirm_background_coordinate", "。这是最近后台截图的位置；本机文字识别未安装，请核对目标。此确认卡不含原截图。") else "" // l10n:keep test default
+                uiText.get("phone_confirm_background_coordinate", "。这是最近后台截图的位置，请核对目标。此确认卡不含原截图。") else "" // l10n:keep test default
         val reason = when {
             kind == WriteKind.TAP_XY && !eligibleVisual -> "tap_xy"
             kind == WriteKind.TYPE && submit -> "submit"
@@ -315,6 +321,13 @@ class SafetyGate(
         return Verdict.Confirm(request, pkg, reason)
     }
 
+    /** Independent operation consent only; callers must check target/policy hard rules first.
+     * This never grants authority over a new target or waives subsequent checks.
+     */
+    internal fun confirmationOnce(sentence: String, pkg: String?, appLabel: String?, reason: String): Verdict =
+        Verdict.Confirm(ConfirmRequest(sentence = sentence, appLabel = appLabel ?: pkg,
+            packageName = pkg, firstInApp = false, offerTaskWaiver = false), pkg, reason, onlyOnce = true)
+
     /** Resolves a verdict, asking the person if needed. InterruptedException means stop. */
     fun resolve(verdict: Verdict, scope: SerialWorker.Scope, owner: PhoneTasks.Owner? = null): Result = when (verdict) {
         Verdict.Allow -> Result.Go("allowed")
@@ -332,6 +345,8 @@ class SafetyGate(
         val decision = scope.userWait { g.confirm(v.request.copy(owner = owner)) }
         // A real tap is not authority over a task that replaced the one being asked about.
         if (!tasks.isCurrent(owner)) return stopped()
+        if (v.onlyOnce && decision in setOf(Decision.ALLOW_APP_FOR_TASK, Decision.ALLOW_ALL_FOR_TASK, Decision.ALLOW_VISUAL_FOR_TASK))
+            return Result.No("确认返回了本请求不提供的权限，未继续操作；不要自动重试。", "denied") // l10n:keep
         if (v.request.visualScope != null && decision in setOf(Decision.ALLOW_APP_FOR_TASK, Decision.ALLOW_ALL_FOR_TASK))
             return Result.No("确认返回了本请求不提供的权限，未继续操作；不要自动重试。", "denied") // l10n:keep
         return when (decision) {
@@ -370,13 +385,19 @@ class SafetyGate(
      * apps and secure windows. Images go with the text they belong to; a screen with a bank card or
      * ID number (masked in the text) keeps its text but loses the image.
      */
-    fun filterScreen(s: ScreenSnapshot): ScreenSnapshot {
-        val p = policies()
+    fun filterScreen(s: ScreenSnapshot): ScreenSnapshot = filterScreen(s, policies())
+
+    internal fun filterScreen(s: ScreenSnapshot, p: PhonePolicies): ScreenSnapshot {
+        val sourceRefusal = s.readPackages.firstNotNullOfOrNull { checkRead(p, it, null) }
         val refusal = when {
             s.packageName == ownPackage && !p.unlocks.ownApp -> OWN_APP
             s.packageName != null && s.packageName in p.denyPackages -> denied(labelOf(s.packageName, s.appLabel))
+            sourceRefusal != null -> sourceRefusal.message
             // l10n:keep agent safety result
             s.secure -> "安全窗口（禁止截屏 / 读取）。要操作请 handoff。"
+            s.image != null && s.imageReadPackages.any { checkRead(p, it, null) != null } ->
+                // l10n:keep agent safety result
+                return s.copy(text = s.text + "\n提示：截图范围包含当前不允许读取的应用，这次没有附截图。", image = null, imageMime = null)
             // l10n:keep agent safety result
             s.image != null && ("«银行卡" in s.text || "«身份证" in s.text) ->
                 // l10n:keep agent safety result
@@ -385,7 +406,7 @@ class SafetyGate(
         }
         val app = s.appLabel?.let { " · $it" } ?: ""
         // l10n:keep agent safety result
-        return s.copy(text = "屏幕 ${s.id}$app\n$refusal", image = null, imageMime = null)
+        return s.copy(text = "屏幕 ${s.id}$app\n$refusal", image = null, imageMime = null, focus = null)
     }
 
     private fun describe(kind: WriteKind, t: TargetInfo?, app: String, typed: String?, submit: Boolean, point: Pair<Int, Int>?, coordinate: PhoneAction.TapXY?): String {

@@ -175,4 +175,82 @@ class BackgroundDisplayIoTest {
             assertTrue(scope.release { true })
         } finally { reply.countDown(); join(first); second?.let(::join) }
     }
+
+    @Test fun sealedOrReleasedObservationNeverExecutesItsCommitBody() {
+        for (releaseFirst in listOf(false, true)) {
+            val io = BackgroundDisplayIo<Any>(); val peer = Any()
+            io.call { io.startResource(peer, { it(); Unit }) { true } }
+            var commits = 0
+            try {
+                if (releaseFirst) assertTrue(io.release { assertSame(peer, it); true }) else io.seal()
+                assertThrows(IllegalStateException::class.java) {
+                    io.commitObservation { commits++; "old response" }
+                }
+                assertEquals(0, commits)
+                assertTrue(io.release { assertSame(peer, it); true })
+            } finally { assertTrue(io.release { assertSame(peer, it); true }) }
+        }
+    }
+
+
+    @Test fun committedObservationFinishesBeforeSealAndLaterCommitsAreRejected() {
+        val io = BackgroundDisplayIo<Any>()
+        val entered = CountDownLatch(1); val finish = CountDownLatch(1)
+        val sealStarted = CountDownLatch(1); val sealed = CountDownLatch(1)
+        val value = AtomicReference<String?>(); val failure = AtomicReference<Throwable?>()
+        val commit = Thread {
+            try { value.set(io.commitObservation { entered.countDown(); finish.await(); "current response" }) }
+            catch (e: Throwable) { failure.set(e) }
+        }.apply { start() }
+        var closer: Thread? = null
+        try {
+            await(entered)
+            closer = Thread { sealStarted.countDown(); io.seal(); sealed.countDown() }.apply { start() }
+            await(sealStarted)
+            val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (closer.state != Thread.State.BLOCKED && sealed.count != 0L && System.nanoTime() < until) {
+                Thread.yield()
+            }
+            assertEquals(Thread.State.BLOCKED, closer.state)
+            assertEquals(1L, sealed.count)
+            finish.countDown(); join(commit); join(closer)
+            assertNull(failure.get()); assertEquals("current response", value.get())
+            assertEquals(0L, sealed.count)
+            var lateCommits = 0
+            assertThrows(IllegalStateException::class.java) {
+                io.commitObservation { lateCommits++; "late output" }
+            }
+            assertEquals(0, lateCommits)
+            assertTrue(io.release { error("no peer was allocated") })
+        } finally { finish.countDown(); join(commit); closer?.let(::join) }
+    }
+
+    @Test fun sealedPhysicalReplyDrainsOriginalPeerWithoutPublishingItsObservation() {
+        val io = BackgroundDisplayIo<Any>(); val peer = Any()
+        val entered = CountDownLatch(1); val reply = CountDownLatch(1)
+        val published = AtomicInteger(); val releases = AtomicInteger()
+        val failure = AtomicReference<Throwable?>()
+        val caller = Thread {
+            try {
+                io.call {
+                    io.startResource(peer, { beforeSend -> beforeSend(); entered.countDown(); reply.await() }) { true }
+                    io.commitObservation { published.incrementAndGet() }
+                }
+            } catch (e: Throwable) { failure.set(e) }
+        }.apply { start() }
+        try {
+            await(entered); io.seal()
+            assertFalse(io.release { releases.incrementAndGet(); true })
+            assertEquals(0, releases.get())
+            reply.countDown(); join(caller)
+            assertTrue(failure.get() is IllegalStateException); assertEquals(0, published.get())
+            assertSame(peer, io.peer())
+            assertTrue(io.release { assertSame(peer, it); releases.incrementAndGet(); true })
+            assertEquals(1, releases.get())
+            assertTrue(io.release { error("already released") })
+        } finally {
+            reply.countDown(); join(caller)
+            assertTrue(io.release { assertSame(peer, it); true })
+        }
+    }
 }

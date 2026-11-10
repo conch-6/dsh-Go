@@ -107,4 +107,53 @@ class ScreenFormatTest {
         assertEquals(listOf(passwordBox, codeBox), secretFieldBounds(windows))
     }
 
+    @Test fun splitWindowSourcesAreFilteredTogetherAndSurviveSnapshotCopies() {
+        val display = Box(0, 0, 400, 800)
+        val upper = Box(0, 0, 400, 400)
+        val lower = Box(0, 400, 400, 800)
+        val windows = listOf(
+            UiWindow(7, WindowKind.APP, "allowed.app", "A", upper,
+                UiNode(ref = 1, bounds = upper, children = listOf(
+                    UiNode(ref = 2, text = "A_PUBLIC_MARKER", bounds = Box(10, 10, 300, 50))))),
+            UiWindow(8, WindowKind.APP, "denied.app", "B", lower,
+                UiNode(ref = 3, className = "android.widget.ListView", scrollable = true,
+                    scroll = Scroll.FORWARD, bounds = lower, children = listOf(
+                        UiNode(ref = 4, text = "B_PUBLIC_MARKER", bounds = Box(10, 410, 300, 450)))))
+        )
+        val formatted = ScreenFormat.format(ScreenInput("s1", "A", "allowed.app",
+            display.width, display.height, false, windows))
+        assertTrue(formatted.text.contains("A_PUBLIC_MARKER"))
+        assertTrue(formatted.text.contains("B_PUBLIC_MARKER"))
+        assertTrue(formatted.elements.any { it.packageName == "denied.app" })
+        val list = ScreenFormat.index(windows).single { it.kind == ElementKind.LIST }
+        assertEquals(8, list.windowId)
+        assertTrue(list.itemTexts.any { it.contains("B_PUBLIC_MARKER") })
+        val sources = windows.mapNotNull { it.packageName }.toSet()
+        val snapshot = ScreenSnapshot("s1", formatted.text, "A", "allowed.app",
+            readPackages = sources)
+        val copied = snapshot.copy(image = byteArrayOf(1), imageMime = "image/png")
+        assertEquals(sources, copied.readPackages)
+        var policy = PhonePolicies()
+        val gate = SafetyGate({ policy }, PhoneTasks(), { null })
+        assertSame(copied, gate.filterScreen(copied))
+        assertEquals("s1", gate.filterScreen(copied).id)
+        policy = PhonePolicies(denyPackages = listOf("denied.app"))
+        assertNull(gate.checkRead("allowed.app", "A"))
+        assertEquals("deny-list", gate.checkRead("denied.app", "B")?.rule)
+        val refused = gate.filterScreen(copied)
+        assertFalse(refused.text.contains("A_PUBLIC_MARKER"))
+        assertFalse(refused.text.contains("B_PUBLIC_MARKER"))
+        assertNull(refused.image)
+        assertEquals(sources, refused.readPackages)
+        var policyReads = 0
+        val changingGate = SafetyGate({
+            policyReads++
+            PhonePolicies(denyPackages = listOf(if (policyReads <= 2) "denied.app" else "allowed.app"))
+        }, PhoneTasks(), { null })
+        val changingResult = changingGate.filterScreen(copied)
+        assertFalse(changingResult.text.contains("A_PUBLIC_MARKER"))
+        assertFalse(changingResult.text.contains("B_PUBLIC_MARKER"))
+        assertNull(changingResult.image)
+        assertEquals(1, policyReads)
+    }
 }

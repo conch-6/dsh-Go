@@ -14,7 +14,9 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import io.github.ccch1mneyyy.dsh_app.MainActivity
 import io.github.ccch1mneyyy.dsh_app.R
@@ -261,6 +263,7 @@ class DshService : Service() {
                 .setOnlyAlertOnce(true)
                 .build()
 
+        private val notificationMain = Handler(Looper.getMainLooper())
         @Volatile private var running = false
 
         /**
@@ -282,6 +285,12 @@ class DshService : Service() {
 
         fun updateNotification(context: Context) {
             if (!running) return
+            // Build and publish with Service start/stop on the main looper, without an old snapshot.
+            if (Looper.myLooper() != Looper.getMainLooper()) {
+                val app = context.applicationContext
+                notificationMain.post { updateNotification(app) }
+                return
+            }
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.notify(NOTIFICATION_ID, buildNotification(context, RuntimeController.get(context)))
         }

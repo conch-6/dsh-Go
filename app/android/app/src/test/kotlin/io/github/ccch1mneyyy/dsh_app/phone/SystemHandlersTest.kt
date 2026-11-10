@@ -7,6 +7,53 @@ import org.junit.Test
 class SystemHandlersTest {
     private val browser = SystemHandler("browser.app", "browser.app.Link", 10123)
 
+    @Test fun defaultComponentStateUsesManifestFlag() {
+        assertTrue(SystemHandlers.componentEnabled(true) { 0 })
+        assertFalse(SystemHandlers.componentEnabled(false) { 0 })
+    }
+
+    @Test fun runtimeEnabledOverridesDisabledAliasManifest() {
+        assertTrue(SystemHandlers.componentEnabled(false) { 1 })
+        assertTrue(SystemHandlers.componentEnabled(true) { 1 })
+    }
+
+    @Test fun everyExplicitDisabledStateOverridesManifest() {
+        // PackageManager: DISABLED, DISABLED_USER, DISABLED_UNTIL_USED.
+        for (state in listOf(2, 3, 4)) {
+            for (manifestEnabled in listOf(false, true)) {
+                assertFalse("state=$state manifest=$manifestEnabled",
+                    SystemHandlers.componentEnabled(manifestEnabled) { state })
+            }
+        }
+    }
+
+    @Test fun unknownComponentStateFailsClosed() {
+        for (state in listOf(-1, 5, Int.MIN_VALUE, Int.MAX_VALUE)) {
+            for (manifestEnabled in listOf(false, true)) {
+                assertFalse("state=$state manifest=$manifestEnabled",
+                    SystemHandlers.componentEnabled(manifestEnabled) { state })
+            }
+        }
+    }
+
+    @Test fun componentStateReadFailureDoesNotFallBackToManifest() {
+        for (failure in listOf(SecurityException(), IllegalArgumentException(), IllegalStateException())) {
+            for (manifestEnabled in listOf(false, true)) {
+                assertFalse(SystemHandlers.componentEnabled(manifestEnabled) { throw failure })
+            }
+        }
+    }
+
+    @Test fun componentStateIsReadAgainForFinalRecheck() {
+        var state = 1
+        var reads = 0
+        val readSetting = { reads++; state }
+        assertTrue(SystemHandlers.componentEnabled(false, readSetting))
+        state = 2
+        assertFalse(SystemHandlers.componentEnabled(true, readSetting))
+        assertEquals(2, reads)
+    }
+
     @Test fun exactCandidateIsKnownIncludingNonAndroidOemPackages() {
         val oem = SystemHandler("vendor.settings", "vendor.settings.Wifi", 1000)
         assertEquals(SystemResolution.Known(oem), SystemHandlers.resolve(listOf(oem), oem, null, true))

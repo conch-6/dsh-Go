@@ -24,6 +24,53 @@ class ResourceRecoveryTest {
         Proto.RECOVERY_PID_NS_INO to 9L, Proto.OWNER to owner, Proto.DISPLAY_ID to 12,
     )
 
+    @Test fun namespaceAvailabilityIsOptionalOnlyForLegacyPositiveIdentity() {
+        val legacy = request()
+        assertTrue(checkNotNull(ResourceRecovery.check(legacy.keys, legacy::get)).birth.nsAvailable)
+        val explicit = legacy + (Proto.RECOVERY_PID_NS_AVAILABLE to true)
+        assertTrue(checkNotNull(ResourceRecovery.check(explicit.keys, explicit::get)).birth.nsAvailable)
+        val unavailable = legacy + mapOf(Proto.RECOVERY_PID_NS_AVAILABLE to false,
+            Proto.RECOVERY_PID_NS_DEV to 0L, Proto.RECOVERY_PID_NS_INO to 0L)
+        assertFalse(checkNotNull(ResourceRecovery.check(unavailable.keys, unavailable::get)).birth.nsAvailable)
+        for ((key, value) in listOf(
+            Proto.RECOVERY_PID_NS_AVAILABLE to true, Proto.RECOVERY_PID_NS_AVAILABLE to null,
+            Proto.RECOVERY_PID_NS_AVAILABLE to 0, Proto.RECOVERY_PID_NS_AVAILABLE to "false",
+            Proto.RECOVERY_PID_NS_DEV to 7L, Proto.RECOVERY_PID_NS_INO to 9L,
+            Proto.RECOVERY_PID_NS_DEV to 0, Proto.RECOVERY_PID_NS_INO to 0,
+        )) {
+            val bad = unavailable + (key to value)
+            assertNull(ResourceRecovery.check(bad.keys, bad::get))
+        }
+        val missing = unavailable - Proto.RECOVERY_PID_NS_AVAILABLE
+        assertNull(ResourceRecovery.check(missing.keys, missing::get))
+        val noId = unavailable - Proto.DISPLAY_ID
+        assertNull(checkNotNull(ResourceRecovery.check(noId.keys, noId::get)).displayId)
+    }
+
+    @Test fun unavailableNamespaceOnEitherSideNeverReadsPidDisplayOrTasks() {
+        val unavailable = current.copy(nsDev = 0L, nsIno = 0L, nsAvailable = false)
+        for (now in listOf(current, unavailable)) {
+            for (before in listOf(old(), old().copy(birth = unavailable.copy(pid = 99)))) {
+                if (now.nsAvailable && before.birth.nsAvailable) continue
+                failure("recoveryUnknown") {
+                    ResourceRecovery.verify(now, before, { error("namespace unknown: no PID query") },
+                        { error("no display query") }, { error("no task query") })
+                }
+            }
+        }
+        failure("recoveryUnknown") {
+            ResourceRecovery.verify(current.copy(nsIno = 0L), old(), { error("invalid namespace") },
+                { error("no display query") }, { error("no task query") })
+        }
+    }
+
+    @Test fun unavailableNamespaceDoesNotInvalidatePreviousBootProof() {
+        val unavailable = current.copy(nsDev = 0L, nsIno = 0L, nsAvailable = false)
+        val previous = old(null).copy(birth = unavailable.copy(boot = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
+        assertEquals("previousBoot", ResourceRecovery.verify(unavailable, previous,
+            { error("previous boot: no PID query") }, { error("no display query") }, { error("no task query") }))
+    }
+
     @Test fun exactCheckRejectsWrongCodecTypesMissingIdentityAndExtraPayload() {
         val good = request()
         assertEquals(12, ResourceRecovery.check(good.keys, good::get)?.displayId)

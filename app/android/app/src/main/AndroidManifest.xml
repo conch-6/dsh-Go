@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Composer voice input (voice/VoicePlugin.kt), asked for on the first tap of the mic. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Remote 扫码配对电脑 (ui/remote/pairing_page.dart, mobile_scanner), asked for when the
+         scanner opens; the photo and paste paths work without it. Never required. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- TODO(targetSdk >= 30): package visibility hides recognition services from
          SpeechRecognizer.isRecognitionAvailable unless declared; add to <queries>:
          <intent><action android:name="android.speech.RecognitionService" /></intent> -->
@@ -208,6 +212,18 @@
             android:taskAffinity=""
             android:theme="@android:style/Theme.NoDisplay" />
 
+        <!-- The privileged gate starts only this inert receiver. Ordinary apps cannot launch it. -->
+        <activity
+            android:name=".phone.background.BackgroundProbeActivity"
+            android:exported="true"
+            android:permission="android.permission.INJECT_EVENTS"
+            android:process=":input_probe"
+            android:launchMode="standard"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
         <!-- Local self-check only: App UID starts this fixed inert target on its leased display. -->
         <activity
             android:name=".phone.selfcheck.PhoneSelfCheckTargetActivity"
@@ -327,6 +343,11 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Initialized on demand by Remote pairing or an admitted local OCR call, never at app startup. -->
+        <provider
+            android:name="com.google.mlkit.common.internal.MlKitInitProvider"
+            android:authorities="${applicationId}.mlkitinitprovider"
+            tools:node="remove" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

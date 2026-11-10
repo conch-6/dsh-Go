@@ -258,7 +258,7 @@ void main() {
 
   testWidgets('手机操控', (tester) async {
     await _check(tester, SettingsPageId.phone, () async {
-      await pumpPhone(tester, const PhoneControlScreen(), size: const Size(390, 3200));
+      await pumpPhone(tester, const PhoneControlScreen(), size: const Size(390, 4400));
     });
   });
 

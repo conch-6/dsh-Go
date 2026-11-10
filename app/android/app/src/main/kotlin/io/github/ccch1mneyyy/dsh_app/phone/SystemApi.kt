@@ -26,7 +26,9 @@ sealed interface SystemTarget {
 interface SystemLaunch { val target: SystemTarget }
 
 /** target is present only once a platform start was attempted, including a throwing start. */
-class SysResult(val ok: Boolean, val message: String, val target: SystemTarget? = null) {
+class SysResult(val ok: Boolean, val message: String, val target: SystemTarget? = null,
+    /** A returned platform start still needs the person to check its actual effect. */
+    val requiresReview: Boolean = false) {
     val appLabel: String? get() = (target as? SystemTarget.Known)?.app?.label
 }
 
@@ -52,6 +54,15 @@ internal sealed interface SystemResolution {
 
 /** Used by the Android preparation path and its final filter recheck. Null means missing evidence. */
 internal object SystemHandlers {
+    /** ActivityInfo.enabled may still be the manifest flag for a runtime-enabled launcher alias. */
+    fun componentEnabled(manifestEnabled: Boolean, readSetting: () -> Int): Boolean = try {
+        when (readSetting()) {
+            0 -> manifestEnabled // PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+            1 -> true // PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            else -> false // Explicitly disabled or unknown: never fall back to the manifest.
+        }
+    } catch (_: Exception) { false }
+
     fun valid(candidates: List<SystemHandler>, packageName: String?): Boolean =
         candidates.isNotEmpty() && candidates.all {
             it.packageName.isNotBlank() && it.component.isNotBlank() && it.uid >= 0 &&
@@ -310,6 +321,18 @@ sealed interface Either<out L, out R> {
 /** Lenient typed access to tool arguments (models send "7" for 7 and 7.0 for 7). */
 class Args(private val map: Map<String, Any?>) {
     fun has(key: String) = map[key] != null
+    /** Presence differs from the existing non-null has(): explicit null must not request AUTO. */
+    fun provided(key: String) = map.containsKey(key)
+    /** Disclosure choices require an actual JSON boolean, not a coerced string or number. */
+    fun strictBool(key: String) = map[key] as? Boolean
+    /** Focus input preserves the actual JSON string; existing type coercion is unchanged. */
+    fun strictText(key: String) = map[key] as? String
+    fun strictInt(key: String): Int? = when (val value = map[key]) {
+        is Int -> value
+        is Long -> value.toInt().takeIf { it.toLong() == value }
+        else -> null
+    }
+    fun onlyKeys(vararg keys: String) = map.keys.all { it in keys }
 
     fun str(key: String): String? = when (val v = map[key]) {
         is String -> v.trim().takeIf { it.isNotEmpty() }

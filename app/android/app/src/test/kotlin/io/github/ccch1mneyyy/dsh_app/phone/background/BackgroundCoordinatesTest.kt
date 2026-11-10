@@ -32,6 +32,14 @@ class BackgroundCoordinatesTest {
         assertNull(parse(request().apply { put(Proto.COORDINATE_OBSERVATION, "") }))
     }
 
+    @Test fun afterVisualIsTheOnlyNewOptionalCoordinateFieldAndMustBeExactVersionOne() {
+        assertNotNull(parse(request() + (Proto.AFTER_LOCAL_VISUAL to 1)))
+        for (bad in listOf<Any?>(null, true, 1L, "1", 0, 2))
+            assertNull(parse(request() + (Proto.AFTER_LOCAL_VISUAL to bad)))
+        assertNull(parse(request() + (Proto.AFTER_VISUAL to "reply-only")))
+        assertNull(parse(request() + (Proto.AFTER_LOCAL_VISUAL to 1) + (Proto.WANT_IMAGE to true)))
+    }
+
     @Test fun swipeHasBoundedDurationAndEveryEndpointMustFitTheOriginalImage() {
         val fields = request("swipe").apply { put(Proto.X2, 47); put(Proto.Y2, 0) }
         assertEquals(400, parse(fields)!!.durationMs)

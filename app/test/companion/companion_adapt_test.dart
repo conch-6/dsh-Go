@@ -19,13 +19,14 @@ Map<String, Object?> probeJson({
 }) => {
   'moc': 'model/m.moc3',
   'mocVersion': 5,
-  'parameterCount': 5,
+  'parameterCount': 6,
   'params': [
     {'id': 'PARAM_ANGLE_X', 'name': '角度 X', 'group': '脸', 'min': -30, 'max': 30, 'def': 0},
     {'id': 'EyeOpenL', 'name': '左眼 开闭', 'group': '眼睛', 'min': 0, 'max': 1, 'def': 1},
     {'id': 'EyeOpenR', 'name': '右眼 开闭', 'group': '眼睛', 'min': 0, 'max': 1, 'def': 1},
     {'id': 'TailSwing', 'name': '尾巴 摆动', 'group': '尾巴', 'min': -1, 'max': 1, 'def': 0},
     {'id': 'Watermark', 'name': '水印', 'group': '开关', 'min': 0, 'max': 1, 'def': 1},
+    {'id': 'ParamMouthForm', 'name': '口型', 'min': -1, 'max': 1, 'def': 0},
   ],
   'parts': [
     {'id': 'PartHead', 'name': '头'},
@@ -34,6 +35,14 @@ Map<String, Object?> probeJson({
   'motions': ['挥手', 'Idle'],
   'linked': {
     'ParamAngleX': ['PARAM_ANGLE_X'],
+  },
+  'ruleAliasVersion': 1,
+  'ruleAliases': {
+    'ParamAngleX': {
+      'ids': ['PARAM_ANGLE_X'],
+      'scale': 1,
+      'offset': 0,
+    },
   },
   'missing': missing,
   'zonesFrom': zonesFrom,
@@ -62,6 +71,11 @@ void main() {
     expect(p.param('EyeOpenL')!.name, '左眼 开闭');
     expect(p.parts.single, ('PartHead', '头'));
     expect(p.linked['ParamAngleX'], ['PARAM_ANGLE_X']);
+    expect(p.ruleAliases!['ParamAngleX']!.toJson(), {
+      'ids': ['PARAM_ANGLE_X'],
+      'scale': 1,
+      'offset': 0,
+    });
     expect(CompanionProbe.fromJson('nope'), isNull);
   });
 
@@ -88,12 +102,21 @@ void main() {
 
   test('the request: what was linked, what is missing, every parameter by group, the note', () {
     final text = companionAdaptRequest(probe(), note: '摸头没反应', current: {'zones': []});
-    expect(text, contains('ParamAngleX→PARAM_ANGLE_X'));
-    expect(text, contains('模型里找不到的标准参数：ParamEyeLOpen，ParamEyeROpen'));
-    expect(text, contains('[眼睛]\nEyeOpenL 左眼 开闭 0..1 =1\nEyeOpenR 右眼 开闭 0..1 =1'));
-    expect(text, contains('表情：开心，脸红，水印消除'));
-    expect(text, contains('用户说哪里不对：摸头没反应'));
-    expect(text, contains('现在用的适配表：{"zones":[]}'));
+    final input = jsonDecode(text) as Map;
+    final data = input['probe'] as Map;
+    expect(data['linked'], {
+      'ParamAngleX': ['PARAM_ANGLE_X'],
+    });
+    expect(data['ruleAliasVersion'], 1);
+    expect(data['ruleAliases'], probeJson()['ruleAliases']);
+    expect(data['missing'], ['ParamEyeLOpen', 'ParamEyeROpen']);
+    expect(data['coverageUnknown'], contains('ParamAngleY'));
+    expect((data['params'] as List).where((p) => p['group'] == '眼睛').map((p) => p['id']), ['EyeOpenL', 'EyeOpenR']);
+    expect(data['loadedExpressions'], ['开心', '脸红', '水印消除']);
+    expect(input['verifiedEffects'], {'expressions': {}, 'motions': {}});
+    expect(input['userFeedback'], '摸头没反应');
+    expect(input['current'], {'adapter': 1});
+    expect(input['currentDropped'], ['zones']);
     expect(companionAdaptSystem, contains('只输出一个 JSON 对象'));
   });
 
@@ -104,40 +127,52 @@ void main() {
   });
 
   test('only what the model backs is kept', () {
-    final (:adapter, :dropped) = companionAdapterCheck({
-      'params': {
-        'ParamEyeLOpen': {'id': 'EyeOpenL'},
-        'ParamEyeROpen': {'id': 'EyeOpenR', 'scale': -1, 'offset': 1},
-        'ParamMouthOpenY': {'id': 'NoSuchParam'},
-        'NotHers': {'id': 'EyeOpenL'},
-      },
-      'emotions': {
-        'happy': {
-          'expression': '开心',
-          'face': {'ParamMouthForm': 3, 'EyeOpenL': 5, 'ParamAngleZ': 15, 'Nope': 1},
+    final (:adapter, :dropped) = companionAdapterCheck(
+      {
+        'params': {
+          'ParamEyeLOpen': {'id': 'EyeOpenL'},
+          'ParamEyeROpen': {'id': 'EyeOpenR', 'scale': -1, 'offset': 1},
+          'ParamMouthOpenY': {'id': 'NoSuchParam'},
+          'NotHers': {'id': 'EyeOpenL'},
         },
-        'shy': {'expression': '不存在'},
-        'ecstatic': {'expression': '开心'},
+        'emotions': {
+          'happy': {
+            'expression': '开心',
+            'face': {'ParamMouthForm': 3, 'EyeOpenL': 5, 'Nope': 1},
+          },
+          'shy': {'expression': '不存在'},
+          'ecstatic': {'expression': '开心'},
+        },
+        'actions': {
+          'wave': {'motion': '挥手'},
+          'nod': {'motion': '没有这个'},
+          'dance': {'motion': '挥手'},
+        },
+        'zones': [
+          {'id': 'head', 'from': 0, 'to': 0.2},
+          {'id': 'face', 'from': 0.3, 'to': 0.2},
+          {'id': 'wings', 'from': 0, 'to': 1},
+          // Preserve upstream malformed-geometry regressions under the stricter contract.
+          {'id': 'legs', 'from': 1.2, 'to': 1.6},
+          {'id': 'body', 'from': 0.3, 'to': 0.6, 'xFrom': 0.5, 'xTo': -0.5},
+        ],
+        'framing': {'zoom': 9, 'y': 0.1},
+        'tail': ['TailSwing', 'Nope'],
+        'pose': {'Watermark': 7, 'Nope': 1},
+        'notes': '  尾巴用摆动参数代替了  ',
+        'script': 'alert(1)',
       },
-      'actions': {
-        'wave': {'motion': '挥手'},
-        'nod': {'motion': '没有这个'},
-        'dance': {'motion': '挥手'},
-      },
-      'zones': [
-        {'id': 'head', 'from': 0, 'to': 0.2},
-        {'id': 'face', 'from': 0.3, 'to': 0.2},
-        {'id': 'wings', 'from': 0, 'to': 1},
-        // Nothing left once clamped, or left of itself: never touchable.
-        {'id': 'legs', 'from': 1.2, 'to': 1.6},
-        {'id': 'body', 'from': 0.3, 'to': 0.6, 'xFrom': 0.5, 'xTo': -0.5},
-      ],
-      'framing': {'zoom': 9, 'y': 0.1},
-      'tail': ['TailSwing', 'Nope'],
-      'pose': {'Watermark': 7, 'Nope': 1},
-      'notes': '  尾巴用摆动参数代替了  ',
-      'script': 'alert(1)',
-    }, probe());
+      probe({
+        ...probeJson(zonesFrom: 'hitAreas'),
+        'zones': [
+          {'id': 'head', 'from': 0, 'to': 0.2},
+        ],
+      }),
+      evidence: const CompanionAdaptEvidence(
+        expressions: {'开心': 'Observed smile; only facial parameters, no switches'},
+        motions: {'挥手': 'Observed waving with no sound, events or visibility effects'},
+      ),
+    );
     expect(adapter['params'], {
       'ParamEyeLOpen': {'id': 'EyeOpenL'},
       'ParamEyeROpen': {'id': 'EyeOpenR', 'scale': -1.0, 'offset': 1.0},
@@ -145,8 +180,7 @@ void main() {
     expect(adapter['emotions'], {
       'happy': {
         'expression': '开心',
-        // Added to where she already is: as far as the parameter can move.
-        'face': {'ParamMouthForm': 2.0, 'EyeOpenL': 1.0, 'ParamAngleZ': 15.0},
+        'face': {'ParamMouthForm': 1.0},
       },
     });
     expect(adapter['actions'], {
@@ -155,9 +189,9 @@ void main() {
     expect(adapter['zones'], [
       {'id': 'head', 'from': 0.0, 'to': 0.2},
     ]);
-    expect(adapter['framing'], {'zoom': 3.0, 'y': 0.1});
+    expect(adapter.containsKey('framing'), isFalse);
     expect(adapter['tail'], ['TailSwing']);
-    expect(adapter['pose'], {'Watermark': 1.0});
+    expect(adapter.containsKey('pose'), isFalse);
     expect(adapter['notes'], '尾巴用摆动参数代替了');
     expect(adapter.containsKey('script'), isFalse);
     expect(
@@ -172,22 +206,49 @@ void main() {
         'actions.dance',
         'zones',
         'script',
+        'pose',
       ]),
     );
     expect(companionAdapterEmpty(adapter), isFalse);
     expect(companionAdapterEmpty(companionAdapterCheck({'notes': 'x'}, probe()).adapter), isTrue);
-    // Only the framing was off: that is still a fix.
+    // Framing has no camera evidence and cannot make an empty result useful.
     expect(
       companionAdapterEmpty(
         companionAdapterCheck({
           'framing': {'zoom': 0.7},
         }, probe()).adapter,
       ),
-      isFalse,
+      isTrue,
     );
   });
 
   group('asking her AI', () {
+    const current = {
+      'adapter': 1,
+      'params': {
+        'ParamMouthForm': {'id': 'SmileShape', 'scale': -2.0, 'offset': 0.3},
+      },
+    };
+    const face = {
+      'emotions': {
+        'happy': {
+          'face': {'ParamMouthForm': 0.5},
+        },
+      },
+    };
+    Map<String, Object?> replacementReport({Map<String, Object?> rules = const {}, bool legacy = false}) => {
+      'adapter': true,
+      'parameterCount': 1,
+      'params': [
+        {'id': 'SmileShape', 'min': -1, 'max': 1, 'def': 0},
+      ],
+      'linked': {
+        'ParamMouthForm': ['SmileShape'],
+      },
+      if (!legacy) 'ruleAliasVersion': 1,
+      if (!legacy) 'ruleAliases': rules,
+    };
+
     test('one request, the answer checked', () async {
       final asked = <Map<String, Object?>>[];
       final client = MockClient.streaming((request, body) async {
@@ -240,6 +301,77 @@ void main() {
         companionAdaptAsk(client: made, apiKey: 'k', probe: probe()),
         throwsA(isA<CompanionAdaptError>().having((e) => e.reason, 'reason', 'empty')),
       );
+    });
+
+    test('old linked-only face is rejected even when current is supplied', () async {
+      for (final legacy in [false, true]) {
+        final asked = <Map>[];
+        final client = MockClient.streaming((_, body) async {
+          final request = jsonDecode(await body.bytesToString()) as Map;
+          asked.add(jsonDecode((request['messages'] as List).single['content'] as String) as Map);
+          return http.StreamedResponse(Stream.value(utf8.encode(sse(jsonEncode(face)))), 200);
+        });
+        addTearDown(client.close);
+        final before = jsonEncode(current);
+        await expectLater(
+          companionAdaptAsk(
+            client: client,
+            apiKey: 'k',
+            probe: probe(replacementReport(legacy: legacy)),
+            current: current,
+          ),
+          throwsA(isA<CompanionAdaptError>().having((e) => e.reason, 'reason', 'empty')),
+        );
+        expect(asked.single['current'], current);
+        expect((asked.single['probe'] as Map)['ruleAliases'], legacy ? null : {});
+        expect(jsonEncode(current), before, reason: 'the supplied old adapter is not modified');
+      }
+    });
+
+    test('explicit retained params keep negative affine coefficients and support face on legacy stage', () async {
+      final client = MockClient.streaming(
+        (_, _) async => http.StreamedResponse(Stream.value(utf8.encode(sse(jsonEncode({...current, ...face})))), 200),
+      );
+      addTearDown(client.close);
+      final checked = await companionAdaptAsk(
+        client: client,
+        apiKey: 'k',
+        probe: probe(replacementReport(legacy: true)),
+        current: current,
+      );
+      expect(checked, {...current, ...face});
+    });
+
+    test('omitted override restores original rules and the request preserves their coefficients', () async {
+      const rules = {
+        'ParamMouthForm': {
+          'ids': ['SmileShape'],
+          'scale': -0.000037123456789,
+          'offset': 0.000000987654321,
+        },
+      };
+      final asked = <Map>[];
+      final client = MockClient.streaming((_, body) async {
+        final request = jsonDecode(await body.bytesToString()) as Map;
+        asked.add(jsonDecode((request['messages'] as List).single['content'] as String) as Map);
+        return http.StreamedResponse(Stream.value(utf8.encode(sse(jsonEncode(face)))), 200);
+      });
+      addTearDown(client.close);
+      final checked = await companionAdaptAsk(
+        client: client,
+        apiKey: 'k',
+        probe: probe({
+          ...replacementReport(rules: rules),
+          'params': [
+            {'id': 'SmileShape', 'min': -0.00004, 'max': 0.00004, 'def': 0.000001},
+          ],
+        }),
+        current: current,
+      );
+      expect(checked, {'adapter': 1, ...face});
+      expect(checked.containsKey('params'), isFalse, reason: 'current is not merged into a full replacement');
+      expect((asked.single['probe'] as Map)['ruleAliases'], rules);
+      expect(asked.single['current'], current);
     });
 
     test('a refused key is the light route\'s error', () async {

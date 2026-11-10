@@ -70,6 +70,7 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
             if (it <= 0) throw IOException("rootTimeout")
         }
         var negotiated: String? = null
+        var backgroundLimit = 0
         val failure = try {
             val probe = Bundles.unmarshal(process.exchange(Bundles.marshal(Bundle().apply {
                 putString(Proto.OP, Proto.OP_PROBE)
@@ -83,6 +84,7 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
                         val ack = Bundles.unmarshal(process.exchange(Bundles.marshal(MuxProtocol.optIn(peer)), remaining()))
                         MuxProtocol.acknowledge(ack, peer)
                     }
+                    backgroundLimit = backgroundRequestLimit(probe::get, probe::containsKey, negotiated != null)
                     null
                 }
             }
@@ -90,7 +92,7 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
             reason(error)
         }
         val candidate = if (failure == null) try {
-            RootChannel(process, negotiated) { channelFailed(process, it) }
+            RootChannel(process, negotiated, backgroundLimit) { channelFailed(process, it) }
         } catch (_: Exception) { process.close(); null } else null
         val result = synchronized(guard) {
             if (state.current(ticket) && !mayStart()) state.disconnect()
@@ -171,10 +173,12 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
 private class RootChannel(
     val process: RootProcess,
     private val peer: String?,
+    private val supportedBackgroundLimit: Int,
     private val onFailure: (String) -> Unit,
 ) : PrivilegedChannel {
     private val calls = PrivilegedCalls(if (peer == null) 1 else 3)
     init { peer?.let { process.installMux(it, calls::retire) } }
+    override val backgroundLimit: Int get() = if (calls.alive()) supportedBackgroundLimit else 0
     override fun alive(): Boolean = calls.alive() && process.alive()
     override fun close() { calls.retire(); process.close() }
     override fun execute(request: Bundle, beforeSend: () -> Unit): Bundle =

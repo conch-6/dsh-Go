@@ -10,10 +10,11 @@ internal class BackgroundResourceJournal(
     private val processInstance: String = PROCESS_INSTANCE,
 ) {
     data class Birth(val peer: String, val boot: String, val pid: Int, val uid: Int,
-        val pidNsDev: Long, val pidNsIno: Long) {
+        val pidNsDev: Long, val pidNsIno: Long, val pidNsAvailable: Boolean = true) {
         init {
             require(canonicalUuid(peer) && canonicalUuid(boot))
-            require(pid > 0 && uid >= 0 && pidNsIno > 0)
+            require(pid > 0 && uid >= 0)
+            require(if (pidNsAvailable) pidNsIno > 0 else pidNsDev == 0L && pidNsIno == 0L)
         }
     }
     data class Record internal constructor(
@@ -161,7 +162,7 @@ internal class BackgroundResourceJournal(
             "recoveryPidNsDev" to r.birth.pidNsDev, "recoveryPidNsIno" to r.birth.pidNsIno,
             "viewport" to r.viewport, "displayId" to r.displayId,
             "phase" to if (r.displayId == null) "intent" else "allocated",
-        ) }))
+        ) + if (r.birth.pidNsAvailable) emptyMap() else mapOf("recoveryPidNsAvailable" to false) }))
 
     private fun decode(raw: String): List<Record> {
         val root = Json.parse(raw) as? Map<*, *> ?: error("format")
@@ -170,7 +171,9 @@ internal class BackgroundResourceJournal(
         require(list.size <= LIMIT)
         val result = list.map { value ->
             val m = value as? Map<*, *> ?: error("record")
-            require(m.keys == RECORD_KEYS)
+            require(m.keys == RECORD_KEYS || m.keys == RECORD_KEYS + "recoveryPidNsAvailable")
+            val nsAvailable = if ("recoveryPidNsAvailable" in m)
+                m["recoveryPidNsAvailable"] as? Boolean ?: error("namespace") else true
             fun string(key: String): String = m[key] as? String ?: error("string")
             fun uuid(key: String): String = string(key).also { require(canonicalUuid(it)) }
             fun number(key: String): Long = m[key] as? Long ?: error("number")
@@ -187,7 +190,7 @@ internal class BackgroundResourceJournal(
             require(m["phase"] == if (id == null) "intent" else "allocated")
             Record(uuid("owner"), uuid("processInstance"), purpose,
                 Birth(uuid("recoveryPeer"), uuid("recoveryBoot"), integer("recoveryPid"),
-                    integer("recoveryUid"), number("recoveryPidNsDev"), number("recoveryPidNsIno")),
+                    integer("recoveryUid"), number("recoveryPidNsDev"), number("recoveryPidNsIno"), nsAvailable),
                 viewport as String?, id)
         }
         require(result.map { it.owner }.distinct().size == result.size)

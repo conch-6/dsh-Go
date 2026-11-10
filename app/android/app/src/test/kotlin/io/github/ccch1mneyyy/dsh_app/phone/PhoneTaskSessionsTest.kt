@@ -1,6 +1,11 @@
 package io.github.ccch1mneyyy.dsh_app.phone
 
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundResourceJournal
+import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillReplaySelections
+import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillRoute
+import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillDrafts
+import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillOutcomes
+import io.github.ccch1mneyyy.dsh_app.runtime.PhoneSkillBundleReader
 import java.time.ZoneId
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -22,6 +27,9 @@ class PhoneTaskSessionsTest {
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var confirm: (ConfirmRequest) -> Decision = { Decision.UNAVAILABLE }
     private val actions = AtomicLong()
+    private val backgroundPreparations = AtomicLong()
+    private var lastOpenedDriver: PhoneDriver? = null
+    private var existingReplay: (PhoneTasks.Owner, PhoneAppIdentity) -> PhoneDriver? = { _, _ -> null }
     @Volatile private var open: (PhoneAppIdentity) -> ActionResult = { error("unexpected launch") }
     @Volatile private var appEntries = listOf(AppEntry("Example", PhoneAppIdentity("example.app", 10123)))
     @Volatile private var prepareLaunch: (AppEntry) -> SystemLaunch = { TestSystemLaunch(SystemTarget.Known(it)) }
@@ -53,8 +61,10 @@ class PhoneTaskSessionsTest {
             override fun collect(screenId: String, listElementId: Int, maxPages: Int, until: String?) = error("unexpected collect")
             override fun target(screenId: String, elementId: Int) = TargetInfo(screenId, elementId, "button", "Button", "example.app", "Example", false, false, false)
             override fun perform(action: PhoneAction): ActionResult { actions.incrementAndGet(); return ActionResult(true, "done") }
-            override fun open(target: PhoneAppIdentity) = this@PhoneTaskSessionsTest.open(target)
+            override fun open(target: PhoneAppIdentity): ActionResult =
+                this@PhoneTaskSessionsTest.open(target).also { if (it.ok) lastOpenedDriver = this }
         }
+        override fun existingReplayDriver(owner: PhoneTasks.Owner, app: PhoneAppIdentity): PhoneDriver? = existingReplay(owner, app)
         override fun a11yState() = A11yState.CONNECTED
         override fun backgroundUnavailable() = "unavailable"
         override fun zone() = ZoneId.of("UTC")
@@ -77,9 +87,11 @@ class PhoneTaskSessionsTest {
     @Volatile private var journalCommit: (String) -> Boolean = { journalBytes = it; true }
     @Volatile private var recoveryAdmission: () -> String? = { null }
     private val journal = PhoneTaskJournal({ journalBytes }, { journalCommit(it) })
-    private val sessions = PhoneTaskSessions(::taskClock, ids::incrementAndGet,
+    // Deadline reads must not trip the Tasks.begin barrier used by the reserved-successor test.
+    private val sessions = PhoneTaskSessions(time::get, ids::incrementAndGet,
         { tasks, _ -> PhoneCore(env, tasks, ActionLog(), worker) }, legacy, legacyCore, { changed() }, settleResources = { cleanup(it) }, dispatchCleanup = { cleanupDispatch(it) }, cancelScope = { task, state -> cancelScope(task, state) },
         journal = journal, recoveryAdmission = { recoveryAdmission() },
+        prepareBackground = { _, _ -> backgroundPreparations.incrementAndGet(); null },
         createBackgroundWorker = { SerialWorker("session-background", time::get) { false }.also { backgroundWorkers += it } })
     private fun admit(session: String?, run: String = "1") = sessions.admit(session?.let { PhoneCaller(it, run, "call", runLifecycle = 1) })
     private fun invoke(session: String?, run: String = "1", tool: String = PhoneToolCatalog.APPS) =
@@ -89,6 +101,98 @@ class PhoneTaskSessionsTest {
     @After fun close() { pool.shutdownNow(); worker.shutdown(); backgroundWorkers.toList().forEach { it.shutdown() } }
 
     private fun journalCount(): Int = journalBytes?.let { ((Json.parse(it) as Map<*, *>)["records"] as List<*>).size } ?: 0
+
+    @Test fun callerCapabilitySurvivesRetirementAndOnlyANewLaunchResetsIt() {
+        sessions.beginCallerLaunch()
+        assertEquals(mapOf("launch" to 1L, "modernSeen" to false), sessions.callerCapability())
+        assertFalse(invoke(null).isError)
+        assertEquals(false, sessions.callerCapability()["modernSeen"])
+        assertFalse(invoke("A").isError)
+        sessions.retire()
+        assertEquals(mapOf("launch" to 1L, "modernSeen" to true), sessions.callerCapability())
+        sessions.beginCallerLaunch()
+        assertEquals(mapOf("launch" to 2L, "modernSeen" to false), sessions.callerCapability())
+    }
+
+    @Test fun evenARejectedModernAdmissionProvesThisLaunchIsNotLegacyOnly() {
+        sessions.beginCallerLaunch()
+        val lease = checkNotNull(sessions.tryReserveSelfCheck())
+        try {
+            assertTrue(sessions.run(admit("A"), PhoneToolCatalog.APPS, emptyMap()).isError)
+            assertEquals(true, sessions.callerCapability()["modernSeen"])
+        } finally { sessions.releaseSelfCheck(lease) }
+    }
+
+    @Test fun stopAllCommitsEveryExistingOwnerBeforeAnyExternalCancellation() {
+        assertFalse(invoke("A").isError); assertFalse(invoke("B").isError)
+        val a = task("A"); val b = task("B")
+        val aOwner = checkNotNull(a.tasks.activeOwner())
+        val bOwner = checkNotNull(b.tasks.activeOwner())
+        val queuedB = admit("B")
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        cancelScope = { record, _ ->
+            if (record === a) { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+        }
+        val stopping = pool.submit { sessions.stopAll("screen off") }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertFalse(a.tasks.isCurrent(aOwner))
+            assertFalse(b.tasks.isCurrent(bOwner))
+            assertTrue(b.tasks.isStopped())
+            assertTrue(sessions.run(queuedB, PhoneToolCatalog.APPS, emptyMap()).isError)
+            // This is not a permanent global stop switch, and callbacks hold no registry lock.
+            assertFalse(invoke("after-batch").isError)
+            release.countDown()
+            stopping.get(5, TimeUnit.SECONDS)
+        } finally { release.countDown() }
+    }
+
+    @Test fun stopAllDuringAnExistingCancellationCommitsStopWithoutASecondCancellation() {
+        assertFalse(invoke("A").isError); assertFalse(invoke("B").isError)
+        val a = task("A"); val b = task("B")
+        val bOwner = checkNotNull(b.tasks.activeOwner())
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val aCancels = AtomicLong()
+        cancelScope = { record, _ ->
+            if (record === a) {
+                aCancels.incrementAndGet()
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+        }
+        val first = pool.submit<Boolean> { sessions.stop(a, "first stop") }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val oldEpoch = a.tasks.admissionEpoch()
+            sessions.stopAll("screen off")
+            assertEquals(1L, aCancels.get())
+            assertTrue(a.tasks.admissionEpoch() > oldEpoch)
+            assertTrue(a.tasks.isStopped())
+            assertFalse(b.tasks.isCurrent(bOwner))
+            assertFalse(sessions.resume(a))
+            release.countDown()
+            assertTrue(first.get(5, TimeUnit.SECONDS))
+            assertEquals(1L, aCancels.get())
+            assertTrue(invoke("A", run = "after-stop").isError)
+        } finally { release.countDown() }
+    }
+
+    @Test fun stopAllFinishesOtherClaimedCancellationsWhenOneCallbackFails() {
+        assertFalse(invoke("A").isError); assertFalse(invoke("B").isError)
+        val a = task("A"); val b = task("B")
+        val bOwner = checkNotNull(b.tasks.activeOwner())
+        val failure = IllegalStateException("cancel failure")
+        val bCancels = AtomicLong()
+        cancelScope = { record, _ ->
+            if (record === a) throw failure
+            if (record === b) bCancels.incrementAndGet()
+        }
+        assertSame(failure, runCatching { sessions.stopAll("screen off") }.exceptionOrNull())
+        assertEquals(1L, bCancels.get())
+        assertFalse(b.tasks.isCurrent(bOwner))
+        assertFalse(sessions.isBusy(a))
+        assertFalse(sessions.isBusy(b))
+    }
 
     @Test fun durableMarkMustFinishBeforeAnyPreparationAndStopDuringItCannotAct() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val lookups = AtomicLong()
@@ -556,6 +660,162 @@ class PhoneTaskSessionsTest {
         assertTrue(task("A", "2").tasks.isActive)
         assertNull(sessions.completed(receipt.taskId, "1", receipt.lifecycle))
     }
+    @Test fun policyPublicationExcludesANewAdmissionUntilTheValueIsVisible() {
+        val published = AtomicReference(PhonePolicies())
+        val insidePublish = CountDownLatch(1)
+        val releasePublish = CountDownLatch(1)
+        val attempting = CountDownLatch(1)
+        val admitted = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>()
+        val caller = Thread {
+            attempting.countDown()
+            try {
+                val admission = admit("policy-race")
+                admitted.countDown()
+                assertTrue(published.get().unlocks.secretFields)
+                sessions.run(admission, PhoneToolCatalog.APPS, emptyMap())
+            } catch (e: Throwable) { failure.set(e); admitted.countDown() }
+        }
+        val writer = pool.submit<PhonePolicies?> {
+            sessions.updatePolicies(mapOf("unlocks" to mapOf("secretFields" to true)), published::get) { next ->
+                insidePublish.countDown()
+                check(releasePublish.await(5, TimeUnit.SECONDS))
+                published.set(next)
+            }
+        }
+        try {
+            assertTrue(insidePublish.await(5, TimeUnit.SECONDS))
+            caller.start()
+            assertTrue(attempting.await(5, TimeUnit.SECONDS))
+            // Observe the actual monitor barrier, not a sleep or assumed scheduler delay.
+            val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (caller.state != Thread.State.BLOCKED && admitted.count != 0L && System.nanoTime() < until) {
+                Thread.yield()
+            }
+            assertEquals(Thread.State.BLOCKED, caller.state)
+            assertTrue(caller.stackTrace.any {
+                it.className == PhoneTaskSessions::class.java.name && it.methodName == "admit"
+            })
+            assertEquals(1L, admitted.count)
+            releasePublish.countDown()
+            assertNotNull(writer.get(5, TimeUnit.SECONDS))
+            assertTrue(admitted.await(5, TimeUnit.SECONDS))
+            caller.join(5_000)
+            assertFalse(caller.isAlive)
+            assertNull(failure.get())
+        } finally { releasePublish.countDown(); caller.join(5_000) }
+    }
+
+    @Test fun anAlreadyAdmittedTaskRejectsUnlockButStillAllowsRestoringRestrictions() {
+        val current = AtomicReference(PhonePolicies(unlocks = PhoneUnlocks(ownApp = true)))
+        val admitted = admit("active")
+        var writes = 0
+        assertNull(sessions.updatePolicies(mapOf("unlocks" to mapOf("secretFields" to true)), current::get) {
+            writes++; current.set(it)
+        })
+        assertEquals(0, writes)
+        assertFalse(current.get().unlocks.secretFields)
+        assertNotNull(sessions.updatePolicies(mapOf("unlocks" to mapOf("ownApp" to false)), current::get) {
+            writes++; current.set(it)
+        })
+        assertEquals(1, writes)
+        assertFalse(current.get().unlocks.ownApp)
+        assertFalse(sessions.run(admitted, PhoneToolCatalog.APPS, emptyMap()).isError)
+    }
+
+    @Test fun explicitCleanupRetryDuringClosingIsNotLostBeforeFailureIsPublished() {
+        assertFalse(invoke("A", tool = PhoneToolCatalog.SCREEN).isError)
+        val record = task("A")
+        val id = record.tasks.snapshot().id
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val attempts = AtomicLong()
+        cleanup = {
+            if (attempts.incrementAndGet() == 1L) {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                error("original release raced with verified recovery")
+            }
+        }
+        val ending = pool.submit { end("A") }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertFalse(record.cleanupFailed)
+            assertTrue(record.closing)
+            assertFalse(sessions.retryCleanup(id))
+            assertFalse(sessions.retryCleanup(id)) // Same in-flight close: one owed retry.
+            release.countDown()
+            ending.get(5, TimeUnit.SECONDS)
+            assertEquals(2L, attempts.get())
+            assertTrue(record.resourcesReleased)
+            assertFalse(record.cleanupFailed)
+            assertFalse(record.closing)
+        } finally { release.countDown() }
+    }
+
+    @Test fun anOwedCleanupRetryDoesNotRepeatAfterSuccessOrRetryItsOwnFailure() {
+        for (firstSucceeds in listOf(true, false)) {
+            val session = if (firstSucceeds) "success" else "failure"
+            assertFalse(invoke(session, tool = PhoneToolCatalog.SCREEN).isError)
+            val record = task(session)
+            val id = record.tasks.snapshot().id
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val attempts = AtomicLong()
+            cleanup = {
+                if (attempts.incrementAndGet() == 1L) {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+                if (!firstSucceeds) error("release still unknown")
+            }
+            val ending = pool.submit { end(session) }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                assertFalse(sessions.retryCleanup(id))
+                release.countDown()
+                ending.get(5, TimeUnit.SECONDS)
+                assertEquals(if (firstSucceeds) 1L else 2L, attempts.get())
+                assertEquals(firstSucceeds, record.resourcesReleased)
+                assertEquals(!firstSucceeds, record.cleanupFailed)
+            } finally { release.countDown() }
+        }
+    }
+
+    @Test fun journalOnlyClosingDoesNotRetainAPhysicalCleanupRetry() {
+        val releases = AtomicLong()
+        cleanup = { releases.incrementAndGet() }
+        assertFalse(invoke("journal-only", tool = PhoneToolCatalog.SCREEN).isError)
+        val record = task("journal-only")
+        val id = record.tasks.snapshot().id
+        journalCommit = { false }
+        end("journal-only")
+        assertTrue(record.resourcesReleased)
+        assertTrue(record.journalFailed)
+        val clearing = CountDownLatch(1)
+        val finish = CountDownLatch(1)
+        val writes = AtomicLong()
+        journalCommit = { bytes ->
+            if (writes.incrementAndGet() == 2L) {
+                clearing.countDown()
+                check(finish.await(5, TimeUnit.SECONDS))
+            }
+            journalBytes = bytes
+            true
+        }
+        val retry = pool.submit<Boolean> { sessions.retryJournalStorage() }
+        try {
+            assertTrue(clearing.await(5, TimeUnit.SECONDS))
+            assertTrue(record.closing)
+            assertFalse(sessions.retryCleanup(id))
+            assertNull(record.cleanupRetryTaskId)
+            finish.countDown()
+            assertTrue(retry.get(5, TimeUnit.SECONDS))
+            assertNull(record.cleanupRetryTaskId)
+            assertEquals(1L, releases.get())
+        } finally { finish.countDown() }
+    }
+
     @Test fun anyStillActiveSessionCountsNotJustTheLastOne() {
         assertFalse(sessions.anyActive())
         val queued = admit("C") // Admitted, not begun: it would act under whatever policy it finds.
@@ -1034,6 +1294,113 @@ class PhoneTaskSessionsTest {
     private fun openApp(session: String, pkg: String, background: Boolean = true): ToolOutput =
         sessions.run(admit(session), PhoneToolCatalog.OPEN, mapOf("app" to pkg, "background" to background))
 
+    @Test fun admissionTimeCountsBeforePreparationStarts() {
+        val lookups = AtomicLong(); lookup = { lookups.incrementAndGet() }
+        val admitted = admit("expired")
+        time.addAndGet(PhoneCore.MAX_TOTAL_MS)
+        assertTrue(sessions.run(admitted, PhoneToolCatalog.OPEN, mapOf("app" to "example.app")).isError)
+        assertEquals(0L, lookups.get())
+        assertEquals(0, task("expired").pending)
+        assertFalse(task("expired").running)
+        assertTrue(task("expired").heldApps.isEmpty())
+    }
+
+    @Test fun preparationConsumesTheSameDeadlineAndCannotAcquireOrOpenLate() {
+        val opens = AtomicLong(); open = { opens.incrementAndGet(); ActionResult(true, "opened") }
+        prepareLaunch = { app -> time.addAndGet(PhoneCore.MAX_TOTAL_MS); TestSystemLaunch(SystemTarget.Known(app)) }
+        val output = openApp("expired", "example.app")
+        assertTrue(output.isError)
+        assertEquals(0L, opens.get())
+        assertTrue(task("expired").heldApps.isEmpty())
+        assertTrue(task("expired").resourcesReleased)
+    }
+
+    @Test fun releasingAResourceDoesNotAdmitAWaiterWhoseOverallDeadlineExpired() {
+        assertFalse(screen("holder").isError)
+        val admission = admit("waiter")
+        time.addAndGet(PhoneCore.MAX_TOTAL_MS - 1_000)
+        val waiting = CountDownLatch(1); val reads = AtomicLong()
+        observe = { reads.incrementAndGet() }
+        changed = { if (sessions.snapshot().any { it["sessionId"] == "waiter" && it["waitingForScreen"] == "main" }) waiting.countDown() }
+        val result = pool.submit<ToolOutput> { sessions.run(admission, PhoneToolCatalog.SCREEN, emptyMap()) }
+        try {
+            assertTrue(waiting.await(5, TimeUnit.SECONDS))
+            time.addAndGet(1_000)
+            end("holder")
+            assertTrue(result.get(5, TimeUnit.SECONDS).isError)
+            assertEquals(0L, reads.get())
+            assertTrue(task("waiter").resourcesReleased)
+            assertTrue(task("waiter").heldApps.isEmpty())
+        } finally { end("holder"); end("waiter") }
+    }
+
+    @Test fun deadlineReplyDoesNotReleaseANonReturningPreparationOrPublishItsLateResult() {
+        assertFalse(invoke("A", tool = PhoneToolCatalog.SCREEN).isError)
+        val entered = CountDownLatch(1); val exit = CountDownLatch(1); val interrupted = CountDownLatch(1)
+        val opens = AtomicLong(); open = { opens.incrementAndGet(); ActionResult(true, "opened") }
+        prepareLaunch = { app ->
+            entered.countDown()
+            var done = false
+            while (!done) {
+                try { check(exit.await(5, TimeUnit.SECONDS)); done = true }
+                catch (_: InterruptedException) { interrupted.countDown() }
+            }
+            TestSystemLaunch(SystemTarget.Known(app))
+        }
+        val admission = admit("A")
+        val work = PhoneCallWork(
+            { sessions.run(admission, PhoneToolCatalog.OPEN, mapOf("app" to "example.app", "background" to true)).text },
+            { sessions.remainingMs(admission) }, { sessions.expire(admission).text },
+        )
+        val response = pool.submit<String?> { work.run() }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val a = task("A")
+            time.addAndGet(PhoneCore.MAX_TOTAL_MS)
+            assertNotNull(work.expire()) // Same method as the timer; no real deadline wait.
+            assertTrue(interrupted.await(5, TimeUnit.SECONDS))
+            assertFalse(response.isDone)
+            assertTrue(a.running); assertEquals(1, a.pending)
+            assertFalse(a.resourcesReleased); assertNull(sessions.tryReserveSelfCheck())
+            assertNull(work.expire()) // Exactly one reply commitment.
+            exit.countDown()
+            assertNull(response.get(5, TimeUnit.SECONDS)) // Late completion cannot become another reply.
+            assertEquals(0L, opens.get()); assertEquals(0, a.pending); assertFalse(a.running)
+            assertFalse(a.resourcesReleased) // The existing scope still owns its earlier MAIN lease.
+            end("A")
+            assertTrue(a.resourcesReleased)
+        } finally { exit.countDown() }
+    }
+
+    @Test fun timeoutBeforeTheCallPoolStartsStillDrainsAdmissionWithoutPreparing() {
+        val calls = AtomicLong(); lookup = { calls.incrementAndGet() }
+        val admission = admit("A")
+        val work = PhoneCallWork(
+            { sessions.run(admission, PhoneToolCatalog.APPS, emptyMap()).text },
+            { sessions.remainingMs(admission) }, { sessions.expire(admission).text },
+        )
+        time.addAndGet(PhoneCore.MAX_TOTAL_MS)
+        assertNotNull(work.expire())
+        assertEquals(1, task("A").pending) // Reply cancellation is not physical drain.
+        assertNull(work.run())
+        assertEquals(0L, calls.get()); assertEquals(0, task("A").pending)
+        assertFalse(task("A").running)
+    }
+
+    @Test fun completedBodyCannotCommitSuccessAfterTheOriginalDeadline() {
+        val admission = admit("A")
+        val work = PhoneCallWork({
+            val result = sessions.run(admission, PhoneToolCatalog.APPS, emptyMap())
+            assertFalse(result.isError)
+            time.addAndGet(PhoneCore.MAX_TOTAL_MS)
+            "LATE_SUCCESS"
+        }, { sessions.remainingMs(admission) }, { sessions.expire(admission).text })
+        val reply = checkNotNull(work.run())
+        assertFalse(reply.contains("LATE_SUCCESS"))
+        assertNull(work.expire())
+        assertEquals(0, task("A").pending)
+    }
+
     @Test fun nativePlanPreparationDoesNotOccupyTheSharedWorkerAndStopRejectsItsLateResult() {
         val entered = CountDownLatch(1); val exit = CountDownLatch(1)
         val launches = AtomicLong()
@@ -1294,6 +1661,127 @@ class PhoneTaskSessionsTest {
         }
         assertFalse(invoke("current-process").isError)
         assertTrue(task("current-process").tasks.snapshot().active)
+    }
+
+
+    @Test fun nativeReplayUsesOriginalManagedAdmissionAndMainUnknownAppLease() {
+        val registry = PhoneSkillReplaySelections { 0L }
+        val app = PhoneSkillReplaySelections.App("example.app", 10123, 1, 1, "a".repeat(64))
+        val route = PhoneSkillRoute.Route("phone-task-" + "1".repeat(32), "2".repeat(32), "markor-navigation-v1", listOf("app1"), emptyList(),
+            listOf(PhoneSkillRoute.Step(PhoneSkillRoute.Op.SELECT_OPTION, "app1", PhoneScreen.MAIN,
+                "navigation", "bottom-tabs", PhoneSkillRoute.Value.OptionLiteral("more"), PhoneSkillRoute.Post.OptionSelected)))
+        val selection = registry.prepare(PhoneSkillDrafts().attachClient(), 1, { true },
+            PhoneSkillReplaySelections.Request(route.skillName, route.revision, "A", app.packageName, app.uid),
+            PhoneSkillBundleReader.Read.Accepted(route, 2, "b".repeat(64), "c".repeat(64)), app)!!
+        assertTrue(registry.claim(selection, PhoneCaller("A", "1", "c", 1)) is PhoneSkillReplaySelections.Claim.Start)
+        var stored: String? = null
+        val accounting = PhoneSkillOutcomes({ stored }, { stored = it; true }, "d".repeat(32))
+        val result = sessions.runReplay(admit("A"), selection, registry, accounting)
+        assertTrue(result.isError) // Real default driver refuses unsupported typed replay, not a fake executor success.
+        assertEquals(0L, actions.get())
+        assertEquals(0, task("A").pending)
+        assertFalse(task("A").running)
+        assertTrue(task("A").holdsUnknownApp) // PM UID never substitutes for MAIN window UID.
+        assertTrue(sessions.runReplay(admit("B"), selection, registry, accounting).isError)
+        assertEquals(0, task("B").pending)
+        assertFalse(task("B").holdsUnknownApp)
+        assertEquals(0L, actions.get())
+        end("A"); end("B")
+    }
+    private class BackgroundReplayFixture(
+        val selections: PhoneSkillReplaySelections,
+        val selection: PhoneSkillReplaySelections.Selection,
+        val outcomes: PhoneSkillOutcomes,
+    )
+
+    private fun backgroundReplay(session: String, run: String = "1"): BackgroundReplayFixture {
+        val registry = PhoneSkillReplaySelections { 0L }
+        val app = PhoneSkillReplaySelections.App("example.app", 10123, 1, 1, "a".repeat(64))
+        val route = PhoneSkillRoute.Route("phone-task-" + "1".repeat(32), "2".repeat(32),
+            "markor-navigation-v1", listOf("app1"), emptyList(), listOf(PhoneSkillRoute.Step(
+                PhoneSkillRoute.Op.SELECT_OPTION, "app1", PhoneScreen.BACKGROUND, "navigation", "bottom-tabs",
+                PhoneSkillRoute.Value.OptionLiteral("more"), PhoneSkillRoute.Post.OptionSelected)))
+        val selection = checkNotNull(registry.prepare(PhoneSkillDrafts().attachClient(), 1, { true },
+            PhoneSkillReplaySelections.Request(route.skillName, route.revision, session, app.packageName, app.uid),
+            PhoneSkillBundleReader.Read.Accepted(route, 2, "b".repeat(64), "c".repeat(64)), app))
+        assertTrue(registry.claim(selection, PhoneCaller(session, run, "c", 1)) is PhoneSkillReplaySelections.Claim.Start)
+        var stored: String? = null
+        return BackgroundReplayFixture(registry, selection, PhoneSkillOutcomes({ stored }, { stored = it; true }, "d".repeat(32)))
+    }
+
+    @Test fun backgroundReplayWithoutAnOriginalDriverDoesNotBootstrapOrAcquire() {
+        val f = backgroundReplay("empty")
+        val result = sessions.runReplay(admit("empty"), f.selection, f.selections, f.outcomes)
+        assertTrue(result.isError)
+        assertTrue(result.text.contains("原任务没有已就绪"))
+        assertEquals(0L, backgroundPreparations.get())
+        assertEquals(0L, actions.get())
+        assertNull(lastOpenedDriver)
+        assertTrue(task("empty").heldApps.isEmpty())
+        assertFalse(task("empty").holdsUnknownApp)
+        assertFalse(task("empty").tasks.isStopped())
+    }
+
+    @Test fun backgroundReplayFreezesTheOrdinaryRunsOriginalDriverAndKnownApp() {
+        confirm = { Decision.ALLOW_ONCE }
+        val app = PhoneAppIdentity("example.app", 10123)
+        open = { ActionResult(true, "opened") }
+        assertFalse(openApp("A", app.packageName).isError)
+        val original = task("A")
+        val owner = checkNotNull(original.tasks.activeOwner())
+        val driver = checkNotNull(lastOpenedDriver)
+        val opensBefore = backgroundPreparations.get()
+        var lookups = 0
+        existingReplay = { requested, target ->
+            lookups++
+            if (requested.taskId == owner.taskId && requested.lifecycle == owner.lifecycle && original.tasks.isCurrent(owner) && target == app) driver else null
+        }
+        val f = backgroundReplay("A")
+        val prepared = original.core.prepareReplayCall(f.selection, f.selections, f.outcomes, owner)
+        assertTrue(prepared is Either.Right)
+        val call = (prepared as Either.Right).value
+        assertSame(driver, call.replayDriver)
+        assertEquals(app, call.knownApp)
+        assertEquals(listOf(PhoneScreen.BACKGROUND), call.screens)
+        assertFalse(call.unknownApp)
+        val result = sessions.runReplay(admit("A"), f.selection, f.selections, f.outcomes)
+        assertTrue(result.isError) // The real default device seam refuses typed replay; no producer success is fabricated.
+        assertEquals(opensBefore, backgroundPreparations.get())
+        assertEquals(2, lookups)
+        assertEquals(setOf(app), original.heldApps)
+        assertFalse(original.holdsUnknownApp)
+        assertEquals(0L, actions.get())
+        end("A")
+        assertTrue(original.resourcesReleased)
+        val next = backgroundReplay("A", "2")
+        val rejected = sessions.runReplay(admit("A", "2"), next.selection, next.selections, next.outcomes)
+        assertTrue(rejected.isError)
+        assertTrue(rejected.text.contains("原任务没有已就绪"))
+        assertEquals(opensBefore, backgroundPreparations.get())
+        assertTrue(task("A", "2").heldApps.isEmpty())
+    }
+
+    @Test fun backgroundReplayOriginalLookupStillConsumesTheSameAdmissionDeadline() {
+        confirm = { Decision.ALLOW_ONCE }
+        open = { ActionResult(true, "opened") }
+        assertFalse(openApp("A", "example.app").isError)
+        val original = task("A")
+        val owner = checkNotNull(original.tasks.activeOwner())
+        val driver = checkNotNull(lastOpenedDriver)
+        existingReplay = { requested, _ ->
+            assertEquals(owner.taskId, requested.taskId)
+            assertEquals(owner.lifecycle, requested.lifecycle)
+            time.addAndGet(PhoneCore.MAX_TOTAL_MS)
+            driver
+        }
+        val count = backgroundPreparations.get()
+        val f = backgroundReplay("A")
+        assertTrue(sessions.runReplay(admit("A"), f.selection, f.selections, f.outcomes).isError)
+        assertEquals(count, backgroundPreparations.get())
+        assertEquals(0L, actions.get())
+        assertEquals(0, original.pending)
+        assertFalse(original.running)
+        end("A")
     }
 
 }

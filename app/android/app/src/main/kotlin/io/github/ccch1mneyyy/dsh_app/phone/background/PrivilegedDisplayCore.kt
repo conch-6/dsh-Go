@@ -140,9 +140,11 @@ class PrivilegedDisplayCore internal constructor(
         var targetReply = SelfCheckTargetRequest.Step.entries.any { it.op == op } || request.containsKey(Proto.SELF_CHECK_TARGET_C2_VERSION)
         var selfCheckReply = op == Proto.OP_SELF_CHECK_PROBE
         try {
+            if (!BackgroundAfterVisual.validRequest(op, request.containsKey(Proto.AFTER_LOCAL_VISUAL),
+                    request.get(Proto.AFTER_LOCAL_VISUAL))) throw Fault("invalidArguments")
             if ((request.containsKey(Proto.TARGET_IDENTITY_VERSION) || request.containsKey(Proto.TARGET_UID)) &&
                 op !in setOf(Proto.OP_CREATE, Proto.OP_LAUNCH, Proto.OP_OBSERVE, Proto.OP_TAP, Proto.OP_SCROLL,
-                    Proto.OP_KEY, Proto.OP_TEXT, Proto.OP_COORDINATE, Proto.OP_RELEASE)) throw Fault("invalidArguments")
+                    Proto.OP_KEY, Proto.OP_TEXT, Proto.OP_COORDINATE, Proto.OP_RELEASE, Proto.OP_REPLAY_NAVIGATION)) throw Fault("invalidArguments")
             if (op == Proto.OP_PROBE) {
                 response.putBoolean(Proto.OK, true)
                 response.putInt(Proto.UID, Process.myUid())
@@ -151,6 +153,8 @@ class PrivilegedDisplayCore internal constructor(
                 response.putInt(Proto.VIEWPORT_VERSION, 1)
                 response.putInt(Proto.TARGET_IDENTITY_VERSION, 1)
                 response.putInt(Proto.BACKGROUND_COORDINATES, 1)
+                response.putInt(Proto.AFTER_LOCAL_VISUAL, 1)
+                response.putInt(Proto.REPLAY_NAVIGATION, 1)
                 // A real successful full query is required; finding the reflective method is insufficient.
                 if (runCatching { rootTasksEmpty(Display.DEFAULT_DISPLAY) }.isSuccess) {
                     response.putInt(Proto.RELEASE_RECEIPT, 1)
@@ -223,6 +227,7 @@ class PrivilegedDisplayCore internal constructor(
             }
             if (!response.containsKey(Proto.ERROR)) response.putBoolean(Proto.OK, true)
         } catch (e: Throwable) {
+            if (op == Proto.OP_REPLAY_NAVIGATION) response.getBundle(Proto.NAVIGATION)?.putString("post", "unknown")
             if (response.containsKey(Proto.COORDINATE_SCOPE_VERSION)) response.putBoolean(Proto.COORDINATE_SCOPE_KNOWN, false)
             response.putBoolean(Proto.OK, false)
             response.putString(Proto.ERROR, failureCode(e))
@@ -294,6 +299,8 @@ class PrivilegedDisplayCore internal constructor(
         }
         requireTreeReady()
         if (selfCheckOwner || targetSequence != null) throw Fault("identityChanged")
+        if (op == Proto.OP_REPLAY_NAVIGATION && hosted?.recovery != true)
+            throw Fault("identityChanged")
         if (hosted?.recovery == true && (!allocationReady || display == null))
             throw Fault("allocationRequired")
         if (owner != null && owner != ownerId) throw Fault("identityChanged")
@@ -332,6 +339,10 @@ class PrivilegedDisplayCore internal constructor(
         }
         val previousVisual = if (localVisual && (op == Proto.OP_TAP || op == Proto.OP_SCROLL)) visualObservation else null
         visualObservation = null // Consume before any dispatch, including failed or non-opt-in operations.
+        if (op == Proto.OP_REPLAY_NAVIGATION) {
+            navigation(request, response, expected ?: throw Fault("targetIdentityUnavailable"))
+            return // navigation completes its own final actual-target gate before publishing proof.
+        }
         when (op) {
             Proto.OP_CREATE, Proto.OP_LAUNCH -> {
                 if (hosted?.recovery == true && op != Proto.OP_LAUNCH) throw Fault("allocationRequired")
@@ -354,7 +365,7 @@ class PrivilegedDisplayCore internal constructor(
                 requireForeground(pkg)
                 tap(pkg, request)
                 sleepChecked(250)
-                observe(pkg, false, response, localVisual = localVisual)
+                observeAfterAction(pkg, request, response, localVisual = localVisual)
                 if (localVisual) response.putString(Proto.VISUAL_CHANGE,
                     visualObservation?.changeFrom(previousVisual, SystemClock.uptimeMillis()) ?: "unavailable")
             }
@@ -362,7 +373,7 @@ class PrivilegedDisplayCore internal constructor(
                 requireForeground(pkg)
                 scroll(pkg, request)
                 sleepChecked(250)
-                observe(pkg, false, response, localVisual = localVisual)
+                observeAfterAction(pkg, request, response, localVisual = localVisual)
                 if (localVisual) response.putString(Proto.VISUAL_CHANGE,
                     visualObservation?.changeFrom(previousVisual, SystemClock.uptimeMillis()) ?: "unavailable")
             }
@@ -370,13 +381,13 @@ class PrivilegedDisplayCore internal constructor(
                 requireForeground(pkg)
                 globalKey(request.getString(Proto.DIR))
                 sleepChecked(250)
-                observe(pkg, false, response)
+                observeAfterAction(pkg, request, response)
             }
             Proto.OP_TEXT -> {
                 requireForeground(pkg)
                 typeText(pkg, request, response)
                 sleepChecked(200)
-                observe(pkg, false, response)
+                observeAfterAction(pkg, request, response)
             }
             else -> throw Fault("invalidArguments")
         }
@@ -1024,6 +1035,38 @@ class PrivilegedDisplayCore internal constructor(
 
     // ---- observation (tree + optional screenshot) --------------------------
 
+    /** Exactly the original post-action read; a diagnostic attachment cannot rewrite the action ACK. */
+    private fun observeAfterAction(pkg: String, request: Bundle, response: Bundle,
+                                   localVisual: Boolean = false,
+                                   coordinatePost: BackgroundCoordinateObservation? = null) {
+        if (!request.containsKey(Proto.AFTER_LOCAL_VISUAL)) {
+            observe(pkg, false, response, localVisual = localVisual, coordinatePost = coordinatePost)
+            return
+        }
+        val after = Bundle()
+        try {
+            observe(pkg, true, after, localVisual = localVisual, coordinates = true, coordinatePost = coordinatePost)
+            val expected = targetIdentity.current ?: throw Fault("targetIdentityUnavailable")
+            val actual = requireActualTarget(expected)
+            after.putInt(Proto.TARGET_IDENTITY_VERSION, 1)
+            after.putInt(Proto.TARGET_UID, actual.uid)
+            after.putString(Proto.PKG, actual.packageName)
+            after.putBoolean(Proto.OK, after.containsKey(Proto.COUNT) && !after.getBoolean(Proto.FRAME_NOT_READY))
+        } catch (error: Exception) {
+            coordinateObservation = null
+            visualObservation = null
+            if (error is InterruptedException || error is Fault && error.code == "cancelled") throw error
+            after.clear()
+            after.putBoolean(Proto.OK, false)
+            after.putString(Proto.ERROR, failureCode(error))
+        }
+        val legacy = Bundle(after)
+        for (key in legacy.keySet().toList()) if (key !in BackgroundAfterVisual.legacyKeys) legacy.remove(key)
+        response.putAll(legacy)
+        response.putInt(Proto.AFTER_LOCAL_VISUAL, 1)
+        response.putBundle(Proto.AFTER_VISUAL, after)
+    }
+
     private fun observe(pkg: String, wantImage: Boolean, response: Bundle, requireTree: Boolean = false, detail: Boolean = false,
                         localVisual: Boolean = false, coordinates: Boolean = false,
                         coordinatePost: BackgroundCoordinateObservation? = null) {
@@ -1476,8 +1519,13 @@ class PrivilegedDisplayCore internal constructor(
         automation: UiAutomation, displayId: Int, pkg: String,
         targetId: Int = 0, scanOtherWindows: Boolean = false, inspectVisual: Boolean = false,
         targetEvidence: SelfCheckTargetEvidence? = null, coordinates: Boolean = false,
+        navigation: NavigationRead? = null,
     ): TreeRead {
-        runCatching { invoke(automation, "clearCache") }
+        if (navigation != null) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException()
+            if (runCatching { invoke(automation, "clearCache") }.getOrNull() != true)
+                throw Fault("treeUnavailable")
+        } else runCatching { invoke(automation, "clearCache") }
         @Suppress("UNCHECKED_CAST")
         val all = invoke(automation, "getWindowsOnAllDisplays") as? SparseArray<List<AccessibilityWindowInfo>>
             ?: throw Fault("treeUnavailable")
@@ -1485,7 +1533,7 @@ class PrivilegedDisplayCore internal constructor(
         val windows = displayWindows.filter {
             it.type == AccessibilityWindowInfo.TYPE_APPLICATION
         }
-        if (targetEvidence != null && (displayWindows.size != 1 || windows.size != 1)) throw Fault("targetUnavailable")
+        if ((targetEvidence != null || navigation != null) && (displayWindows.size != 1 || windows.size != 1)) throw Fault("targetUnavailable")
         val roots = ArrayList<AccessibilityNodeInfo?>()
         try {
             for (window in windows) roots.add(window.root)
@@ -1502,7 +1550,7 @@ class PrivilegedDisplayCore internal constructor(
             }
             if (!scanOtherWindows && roots.size > 1) tree.complete = false
             try {
-                walk(roots[selected.index]!!, tree, 0, 600)
+                walk(roots[selected.index]!!, tree, 0, 600, navigation = navigation)
                 assignRegions(tree.elements)
                 if (scanOtherWindows) for (index in selected.scanOrder.drop(1)) {
                     try {
@@ -1529,10 +1577,18 @@ class PrivilegedDisplayCore internal constructor(
         } finally { roots.forEach { it?.recycle() } }
     }
 
-    private fun walk(node: AccessibilityNodeInfo?, tree: TreeRead, indent: Int, budget: Int, emitElements: Boolean = true, parentIndex: Int = -1) {
+    private fun walk(node: AccessibilityNodeInfo?, tree: TreeRead, indent: Int, budget: Int, emitElements: Boolean = true, parentIndex: Int = -1,
+                     navigation: NavigationRead? = null, navigationParent: Int = -1) {
         if (node == null) { tree.complete = false; return }
         if (tree.visited >= budget) { tree.complete = false; return }
         tree.visited++
+        if (navigation != null) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException()
+            val refreshed = node.refresh()
+            if (Thread.currentThread().isInterrupted) throw InterruptedException()
+            if (!refreshed) throw Fault("targetUnavailable")
+        }
+        val navigationIndex = navigation?.visit(node, navigationParent) ?: -1
         val coordinateIndex = tree.coordinateNodes?.size ?: -1
         val actionClick = if (tree.coordinateNodes != null) node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK } else false
         tree.coordinateNodes?.add(VisualNode(parentIndex, node.className?.take(4097)?.toString(),
@@ -1595,7 +1651,7 @@ class PrivilegedDisplayCore internal constructor(
         for (i in 0 until node.childCount) {
             if (tree.visited >= budget) { tree.complete = false; break }
             val child = node.getChild(i)
-            try { walk(child, tree, childIndent, budget, emitElements, coordinateIndex) } finally { child?.recycle() }
+            try { walk(child, tree, childIndent, budget, emitElements, coordinateIndex, navigation, navigationIndex) } finally { child?.recycle() }
         }
     }
 
@@ -1757,7 +1813,117 @@ class PrivilegedDisplayCore internal constructor(
             "swipe" -> injectSwipe(action.x, action.y, checkNotNull(action.x2), checkNotNull(action.y2), action.durationMs)
         }
         sleepChecked(250)
-        observe(pkg, false, response, coordinatePost = observed)
+        observeAfterAction(pkg, request, response, coordinatePost = observed)
+    }
+
+    /** Per-request original native nodes, never retained between requests. */
+    private class NavigationRead : AutoCloseable {
+        data class Node(val parent: Int, val viewId: String?, val desc: String?, val bounds: Rect,
+            val enabled: Boolean, val password: Boolean, val editable: Boolean,
+            val selected: Boolean, val clickable: Boolean, val actionClick: Boolean)
+        val nodes = ArrayList<Node>()
+        var more: AccessibilityNodeInfo? = null
+        var observation: io.github.ccch1mneyyy.dsh_app.phone.a11y.MarkorNavigation.Observation? = null
+        var label = ""
+        fun visit(node: AccessibilityNodeInfo, parent: Int): Int {
+            val viewId = node.viewIdResourceName
+            val desc = node.contentDescription?.toString()
+            if ((viewId?.length ?: 0) > 1024 || (desc?.toByteArray(Charsets.UTF_8)?.size ?: 0) > 1024)
+                throw Fault("targetUnavailable")
+            val index = nodes.size
+            nodes += Node(parent, viewId, desc, Rect().also { node.getBoundsInScreen(it) },
+                node.isEnabled && node.isVisibleToUser, node.isPassword, node.isEditable,
+                node.isSelected, node.isClickable, node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
+            if (viewId == "${BackgroundNavigationProtocol.PACKAGE}:id/nav_more" && more == null)
+                more = AccessibilityNodeInfo.obtain(node)
+            return index
+        }
+        fun window(window: BackgroundVisualObservation.Window): io.github.ccch1mneyyy.dsh_app.phone.a11y.UiWindow {
+            fun convert(index: Int): io.github.ccch1mneyyy.dsh_app.phone.a11y.UiNode {
+                val n = nodes[index]
+                return io.github.ccch1mneyyy.dsh_app.phone.a11y.UiNode(ref = index, viewId = n.viewId,
+                    desc = n.desc, bounds = io.github.ccch1mneyyy.dsh_app.phone.a11y.Box(n.bounds.left, n.bounds.top, n.bounds.right, n.bounds.bottom),
+                    enabled = n.enabled, password = n.password, editable = n.editable, selected = n.selected,
+                    clickable = n.clickable, actionClick = n.actionClick,
+                    children = nodes.indices.filter { nodes[it].parent == index }.map(::convert))
+            }
+            return io.github.ccch1mneyyy.dsh_app.phone.a11y.UiWindow(window.id,
+                io.github.ccch1mneyyy.dsh_app.phone.a11y.WindowKind.APP, BackgroundNavigationProtocol.PACKAGE, null,
+                io.github.ccch1mneyyy.dsh_app.phone.a11y.Box(window.left, window.top, window.right, window.bottom), convert(0))
+        }
+        override fun close() { more?.recycle(); more = null }
+    }
+
+    private fun navigationIdentity(expected: PhoneAppIdentity, app: BackgroundNavigationProtocol.Installation): Map<String, String> {
+        if (Thread.currentThread().isInterrupted) throw InterruptedException()
+        if (keyguard?.isKeyguardLocked == true) throw Fault("locked")
+        requireActualTarget(expected)
+        val installed = io.github.ccch1mneyyy.dsh_app.phone.a11y.MarkorNavigation.installed(privileged)
+            ?: throw Fault("targetIdentityUnavailable")
+        val actual = installed.first
+        if (expected.packageName != BackgroundNavigationProtocol.PACKAGE || actual.uid != expected.uid ||
+            actual.version != app.version || actual.updated != app.updated || actual.signers != app.signers)
+            throw Fault("targetIdentityChanged")
+        return installed.second
+    }
+
+    private fun navigationTree(automation: UiAutomation, expected: PhoneAppIdentity,
+                               app: BackgroundNavigationProtocol.Installation): NavigationRead {
+        val labels = navigationIdentity(expected, app)
+        val read = NavigationRead()
+        try {
+            val tree = readTree(automation, displayId(), expected.packageName, inspectVisual = true, navigation = read)
+            if (!tree.complete || tree.hasSecrets || tree.hasSensitive || read.nodes.isEmpty()) throw Fault("targetUnavailable")
+            val window = tree.visualWindow ?: throw Fault("targetUnavailable")
+            read.observation = io.github.ccch1mneyyy.dsh_app.phone.a11y.MarkorNavigation.inspect(listOf(read.window(window)), labels)
+                ?: throw Fault("targetUnavailable")
+            read.label = labels["nav_more"]?.takeIf { it.isNotBlank() && it.toByteArray(Charsets.UTF_8).size <= 1024 }
+                ?: throw Fault("targetUnavailable")
+            return read
+        } catch (error: Throwable) { read.close(); throw error }
+    }
+
+    /** One original resource request, at most one NODE call, no tap/coordinate fallback. */
+    private fun navigation(request: Bundle, response: Bundle, expected: PhoneAppIdentity) {
+        val parsed = BackgroundNavigationProtocol.request(request.keySet(), request::get) ?: throw Fault("invalidArguments")
+        val result = Bundle().apply {
+            putInt("version", 1); putString("mode", if (parsed.execute) "execute" else "inspect")
+            putBoolean("attempted", false); putString("post", "unknown")
+        }
+        response.putBundle(Proto.NAVIGATION, result)
+        val vd = display ?: throw Fault("displayMissing")
+        withTreeConnection(vd.display, expected.packageName, "treeUnavailable") { automation ->
+            navigationTree(automation, expected, parsed.app).use { before ->
+                val first = checkNotNull(before.observation)
+                val wanted = parsed.expected
+                if (wanted != null && (first.windowId != wanted.window || before.label != wanted.label ||
+                    wanted.readOnly && first.selected != "nav_more" ||
+                    first.selected != "nav_more" && first.selected != wanted.selected)) throw Fault("staleSnapshot")
+                fun publish(read: NavigationRead, post: String) {
+                    val observed = checkNotNull(read.observation)
+                    if (observed.windowId != first.windowId || read.label != before.label) throw Fault("staleSnapshot")
+                    navigationIdentity(expected, parsed.app) // Final identity gate before copying successful proof.
+                    result.putInt("windowId", observed.windowId); result.putString("selected", observed.selected)
+                    result.putString("targetLabel", read.label); result.putBoolean("targetClickable", observed.moreCanClick)
+                    result.putLong("appVersion", parsed.app.version); result.putLong("appUpdated", parsed.app.updated)
+                    result.putString("appSigningDigest", parsed.app.signers); result.putString("post", post)
+                    response.putInt(Proto.TARGET_IDENTITY_VERSION, 1); response.putInt(Proto.TARGET_UID, expected.uid)
+                    response.putString(Proto.PKG, expected.packageName)
+                }
+                if (!parsed.execute) { publish(before, "unknown"); return@use }
+                if (first.selected == "nav_more") { publish(before, "satisfied"); return@use }
+                if (!first.moreCanClick) throw Fault("inputRejected")
+                val node = before.more ?: throw Fault("targetUnavailable")
+                navigationIdentity(expected, parsed.app)
+                result.putBoolean("attempted", true)
+                val accepted = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                // False may be an in-flight timeout. No fallback/repeat, and no successful post proof.
+                navigationTree(automation, expected, parsed.app).use { after ->
+                    if (!accepted) throw Fault("inputRejected")
+                    publish(after, if (after.observation?.selected == "nav_more") "satisfied" else "different")
+                }
+            }
+        }
     }
 
     private fun tap(pkg: String, request: Bundle) {
@@ -1815,9 +1981,9 @@ class PrivilegedDisplayCore internal constructor(
     }
 
     private fun typeText(pkg: String, request: Bundle, response: Bundle) {
-        val text = request.getString(Proto.TEXT).orEmpty()
+        val text = request.get(Proto.TEXT) as? String ?: throw Fault("invalidArguments")
         val index = request.getInt(Proto.ELEMENT, -1)
-        if (index < 1 || text.isEmpty() || text.length > 500 || '\u0000' in text) throw Fault("invalidArguments")
+        if (index < 1 || text.length > 500 || '\u0000' in text) throw Fault("invalidArguments")
         val vd = display ?: throw Fault("displayMissing")
         withTreeConnection(vd.display, pkg, "textConnectionUnavailable") { automation ->
             val node = readTree(automation, vd.display.displayId, pkg, index).target ?: throw Fault("elementMissing")

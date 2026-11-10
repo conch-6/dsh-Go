@@ -77,6 +77,7 @@ await client.close();                                // or account.logout()
 | `Future<void> logout({bool revokeDevice = true})` | Closes the connection and revokes the device on the Server (best effort). Deletes the tokens, and also the identity when revoked. Host pins are kept |
 | `Future<void> refresh()` / `Future<String> accessToken({forceRefresh})` | Refresh is normally automatic (60 s before expiry) and single-flight, because refresh tokens rotate and reusing an old one revokes the whole family |
 | `Future<List<RemoteHost>> listHosts()` | Fetches every Host's descriptor in parallel to report the identity key and trust |
+| `Future<bool> supportsPairing()`, `resolvePairing(scan)`, `claimPairing(offer, {deepseekUserId})` | Device pairing v1 (scan the computer's QR, see below) |
 | `Future<void> forgetHost(hostId)` | Drops a pin. Use it after the user confirms a legitimate Host reinstall |
 | `Future<DshClient> connectHost(host, {onState, confirmNewHost, muxOptions, timeout = 30 s, tracer})` | See below |
 | `Stream<RemoteConnectionState> connectionStates`, `connectionState`, `activeClient` | Follow whichever connection is currently active |
@@ -142,6 +143,17 @@ A terminal failure **sticks**: the client stops reconnecting, so it never fights
 There is no extra client-side 20 MiB cap. The carrier enforces the protocol's absolute **1 GiB** ceiling; the app retains its normal **200 MiB** attachment budget. The Host remains authoritative for its version/path-specific limits (usually 20 MiB for Relay/TURN/unknown paths and older plugins, up to 1 GiB for newer verified LAN/P2P), writable session workspaces, safe basenames and collision-safe publication. Failed transfers are aborted best-effort; no mutation is automatically replayed after a timeout or reconnect. A timed-out commit may already have published the file.
 
 Protocol reference: [ds-harness-remote 0.6.2, `479b943`](https://github.com/liguobao/ds-harness-remote/blob/479b94341c0d0de63846f21d0fcca26997d158d1/docs/protocol.md#L1529-L1618), MIT.
+
+### Device pairing (scan the computer's code)
+
+Upstream `docs/device-pairing-v1.md` and `docs/dsh-go-pairing-integration.md`, the phone side:
+
+1. `parsePairingScan(text)` strictly parses the short code `https://<server>/pair#v1.<ticket>` (or the legacy JSON code) without opening it. Show `scan.origin` before sending anything there.
+2. `resolvePairing(scan)` checks login discovery (`capabilities.devicePairing == dsh-pairing-v1`, plus `devicePairingQr == fragment-ticket-v1` for the short code) and resolves the ticket. Read-only on the Server. A code for another Server fails with `PAIRING_SERVER_MISMATCH` and its `origin`.
+3. After the person confirmed the computer (name and the full `PairingDevice.fingerprint`), `claimPairing` claims with this device identity and returns `RemotePairing.verificationCode` (8 digits). The person types it into the computer; the phone never confirms for it.
+4. `RemotePairing.result` completes once this phone's credentials are stored and the Host key is pinned; then `listHosts` / `connectHost` as usual. It fails with `PAIRING_CODE_REJECTED` (one attempt), `PAIRING_EXPIRED`, `PAIRING_CANCELLED`, `PAIRING_ACCOUNT_CONFLICT` (signed in to another account: those credentials are kept), `PAIRING_IDENTITY_MISMATCH`, or a Server code.
+
+The claim, `mobile/status` and `mobile/cancel` POSTs carry `X-DSH-Pairing-Proof` over the exact JSON text sent; `resolve` sends only the ticket, without a proof (`pairingProof`, checked against the upstream fixed vectors in `test/fixtures/pairing/proof_v1.json`). A lost claim response is recovered by resending the same bytes. Polling (2.5 s) backs off on 429/503 and pauses with `RemotePairing.paused`. `deepseekUserId` is optional unverified metadata, never credentials.
 
 ## Security model
 

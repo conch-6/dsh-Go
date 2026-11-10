@@ -2,6 +2,7 @@ package io.github.ccch1mneyyy.dsh_app.phone
 
 import io.github.ccch1mneyyy.dsh_app.i18n.AppStrings
 import io.github.ccch1mneyyy.dsh_app.R
+import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundPreview
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -12,6 +13,10 @@ import android.os.Looper
 import android.os.SystemClock
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillDrafts
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillBridge
+import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillReplaySelections
+import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillReplayApps
+import io.github.ccch1mneyyy.dsh_app.runtime.RuntimeController
+import io.github.ccch1mneyyy.dsh_app.runtime.PhoneSkillBundleReader
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.OverlayPrefs
 import io.github.ccch1mneyyy.dsh_app.phone.background.PrivilegedActionGate
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -57,6 +62,11 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
     @Volatile private var promptOwner = Any()
     @Volatile private var attached = false
     @Volatile private var skillClient: PhoneSkillDrafts.Client? = null
+    private class SkillInspection(val client: PhoneSkillDrafts.Client, val epoch: Long,
+        val origin: RuntimeController.PhoneSkillOrigin, val bundle: PhoneSkillBundleReader.Read.Accepted,
+        val choices: List<PhoneSkillReplayApps.Choice>)
+    private var skillInspection: SkillInspection? = null
+    private var skillSelectionRequest = Any()
     private val privilegedActions = PrivilegedActionGate()
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -96,7 +106,9 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         control.selfCheck.stop(promptOwner)
         control.background.changeGateIntent { attached = false }
-        skillClient?.let { control.skillDrafts.retireClient(it) }
+        skillSelectionRequest = Any()
+        skillInspection = null
+        skillClient?.let { control.skillReplaySelections.retireClient(it); control.skillDrafts.retireClient(it) }
         skillClient = null
         (appContext as Application).unregisterActivityLifecycleCallbacks(previewLifecycle)
         control.preview.removeConsumer(previewOwner)
@@ -137,7 +149,7 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         val events = previewSink ?: return
         val host = activity?.activity ?: return
         if (attached && AppVisibility.isResumed(host)) {
-            control.preview.addConsumer(previewOwner, taskId) { events.success(it) }
+            control.preview.addConsumer(previewOwner, taskId, BackgroundPreview.ConsumerKind.APP_DIALOG) { events.success(it) }
         }
     }
 
@@ -151,12 +163,17 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
             } catch (e: Throwable) {
                 Result.failure(e)
             }
-            main.post {
-                value.fold(
-                    onSuccess = { result.success(it) },
-                    onFailure = { result.error("phone_failed", it.message ?: it.javaClass.simpleName, null) },
-                )
-            }
+            complete(result, value)
+        }
+    }
+
+    /** Both async control work and the status capture lane finish on the original main handler. */
+    private fun complete(result: MethodChannel.Result, value: Result<Any?>) {
+        main.post {
+            value.fold(
+                onSuccess = { result.success(it) },
+                onFailure = { result.error("phone_failed", it.message ?: it.javaClass.simpleName, null) },
+            )
         }
     }
 
@@ -172,7 +189,36 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "status" -> async(result, shortControl = true) { control.status() }
+            "status" -> control.status { complete(result, it) }
+            "androidShellStatus" -> async(result, shortControl = true) { control.shell.status() }
+            "configureAndroidShell" -> {
+                val args = call.arguments as? Map<*, *>
+                val enabled = args?.get("enabled") as? Boolean
+                val backend = args?.get("backend") as? String
+                if (args?.keys != setOf("enabled", "backend") || enabled == null || backend !in setOf("shizuku", "adb")) {
+                    result.success(mapOf("ok" to false, "errorCode" to "invalidArguments"))
+                } else if (enabled && !control.isEnabled()) {
+                    result.success(mapOf("ok" to false, "errorCode" to "disabled"))
+                } else async(result, shortControl = true) { control.shell.configure(enabled, backend!!) }
+            }
+            "androidShellRequestPermission" -> async(result) { control.shell.requestShizukuPermission() }
+            "androidShellStartPairing" -> async(result) { control.shell.startAdbPairing() }
+            "androidShellPair" -> {
+                val args = call.arguments as? Map<*, *>
+                val code = args?.get("code") as? String
+                val port = args?.get("port") as? Int
+                if (args == null || args.keys.any { it !in setOf("code", "port") } || code == null ||
+                    args["port"] != null && port == null) result.success(mapOf("ok" to false, "errorCode" to "invalidArguments"))
+                else async(result) { control.shell.pairAdb(code, port) }
+            }
+            "androidShellConnect" -> {
+                val args = call.arguments as? Map<*, *>
+                val port = args?.get("port") as? Int
+                if (call.arguments != null && (args == null || args.keys.any { it != "port" } ||
+                    args["port"] != null && port == null)) result.success(mapOf("ok" to false, "errorCode" to "invalidArguments"))
+                else async(result) { control.shell.connect(port) }
+            }
+            "androidShellStop" -> { control.shell.cancelAll(); result.success(true) }
             "acknowledgeTaskInterruption" -> async(result) {
                 (call.argument<Any?>("batchToken") as? String)?.let(control::acknowledgeTaskInterruption) == true
             }
@@ -180,6 +226,10 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
             "retryBackgroundRecovery" -> async(result) { control.retryBackgroundRecovery() }
             "startPhoneSelfCheck", "phoneSelfCheckStatus", "cancelPhoneSelfCheck",
             "retryPhoneSelfCheckCleanup" -> selfCheckCall(call, result)
+            "setBackgroundParallelLimit" -> async(result, shortControl = true) {
+                val args = call.arguments as? Map<*, *>
+                control.setBackgroundParallelLimit(if (args != null && args.keys == setOf("limit")) args["limit"] else null)
+            }
             "setBackgroundViewport" -> async(result, shortControl = true) {
                 val args = call.arguments as? Map<*, *>
                 control.background.setBackgroundViewport(if (args != null && args.keys == setOf("preset")) args["preset"] else null)
@@ -190,6 +240,16 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                 else async(result, shortControl = true) { control.setSkillSavePrompt(enabled) }
             }
             "skillDraft", "saveSkillDraft", "discardSkillDraft" -> skillCall(call, result)
+            "inspectSkillReplay" -> inspectSkillReplay(call, result)
+            "prepareSkillReplay" -> prepareSkillReplay(call, result)
+            "discardSkillReplay" -> {
+                val args = call.arguments as? Map<*, *>
+                val id = args?.get("invocation") as? String
+                val client = skillClient
+                val removed = client != null && args?.keys == setOf("invocation") && id != null &&
+                    control.skillReplaySelections.discard(client, id)
+                result.success(if (removed) mapOf("kind" to "discarded") else replayRejected("stale"))
+            }
             "setBackgroundPreview" -> result.success(control.preview.setEnabled(call.argument<Boolean>("enabled") == true))
             "setBackgroundKeep" -> {
                 val selected = call.argument<String>("mode").orEmpty()
@@ -329,15 +389,114 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
     }
 
     /** Capture this attachment, never borrow the Client from a newer engine when queued work runs. */
+    private fun replayRejected(reason: String): Map<String, Any?> = mapOf("kind" to "rejected", "reason" to reason)
+
+    private fun skillReplayLive(value: SkillInspection): Boolean = attached && skillClient === value.client &&
+        control.skillDrafts.clientCurrent(value.client) && control.skillDrafts.currentEpoch() == value.epoch &&
+        value.origin.runtime.phoneSkillOriginCurrent(value.origin)
+
+    private fun inspectSkillReplay(call: MethodCall, result: MethodChannel.Result) {
+        val args = call.arguments as? Map<*, *>
+        val name = args?.get("skillId") as? String
+        val client = skillClient
+        val host = activity?.activity
+        skillInspection = null
+        val request = Any().also { skillSelectionRequest = it }
+        if (args?.keys != setOf("skillId") || name == null || !Regex("phone-task-[a-f0-9]{32}").matches(name)) {
+            result.success(replayRejected("invalid")); return
+        }
+        if (!attached || client == null || host == null || !AppVisibility.isResumed(host)) {
+            result.success(replayRejected("unavailable")); return
+        }
+        val runtime = RuntimeController.get(appContext)
+        val origin = runtime.capturePhoneSkillOrigin()
+        val epoch = control.skillDrafts.currentEpoch()
+        if (origin == null) { result.success(replayRejected("stale")); return }
+        runtime.readPhoneSkillBundle(origin, name, null, PhoneSkillReplayApps.descriptors) { read ->
+            if (read !is PhoneSkillBundleReader.Read.Accepted) {
+                result.success(replayRejected("unsupported")); return@readPhoneSkillBundle
+            }
+            controlIo.execute {
+                val choices = PhoneSkillReplayApps.choices(appContext, read.route.descriptorId)
+                val summary = PhoneSkillReplayApps.summary(read.route)
+                main.post {
+                    val inspection = SkillInspection(client, epoch, origin, read, choices)
+                    if (skillSelectionRequest !== request || !skillReplayLive(inspection)) {
+                        result.success(replayRejected("stale"))
+                    } else if (choices.isEmpty() || summary == null) {
+                        result.success(replayRejected("unsupported"))
+                    } else {
+                        skillInspection = inspection
+                        result.success(mapOf("kind" to "available", "revision" to read.route.revision,
+                            "summary" to summary, "apps" to choices.map { choice -> mapOf(
+                                "packageName" to choice.app.packageName, "uid" to choice.app.uid, "label" to choice.label) }))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun prepareSkillReplay(call: MethodCall, result: MethodChannel.Result) {
+        val request = PhoneSkillReplaySelections.Request.parse(call.arguments)
+        val inspection = skillInspection
+        val host = activity?.activity
+        if (request == null) { result.success(replayRejected("invalid")); return }
+        if (inspection == null || host == null || !AppVisibility.isResumed(host) || !skillReplayLive(inspection) ||
+            inspection.bundle.route.skillName != request.name || inspection.bundle.route.revision != request.revision) {
+            result.success(replayRejected("stale")); return
+        }
+        val selected = inspection.choices.singleOrNull { it.app.packageName == request.packageName && it.app.uid == request.uid }
+        if (selected == null) { result.success(replayRejected("unsupported")); return }
+        val ticket = Any().also { skillSelectionRequest = it }
+        val runtime = inspection.origin.runtime
+        runtime.readPhoneSkillBundle(inspection.origin, request.name, request.revision, PhoneSkillReplayApps.descriptors) { read ->
+            if (read !is PhoneSkillBundleReader.Read.Accepted || read.routeSha256 != inspection.bundle.routeSha256 ||
+                read.skillSha256 != inspection.bundle.skillSha256 || read.draftRevision != inspection.bundle.draftRevision) {
+                result.success(replayRejected("stale")); return@readPhoneSkillBundle
+            }
+            if (SkillReplaySupport.screen(read.route) == null) {
+                result.success(replayRejected("unsupported")); return@readPhoneSkillBundle
+            }
+            controlIo.execute {
+                val now = PhoneSkillReplayApps.choices(appContext, read.route.descriptorId)
+                    .singleOrNull { it.app == selected.app }
+                main.post {
+                    if (skillSelectionRequest !== ticket || !skillReplayLive(inspection)) {
+                        result.success(replayRejected("stale"))
+                    } else if (now == null) result.success(replayRejected("app_changed"))
+                    else {
+                        val drafts = control.skillDrafts
+                        val originalClient = inspection.client
+                        val originalEpoch = inspection.epoch
+                        val originalOrigin = inspection.origin
+                        val pending = control.skillReplaySelections.prepare(originalClient, originalEpoch,
+                            { drafts.clientCurrent(originalClient) && drafts.currentEpoch() == originalEpoch &&
+                                runtime.phoneSkillOriginCurrent(originalOrigin) }, request, read, now.app)
+                        result.success(if (pending == null) replayRejected("busy") else mapOf("kind" to "ready",
+                            "invocation" to pending.invocation, "revision" to request.revision,
+                            "parameterNames" to emptyList<String>()))
+                    }
+                }
+            }
+        }
+    }
+
     private fun skillCall(call: MethodCall, result: MethodChannel.Result) {
         val client = skillClient
         if (client == null) { result.success(PhoneSkillBridge.rejected("stale")); return }
         controlIo.execute {
-            val value = try { control.skillBridge.call(client, call.method, call.arguments) }
-                catch (_: Exception) { PhoneSkillBridge.rejected("io") }
-            main.post {
-                if (skillClient === client) result.success(value)
-                else result.success(PhoneSkillBridge.rejected("stale"))
+            fun finish(value: Map<String, Any?>) {
+                main.post {
+                    if (skillClient === client) result.success(value)
+                    else result.success(PhoneSkillBridge.rejected("stale"))
+                }
+            }
+            if (call.method == "skillDraft" && (call.arguments as? Map<*, *>)?.get("action") == "check_save") {
+                control.skillBridge.checkSave(client, call.arguments, ::finish)
+            } else {
+                val value = try { control.skillBridge.call(client, call.method, call.arguments) }
+                    catch (_: Exception) { PhoneSkillBridge.rejected("io") }
+                finish(value)
             }
         }
     }

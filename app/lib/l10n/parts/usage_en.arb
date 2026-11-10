@@ -1,7 +1,7 @@
 {
   "usageStatsTitle": "Send anonymous usage stats",
   "usageStatsSection": "Improve DSH Go",
-  "usageStatsFooter": "Only usage counts, versions and the phone’s maker. Never chats, files or accounts.",
+  "usageStatsFooter": "This switch controls dsh-go’s own usage counts, versions, phone maker and model, and system version statistics. It includes no chats, files or accounts, and does not control Google ML Kit SDK statistics.",
   "usageNoticeBody": "No chats or personal info.\nTurn off anytime.",
   "usageUpgradeNotice": "New: anonymous usage stats, to help improve DSH Go.\nNo chats or personal info.",
   "usageUpgradeLearn": "Learn more",

@@ -30,4 +30,9 @@
     <string name="overlay_preview_waiting">Waiting for the background screen…</string>
     <string name="overlay_preview_protected">Protected screen. Preview is hidden.</string>
     <string name="overlay_preview_unavailable">Background preview is unavailable.</string>
+    <string name="overlay_control_rejected">The task did not accept this control.</string>
+    <string name="overlay_steer_rejected">Not sent. The task no longer accepts this message; your text is kept.</string>
+    <string name="overlay_preview_in_use">Another task is being previewed</string>
+    <string name="background_parallel_limit_invalid">Choose 1, 2, or 3 background tasks.</string>
+    <string name="background_parallel_limit_save_failed">Could not save the background task limit. Please try again.</string>
 </resources>

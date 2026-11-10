@@ -280,6 +280,17 @@ class AuthorizedPeer {
   final String? harnessVersion;
 }
 
+/// What login discovery says about device pairing.
+class RemoteServerCapabilities {
+  const RemoteServerCapabilities({this.devicePairing, this.devicePairingQr});
+
+  /// `dsh-pairing-v1` when the Server pairs devices by scanning.
+  final String? devicePairing;
+
+  /// `fragment-ticket-v1` when it resolves the short QR code.
+  final String? devicePairingQr;
+}
+
 /// Thin, validating REST client. Bearer tokens are passed per call and
 /// never logged or put in URLs.
 class RemoteServerApi {
@@ -550,13 +561,60 @@ class RemoteServerApi {
     return result;
   }
 
+  // ---------------------------------------------------------------------------
+  // Device pairing v1 (upstream docs/device-pairing-v1.md)
+
+  /// Login discovery's `capabilities` (`devicePairing`, `devicePairingQr`).
+  /// A Server without the discovery endpoint (404) declares none; any other
+  /// failure is reported, never read as "unsupported".
+  Future<RemoteServerCapabilities> serverCapabilities() async {
+    Object? body;
+    try {
+      body = await _request('GET', '/api/v1/auth/oauth/providers');
+    } on RemoteApiException catch (error) {
+      if (error.status == 404) return const RemoteServerCapabilities();
+      rethrow;
+    }
+    final map = asMap(body);
+    final raw = map?['capabilities'];
+    final capabilities = asMap(raw);
+    if (map == null || map['items'] is! List || (raw != null && capabilities == null)) {
+      throw const RemoteApiException('INVALID_MESSAGE', 'The server returned invalid sign-in capabilities.');
+    }
+    return RemoteServerCapabilities(
+      devicePairing: asString(capabilities?['devicePairing']),
+      devicePairingQr: asString(capabilities?['devicePairingQr']),
+    );
+  }
+
+  /// `POST /api/v1/device-pairing/resolve`: the session behind a short code.
+  /// Read-only on the Server (it does not use up the claim), so a lost
+  /// response may be asked again with the same ticket.
+  Future<Object?> resolvePairing(String ticket) =>
+      _request('POST', '/api/v1/device-pairing/resolve', rawJson: jsonEncode({'ticket': ticket}));
+
+  /// One proof-carrying pairing POST; [rawJson] is sent byte for byte.
+  Future<Object?> pairingPost(String path, String rawJson, String proof) {
+    if (!RegExp(r'^/api/v1/device-pairing/sessions/[0-9a-fA-F-]{36}/[a-z/]+$').hasMatch(path)) {
+      throw ArgumentError.value(path, 'path');
+    }
+    return _request('POST', path, rawJson: rawJson, headers: {'X-DSH-Pairing-Proof': proof});
+  }
+
   void close() {
     if (_ownsClient) _http.close(force: true);
   }
 
   // ---------------------------------------------------------------------------
 
-  Future<Object?> _request(String method, String path, {Object? body, String? bearer}) async {
+  Future<Object?> _request(
+    String method,
+    String path, {
+    Object? body,
+    String? rawJson,
+    Map<String, String> headers = const {},
+    String? bearer,
+  }) async {
     final uri = serverUrl.resolve(path);
     if (uri.origin != serverUrl.origin) {
       throw const RemoteApiException('INVALID_MESSAGE', 'Refusing a cross-origin Server request.');
@@ -575,8 +633,10 @@ class RemoteServerApi {
       req.followRedirects = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       if (bearer != null) req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $bearer');
-      if (body != null) {
-        final bytes = utf8.encode(jsonEncode(body));
+      headers.forEach(req.headers.set);
+      if (body != null || rawJson != null) {
+        // [rawJson] goes out byte for byte (a pairing proof signs these bytes).
+        final bytes = utf8.encode(rawJson ?? jsonEncode(body));
         req.headers.contentType = ContentType.json;
         req.contentLength = bytes.length;
         req.add(bytes);

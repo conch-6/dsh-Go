@@ -64,4 +64,33 @@ class BackgroundPreviewDeliveryTest {
         assertNull(state.initial(7)["imageBytes"])
         assertEquals("off", state.initial(7)["state"])
     }
+
+    @Test fun losingConsumerClearsWithoutReplacingTheWinnersCacheOrAcknowledgement() {
+        val state = BackgroundPreviewDelivery(); state.reset(7)
+        val frame = state.accept("frame", 40, 2, 1, byteArrayOf(1))!!
+        val occupied = state.placeholder(8, true)
+        assertEquals(8L, occupied["taskId"])
+        assertEquals("inUse", occupied["state"])
+        assertNull(occupied["imageBytes"])
+        assertEquals(0, occupied["width"]); assertEquals(0, occupied["height"])
+        assertTrue(seq(occupied) > seq(frame))
+        assertEquals(40L, state.afterSequence)
+        assertSame(frame, state.initial(7))
+        val ended = state.placeholder(8, false)
+        assertEquals("off", ended["state"])
+        assertTrue(seq(ended) > seq(occupied))
+        assertSame(frame, state.initial(7))
+    }
+
+    @Test fun selectedTasksWithoutReadyTargetsStillHaveDifferentGenerations() {
+        val state = BackgroundPreviewDelivery(); state.reset(7)
+        val first = state.initial(7)
+        state.reset(8)
+        val second = state.initial(8)
+        assertEquals("waiting", first["state"]); assertEquals("waiting", second["state"])
+        assertTrue((second["generation"] as Long) > (first["generation"] as Long))
+        assertNull(second["imageBytes"])
+        assertEquals(-1L, state.afterSequence)
+    }
+
 }

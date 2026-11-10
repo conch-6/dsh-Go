@@ -89,7 +89,25 @@ class PhoneDisplaySelectionTest {
         assertEquals("line B", selection.view()!!.line); assertEquals("App B", selection.view()!!.state.app)
     }
 
-    private val stop = { task: PhoneTasks, owner: PhoneTasks.Owner, reason: String -> task.stopIfCurrent(owner, reason); Unit }
+    private val stop = { task: PhoneTasks, owner: PhoneTasks.Owner, reason: String -> task.stopIfCurrent(owner, reason) }
+
+    @Test fun stoppingDisplayedADoesNotAnswerAPromptOwnedByB() {
+        val selection = PhoneDisplaySelection()
+        val a = PhoneTasks(); val b = PhoneTasks()
+        val oa = start(a); val ob = start(b)
+        val arbiter = PromptArbiter({ 1_000L }, { "nonce" })
+        val prompt = arbiter.begin(null, b, PromptContent(PromptKind.REVIEW, "B"), 30_000) { b.isCurrent(ob) }!!
+        val stopOwner = { task: PhoneTasks, owner: PhoneTasks.Owner, reason: String ->
+            task.stopIfCurrent(owner, reason).also { accepted -> if (accepted) arbiter.cancelOwner(task) }
+        }
+        selection.select(a, oa)
+        val forA = selection.controls(stopOwner)!!
+        assertTrue(forA.stop("stop A"))
+        assertTrue(prompt.live)
+        selection.select(b, ob)
+        assertTrue(selection.controls(stopOwner)!!.stop("stop B"))
+        assertFalse(prompt.live)
+    }
 
     @Test fun shownControlsActOnTheTaskTheyWereShownForAfterAnotherIsSelected() {
         val selection = PhoneDisplaySelection(); val shown = StatusOwnership()
@@ -99,9 +117,9 @@ class PhoneDisplaySelectionTest {
         assertTrue(shown.publish(selection.guard(ta)) { selection.controls(stop) })
         selection.select(b, ob) // B selected while A's pill (or a tap queued on it) is still there.
         val controls = shown.controls!!
-        controls.setPaused(true)
+        assertEquals(true, controls.setPaused(true))
         assertTrue(a.isPaused); assertFalse(b.isPaused); assertTrue(controls.isPaused())
-        controls.interject("for A")
+        assertEquals(true, controls.interject("for A"))
         assertEquals(listOf("for A"), a.drainInterjections()); assertTrue(b.drainInterjections().isEmpty())
         controls.stop("stop A")
         assertFalse(a.isCurrent(oa)); assertTrue(b.isCurrent(ob))
@@ -115,7 +133,7 @@ class PhoneDisplaySelectionTest {
         assertTrue(shown.publish(selection.guard(ta)) { selection.controls(stop) })
         val controls = shown.controls!!
         a.stop("stop"); a.clearStop(); val next = start(a) // The displayed owner is gone; A runs anew.
-        controls.setPaused(true); controls.interject("late"); controls.stop("late")
+        assertEquals(false, controls.setPaused(true)); assertEquals(false, controls.interject("late")); controls.stop("late")
         assertFalse(a.isPaused); assertFalse(controls.isPaused()); assertTrue(a.drainInterjections().isEmpty())
         assertTrue(a.isCurrent(next))
         // A late status of the old ticket cannot hand its controls to the pill shown for B.

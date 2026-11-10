@@ -151,8 +151,19 @@ class NativeMediaPlugin :
         }
         when (call.method) {
             "play" -> play(o, call, result)
-            "pause" -> ok(result, player?.pause() == true, "audio")
-            "resume" -> ok(result, onScreen() && player?.resume() == true, "audio")
+            "pause" -> {
+                val p = player
+                val wasPlaying = p?.playing == true
+                val done = p?.pause() == true
+                if (done && wasPlaying) capture?.setPlaying(false)
+                ok(result, done, "audio")
+            }
+            "resume" -> {
+                val p = player
+                val done = onScreen() && p?.resume() == true
+                if (done && p.playing == true) capture?.setPlaying(true)
+                ok(result, done, "audio")
+            }
             "stop" -> {
                 capture?.setPlaying(false)
                 ok(result, player?.release() != false, "close")

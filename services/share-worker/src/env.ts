@@ -3,6 +3,8 @@ import type { RateLimiter } from './limits';
 export interface Env {
   /** HTTPS publication root; defaults to dsh-go-market GitHub Pages. */
   MARKET_SOURCE_URL?: string;
+  /** "1": cron also verifies and mirrors pets/adapters from the same market. */
+  PET_MARKET_ENABLED?: string;
   /** Static files (public/): the site, and the viewer the Worker serves at /c/<id>. */
   ASSETS: { fetch(request: Request): Promise<Response> };
   /** Ciphertexts, under the tier prefixes of ids.ts. */

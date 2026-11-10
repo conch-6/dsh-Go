@@ -32,15 +32,17 @@ internal class InputProbe(
     private var downTime: Long? = null
     private var down = false
 
-    fun ready(target: Target) {
+    @Synchronized fun ready(target: Target) {
+        if (this.target != null || failure != null) return
         this.target = target
         ready.countDown()
     }
 
     /** Receiver setup failed before injection; even SecurityException is a window failure here. */
-    fun fail(error: Throwable) {
+    @Synchronized fun fail(error: Throwable) {
         failure = failure("inputWindowNotReady", error)
         ready.countDown()
+        received.countDown()
     }
 
     fun verify(
@@ -64,11 +66,12 @@ internal class InputProbe(
         entered(InputProbeDiagnostics.Stage.RECEIPT_WAIT)
         if (!received.await(receiptTimeoutMs, TimeUnit.MILLISECONDS))
             throw failure("inputUnconfirmed", java.util.concurrent.TimeoutException())
+        failure?.let { throw it }
     }
 
     @Synchronized fun accept(id: Int, time: Long, action: Int, x: Float, y: Float) {
         val point = target ?: return
-        if (id != displayId || downTime != time || !x.isFinite() || !y.isFinite() ||
+        if (failure != null || id != displayId || downTime != time || !x.isFinite() || !y.isFinite() ||
             abs(x - point.x) > 2 || abs(y - point.y) > 2) return
         when (action) {
             0 -> down = true // ACTION_DOWN

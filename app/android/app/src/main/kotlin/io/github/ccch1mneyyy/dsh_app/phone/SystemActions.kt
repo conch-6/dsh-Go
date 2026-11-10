@@ -99,11 +99,15 @@ class SystemActions(private val app: Context) : SystemApi {
     ) : SystemLaunch
 
     private fun handler(info: ActivityInfo?): SystemHandler? {
-        if (info == null || !info.enabled || !info.exported) return null
+        if (info == null || !info.exported) return null
         val application = info.applicationInfo ?: return null
         val pkg = info.packageName ?: return null
         val component = info.name ?: return null
         if (!application.enabled || application.packageName != pkg) return null
+        val enabled = SystemHandlers.componentEnabled(info.enabled) {
+            pm.getComponentEnabledSetting(ComponentName(pkg, component))
+        }
+        if (!enabled) return null
         return SystemHandler(pkg, component, application.uid)
     }
 
@@ -276,33 +280,13 @@ class SystemActions(private val app: Context) : SystemApi {
         val attempted = AppStrings.get(app, R.string.phone_system_start_attempted, native.noticeWhat)
         val exempt = AppVisibility.visible || PhoneRegistry.mainDriver != null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
         if (exempt) return SysResult(true, attempted, native.target)
-        // Notification failure/stop cannot erase a platform call that already returned.
-        val notice = try { postOpen(dispatch, native.noticeWhat) } catch (_: InterruptedException) {
+        // A separate commitment: a stop during startActivity must not start a new review.
+        // The Core uses its existing task-owned handoff; this never replays the original Intent.
+        if (!dispatch.commitNotice()) {
             Thread.currentThread().interrupt()
             return SysResult(true, attempted, native.target)
-        } catch (_: Exception) { false }
-        return SysResult(true, attempted + " " + AppStrings.get(app,
-            if (notice) R.string.phone_system_review_notice else R.string.phone_system_review_unavailable), native.target)
-    }
-
-    private fun postOpen(dispatch: PhoneTasks.SystemDispatch, what: String): Boolean {
-        ensureChannel(CHANNEL_OPEN, AppStrings.get(app, R.string.phone_open_channel), NotificationManager.IMPORTANCE_HIGH)
-        val available = nm.areNotificationsEnabled() &&
-            (Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
-                nm.getNotificationChannel(CHANNEL_OPEN)?.importance != NotificationManager.IMPORTANCE_NONE)
-        val notification = builder(CHANNEL_OPEN)
-            .setContentTitle(AppStrings.get(app, R.string.phone_open_notice, what))
-            .setContentText(AppStrings.get(app, R.string.phone_tap_open)).setAutoCancel(true)
-        // A separate commitment: a stop during startActivity must not publish a new notice.
-        // Create the PendingIntent only after commitment; never cancel a potentially reused one.
-        if (!dispatch.commitNotice()) throw InterruptedException(PhoneTasks.STOPPED_MESSAGE)
-        if (!available) return false
-        val id = ids.incrementAndGet()
-        val review = Intent(app, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        val pi = PendingIntent.getActivity(app, id, review, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        nm.notify(TAG, id, notification.setContentIntent(pi).build())
-        return true
+        }
+        return SysResult(true, attempted, native.target, requiresReview = true)
     }
 
     override fun notify(title: String, text: String): SysResult {
@@ -359,8 +343,11 @@ class SystemActions(private val app: Context) : SystemApi {
                 SysResult(false, "读不到剪贴板：系统只允许前台应用读，DSH 不在前台。请用户切回 DSH 再说，或直接把内容发给你。")
             }
         }
+        val limit = 20_000
+        // Keep a complete surrogate pair out of the preview when it crosses the limit.
+        val end = if (text.length > limit && text[limit - 1].isHighSurrogate() && text[limit].isLowSurrogate()) limit - 1 else limit
         // l10n:keep agent tool result
-        val shown = if (text.length > 20_000) text.take(20_000) + "\n…（后面还有 ${text.length - 20_000} 字）" else text
+        val shown = if (text.length > limit) text.take(end) + "\n…（后面还有 ${text.length - end} 字）" else text
         // l10n:keep agent tool result
         return SysResult(true, "剪贴板内容：\n$shown")
     }
@@ -402,6 +389,5 @@ class SystemActions(private val app: Context) : SystemApi {
     companion object {
         private const val TAG = "dsh-phone-sys"
         const val CHANNEL_NOTIFY = "dsh-phone-notify"
-        const val CHANNEL_OPEN = "dsh-phone-open"
     }
 }

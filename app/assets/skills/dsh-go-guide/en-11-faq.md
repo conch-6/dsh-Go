@@ -74,9 +74,22 @@ Check that the plugin is enabled, and restart the engine if asked. A plugin's na
 <!-- nav: commonSettings,hubPrivacy,usageStatsTitle -->
 `Settings › Privacy and sharing › Send anonymous usage stats` · [Open](dshgo://open/usage-stats)
 
-On by default; the switch is on the welcome screen the first time you open the app. If you updated from an earlier version, a one-time notice at the bottom of the home screen tells you, and can turn it off right there. While it's on, the app sends anonymous stats for the days before, at most once a day, and only this: app and Android version, CPU architecture, phone maker (not the model), app language, how the local engine was started, and that day's number of messages, voice inputs, phone control tasks, generations, shares and installed plugins. Devices are told apart by a random ID that changes every 90 days.
+dsh-go’s own anonymous usage statistics are on by default; the switch is on the welcome screen the first time you open the app. If you updated from an earlier version, a one-time notice at the bottom of the home screen tells you, and can turn it off right there. While it's on, the app sends anonymous stats for the days before, at most once a day, and only this: app and Android version, CPU architecture, phone maker and model (such as `V2405A`, from 1.0.15), the maker's system and its version (such as OriginOS 5.0, from 1.0.15), app language, how the local engine was started, and that day's number of messages, voice inputs, phone control tasks, generations, shares and installed plugins. Devices are told apart by a random ID that changes every 90 days.
 
-Never accounts, API keys, chats, files, prompts or host addresses, and no device identifiers such as phone number or IMEI. Turn it off and nothing more is sent; the random ID and the counts kept on the phone are deleted at once.
+These statistics never include accounts, API keys, chats, files, prompts or host addresses, or device identifiers such as phone number or IMEI. Turning this switch off stops these dsh-go statistics; the random ID and the counts kept on the phone are deleted at once.
+
+## Local text recognition and Google ML Kit
+
+<!-- nav: commonSettings,hubSettingsPhoneControl -->
+`Settings › Phone control`
+
+Phone control uses bundled Google ML Kit Chinese text recognition (`com.google.mlkit:text-recognition-chinese:16.0.1`), enabled by default; turn it off separately with **On-device text recognition (ML Kit)** on that page. Recognition runs on this device; screenshots and recognized text are not sent to Google. Google’s SDK collects usage statistics such as device model, app version and processing time. The anonymous usage statistics switch above does not control this SDK.
+
+Screenshots and recognized text may be sent to your configured model as part of phone control. While off, recognition requests do not trigger SDK loading or initialization. Turning local recognition off prevents new recognition; work already started may still finish. It does not uninstall the SDK, clear previously accumulated SDK statistics, or guarantee that old SDK statistics stop being sent. A device that has never initialized the SDK and a device previously used with recognition enabled have different histories.
+
+Remote’s pairing scanner also uses ML Kit and initializes the shared SDK separately when the scanner opens. Camera scanning and reading a gallery image do not require phone control or text recognition to be enabled, and do not change that setting. To connect without using ML Kit for pairing, use the Remote account sign-in path instead.
+
+See [Google ML Kit terms](https://developers.google.com/ml-kit/terms) and [Android SDK data disclosure](https://developers.google.com/ml-kit/android-data-disclosure). These SDK terms are distinct from the Apache 2.0 license attached to example code in the documentation.
 
 ## The guide doesn't match what I see
 

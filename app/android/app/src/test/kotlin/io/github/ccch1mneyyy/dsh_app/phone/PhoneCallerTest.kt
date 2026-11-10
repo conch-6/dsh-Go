@@ -60,6 +60,7 @@ class PhoneCallerTest {
         assertEquals(1L, capability["v"])
         assertEquals(1L, capability["taskIsolation"])
         assertEquals(1L, capability["parallelLimit"])
+        assertEquals(mapOf("v" to 1L, "maxLimit" to 3L, "defaultLimit" to 1L), capability["backgroundParallelism"])
         assertEquals(tools, result("tools/list")["tools"])
         val callResult = server.handle(request(2, caller("A")))!!
         assertFalse(callResult.contains("run-A"))

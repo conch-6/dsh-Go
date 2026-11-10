@@ -82,6 +82,15 @@ String? humanizeRuntimeError(String? raw) {
   for (final prefix in const ['install failed: ', 'start failed: ']) {
     if (text.startsWith(prefix)) text = text.substring(prefix.length);
   }
+  if (text.startsWith('runtime_upgrade_blocked:')) {
+    return switch (text.substring('runtime_upgrade_blocked:'.length)) {
+      'base' => appL10n.phoneRuntimeUpgradeBase,
+      'running' => appL10n.phoneRuntimeUpgradeRunning,
+      'symlink' => appL10n.phoneRuntimeUpgradeSymlink,
+      'transaction' || 'legacy_interrupted' => appL10n.phoneRuntimeUpgradeInterrupted,
+      _ => appL10n.phoneRuntimeUpgradeManifest,
+    };
+  }
   if (text == 'no startup token received within 180s') return appL10n.phoneStartupTokenTimeout;
   if (RegExp(r'^token seen but port [0-9]+ never accepted connections$').hasMatch(text)) {
     return appL10n.phoneStartupPortNotReady;

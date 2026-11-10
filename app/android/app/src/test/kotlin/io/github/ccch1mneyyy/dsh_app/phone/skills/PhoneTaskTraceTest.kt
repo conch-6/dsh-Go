@@ -17,6 +17,36 @@ class PhoneTaskTraceTest {
     private fun render(trace: PhoneTaskTrace, owner: PhoneTasks.Owner): PhoneSkillDraft.Result =
         PhoneSkillDraft.render(trace.snapshot(owner), NAME, true)
 
+    @Test fun ordinaryOkNeverInventsNavigationAndNativeFactsStayOnTheirOriginalTicket() {
+        val trace = PhoneTaskTrace(); val original = owner(); trace.start(original)
+        accepted(trace, original)
+        assertNull(trace.snapshot(original)!!.steps.single().navigation)
+        // Consumer fixture only: Main/PackageManager production is tested separately on device.
+        val witness = PhoneSkillNavigationWitness(10123, 164, 1, "a".repeat(64))
+        val ticket = trace.beginAction(original, PhoneAction.Tap("s91", 32), target("More"))
+        trace.finish(ticket, true, false, true, witness)
+        assertSame(witness, trace.snapshot(original)!!.steps.last().navigation)
+        val reserved = trace.reservedBytes()
+        trace.finish(ticket, true, false, true, witness)
+        assertEquals(reserved, trace.reservedBytes())
+        val pending = trace.beginAction(original, PhoneAction.Tap("s91", 32), target("More"))
+        trace.complete(original, true)
+        trace.finish(pending, true, false, true, witness)
+        assertNull(trace.snapshot(original)!!.steps.last().navigation)
+        val successor = owner(1, 2); trace.start(successor)
+        assertTrue(trace.snapshot(successor)!!.steps.isEmpty())
+    }
+
+    @Test fun failedStaleOrUnreadableResultsDoNotRetainNavigationFacts() {
+        val witness = PhoneSkillNavigationWitness(10123, 164, 1, "a".repeat(64))
+        for ((ok, stale, readable) in listOf(Triple(false, false, true), Triple(true, true, true), Triple(true, false, false))) {
+            val trace = PhoneTaskTrace(); val owner = owner(); trace.start(owner)
+            val ticket = trace.beginAction(owner, PhoneAction.Tap("s91", 32), target("More"))
+            trace.finish(ticket, ok, stale, readable, witness)
+            assertNull(trace.snapshot(owner)!!.steps.single().navigation)
+        }
+    }
+
     @Test fun arbitraryLabelsAndEveryInputValueAreParametersNotStoredText() {
         val privateValues = listOf("张三", "北京市海淀区一号", "13800138000", "me@example.com", "https://example.com/?token=SECRET",
             "发送给Alice", "密码abc", "---\nname: injected\n```", "😀".repeat(100))

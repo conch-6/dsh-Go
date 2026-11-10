@@ -453,6 +453,9 @@
   "phonePreviewTitle": "Live background preview",
   "phonePreviewDescription": "Frames are read only while the preview is visible and stay on this device. The preview is view-only.",
   "phonePreviewOpen": "View background screen",
+  "phonePreviewTask": "Preview task {taskId}",
+  "@phonePreviewTask": {"placeholders": {"taskId": {"type": "String"}}},
+  "phonePreviewInUse": "Another task is being previewed",
   "phonePreviewOff": "The task ended or preview is off",
   "phonePreviewUnavailable": "Preview is unavailable or the screen is protected",
   "phonePreviewWaiting": "Waiting for a new background frame",
@@ -505,7 +508,7 @@
       }
     }
   },
-  "phoneSelfCheckReason": "{reason, select, busy{The phone or channel is busy.} unsupported{This device or peer does not support this check.} cancelled{This request was cancelled or retired.} disabled{Phone control is turned off.} locked{The device is locked.} identity{The original run or channel no longer matches.} invalid{The request or result could not be verified.} display{The temporary display could not be verified.} input{Input acceptance or delivery was not confirmed. Sent input is not retried.} cleanup{Resource cleanup is unconfirmed. Retry only cleanup.} denied{The system denied the operation.} timeout{The operation timed out; sent work may still complete.} unavailable{The local status or selected channel is unavailable.} target_unavailable{The fixed target could not be verified. Finish cleanup before starting again.} target_changed{The original target changed. Continue only with cleanup.} target_cleanup{Target cleanup is unconfirmed. Retry only cleanup.} target_main{The target was observed on MAIN. Further steps stopped; complete cleanup.} target_readback{The fixed target count or text did not match. Do not repeat the action; complete cleanup.} tree_cleanup{Tree connection cleanup is unconfirmed. Retry only cleanup.} target_launch{Target launch was denied or unconfirmed. Check the device and complete cleanup.} frame_unavailable{No usable local pattern frame was observed. Complete cleanup before a new check.} frame_mismatch{The actual frame did not match this target and phase. Complete cleanup.} continuity{The limited controlled refresh sequence was not confirmed. This is not a frame-rate result.} main_changed{MAIN samples changed; this may include user actions. Complete cleanup. This does not establish the cause.} main_unchanged{No change was seen at these finite sampling points. Disturbance between them remains unknown.} main_incomplete{MAIN samples are incomplete. They cannot establish absence of disturbance.} not_installed{No local OCR recognizer is installed. OCR was not tested.} other{An unrecognized result was received.}}",
+  "phoneSelfCheckReason": "{reason, select, busy{The phone or channel is busy.} unsupported{This device or peer does not support this check.} cancelled{This request was cancelled or retired.} disabled{Phone control is turned off.} locked{The device is locked.} identity{The original run or channel no longer matches.} invalid{The request or result could not be verified.} display{The temporary display could not be verified.} input{Input acceptance or delivery was not confirmed. Sent input is not retried.} cleanup{Resource cleanup is unconfirmed. Retry only cleanup.} denied{The system denied the operation.} timeout{The operation timed out; sent work may still complete.} unavailable{The local status or selected channel is unavailable.} target_unavailable{The fixed target could not be verified. Finish cleanup before starting again.} target_changed{The original target changed. Continue only with cleanup.} target_cleanup{Target cleanup is unconfirmed. Retry only cleanup.} target_main{The target was observed on MAIN. Further steps stopped; complete cleanup.} target_readback{The fixed target count or text did not match. Do not repeat the action; complete cleanup.} tree_cleanup{Tree connection cleanup is unconfirmed. Retry only cleanup.} target_launch{Target launch was denied or unconfirmed. Check the device and complete cleanup.} frame_unavailable{No usable local pattern frame was observed. Complete cleanup before a new check.} frame_mismatch{The actual frame did not match this target and phase. Complete cleanup.} continuity{The limited controlled refresh sequence was not confirmed. This is not a frame-rate result.} main_changed{MAIN samples changed; this may include user actions. Complete cleanup. This does not establish the cause.} main_unchanged{No change was seen at these finite sampling points. Disturbance between them remains unknown.} main_incomplete{MAIN samples are incomplete. They cannot establish absence of disturbance.} not_installed{This self-check does not include OCR. OCR was not tested.} other{An unrecognized result was received.}}",
   "@phoneSelfCheckReason": {
     "placeholders": {
       "reason": {
@@ -531,7 +534,7 @@
       }
     }
   },
-  "phoneSelfCheckTargetC2Scope": "Uses a fixed local target for launch, tree reading, one button tap, ASCII and Chinese ACTION_SET_TEXT replacement/readback, local pattern capture and limited controlled refresh. This does not measure FPS or smoothness. Finite MAIN samples cannot prove there was no disturbance between samples. OCR is not installed; touch receiver, scrolling and back are not tested. Cleanup alone does not prove a display was created.",
+  "phoneSelfCheckTargetC2Scope": "Uses a fixed local target for launch, tree reading, one button tap, ASCII and Chinese ACTION_SET_TEXT replacement/readback, local pattern capture and limited controlled refresh. This does not measure FPS or smoothness. Finite MAIN samples cannot prove there was no disturbance between samples. OCR, touch reception, scrolling and back are not tested. Cleanup alone does not prove a display was created.",
   "phoneTaskWaiting": "Task {taskId} · Waiting for resources",
   "phoneTaskWaitingApp": "Waiting for app {packageName} · {seconds} seconds elapsed.",
   "phoneTaskWaitingUnknown": "Waiting for the interface (app identity unconfirmed) · {seconds} seconds elapsed.",
@@ -585,5 +588,54 @@
         "type": "int"
       }
     }
-  }
+  },
+  "phoneLocalOcrTitle": "On-device text recognition (ML Kit)",
+  "phoneLocalOcrUnknown": "This setting could not be read. Refresh and try again.",
+  "phoneLocalOcrDisclosure": "Recognition runs on this device. Screenshots and text are not sent to Google; Google’s SDK collects usage statistics such as device model, app version and processing time.",
+  "phoneLocalOcrDetails": "Enabled by default. While off, text recognition requests do not trigger SDK loading or initialization. Remote pairing initializes the shared SDK separately when its scanner opens; it does not enable text recognition. Screenshots and recognized text may be sent to your configured model. Turning this off prevents new local recognition; work already started may still finish. It does not uninstall the SDK or promise to clear or stop sending previously accumulated SDK statistics.",
+  "phoneBackgroundParallelTitle": "Background task limit",
+  "phoneBackgroundParallelStatus": "Configured: {configured} · Available limit: {effective} · Occupied: {held}",
+  "phoneBackgroundParallelDescription": "A lower limit keeps existing tasks. New tasks still wait for apps and the main screen to become available.",
+  "phoneBackgroundParallelChoice": "{limit} background task slots",
+  "phoneBackgroundParallelOff": "The background channel is off. Saving this preference does not turn it on.",
+  "phoneBackgroundParallelUnsupported": "Background operation is unavailable on this device.",
+  "phoneBackgroundParallelConnection": "A connection is required before a new background task can start.",
+  "phoneBackgroundParallelBusy": "The background channel is being prepared or maintained. New tasks cannot start yet.",
+  "phoneBackgroundParallelRecovery": "Resolve unfinished background resource recovery before starting new tasks.",
+  "phoneBackgroundParallelPeer": "The connected service does not support the required background capabilities.",
+  "phoneBackgroundParallelSerial": "This connection supports one background slot. Your preference remains saved.",
+  "@phoneBackgroundParallelStatus": {
+    "placeholders": {
+      "configured": {
+        "type": "int"
+      },
+      "effective": {
+        "type": "int"
+      },
+      "held": {
+        "type": "int"
+      }
+    }
+  },
+  "@phoneBackgroundParallelChoice": {
+    "placeholders": {
+      "limit": {
+        "type": "int"
+      }
+    }
+  },
+  "phoneSkillBundlePublishedUnverified": "The files were published, but full verification has not succeeded. Do not save again.",
+  "phoneSkillBundleUnknown": "The save result is not confirmed. Files may already have been written. Do not save again.",
+  "phoneSkillBundleRevision": "Route revision: {revision}",
+  "@phoneSkillBundleRevision": {"placeholders": {"revision": {"type": "String"}}},
+  "phoneSkillReplayReview": "Review phone route",
+  "phoneSkillReplaySourceChanged": "The local session or connection changed. Select the route again from the current local conversation.",
+  "phoneSkillReplayUnavailable": "This route is not available for controlled execution on this phone. The ordinary skill template remains available.",
+  "phoneSkillReplayConfirm": "I have reviewed this route and the app selected for this use.",
+  "phoneSkillReplayToComposer": "Insert into this conversation",
+  "phoneSkillReplayStartText": "A phone route has been selected and reviewed locally. Call only mcp__phone__replay with {request}. If unavailable or refused, hand back to the user/model; do not replay it as ordinary actions.",
+  "@phoneSkillReplayStartText": {"placeholders": {"request": {"type": "String"}}},
+  "phoneSkillReplayQueue": "Send route (queue)",
+  "phoneSkillReplayQueued": "The route message was accepted or queued. This does not mean the route has executed successfully.",
+  "phoneSkillReplaySendUncertain": "Delivery of the route message was not confirmed. It has not been prepared or replayed again. Check the original conversation."
 }

@@ -518,6 +518,12 @@ class TerminalWorkspace extends Notifier<TerminalWorkspaceState> {
 
   /// Re-attaches every dropped tab (the link came back, the app resumed).
   void reconnectAll() {
+    // Nothing listed yet (the Host had the terminal off, or the link was
+    // down): the link coming back is the moment to list again.
+    if (state.tabs.isEmpty && state.error != null) {
+      unawaited(reload());
+      return;
+    }
     for (final tab in state.tabs) {
       final link = _links[tab.id];
       if (tab.phase == TerminalPhase.disconnected) {

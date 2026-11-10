@@ -169,6 +169,80 @@ class PhoneEvalTest(unittest.TestCase):
         self.assertEqual(group["verdicts"], {"fail": 1})
         self.assertEqual(group["metrics"]["elapsed_ms"]["excluded_runs"], 1)
 
+    def coordinate(self, start, seq, result, reason):
+        return self.event(start, seq, "coordinate", result=result, reason=reason,
+                          evidence="simulation" if start["mode"] == "simulated" else "manual_device")
+
+    def test_coordinate_denominator_is_recorded_attempts_not_runs(self):
+        one, many = self.start(), self.start()
+        events = [one, self.coordinate(one, 1, "refused", "observation"), many]
+        events += [self.coordinate(many, i, "dispatched", "none") for i in range(1, 10)]
+        stats = self.report(events)["groups"][0]["coordinates"]
+        self.assertEqual(stats["recorded_attempts"], 10)
+        self.assertEqual(stats["runs_with_attempts"], 2)
+        self.assertEqual(stats["refused"], 1)
+        self.assertEqual(stats["dispatched"], 9)
+        self.assertEqual(stats["refusal_rate"], .1)
+        self.assertEqual(stats["refusal_rate_bounds"], [.1, .1])
+        self.assertEqual(stats["incomplete_attempts"], 10)
+        self.assertEqual(stats["refusal_reasons"], {"observation": 1})
+
+    def test_coordinate_unknown_retains_denominator_and_missing_is_not_zero(self):
+        empty = self.report([self.start()])["groups"][0]["coordinates"]
+        self.assertEqual(empty["recorded_attempts"], 0)
+        self.assertIsNone(empty["refusal_rate"])
+        self.assertIsNone(empty["refusal_rate_bounds"])
+        start = self.start()
+        events = [start, self.coordinate(start, 1, "refused", "policy"),
+                  self.coordinate(start, 2, "dispatched", "none"),
+                  self.coordinate(start, 3, "unknown", "unknown"),
+                  self.coordinate(start, 4, "unknown", "unknown")]
+        stats = self.report(events)["groups"][0]["coordinates"]
+        self.assertEqual(stats["recorded_attempts"], 4)
+        self.assertEqual(stats["unknown"], 2)
+        self.assertIsNone(stats["refusal_rate"])
+        self.assertEqual(stats["refusal_rate_bounds"], [.25, .75])
+
+    def test_coordinate_schema_excludes_content_and_requires_observable_classification(self):
+        start = self.start(mode="device", android_api=34)
+        valid = self.coordinate(start, 1, "refused", "observation")
+        for change in ({"result": "success"}, {"result": "dispatched"}, {"reason": "raw private text"},
+                       {"evidence": "simulation"}, {"evidence": "none"}, {"x": 42}, {"result": []}):
+            with self.subTest(change=change), self.assertRaises(ev.Invalid):
+                ev.validate([start, {**valid, **change}], self.cases)
+        self.assertEqual(self.report([start, valid])["groups"][0]["coordinates"]["refused"], 1)
+
+    def test_coordinate_evidence_stays_separate_and_skips_do_not_erase_observed_attempts(self):
+        simulated = self.start(); device = self.start(mode="device", android_api=34)
+        events = [simulated, self.coordinate(simulated, 1, "refused", "halted"),
+                  self.event(simulated, 2, "end", outcome="skipped", reason="unsupported"),
+                  device, self.coordinate(device, 1, "dispatched", "none")]
+        groups = {g["mode"]: g for g in self.report(events)["groups"]}
+        self.assertEqual(groups["simulated"]["coordinates"]["refusal_rate"], 1)
+        self.assertEqual(groups["simulated"]["coordinates"]["skipped_attempts"], 1)
+        self.assertEqual(groups["device"]["coordinates"]["refusal_rate"], 0)
+        self.assertEqual(groups["device"]["coordinates"]["recorded_attempts"], 1)
+        self.assertEqual(groups["device"]["verdicts"], {"incomplete": 1})
+
+    def test_real_cli_records_content_free_coordinate_attempts_and_unknown_bounds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "coordinate.jsonl"
+            prefix = [sys.executable, str(Path(ev.__file__))]
+            start = self.start()
+            events = [start, self.coordinate(start, 1, "refused", "observation"),
+                      self.coordinate(start, 2, "unknown", "unknown"),
+                      self.event(start, 3, "end", outcome="blocked", reason="safety_refusal")]
+            for event in events:
+                reply = subprocess.run(prefix + ["record", str(path)], input=json.dumps(event), text=True, capture_output=True)
+                self.assertEqual(reply.returncode, 0, reply.stderr)
+            reply = subprocess.run(prefix + ["summary", str(path)], text=True, capture_output=True)
+            self.assertEqual(reply.returncode, 0, reply.stderr)
+            summary = json.loads(reply.stdout)["groups"][0]["coordinates"]
+            self.assertEqual(summary["coverage"], "recorded_tap_xy_attempts_only")
+            self.assertEqual(summary["recorded_attempts"], 2)
+            self.assertEqual(summary["refusal_rate_bounds"], [.5, 1])
+            self.assertIsNone(summary["refusal_rate"])
+
     def test_lock_and_invalid_append_preserve_prior_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "runs.jsonl"

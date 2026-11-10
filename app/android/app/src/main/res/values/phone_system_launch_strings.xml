@@ -2,8 +2,10 @@
 <resources>
     <string name="phone_system_start_attempted">Attempted to %1$s. Check the actual screen; a returned system call does not confirm completion.</string>
     <string name="phone_system_start_rejected">Attempted to %1$s, but the system call failed. Check the actual state before trying again.</string>
-    <string name="phone_system_review_notice">A review notification returns to DSH only; it does not repeat the action.</string>
-    <string name="phone_system_review_unavailable">A review notification is unavailable. Check the target screen directly.</string>
+    <string name="phone_system_review_notice">Check whether the original action completed. If it did not, complete it yourself, then tap Continue. DSH will not send the original request again.</string>
+    <string name="phone_system_review_unavailable">Manual review is unavailable. The original request was attempted and will not be repeated; check the target screen directly.</string>
+    <string name="phone_system_review_timeout">Manual review timed out. The actual result of the original action is still unknown; check it yourself before any further request.</string>
+    <string name="phone_system_review_continued">You tapped Continue. Use the current screen to check the state; the original request was not sent again.</string>
     <string name="phone_system_handler_unconfirmed">The later screen read did not confirm the planned handler in the foreground; the action will not be repeated.</string>
     <string name="phone_system_attempt_stopped">%1$s (attempted; stopped afterward)</string>
     <string name="phone_system_choose_handler">Choose an app</string>

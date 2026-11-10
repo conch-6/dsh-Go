@@ -18,7 +18,8 @@ import java.util.Locale
  * (lib/companion/companion_voice.dart). The app keeps no audio; the system's engine does what it
  * does with the text.
  *
- * `ready` starts the engine once and answers whether it can speak the language asked for.
+ * `ready` initializes the engine (retrying a failed init on a later call) and answers whether it
+ * can speak the language asked for.
  * `speak` queues one sentence under an id (or replaces everything with `flush`); `play` plays one
  * sentence of an external voice from a file the app fetched (lib/companion/companion_voice_source.dart);
  * `stop` drops what is speaking, playing and queued. Progress comes back on the same channel as `event` calls: `start`,
@@ -65,6 +66,11 @@ class CompanionVoicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     private fun ready(language: String, result: MethodChannel.Result) {
+        if (status == TextToSpeech.ERROR) {
+            tts?.shutdown()
+            tts = null
+            status = null
+        }
         val engine = tts
         if (engine != null && status != null) {
             result.success(use(engine, language))

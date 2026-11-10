@@ -87,7 +87,7 @@ export interface ServeOptions {
 }
 
 /** Syntax only. The cursor only advances, including through empty list members. */
-function validTagList(value: string): boolean {
+function validTagList(value: string, tags?: string[]): boolean {
   if (value === '*') return true;
   let i = 0;
   let found = false;
@@ -95,6 +95,7 @@ function validTagList(value: string): boolean {
     while (value[i] === ' ' || value[i] === '\t' || value[i] === ',') i++;
     if (i === value.length) break;
     if (value.startsWith('W/', i)) i += 2;
+    const start = i;
     if (value[i++] !== '"') return false;
     while (i < value.length && value[i] !== '"') {
       const c = value.charCodeAt(i++);
@@ -102,6 +103,7 @@ function validTagList(value: string): boolean {
     }
     if (i === value.length) return false;
     i++;
+    tags?.push(value.slice(start, i));
     found = true;
     while (value[i] === ' ' || value[i] === '\t') i++;
     if (i < value.length && value[i] !== ',') return false;
@@ -109,10 +111,58 @@ function validTagList(value: string): boolean {
   return found;
 }
 
+/** Weak cache comparison of complete opaque tags. A comma or '*' inside one
+ *  quoted tag is data, not a list separator or wildcard. Keep the same syntax
+ *  parser used by R2 conditional reads; malformed lists never partially match.
+ */
+export function matchesEtag(value: string | null | undefined, etag: string): boolean {
+  if (value == null) return false;
+  const text = value.replace(/^[ \t]+|[ \t]+$/g, ''), tags: string[] = [];
+  return validTagList(text, tags) && (text === '*' || tags.includes(etag.replace(/^W\//, '')));
+}
+
+/** RFC 9110 sections 5.6.7/13.1.3: HTTP-date has three wire formats, not the
+ *  arbitrary ISO/year strings accepted by Date.parse. Calendar/weekday semantics
+ *  follow RFC 5322 section 3.3; RFC 850's short year uses the future-50-year rule.
+ *  Existing streamed R2 responses continue to use R2's condition evaluator.
+ */
+export function parseHttpDate(value: string | null, now = Date.now()): number | null {
+  if (value === null) return null;
+  const text = value.replace(/^[ \t]+|[ \t]+$/g, '');
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const longDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  let parts: string[], shortYear = false;
+  let match = /^([A-Za-z]{3}), (\d{2}) ([A-Za-z]{3}) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(text);
+  if (match) parts = match.slice(1);
+  else if ((match = /^([A-Za-z]+), (\d{2})-([A-Za-z]{3})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(text))) {
+    if (!longDays.includes(match[1]!)) return null;
+    parts = match.slice(1); parts[0] = parts[0]!.slice(0, 3); shortYear = true;
+  } else if ((match = /^([A-Za-z]{3}) ([A-Za-z]{3}) ( \d|\d{2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(text))) {
+    parts = [match[1]!, match[3]!, match[2]!, match[7]!, match[4]!, match[5]!, match[6]!];
+  } else return null;
+  const weekday = days.indexOf(parts[0]!), day = Number(parts[1]), month = months.indexOf(parts[2]!);
+  let year = Number(parts[3]);
+  const hour = Number(parts[4]), minute = Number(parts[5]), second = Number(parts[6]);
+  if (weekday < 0 || month < 0 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 60) return null;
+  if (shortYear) {
+    if (!Number.isFinite(now)) return null;
+    const current = new Date(now), limit = new Date(now);
+    year += Math.floor(current.getUTCFullYear() / 100) * 100;
+    limit.setUTCFullYear(current.getUTCFullYear() + 50);
+    const candidate = Date.UTC(year, month, day, hour, minute, Math.min(second, 59)) + (second === 60 ? 1000 : 0);
+    if (candidate > limit.getTime()) year -= 100;
+  }
+  if (year < 1900) return null;
+  const date = new Date(Date.UTC(year, month, day, hour, minute, Math.min(second, 59)));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month || date.getUTCDate() !== day || date.getUTCDay() !== weekday) return null;
+  return date.getTime() + (second === 60 ? 1000 : 0);
+}
+
 /** Only cache validators: other preconditions must not become a 304. */
-function validators(request: Request): Headers | undefined {
+export function validators(request: Request): Headers | undefined {
   const headers = new Headers();
-  const tag = request.headers.get('If-None-Match')?.trim();
+  const tag = request.headers.get('If-None-Match')?.replace(/^[ \t]+|[ \t]+$/g, '');
   if (tag !== undefined) {
     // R2 rejects malformed ETags. Ignore those as before; comparison itself
     // (including weak tags, quoted commas and empty list members) belongs to R2.

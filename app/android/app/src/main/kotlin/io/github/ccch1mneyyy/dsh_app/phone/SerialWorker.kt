@@ -119,7 +119,12 @@ class SerialWorker internal constructor(
         }
         while (true) {
             try {
-                return Outcome.Done(future.get(POLL_MS, TimeUnit.MILLISECONDS))
+                val value = future.get(POLL_MS, TimeUnit.MILLISECONDS)
+                // Device code may consume interruption. Retirement and delivery share this
+                // commit point; a drained old body must not publish a successful old value.
+                return synchronized(retirementLock) {
+                    if (admittedEpoch != retirementEpoch) Outcome.Interrupted else Outcome.Done(value)
+                }
             } catch (_: TimeoutException) {
                 val t = clock()
                 val state = synchronized(retirementLock) { admission to startedAt }

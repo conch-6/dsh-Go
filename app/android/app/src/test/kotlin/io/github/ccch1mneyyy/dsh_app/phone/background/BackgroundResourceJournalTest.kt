@@ -1,5 +1,6 @@
 package io.github.ccch1mneyyy.dsh_app.phone.background
 
+import io.github.ccch1mneyyy.dsh_app.phone.Json
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -30,6 +31,99 @@ class BackgroundResourceJournalTest {
     }
     private fun journal(store: Store, current: String = process) =
         BackgroundResourceJournal({ store.raw.get() }, store::commit, current)
+
+    private fun changeStoredBirth(raw: String, values: Map<String, Any?>): String {
+        val root = Json.parse(raw) as Map<*, *>
+        val record = (root["records"] as List<*>).single() as Map<*, *>
+        return Json.write(root + mapOf("records" to listOf(record + values)))
+    }
+
+    @Test fun namespaceUnavailableStillAllowsOriginalScopeAllocationAndPhysicalCleanup() {
+        val store = Store()
+        val journal = journal(store)
+        assertTrue(journal.load())
+        val unavailable = birth.copy(pidNsDev = 0L, pidNsIno = 0L, pidNsAvailable = false)
+        val io = BackgroundDisplayIo<Any>()
+        val scope = BackgroundResourceScope(io, journal, "probe")
+        try {
+            io.call {
+                assertTrue(scope.begin(unavailable))
+                assertTrue(io.startResource(Any(), { beforeSend -> beforeSend(); true }, { it }))
+                assertTrue(scope.allocated(11) { true })
+            }
+            assertTrue(scope.allocationReady)
+            val next = journal(store, restarted)
+            assertTrue(next.load())
+            assertEquals(unavailable, next.oldRecords()!!.single().birth)
+            assertEquals("pending", next.status().state)
+            assertTrue(next.retryStorage())
+            assertEquals("pending", next.status().state)
+            assertFalse(next.closed(next.oldRecords()!!.single()))
+            assertTrue(scope.cleanup { true })
+            assertEquals(0, journal.status().count)
+        } finally { scope.cleanup { true } }
+    }
+
+    @Test fun legacyKnownNamespaceShapeRemainsReadableAndUnchangedOnWrite() {
+        val store = Store()
+        val original = journal(store)
+        assertTrue(original.load())
+        assertTrue(original.mark(original.record(UUID.randomUUID().toString(), "probe", birth, null)))
+        val legacy = store.raw.get()!!
+        assertFalse(legacy.contains("recoveryPidNsAvailable"))
+        val next = journal(store, restarted)
+        assertTrue(next.load())
+        assertEquals(birth, next.oldRecords()!!.single().birth)
+        store.raw.set(changeStoredBirth(legacy, mapOf("recoveryPidNsAvailable" to true)))
+        val explicit = journal(store, restarted)
+        assertTrue(explicit.load())
+        assertEquals(birth, explicit.oldRecords()!!.single().birth)
+    }
+
+    @Test fun namespaceSentinelsAndOptionalFieldTypesAreStrictOnDurableRead() {
+        val store = Store()
+        val original = journal(store)
+        assertTrue(original.load())
+        assertTrue(original.mark(original.record(UUID.randomUUID().toString(), "probe", birth, null)))
+        val known = store.raw.get()!!
+        val zero = mapOf("recoveryPidNsDev" to 0L, "recoveryPidNsIno" to 0L)
+        for (values in listOf(
+            mapOf("recoveryPidNsAvailable" to null), mapOf("recoveryPidNsAvailable" to 0L),
+            mapOf("recoveryPidNsAvailable" to "false"), mapOf("recoveryPidNsAvailable" to false),
+            zero, zero + ("recoveryPidNsAvailable" to true),
+            zero + mapOf("recoveryPidNsAvailable" to false, "recoveryPidNsDev" to 7L),
+            zero + mapOf("recoveryPidNsAvailable" to false, "recoveryPidNsIno" to 9L),
+            mapOf("unknownNamespace" to false),
+        )) {
+            store.raw.set(changeStoredBirth(known, values))
+            val next = journal(store, restarted)
+            assertFalse(next.load())
+            assertNull(next.oldRecords())
+            assertEquals("storageReadFailed", next.status().reason)
+            assertEquals(1, store.writes.get())
+        }
+        for ((dev, ino, available) in listOf(Triple(7L, 0L, true), Triple(7L, 9L, false), Triple(0L, 9L, false))) {
+            try {
+                birth.copy(pidNsDev = dev, pidNsIno = ino, pidNsAvailable = available)
+                fail("Invalid namespace birth must be rejected")
+            } catch (_: IllegalArgumentException) { }
+        }
+    }
+
+    @Test fun unavailableOldRecordsCanStillUseExactOriginalPeerRetirementProof() {
+        val store = Store()
+        val original = journal(store)
+        assertTrue(original.load())
+        val unavailable = birth.copy(pidNsDev = 0L, pidNsIno = 0L, pidNsAvailable = false)
+        assertTrue(original.mark(original.record(UUID.randomUUID().toString(), "probe", unavailable, null)))
+        val next = journal(store, restarted)
+        assertTrue(next.load())
+        val group = next.oldRecords()!!
+        assertFalse(group.single().birth.pidNsAvailable)
+        assertTrue(next.recoveredPeer(unavailable.peer, group))
+        assertEquals("clear", next.status().state)
+        assertEquals(0, next.status().count)
+    }
 
     @Test fun currentActiveDoesNotBlockButRestartedRecordBlocksWithoutBeingAcknowledged() {
         val store = Store()

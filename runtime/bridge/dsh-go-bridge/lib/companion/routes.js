@@ -1,9 +1,35 @@
 import { CompanionError, MAX_BODY_BYTES, invalid, ioError } from "./schema.js";
 import { createCompanionStore } from "./store.js";
+import { contextId, FULL_PRESET, validatePromptContext } from './prompt-context.js';
+import { createRecallCoordinator } from "./recall.js";
+import { recallError } from "./recall-schema.js";
 
 const ROOT = "/dsh-go/v1/companion";
 
-function readJson(req) {
+// Recall requests are flat objects. Reject duplicate keys before a
+// JSON parser's last-value-wins rule can make a CAS target ambiguous. Strings
+// (including escaped quotes and key-like text in values) are scanned as tokens.
+function duplicateTopLevelKey(text) {
+  const seen = new Set();
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '"') {
+      const start = i++;
+      for (; i < text.length && text[i] !== '"'; i++) if (text[i] === '\\') i++;
+      let next = i + 1;
+      while (/\s/.test(text[next] ?? '') && next < text.length) next++;
+      if (depth === 1 && text[next] === ':') {
+        const key = JSON.parse(text.slice(start, i + 1));
+        if (seen.has(key)) return true;
+        seen.add(key);
+      }
+    } else if (text[i] === '{' || text[i] === '[') depth++;
+    else if (text[i] === '}' || text[i] === ']') depth--;
+  }
+  return false;
+}
+
+function readJson(req, maxBytes = MAX_BODY_BYTES, strictKeys = false) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -22,12 +48,17 @@ function readJson(req) {
     };
     const data = (chunk) => {
       size += chunk.length;
-      if (size <= MAX_BODY_BYTES) chunks.push(chunk);
+      if (size <= maxBytes) chunks.push(chunk);
     };
     const end = () => {
       cleanup();
-      if (size > MAX_BODY_BYTES) return reject(new CompanionError(413, "too-large", "Companion request body is too large"));
-      try { resolve(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)))); }
+      if (size > maxBytes) return reject(new CompanionError(413, "too-large", "Companion request body is too large"));
+      try {
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+        const parsed = JSON.parse(text);
+        if (strictKeys && duplicateTopLevelKey(text)) throw invalid();
+        resolve(parsed);
+      }
       catch { reject(invalid()); }
     };
     if (req.aborted || req.destroyed) return reject(invalid());
@@ -40,23 +71,89 @@ function readJson(req) {
 
 // Called only after the bridge's existing connection.requestRejection guard.
 // Store construction does no I/O, including on hosts that never open this page.
-export function createCompanionRoutes({ send, store = createCompanionStore() }) {
+export function createCompanionRoutes({ send, store = createCompanionStore(), signals, ctx, promptContext,
+  recall = createRecallCoordinator({ store, promptContext }) }) {
+  async function promptRoute(req) {
+    const connection = ctx?.get('connection');
+    if (!promptContext || typeof connection?.admit !== 'function') {
+      throw new CompanionError(503, 'unavailable', 'Companion prompt context is unavailable');
+    }
+    const admission = connection.admit(req);
+    if (admission?.peer?.principal?.kind !== 'owner') {
+      throw new CompanionError(admission?.rejection ?? 403, 'forbidden', 'Companion prompt context requires the host owner');
+    }
+    if (req.method !== 'GET' && req.method !== 'POST') {
+      throw new CompanionError(405, 'invalid-request', 'Use GET or POST');
+    }
+    let body;
+    if (req.method === 'POST') {
+      if (String(req.headers['content-type']).split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+        throw new CompanionError(415, 'content-type', 'Content-Type must be application/json');
+      }
+      body = validatePromptContext(await readJson(req, 32768));
+    }
+    const sessionId = body?.sessionId ?? new URL(req.url, 'http://dsh-go.invalid').searchParams.get('sessionId');
+    if (!contextId(sessionId)) throw invalid();
+    const controller = ctx.get('sessionController'), presets = ctx.get('agentPresets');
+    if (typeof controller?.resolveAgent !== 'function' || typeof presets?.presetForSession !== 'function') {
+      throw new CompanionError(503, 'unavailable', 'Companion session services are unavailable');
+    }
+    const found = await controller.resolveAgent(sessionId);
+    if (!found?.agent) throw new CompanionError(found?.error?.code === 'session/not-found' ? 404 : 409,
+      'session-unavailable', 'Open the companion session before updating its context');
+    if (presets.presetForSession(found.agent.session) !== FULL_PRESET) {
+      throw new CompanionError(409, 'wrong-session', 'Context is only available for the full companion preset');
+    }
+    const session = found.agent.session;
+    const current = () => ctx.get('agents')?.get(sessionId) === found.agent &&
+      found.agent.session === session && presets.presetForSession(session) === FULL_PRESET;
+    if (!current()) throw new CompanionError(409, 'session-unavailable', 'Companion session changed; retry after synchronization');
+    if (!body) return promptContext.info(found.agent);
+    const memoryTicket = promptContext.captureMemory(found.agent);
+    const recalled = body.query === undefined || !memoryTicket.allowed
+      ? [] : (await store.getContext({ query: body.query, limit: 6 })).memories;
+    // Resolve/recall awaited: the host may have retired or switched the Agent.
+    if (!current()) {
+      throw new CompanionError(409, 'session-unavailable', 'Companion session changed; retry after synchronization');
+    }
+    // time-context measures the preceding model-visible event (also tools or
+    // assistant replies). Read the actual human baseline for the distinct gap.
+    let lastHumanAt;
+    for (let seq = found.agent.session.seq - 1; seq >= 0; seq--) {
+      const event = found.agent.session.eventAt(seq);
+      if (event?.type === 'user/message' && event.data?.source?.kind === 'user' &&
+          event.data.source.principal === undefined) { lastHumanAt = event.time; break; }
+    }
+    return promptContext.prepare(found.agent, body, recalled, lastHumanAt, memoryTicket);
+  }
   const routes = new Map([
     [ROOT, { method: "GET", run: () => store.getSnapshot() }],
     [`${ROOT}/events`, { method: "POST", run: (body) => store.event(body) }],
-    [`${ROOT}/memories/delete`, { method: "POST", run: (body) => store.deleteMemory(body) }],
-    [`${ROOT}/memories/clear`, { method: "POST", run: (body) => store.clearMemories(body) }],
+    [`${ROOT}/memories/delete`, { method: "POST", run: (body) => recall.mutateMemory("deleteMemory", body) }],
+    [`${ROOT}/memories/clear`, { method: "POST", run: (body) => recall.mutateMemory("clearMemories", body) }],
     [`${ROOT}/context`, { method: "POST", run: (body) => store.getContext(body) }],
     [`${ROOT}/export`, { method: "GET", run: () => store.exportData() }],
+    [`${ROOT}/recall`, { method: "GET", run: () => recall.capability() }],
+    [`${ROOT}/recall/bind`, { method: "POST", strictKeys: true, run: (body) => recall.bind(body) }],
+    [`${ROOT}/recall/revoke`, { method: "POST", strictKeys: true, run: (body) => recall.revoke(body) }],
   ]);
   return {
     async handle(req, res, path) {
       if (path !== ROOT && !path.startsWith(`${ROOT}/`)) return false;
+      if (signals && await signals.handle(req, res, path, send)) return true;
+      const isRecall = path === `${ROOT}/recall` || path.startsWith(`${ROOT}/recall/`);
       try {
+        if (path === `${ROOT}/prompt-context`) {
+          const result = await promptRoute(req);
+          req.resume();
+          if (!res.destroyed) send(res, 200, result);
+          return true;
+        }
+        const statusMatch = path.match(/^\/dsh-go\/v1\/companion\/recall\/bindings\/([^/]+)$/);
         const route = path === `${ROOT}/memories`
           ? (req.method === "GET" ? { method: "GET", run: () => store.getMemories() }
-            : { method: "POST", run: (body) => store.upsertMemory(body) })
-          : routes.get(path);
+            : { method: "POST", run: (body) => recall.mutateMemory("upsertMemory", body) })
+          : statusMatch ? { method: "GET", run: () => recall.status(statusMatch[1]) } : routes.get(path);
         if (route === undefined) {
           req.resume();
           throw new CompanionError(404, "not-found", "Companion route not found");
@@ -71,14 +168,19 @@ export function createCompanionRoutes({ send, store = createCompanionStore() }) 
             req.resume();
             throw new CompanionError(415, "content-type", "Content-Type must be application/json");
           }
-          body = await readJson(req);
+          body = await readJson(req, route.maxBytes, route.strictKeys);
         } else {
           req.resume();
         }
         const result = await route.run(body);
         if (!res.destroyed) send(res, 200, result);
       } catch (error) {
-        const failure = error instanceof CompanionError ? error : ioError();
+        req.resume();
+        let failure = error instanceof CompanionError ? error : isRecall
+          ? recallError(503, "adapter-unavailable", "Automatic recall is unavailable on this host") : ioError();
+        if (isRecall && !failure.code.startsWith("companion/recall-")) {
+          failure = recallError(failure.status, failure.code.slice("companion/".length), failure.message);
+        }
         if (!res.destroyed) send(res, failure.status, { error: { code: failure.code, message: failure.message } });
       }
       return true;

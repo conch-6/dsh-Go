@@ -53,6 +53,19 @@ internal class BackgroundDisplayIo<C : Any> {
     fun previewAvailable(peer: C): Boolean = synchronized(lock) { !releaseStarted && pinned === peer }
     fun previewClosed(): Boolean = synchronized(lock) { releaseStarted }
 
+    /** Bounded local identity only; no task callback, IPC, or resource acquisition. */
+    fun existingResource(matches: (C) -> Boolean): Boolean = synchronized(lock) {
+        val peer = pinned ?: return false
+        !releaseStarted && !notAdmitted && matches(peer)
+    }
+
+
+    /** Only bounded local observation state may be committed here; never IPC or OCR work. */
+    fun <T> commitObservation(block: () -> T): T = synchronized(lock) {
+        check(!releaseStarted) { "Background resource admission was stopped" }
+        block()
+    }
+
     fun seal() = synchronized(lock) {
         releaseStarted = true
         finishUnused()

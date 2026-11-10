@@ -7,7 +7,7 @@ internal sealed interface LocalOcrResult {
     data class Recognized(val lines: List<Line>) : LocalOcrResult
     data class Unavailable(val reason: Reason) : LocalOcrResult
     data class Failed(val reason: Failure) : LocalOcrResult
-    enum class Reason { NOT_REQUESTED, NOT_INSTALLED, NO_FRAME, PRIVACY_UNVERIFIED, CANCELLED, DEADLINE }
+    enum class Reason { DISABLED, NOT_REQUESTED, NOT_INSTALLED, NO_FRAME, PRIVACY_UNVERIFIED, CANCELLED, DEADLINE }
     enum class Failure { ENGINE, INVALID_RESULT, RESULT_LIMIT }
 }
 
@@ -53,6 +53,8 @@ internal object LocalOcrBoundary {
         // l10n:keep agent local OCR status
         is LocalOcrResult.Failed -> "本机文字识别失败或结果不完整，未提供视觉元素；请 handoff。"
         is LocalOcrResult.Unavailable -> when (result.reason) {
+            // l10n:keep agent local OCR status
+            LocalOcrResult.Reason.DISABLED -> "本机文字识别已关闭"
             // l10n:keep agent local OCR status
             LocalOcrResult.Reason.NOT_INSTALLED -> "本机文字识别后端尚未安装，未提供视觉元素；不能据此猜坐标，请 handoff。"
             // l10n:keep agent local OCR status

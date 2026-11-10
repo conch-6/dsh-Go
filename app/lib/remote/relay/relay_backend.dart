@@ -462,3 +462,129 @@ class RelayHostLink implements HostLink, NetworkInspectableHostLink {
     await _clients.close();
   }
 }
+
+// ── Scan-to-pair (device pairing v1) ─────────────────────────────────────────
+
+/// A computer's pairing code, resolved but not claimed: show it and let the
+/// person confirm it is their computer before [RelayPairingBackend.claimPairing].
+class RelayPairingOffer {
+  const RelayPairingOffer({
+    required this.server,
+    required this.hostName,
+    required this.hostPlatform,
+    required this.fingerprint,
+    required this.token,
+  });
+
+  /// Origin of the Server the code belongs to (`https://dsh.r2049.cn`).
+  final String server;
+
+  /// Untrusted display name from the code / Server.
+  final String hostName;
+  final String hostPlatform;
+
+  /// Full `lowercaseHex(SHA256(key))`, the same 64 digits the computer shows.
+  final String fingerprint;
+
+  /// The backend's own session object.
+  final Object token;
+}
+
+/// Where a claimed pairing stands while the phone shows the code.
+enum RelayPairingPhase {
+  /// The computer has not submitted the code yet.
+  waiting,
+
+  /// The computer submitted the right code; the Server is finishing.
+  approved,
+}
+
+/// A claimed pairing: show [code] until [completed] resolves.
+class RelayPairingSession {
+  RelayPairingSession({
+    required this.code,
+    required this.codeExpiresAt,
+    required this.phases,
+    required this.completed,
+    required this._onPause,
+    required this._onCancel,
+  });
+
+  /// 8 digits, leading zeros kept. Only ever shown on the pairing screen.
+  final String code;
+  final DateTime codeExpiresAt;
+  final Stream<RelayPairingPhase> phases;
+
+  /// The paired Host (its key pinned, this phone signed in); fails with a
+  /// [RelayPairingError].
+  final Future<RelayHost> completed;
+  final void Function(bool paused) _onPause;
+  final Future<void> Function() _onCancel;
+
+  /// Polling stops in the background.
+  set paused(bool value) => _onPause(value);
+
+  Future<void> cancel() => _onCancel();
+}
+
+enum RelayPairingErrorKind {
+  /// Not a pairing code (or an insecure / malformed one).
+  invalidCode,
+
+  /// The code belongs to another Server ([RelayPairingError.server]).
+  otherServer,
+
+  /// This Server cannot pair by scanning.
+  unsupported,
+
+  /// The code or session expired: show a new code on the computer.
+  expired,
+
+  /// The computer typed a wrong code: the session is over.
+  codeRejected,
+  cancelled,
+
+  /// The phone is signed in to another account than the computer's owner.
+  accountConflict,
+
+  /// The session no longer matches the computer or this phone.
+  identityMismatch,
+  network,
+  other,
+}
+
+class RelayPairingError implements Exception {
+  const RelayPairingError(this.kind, this.message, {this.server, this.detail});
+
+  final RelayPairingErrorKind kind;
+  final String message;
+
+  /// For [RelayPairingErrorKind.otherServer]: the code's Server origin.
+  final String? server;
+
+  /// Code and English text for diagnostics (never the pairing code).
+  final String? detail;
+
+  /// The whole scan has to start over (a new code on the computer).
+  bool get needsNewCode =>
+      kind == RelayPairingErrorKind.expired ||
+      kind == RelayPairingErrorKind.codeRejected ||
+      kind == RelayPairingErrorKind.identityMismatch;
+
+  @override
+  String toString() => 'RelayPairingError($kind${detail == null ? '' : ', $detail'})';
+}
+
+/// Scan-to-pair, implemented by `DshRemoteRelayBackend`; a backend without it
+/// shows no pairing entry.
+abstract interface class RelayPairingBackend {
+  /// Whether this Server pairs by scanning (false when it cannot be asked).
+  Future<bool> supportsPairing();
+
+  /// Parses and resolves scanned text (nothing is claimed yet).
+  Future<RelayPairingOffer> resolvePairing(String scanned);
+
+  /// Claims [offer] once the person confirmed the computer. [deepseekUserId]
+  /// is optional, unverified metadata.
+  Future<RelayPairingSession> claimPairing(RelayPairingOffer offer, {String? deepseekUserId});
+}

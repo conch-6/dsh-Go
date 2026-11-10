@@ -2,9 +2,25 @@ package io.github.ccch1mneyyy.dsh_app.phone.a11y
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ScreenVerdictTest {
+    @Test fun failedOrUnconfirmedActionCannotAcquireACompletedOrEndOfListClaim() {
+        for (comparable in listOf(false, true)) for (changed in listOf(false, true)) {
+            val note = unconfirmedActionNote(comparable, changed, null)
+            assertFalse(note.contains("动作已提交"))
+            assertFalse(note.contains("到头"))
+            if (!comparable || !changed) {
+                assertTrue(note.contains("未确认"))
+                assertTrue(note.contains("不要自动重试"))
+            }
+        }
+        assertEquals(ScreenVerdict.KEYBOARD_HIDDEN,
+            unconfirmedActionNote(false, false, ScreenVerdict.KEYBOARD_HIDDEN))
+        assertEquals("", unconfirmedActionNote(true, true, null))
+    }
+
     @Test fun aChangedTreeNeedsNoExplanation() {
         assertEquals("", ScreenVerdict.note(comparable = true, changed = true, keyboard = null, scrolled = false))
         assertEquals("", ScreenVerdict.note(comparable = true, changed = true, keyboard = null, scrolled = true))

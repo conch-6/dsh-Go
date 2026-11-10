@@ -28,6 +28,10 @@ enum UsageCount {
 /// The request body's top-level keys, all of them.
 const usagePayloadKeys = {'v', 'iid', 'day', 'app', 'build', 'sdk', 'abi', 'maker', 'lang', 'engine', 'counts'};
 
+/// Contract v2 (1.0.15 on): v1's keys and the model and the maker's system.
+/// A host that refuses it (400) gets the v1 body instead.
+const usagePayloadKeysV2 = {...usagePayloadKeys, 'model', 'rom'};
+
 /// The keys of its `counts`: [UsageCount] and the plugin gauge.
 final usageCountKeys = {for (final c in UsageCount.values) c.name, 'plugins'};
 
@@ -77,8 +81,7 @@ String newUsageIid([Random? random]) {
 
 /// One day's numbers.
 class UsageDayRecord {
-  UsageDayRecord({Map<UsageCount, int>? counts, this.plugins = 0, this.engine, this.tries = 0})
-    : counts = counts ?? {};
+  UsageDayRecord({Map<UsageCount, int>? counts, this.plugins = 0, this.engine, this.tries = 0}) : counts = counts ?? {};
 
   factory UsageDayRecord.fromJson(Map<String, Object?> json) {
     int n(Object? v) => v is int && v >= 0 ? v : 0;
@@ -202,9 +205,18 @@ class UsageLedger {
 }
 
 /// What the phone says about itself, nothing that tells one phone from
-/// another: the build, the Android level, the CPU, the maker in lower case.
+/// another: the build, the Android level, the CPU, and in lower case the
+/// maker, the model and the maker's system with its version.
 class UsageDevice {
-  const UsageDevice({this.app = '', this.build = 0, this.sdk = 0, this.abi = '', this.maker = ''});
+  const UsageDevice({
+    this.app = '',
+    this.build = 0,
+    this.sdk = 0,
+    this.abi = '',
+    this.maker = '',
+    this.model = '',
+    this.rom = '',
+  });
 
   /// Version name, `0.9.9`.
   final String app;
@@ -216,8 +228,15 @@ class UsageDevice {
   /// `arm64-v8a`, `x86_64`.
   final String abi;
 
-  /// `Build.MANUFACTURER` in lower case: `vivo`, never the model.
+  /// `Build.MANUFACTURER` in lower case: `vivo`.
   final String maker;
+
+  /// `Build.MODEL` in lower case: `v2405a`. Empty without the native side.
+  final String model;
+
+  /// The maker's system and its version: `originos 5.0`, `android` when it
+  /// isn't one we know. Empty without the native side.
+  final String rom;
 }
 
 /// `Build.MANUFACTURER` the way the share host takes it: lower case, ASCII
@@ -231,14 +250,18 @@ String usageMaker(String raw) {
 
 /// The request body for [day]: exactly [usagePayloadKeys], and in `counts`
 /// exactly [usageCountKeys], each at most its [usageCountLimits].
+///
+/// [v2] adds the model and system ([usagePayloadKeysV2]); without them from
+/// the native side the body stays v1.
 Map<String, Object> usagePayload({
   required String iid,
   required String day,
   required UsageDayRecord record,
   required UsageDevice device,
   required String lang,
+  bool v2 = true,
 }) => {
-  'v': 1,
+  'v': v2 && device.model.isNotEmpty && device.rom.isNotEmpty ? 2 : 1,
   'iid': iid,
   'day': day,
   'app': device.app,
@@ -246,6 +269,7 @@ Map<String, Object> usagePayload({
   'sdk': device.sdk,
   'abi': device.abi,
   'maker': device.maker,
+  if (v2 && device.model.isNotEmpty && device.rom.isNotEmpty) ...{'model': device.model, 'rom': device.rom},
   'lang': lang,
   'engine': record.engine ?? 'none',
   'counts': {
@@ -260,13 +284,15 @@ Map<String, Object> usagePayload({
 String? usageProblem(Map<String, Object?> body, DateTime now) {
   bool matches(Object? v, String pattern) => v is String && RegExp(pattern).hasMatch(v);
   bool within(Object? v, int low, int high) => v is int && v >= low && v <= high;
+  final v = body['v'];
+  if (v != 1 && v != 2) return 'v';
+  final keys = v == 2 ? usagePayloadKeysV2 : usagePayloadKeys;
   for (final key in body.keys) {
-    if (!usagePayloadKeys.contains(key)) return key;
+    if (!keys.contains(key)) return key;
   }
-  for (final key in usagePayloadKeys) {
+  for (final key in keys) {
     if (!body.containsKey(key)) return key;
   }
-  if (body['v'] != 1) return 'v';
   if (!matches(body['iid'], r'^[A-Za-z0-9_-]{21}[AQgw]$')) return 'iid';
   final day = body['day'];
   final date = day is String ? _parseDay(day) : null;
@@ -281,6 +307,8 @@ String? usageProblem(Map<String, Object?> body, DateTime now) {
   if (!within(body['sdk'], 26, 60)) return 'sdk';
   if (!usageAbis.contains(body['abi'])) return 'abi';
   if (!matches(body['maker'], r'^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$')) return 'maker';
+  if (v == 2 && !matches(body['model'], r'^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$')) return 'model';
+  if (v == 2 && !matches(body['rom'], r'^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$')) return 'rom';
   if (!matches(body['lang'], r'^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$')) return 'lang';
   if (!{...usageEngineModes, 'none'}.contains(body['engine'])) return 'engine';
   final counts = body['counts'];

@@ -39,7 +39,8 @@ class _A11yRestoreSheetState extends ConsumerState<A11yRestoreSheet> {
   }
 
   Future<void> _grant(String path) async {
-    if (_busy) return;
+    final status = ref.read(phoneProvider).status;
+    if (_busy || !status.ready || !status.enabled || status.background.root.starting) return;
     setState(() {
       _busy = true;
       _message = null;
@@ -60,7 +61,12 @@ class _A11yRestoreSheetState extends ConsumerState<A11yRestoreSheet> {
   /// Only a root connection; 不打扰模式 stays as it is, and so does an Android
   /// version that can't run it (the grant needs no virtual display).
   Future<void> _prepareRoot() async {
-    if (_busy || !await confirmRisk(context, RiskNotices.rootChannel) || !mounted) return;
+    if (_busy || !ref.read(phoneProvider).status.ready ||
+        !await confirmRisk(context, RiskNotices.rootChannel) || !mounted) {
+      return;
+    }
+    final status = ref.read(phoneProvider).status;
+    if (_busy || !status.ready || !status.enabled || status.background.root.starting) return;
     setState(() {
       _busy = true;
       _message = null;
@@ -91,7 +97,7 @@ class _A11yRestoreSheetState extends ConsumerState<A11yRestoreSheet> {
     final offerRoot =
         path == 'setup' && !rootLost && status.background.supportedModes.contains(PhonePrivilegedMode.root);
     // A root prompt already open (from either page) is answered first, not asked twice.
-    final idle = status.enabled && !_busy && !status.background.root.starting;
+    final idle = status.ready && status.enabled && !_busy && !status.background.root.starting;
     return SafeArea(
       top: false,
       child: Column(

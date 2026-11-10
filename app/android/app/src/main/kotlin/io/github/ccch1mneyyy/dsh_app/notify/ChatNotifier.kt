@@ -85,6 +85,10 @@ class ChatNotifier(private val app: Context) {
         ensureChannels()
         val tag = tagOf(post.group)
         val id = idOf(post.key)
+        // Redelivery keeps the first decision and the owner of its timeout.
+        val processing = post.canApprove && actions[tag to id]?.let {
+            it.post.key == post.key && it.decision != null
+        } == true
         val channel = if (post.attention) CHANNEL_ATTENTION else CHANNEL_DONE
         val locked = keyguard.isKeyguardLocked
         val public = Notification.Builder(app, channel)
@@ -93,13 +97,17 @@ class ChatNotifier(private val app: Context) {
             .setContentTitle(AppStrings.APP_NAME)
             .setContentText(post.publicText)
             .build()
-        val (title, text) = if (locked) AppStrings.APP_NAME to post.publicText else post.title to post.text
+        val (title, text) = when {
+            locked -> AppStrings.APP_NAME to post.publicText
+            processing -> post.title to AppStrings.get(app, R.string.notify_action_processing)
+            else -> post.title to post.text
+        }
         val builder = Notification.Builder(app, channel)
             .setSmallIcon(R.drawable.ic_stat_dsh)
             .setColor(ThemeAccent.notificationColor(app))
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(Notification.BigTextStyle().bigText(if (locked) text else post.fullText ?: text))
+            .setStyle(Notification.BigTextStyle().bigText(if (locked || processing) text else post.fullText ?: text))
             .setWhen(postedAt)
             .setShowWhen(true)
             .setAutoCancel(true)
@@ -113,8 +121,10 @@ class ChatNotifier(private val app: Context) {
         // The floating pet is out and its bubble says 做完了 / 出错了: posted, but no banner, no sound.
         io.github.ccch1mneyyy.dsh_app.pet.ResultSilence.apply(builder, tag, post.attention)
         // Approval buttons, in the approval card's order; not on the lock screen.
-        if (post.canApprove) actions[tag to id] = ActionEntry(post, postedAt) else actions.remove(tag to id)
-        if (post.canApprove && !locked) {
+        if (!processing) {
+            if (post.canApprove) actions[tag to id] = ActionEntry(post, postedAt) else actions.remove(tag to id)
+        }
+        if (post.canApprove && !locked && !processing) {
             for ((label, decision) in listOf(AppStrings.get(app, R.string.notify_decline) to "rejected", AppStrings.get(app, R.string.notify_allow_once) to "allowed-once")) {
                 val action = Notification.Action.Builder(null, label, actionIntent(post, decision))
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) action.setAuthenticationRequired(true)
@@ -265,7 +275,7 @@ class ChatNotifier(private val app: Context) {
         val summary = Notification.Builder(app, channel)
             .setSmallIcon(R.drawable.ic_stat_dsh)
             .setColor(ThemeAccent.notificationColor(app))
-            .setContentTitle(title)
+            .setContentTitle(if (keyguard.isKeyguardLocked) AppStrings.APP_NAME else title)
             .setContentText(AppStrings.plural(app, R.plurals.notify_reminder_count, count, count))
             .setGroup(tag)
             .setGroupSummary(true)
@@ -359,7 +369,7 @@ class ChatNotifier(private val app: Context) {
         val builder = Notification.Builder(app, CHANNEL_ATTENTION)
             .setSmallIcon(R.drawable.ic_stat_dsh)
             .setColor(ThemeAccent.notificationColor(app))
-            .setContentTitle(post?.title ?: AppStrings.APP_NAME)
+            .setContentTitle(if (keyguard.isKeyguardLocked) AppStrings.APP_NAME else post?.title ?: AppStrings.APP_NAME)
             .setContentText(text)
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)

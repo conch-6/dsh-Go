@@ -14,16 +14,43 @@ abstract final class CompanionInitiativeRules {
   static const maxInvites = 2;
 }
 
+/// How often she may speak up unasked (「她多主动」, the person's pick): how
+/// many invitations and signal lines in a day, how far apart, and how long
+/// the person must be quiet first. At every pace she says nothing at night
+/// and invites at most once a visit.
+enum CompanionInitiativePace {
+  rare(
+    maxPerDay: CompanionInitiativeRules.maxInvites,
+    gapMs: CompanionInitiativeRules.inviteGapMs,
+    quietMs: CompanionInitiativeRules.quietMs,
+  ),
+  often(maxPerDay: 6, gapMs: 2 * 60 * 60000, quietMs: 30000),
+  chatty(maxPerDay: 12, gapMs: 30 * 60000, quietMs: 20000);
+
+  const CompanionInitiativePace({required this.maxPerDay, required this.gapMs, required this.quietMs});
+  final int maxPerDay;
+  final int gapMs;
+  final int quietMs;
+
+  /// What a saved record may hold, whatever pace it was written under.
+  static const loosest = chatty;
+
+  static CompanionInitiativePace? byName(String? name) => values.where((p) => p.name == name).firstOrNull;
+}
+
 class CompanionInitiativeClock {
-  const CompanionInitiativeClock({required this.wallMs, required this.monoMs});
+  const CompanionInitiativeClock({required this.wallMs, required this.monoMs, this.offsetMinutes = 0});
 
   final int wallMs;
   final int monoMs;
+  final int offsetMinutes;
 
   bool get _valid =>
       wallMs >= 0 &&
       monoMs >= 0 &&
-      wallMs <= _maxSafeInteger - CompanionInitiativeRules.windowMs &&
+      offsetMinutes >= -840 &&
+      offsetMinutes <= 840 &&
+      wallMs <= 8640000000000000 - 3 * CompanionInitiativeRules.windowMs &&
       monoMs <= _maxSafeInteger - CompanionInitiativeRules.windowMs;
 
   Map<String, Object?> toJson() => {'wallMs': wallMs, 'monoMs': monoMs};
@@ -40,53 +67,188 @@ class CompanionInitiativeRestore {
   final Object? _value;
 }
 
-class CompanionInitiativeRecord {
-  CompanionInitiativeRecord._(this.lastGreetingAtMs, List<int> invites, this.declinedUntilMs)
-    : inviteAtMs = List.unmodifiable(invites);
+int? _natural(Object? value) =>
+    value is num && value.isFinite && value >= 0 && value <= _maxSafeInteger && value == value.toInt()
+    ? value.toInt()
+    : null;
 
-  final int? lastGreetingAtMs;
-  final List<int> inviteAtMs;
-  final int declinedUntilMs;
+int? _offset(Object? value) => value is int && value >= -840 && value <= 840 ? value : null;
 
-  static int? _integer(Object? value) =>
-      value is num && value.isFinite && value >= 0 && value <= _maxSafeInteger && value == value.toInt()
-      ? value.toInt()
-      : null;
+String? companionNightKey(int wallMs, int offsetMinutes) {
+  final local = DateTime.fromMillisecondsSinceEpoch(wallMs + offsetMinutes * 60000, isUtc: true);
+  if (local.hour >= 7 && local.hour < 23) return null;
+  final date = local.hour < 7 ? local.subtract(const Duration(days: 1)) : local;
+  return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+}
 
-  static CompanionInitiativeRecord? _read(Object? value) {
-    if (value is! Map || value['v'] != 1 || !value.containsKey('lastGreetingAtMs')) {
-      return null;
-    }
-    // Do not rewrite an unfamiliar record after dropping fields we cannot keep.
-    if (value.keys.any((key) => !const {'v', 'lastGreetingAtMs', 'inviteAtMs', 'declinedUntilMs'}.contains(key))) {
-      return null;
-    }
-    final last = value['lastGreetingAtMs'];
-    final invites = value['inviteAtMs'];
-    final declined = _integer(value['declinedUntilMs']);
-    if ((last != null && _integer(last) == null) ||
-        invites is! List ||
-        invites.length > CompanionInitiativeRules.maxInvites ||
-        declined == null) {
-      return null;
-    }
-    final times = <int>[];
-    for (final value in invites) {
-      final time = _integer(value);
-      if (time == null || (times.isNotEmpty && time - times.last < CompanionInitiativeRules.inviteGapMs)) {
+int _nextNightBoundary(CompanionInitiativeClock now) {
+  final local = DateTime.fromMillisecondsSinceEpoch(now.wallMs + now.offsetMinutes * 60000, isUtc: true);
+  var boundary =
+      DateTime.utc(local.year, local.month, local.day, 23).millisecondsSinceEpoch - now.offsetMinutes * 60000;
+  if (boundary <= now.wallMs) boundary += CompanionInitiativeRules.windowMs;
+  return boundary;
+}
+
+/// Stored with the shared budget; changing the timezone never clears its use.
+class CompanionNightRecord {
+  const CompanionNightRecord._(
+    this.offsetMinutes,
+    this.stableAfterMs,
+    this.lastNightKey,
+    this.lastNightAtMs,
+    this.lastNightOffsetMinutes,
+    this.changedSinceLast,
+  );
+  factory CompanionNightRecord.initial(int offset) => CompanionNightRecord._(offset, 0, null, null, null, false);
+  final int offsetMinutes;
+  final int stableAfterMs;
+  final String? lastNightKey;
+  final int? lastNightAtMs;
+  final int? lastNightOffsetMinutes;
+  final bool changedSinceLast;
+
+  static CompanionNightRecord? read(Object? value) {
+    const keys = {
+      'offsetMinutes',
+      'stableAfterMs',
+      'lastNightKey',
+      'lastNightAtMs',
+      'lastNightOffsetMinutes',
+      'changedSinceLast',
+    };
+    if (value is! Map || value.length != keys.length || value.keys.any((k) => !keys.contains(k))) return null;
+    final offset = _offset(value['offsetMinutes']);
+    final stable = _natural(value['stableAfterMs']);
+    final key = value['lastNightKey'];
+    final at = value['lastNightAtMs'];
+    final lastOffset = value['lastNightOffsetMinutes'];
+    final changed = value['changedSinceLast'];
+    if (offset == null || stable == null || changed is! bool) return null;
+    if (at == null) {
+      if (key != null || lastOffset != null) return null;
+    } else {
+      if (_natural(at) == null || key is! String || _offset(lastOffset) == null) return null;
+      try {
+        if (companionNightKey((at as num).toInt(), lastOffset as int) != key) return null;
+      } on Object {
         return null;
       }
-      times.add(time);
+      if (!changed && offset != lastOffset) return null;
     }
-    return CompanionInitiativeRecord._(last == null ? null : _integer(last), times, declined);
+    return CompanionNightRecord._(
+      offset,
+      stable,
+      key as String?,
+      at == null ? null : (at as num).toInt(),
+      lastOffset as int?,
+      changed,
+    );
+  }
+
+  CompanionNightRecord observe(CompanionInitiativeClock now) {
+    if (now.offsetMinutes == offsetMinutes) return this;
+    final boundary = _nextNightBoundary(now);
+    return CompanionNightRecord._(
+      now.offsetMinutes,
+      boundary > stableAfterMs ? boundary : stableAfterMs,
+      lastNightKey,
+      lastNightAtMs,
+      lastNightOffsetMinutes,
+      true,
+    );
+  }
+
+  bool allows(String key, CompanionInitiativeClock now) =>
+      offsetMinutes == now.offsetMinutes &&
+      now.wallMs >= stableAfterMs &&
+      key == companionNightKey(now.wallMs, now.offsetMinutes) &&
+      key != lastNightKey &&
+      (!changedSinceLast || lastNightAtMs == null || now.wallMs - lastNightAtMs! >= CompanionInitiativeRules.windowMs);
+
+  CompanionNightRecord used(String key, CompanionInitiativeClock now) =>
+      CompanionNightRecord._(offsetMinutes, stableAfterMs, key, now.wallMs, now.offsetMinutes, false);
+  Map<String, Object?> toJson() => {
+    'offsetMinutes': offsetMinutes,
+    'stableAfterMs': stableAfterMs,
+    'lastNightKey': lastNightKey,
+    'lastNightAtMs': lastNightAtMs,
+    'lastNightOffsetMinutes': lastNightOffsetMinutes,
+    'changedSinceLast': changedSinceLast,
+  };
+}
+
+class CompanionInitiativeRecord {
+  CompanionInitiativeRecord._(
+    this.lastGreetingAtMs,
+    List<int> invites,
+    this.declinedUntilMs, [
+    List<int> signals = const [],
+    this.night,
+  ]) : inviteAtMs = List.unmodifiable(invites),
+       signalAtMs = List.unmodifiable(signals);
+  final int? lastGreetingAtMs;
+  final List<int> inviteAtMs;
+  final List<int> signalAtMs;
+  final int declinedUntilMs;
+  final CompanionNightRecord? night;
+  List<int> get optionalAtMs => [...inviteAtMs, ...signalAtMs]..sort();
+
+  static CompanionInitiativeRecord? _read(Object? value) {
+    const v1 = {'v', 'lastGreetingAtMs', 'inviteAtMs', 'declinedUntilMs'};
+    const v2 = {...v1, 'signalAtMs', 'night'};
+    if (value is! Map || (value['v'] != 1 && value['v'] != 2)) return null;
+    final keys = value['v'] == 1 ? v1 : v2;
+    if (value.length != keys.length || value.keys.any((k) => !keys.contains(k))) return null;
+    final last = value['lastGreetingAtMs'];
+    final declined = _natural(value['declinedUntilMs']);
+    if ((last != null && _natural(last) == null) || declined == null) return null;
+    List<int>? times(Object? raw) {
+      if (raw is! List || raw.length > CompanionInitiativePace.loosest.maxPerDay) return null;
+      final result = <int>[];
+      for (final v in raw) {
+        final t = _natural(v);
+        if (t == null || (result.isNotEmpty && t - result.last < CompanionInitiativePace.loosest.gapMs)) return null;
+        result.add(t);
+      }
+      return result;
+    }
+
+    final invites = times(value['inviteAtMs']);
+    final signals = value['v'] == 1 ? <int>[] : times(value['signalAtMs']);
+    if (invites == null || signals == null) return null;
+    final all = [...invites, ...signals]..sort();
+    if (all.length > CompanionInitiativePace.loosest.maxPerDay) return null;
+    for (var i = 1; i < all.length; i++) {
+      if (all[i] - all[i - 1] < CompanionInitiativePace.loosest.gapMs) return null;
+    }
+    final rawNight = value['night'];
+    final night = rawNight == null ? null : CompanionNightRecord.read(rawNight);
+    if (rawNight != null && night == null) return null;
+    return CompanionInitiativeRecord._(last == null ? null : _natural(last), invites, declined, signals, night);
   }
 
   Map<String, Object?> toJson() => {
-    'v': 1,
+    'v': 2,
     'lastGreetingAtMs': lastGreetingAtMs,
     'inviteAtMs': List<int>.of(inviteAtMs),
+    'signalAtMs': List<int>.of(signalAtMs),
     'declinedUntilMs': declinedUntilMs,
+    'night': night?.toJson(),
   };
+}
+
+/// Opaque local candidate identity; never a raw remote DTO or model prompt.
+class CompanionInitiativeSignal {
+  const CompanionInitiativeSignal({
+    required this.id,
+    required this.contextKey,
+    required this.expiresAtMonoMs,
+    this.nightKey,
+  });
+  final String id;
+  final String contextKey;
+  final int expiresAtMonoMs;
+  final String? nightKey;
 }
 
 /// A complete current observation. contextKey changes on a real mode, binding
@@ -161,6 +323,8 @@ enum CompanionInitiativeEventType {
   accept,
   decline,
   storageFault,
+  signal,
+  cancelSignal,
 }
 
 class CompanionInitiativeEvent {
@@ -181,21 +345,39 @@ class CompanionInitiativeEvent {
     : this._(CompanionInitiativeEventType.decline, ticketId: ticketId);
   const CompanionInitiativeEvent.storageFault() : this._(CompanionInitiativeEventType.storageFault);
 
-  const CompanionInitiativeEvent._(this.type, {this.view, this.ticketId});
+  const CompanionInitiativeEvent.signal(
+    CompanionInitiativeSignal signal, {
+    bool nightCareEnabled = false,
+    CompanionInitiativeView? view,
+  }) : this._(CompanionInitiativeEventType.signal, signal: signal, nightCareEnabled: nightCareEnabled, view: view);
+  const CompanionInitiativeEvent.cancelSignal(String id)
+    : this._(CompanionInitiativeEventType.cancelSignal, signalId: id);
+  const CompanionInitiativeEvent._(
+    this.type, {
+    this.view,
+    this.ticketId,
+    this.signal,
+    this.signalId,
+    this.nightCareEnabled = false,
+  });
   final CompanionInitiativeEventType type;
   final CompanionInitiativeView? view;
   final String? ticketId;
+  final CompanionInitiativeSignal? signal;
+  final String? signalId;
+  final bool nightCareEnabled;
 }
 
-enum CompanionPromptKind { greeting, invite }
+enum CompanionPromptKind { greeting, invite, signal }
 
 class CompanionInitiativeTicket {
-  const CompanionInitiativeTicket._(this.id, this.kind, this.ownerEpoch, this.stayId, this.contextKey);
+  const CompanionInitiativeTicket._(this.id, this.kind, this.ownerEpoch, this.stayId, this.contextKey, [this.signalId]);
 
   final String id;
   final CompanionPromptKind kind;
   final int ownerEpoch;
   final int stayId;
+  final String? signalId;
   final String contextKey;
 
   Map<String, Object?> toJson() => {
@@ -203,6 +385,7 @@ class CompanionInitiativeTicket {
     'kind': kind.name,
     'ownerEpoch': ownerEpoch,
     'stayId': stayId,
+    if (signalId != null) 'signalId': signalId,
     'contextKey': contextKey,
   };
 }
@@ -251,7 +434,7 @@ class CompanionInitiativeEffect {
     CompanionInitiativeEffectType.show => {
       'type': type.name,
       'display': display!.toJson(),
-      'silent': true,
+      'silent': display!.ticket.kind != CompanionPromptKind.signal,
       'autoAnnounce': false,
     },
     CompanionInitiativeEffectType.cancelOffer ||
@@ -292,9 +475,15 @@ class _State {
       if (record == null) {
         fault = 'ledger-invalid';
       } else if ((record!.lastGreetingAtMs != null && record!.lastGreetingAtMs! > lastNow.wallMs) ||
-          record!.inviteAtMs.any((t) => t > lastNow.wallMs)) {
+          record!.optionalAtMs.any((t) => t > lastNow.wallMs) ||
+          (record!.night?.lastNightAtMs != null && record!.night!.lastNightAtMs! > lastNow.wallMs)) {
         fault = 'history-in-future';
       }
+    }
+    if (record != null) {
+      optionalMonos = record!.optionalAtMs.map((t) => lastNow.monoMs - (lastNow.wallMs - t)).toList();
+      declinedUntilMono =
+          lastNow.monoMs + (record!.declinedUntilMs > lastNow.wallMs ? record!.declinedUntilMs - lastNow.wallMs : 0);
     }
   }
 
@@ -311,11 +500,21 @@ class _State {
       stay = value.stay == null ? null : _Stay.copy(value.stay!),
       quietSinceMono = value.quietSinceMono,
       ticket = value.ticket,
-      display = value.display;
+      display = value.display,
+      signal = value.signal,
+      nightCareEnabled = value.nightCareEnabled,
+      signalQuietSinceMono = value.signalQuietSinceMono,
+      optionalMonos = List.of(value.optionalMonos),
+      declinedUntilMono = value.declinedUntilMono;
 
   CompanionInitiativeRecord? record;
   String? fault;
   CompanionInitiativeClock lastNow;
+  CompanionInitiativeSignal? signal;
+  bool nightCareEnabled = false;
+  int? signalQuietSinceMono;
+  List<int> optionalMonos = [];
+  int declinedUntilMono = 0;
   bool inRoom = false;
   int? outsideSinceMono;
   CompanionInitiativeView? view;
@@ -352,12 +551,21 @@ class _State {
 /// Host/mode bindings, lifecycle observations, rendering and serialized ledger
 /// writes remain the App owner's responsibility. This is not a multiwriter lock.
 class CompanionInitiativeController {
-  CompanionInitiativeController({required CompanionInitiativeClock now, required CompanionInitiativeRestore restored}) {
+  CompanionInitiativeController({
+    required CompanionInitiativeClock now,
+    required CompanionInitiativeRestore restored,
+    this.enforceLocalQuietHours = true,
+  }) {
     if (!now._valid) throw ArgumentError('Expected safe nonnegative wallMs and monoMs');
     _state = _State(now, restored);
   }
 
+  final bool enforceLocalQuietHours;
+
+  /// The person's pick; a change applies from the next check on.
+  CompanionInitiativePace pace = CompanionInitiativePace.rare;
   late _State _state;
+  CompanionInitiativeSignal? get pendingSignal => _state.signal;
   String? get fault => _state.fault;
   CompanionInitiativeRecord? get record => _state.record;
   CompanionInitiativeTicket? get offer => _state.ticket;
@@ -370,10 +578,27 @@ class CompanionInitiativeController {
   List<CompanionInitiativeEffect> handle(CompanionInitiativeEvent event, CompanionInitiativeClock now) {
     final s = _State.copy(_state);
     final effects = <CompanionInitiativeEffect>[];
-    if (!now._valid || now.monoMs < s.lastNow.monoMs || now.wallMs < s.lastNow.wallMs) {
+    if (!now._valid ||
+        now.monoMs < s.lastNow.monoMs ||
+        now.wallMs < s.lastNow.wallMs ||
+        (enforceLocalQuietHours && ((now.wallMs - s.lastNow.wallMs) - (now.monoMs - s.lastNow.monoMs)).abs() > 1000)) {
       _block(s, effects, 'clock-invalid-or-regressed');
       _state = s;
       return List.unmodifiable(effects);
+    }
+    if (enforceLocalQuietHours && s.fault == null && s.record != null) {
+      final r = s.record!;
+      final night = (r.night ?? CompanionNightRecord.initial(s.lastNow.offsetMinutes)).observe(now);
+      if (!identical(night, r.night)) {
+        s.record = CompanionInitiativeRecord._(
+          r.lastGreetingAtMs,
+          r.inviteAtMs,
+          r.declinedUntilMs,
+          r.signalAtMs,
+          night,
+        );
+        _persist(s, effects);
+      }
     }
     s.lastNow = now;
     final viewEvent =
@@ -422,19 +647,24 @@ class CompanionInitiativeController {
               reason: 'adapter-discarded',
             ),
           );
+          if (s.ticket!.kind == CompanionPromptKind.signal) s.signal = null;
           s.ticket = null;
         }
       case CompanionInitiativeEventType.decline:
-        if (!s.inRoom || (event.ticketId != null && !_currentInvite(s, event.ticketId))) break;
+        if (!s.inRoom || (event.ticketId != null && !_currentOptional(s, event.ticketId))) break;
         _userAction(s, effects);
         if (s.fault == null && s.record != null) {
           final r = s.record!;
-          final deadline = now.wallMs + CompanionInitiativeRules.inviteGapMs;
+          final deadline = now.wallMs + pace.gapMs;
           s.record = CompanionInitiativeRecord._(
             r.lastGreetingAtMs,
             r.inviteAtMs,
             deadline > r.declinedUntilMs ? deadline : r.declinedUntilMs,
+            r.signalAtMs,
+            r.night,
           );
+          final monoDeadline = now.monoMs + pace.gapMs;
+          if (monoDeadline > s.declinedUntilMono) s.declinedUntilMono = monoDeadline;
           _persist(s, effects);
         }
       case CompanionInitiativeEventType.accept:
@@ -463,10 +693,13 @@ class CompanionInitiativeController {
             current &&
             (ticket.kind == CompanionPromptKind.greeting
                 ? _greetingAllows(s, now.wallMs)
+                : ticket.kind == CompanionPromptKind.signal
+                ? ticket.signalId == s.signal?.id && _signalAllows(s, now)
                 : s.quietEligible &&
                       s.quietSinceMono != null &&
-                      now.monoMs - s.quietSinceMono! >= CompanionInitiativeRules.quietMs &&
-                      _inviteAllows(s, now.wallMs));
+                      now.monoMs - s.quietSinceMono! >= pace.quietMs &&
+                      _inviteAllows(s, now.wallMs) &&
+                      _dayAllows(now));
         if (!allowed) {
           effects.add(
             CompanionInitiativeEffect._(
@@ -479,21 +712,59 @@ class CompanionInitiativeController {
         }
         final r = s.record!;
         if (ticket.kind == CompanionPromptKind.greeting) {
-          s.record = CompanionInitiativeRecord._(now.wallMs, r.inviteAtMs, r.declinedUntilMs);
+          s.record = CompanionInitiativeRecord._(now.wallMs, r.inviteAtMs, r.declinedUntilMs, r.signalAtMs, r.night);
         } else {
-          s.record = CompanionInitiativeRecord._(r.lastGreetingAtMs, [
-            ..._recent(r, now.wallMs),
-            now.wallMs,
-          ], r.declinedUntilMs);
-          s.stay!.invited = true;
+          final recentInvites = r.inviteAtMs.where((t) => t > now.wallMs - CompanionInitiativeRules.windowMs).toList();
+          final recentSignals = r.signalAtMs.where((t) => t > now.wallMs - CompanionInitiativeRules.windowMs).toList();
+          var night = r.night;
+          if (ticket.kind == CompanionPromptKind.signal) {
+            recentSignals.add(now.wallMs);
+            if (s.signal!.nightKey != null) night = night!.used(s.signal!.nightKey!, now);
+          } else {
+            recentInvites.add(now.wallMs);
+            s.stay!.invited = true;
+          }
+          s.record = CompanionInitiativeRecord._(
+            r.lastGreetingAtMs,
+            recentInvites,
+            r.declinedUntilMs,
+            recentSignals,
+            night,
+          );
+          s.optionalMonos = [
+            ...s.optionalMonos.where((t) => t > now.monoMs - CompanionInitiativeRules.windowMs),
+            now.monoMs,
+          ];
         }
-        s.display = CompanionInitiativeDisplay._(
-          ticket,
-          now.wallMs,
-          s.view!.accessible ? null : now.monoMs + CompanionInitiativeRules.promptMs,
-        );
+        s.display = CompanionInitiativeDisplay._(ticket, now.wallMs, _displayExpiry(s, ticket, now));
         effects.add(CompanionInitiativeEffect._(CompanionInitiativeEffectType.show, display: s.display));
         _persist(s, effects);
+      case CompanionInitiativeEventType.signal:
+        if (event.view != null) _applyView(s, event.view!, now, effects);
+        final signal = event.signal!;
+        if (!s.eligible ||
+            s.display != null ||
+            signal.id.isEmpty ||
+            signal.contextKey != s.view!.contextKey ||
+            signal.expiresAtMonoMs <= now.monoMs ||
+            signal.expiresAtMonoMs - now.monoMs > 120000) {
+          break;
+        }
+        if (s.signal?.id == signal.id) break;
+        if (s.ticket?.kind == CompanionPromptKind.invite || s.ticket?.kind == CompanionPromptKind.signal) {
+          effects.add(
+            CompanionInitiativeEffect._(
+              CompanionInitiativeEffectType.cancelOffer,
+              ticketId: s.ticket!.id,
+              reason: 'signal-replaced-offer',
+            ),
+          );
+          s.ticket = null;
+        }
+        s.signal = signal;
+        s.nightCareEnabled = event.nightCareEnabled;
+      case CompanionInitiativeEventType.cancelSignal:
+        if (s.signal?.id == event.signalId) _retireSignal(s, effects, 'signal-withdrawn');
       case CompanionInitiativeEventType.storageFault:
         _block(s, effects, 'storage-failed');
       case CompanionInitiativeEventType.check:
@@ -505,11 +776,21 @@ class CompanionInitiativeController {
     } else {
       s.quietSinceMono ??= now.monoMs;
     }
+    if (!s.eligible) {
+      s.signalQuietSinceMono = null;
+    } else {
+      s.signalQuietSinceMono ??= now.monoMs;
+    }
     // Stale button/present callbacks never manufacture a fresh ticket.
-    if (viewEvent || event.type == CompanionInitiativeEventType.check) {
-      if (s.quietEligible &&
+    if (viewEvent ||
+        event.type == CompanionInitiativeEventType.check ||
+        event.type == CompanionInitiativeEventType.signal) {
+      if (_signalAllows(s, now)) _offer(s, CompanionPromptKind.signal, effects);
+      if (s.signal == null &&
+          s.quietEligible &&
+          _dayAllows(now) &&
           s.quietSinceMono != null &&
-          now.monoMs - s.quietSinceMono! >= CompanionInitiativeRules.quietMs &&
+          now.monoMs - s.quietSinceMono! >= pace.quietMs &&
           _inviteAllows(s, now.wallMs)) {
         _offer(s, CompanionPromptKind.invite, effects);
       }
@@ -531,6 +812,8 @@ class CompanionInitiativeController {
     }
     s.ticket = null;
     s.display = null;
+    s.signal = null;
+    s.signalQuietSinceMono = null;
   }
 
   static void _block(_State s, List<CompanionInitiativeEffect> effects, String reason) {
@@ -558,7 +841,7 @@ class CompanionInitiativeController {
       _cancel(s, effects, 'not-presentable');
     } else if (s.display != null && oldAccessible != view.accessible) {
       final display = s.display!;
-      final expiry = view.accessible ? null : now.monoMs + CompanionInitiativeRules.promptMs;
+      final expiry = _displayExpiry(s, display.ticket, now);
       s.display = CompanionInitiativeDisplay._(display.ticket, display.committedAtWallMs, expiry);
       effects.add(
         CompanionInitiativeEffect._(
@@ -572,18 +855,29 @@ class CompanionInitiativeController {
 
   static void _offer(_State s, CompanionPromptKind kind, List<CompanionInitiativeEffect> effects) {
     if (s.ticket != null || s.display != null) return;
-    s.ticket = CompanionInitiativeTicket._('${s.nextTicket++}', kind, s.ownerEpoch, s.stay!.id, s.view!.contextKey);
+    s.ticket = CompanionInitiativeTicket._(
+      '${s.nextTicket++}',
+      kind,
+      s.ownerEpoch,
+      s.stay!.id,
+      s.view!.contextKey,
+      kind == CompanionPromptKind.signal ? s.signal?.id : null,
+    );
     effects.add(CompanionInitiativeEffect._(CompanionInitiativeEffectType.offer, ticket: s.ticket));
   }
 
   static List<int> _recent(CompanionInitiativeRecord record, int wallMs) =>
-      record.inviteAtMs.where((t) => t > wallMs - CompanionInitiativeRules.windowMs).toList();
+      record.optionalAtMs.where((t) => t > wallMs - CompanionInitiativeRules.windowMs).toList();
 
-  static bool _inviteAllows(_State s, int wallMs) {
+  bool _inviteAllows(_State s, int wallMs) {
     final r = s.record;
-    if (r == null || wallMs < r.declinedUntilMs) return false;
-    return _recent(r, wallMs).length < CompanionInitiativeRules.maxInvites &&
-        (r.inviteAtMs.isEmpty || wallMs - r.inviteAtMs.last >= CompanionInitiativeRules.inviteGapMs);
+    if (r == null || wallMs < r.declinedUntilMs || s.lastNow.monoMs < s.declinedUntilMono) return false;
+    final all = r.optionalAtMs;
+    final mono = s.optionalMonos.where((t) => t > s.lastNow.monoMs - CompanionInitiativeRules.windowMs).toList();
+    return _recent(r, wallMs).length < pace.maxPerDay &&
+        (all.isEmpty || wallMs - all.last >= pace.gapMs) &&
+        mono.length < pace.maxPerDay &&
+        (s.optionalMonos.isEmpty || s.lastNow.monoMs - s.optionalMonos.last >= pace.gapMs);
   }
 
   static bool _greetingAllows(_State s, int wallMs) =>
@@ -601,20 +895,106 @@ class CompanionInitiativeController {
     _cancel(s, effects, 'user-action');
   }
 
-  static bool _currentInvite(_State s, String? id) =>
+  static bool _currentOptional(_State s, String? id) =>
       s.display?.ticket.id == id &&
       s.display != null &&
-      s.display!.ticket.kind == CompanionPromptKind.invite &&
+      s.display!.ticket.kind != CompanionPromptKind.greeting &&
       s.display!.ticket.ownerEpoch == s.ownerEpoch &&
       s.display!.ticket.stayId == s.stay?.id;
 
+  static bool _currentInvite(_State s, String? id) =>
+      _currentOptional(s, id) && s.display!.ticket.kind == CompanionPromptKind.invite;
+
   static void _expire(_State s, CompanionInitiativeClock now, List<CompanionInitiativeEffect> effects) {
+    if (s.signal != null &&
+        (now.monoMs >= s.signal!.expiresAtMonoMs ||
+            s.signal!.contextKey != s.view?.contextKey ||
+            (s.signal!.nightKey != null && companionNightKey(now.wallMs, now.offsetMinutes) != s.signal!.nightKey))) {
+      _retireSignal(s, effects, 'signal-expired');
+    }
     final display = s.display;
     if (display != null && display.expiresAtMono != null && now.monoMs >= display.expiresAtMono!) {
       effects.add(
         CompanionInitiativeEffect._(CompanionInitiativeEffectType.hide, ticketId: display.ticket.id, reason: 'timeout'),
       );
       s.display = null;
+      if (display.ticket.kind == CompanionPromptKind.signal) s.signal = null;
     }
   }
+
+  bool _dayAllows(CompanionInitiativeClock now) =>
+      !enforceLocalQuietHours || companionNightKey(now.wallMs, now.offsetMinutes) == null;
+
+  bool _signalAllows(_State s, CompanionInitiativeClock now) {
+    final candidate = s.signal;
+    if (candidate == null ||
+        !s.eligible ||
+        s.signalQuietSinceMono == null ||
+        now.monoMs - s.signalQuietSinceMono! < pace.quietMs ||
+        now.monoMs >= candidate.expiresAtMonoMs ||
+        candidate.contextKey != s.view?.contextKey ||
+        !_inviteAllows(s, now.wallMs)) {
+      return false;
+    }
+    if (candidate.nightKey != null) {
+      return s.nightCareEnabled && (s.record?.night?.allows(candidate.nightKey!, now) ?? false);
+    }
+    return _dayAllows(now);
+  }
+
+  static int? _displayExpiry(_State s, CompanionInitiativeTicket ticket, CompanionInitiativeClock now) {
+    final usual = s.view!.accessible ? null : now.monoMs + CompanionInitiativeRules.promptMs;
+    if (ticket.kind != CompanionPromptKind.signal) return usual;
+    final expiry = s.signal!.expiresAtMonoMs;
+    return usual == null || expiry < usual ? expiry : usual;
+  }
+
+  static void _retireSignal(_State s, List<CompanionInitiativeEffect> effects, String reason) {
+    final id = s.signal?.id;
+    if (id == null) return;
+    if (s.ticket?.signalId == id) {
+      effects.add(
+        CompanionInitiativeEffect._(CompanionInitiativeEffectType.cancelOffer, ticketId: s.ticket!.id, reason: reason),
+      );
+      s.ticket = null;
+    }
+    if (s.display?.ticket.signalId == id) {
+      effects.add(
+        CompanionInitiativeEffect._(CompanionInitiativeEffectType.hide, ticketId: s.display!.ticket.id, reason: reason),
+      );
+      s.display = null;
+    }
+    s.signal = null;
+  }
+
+  /// Stage pure effects, without installing quota or a displayed slot.
+  CompanionInitiativePresentation? stagePresentation(String ticketId, CompanionInitiativeClock now) {
+    final before = _state;
+    final effects = handle(CompanionInitiativeEvent.present(ticketId), now);
+    final after = _state;
+    _state = before;
+    if (!effects.any((e) => e.type == CompanionInitiativeEffectType.show)) {
+      if (after.fault != null) _state = after;
+      return null;
+    }
+    return CompanionInitiativePresentation._(this, before, after, effects);
+  }
+
+  List<CompanionInitiativeEffect> commitPresentation(CompanionInitiativePresentation staged) {
+    if (!identical(staged._controller, this) || staged._used || !identical(staged._before, _state)) return const [];
+    staged._used = true;
+    _state = staged._after;
+    return staged._effects;
+  }
+}
+
+class CompanionInitiativePresentation {
+  CompanionInitiativePresentation._(this._controller, this._before, this._after, this._effects);
+  final CompanionInitiativeController _controller;
+  final _State _before;
+  final _State _after;
+  final List<CompanionInitiativeEffect> _effects;
+  bool _used = false;
+  CompanionInitiativeDisplay get display =>
+      _effects.singleWhere((e) => e.type == CompanionInitiativeEffectType.show).display!;
 }

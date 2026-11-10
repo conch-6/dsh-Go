@@ -66,4 +66,38 @@ class PrivilegedCallsTest {
         } catch (_: IllegalStateException) { }
         assertEquals("agent", calls.execute { "agent" })
     }
+
+    @Test fun capacitySnapshotDoesNotWaitForAnAdmissionCallbackHoldingTheCallsLock() {
+        val calls = PrivilegedCalls(3)
+        val beforeSend = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val actual = executor.submit<String> {
+                calls.execute(beforeSend = {
+                    beforeSend.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                }) { "reply" }
+            }
+            assertTrue(beforeSend.await(5, TimeUnit.SECONDS))
+            // This reader represents the registry side of registry -> capacity. It must
+            // complete while the actual admission callback still owns Calls.lock.
+            assertTrue(executor.submit<Boolean> { calls.alive() }.get(1, TimeUnit.SECONDS))
+            release.countDown()
+            assertEquals("reply", actual.get(5, TimeUnit.SECONDS))
+            calls.retire()
+            assertFalse(calls.alive())
+        } finally {
+            release.countDown()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test fun successfulTerminalReplyPublishesRetirementToTheSameSnapshot() {
+        val calls = PrivilegedCalls(3)
+        assertEquals("closed", calls.execute(global = true, terminal = { it == "closed" }) { "closed" })
+        assertFalse(calls.alive())
+        assertNull(calls.tryPreview { "must not run" })
+    }
+
 }

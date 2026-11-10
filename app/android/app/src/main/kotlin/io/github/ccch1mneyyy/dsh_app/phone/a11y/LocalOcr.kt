@@ -9,7 +9,7 @@ internal interface LocalOcr {
     fun recognize(bitmap: Bitmap, deadlineUptimeMs: Long, cancelled: () -> Boolean): LocalOcrResult
 }
 
-/** No dependency or model has been approved. This is not a successful empty recognition. */
+/** Explicit absent-backend fallback. This is not a successful empty recognition. */
 internal object NoLocalOcr : LocalOcr {
     override val unavailableReason = LocalOcrResult.Reason.NOT_INSTALLED
     override fun recognize(bitmap: Bitmap, deadlineUptimeMs: Long, cancelled: () -> Boolean) =

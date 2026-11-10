@@ -13,10 +13,11 @@ internal class PrivilegedCalls(private val limit: Int = 1) {
     private var waiting = 0
     private var globals = 0
     private var exclusive = false
-    private var retired = false
+    @Volatile private var retired = false
     init { require(limit in 1..3) }
 
-    fun alive(): Boolean = lock.withLock { !retired }
+    // Read by registry admission too; beforeSend may itself enter registry/Tasks while holding lock.
+    fun alive(): Boolean = !retired
     fun retire() = lock.withLock { retired = true; changed.signalAll() }
 
     fun <T> execute(global: Boolean = false, beforeSend: () -> Unit = {},

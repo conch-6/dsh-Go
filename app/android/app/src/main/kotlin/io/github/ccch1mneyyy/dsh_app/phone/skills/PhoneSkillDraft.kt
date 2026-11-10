@@ -49,6 +49,21 @@ object PhoneSkillDraft {
         return Document(trace.owner, skillName, markdown)
     }
 
+    /** Reviewed native public route summary only; no MethodChannel accepts this text.
+     * The caller must bind this exact preview and bundle at a new editor revision. */
+    internal fun withRouteSummary(document: Ready, summary: String): Ready? {
+        val markdown = buildString {
+            append("---\nname: ").append(document.skillName)
+            append("\ndescription: 本机公共路线，使用时重新核对应用、目标与许可\n")
+            append("disable-model-invocation: true\nuser-invocable: true\n---\n\n")
+            append("# 公共路线预览\n\n").append(summary)
+            append("\n\n保存确认不授予执行权限。任一步前置、唯一目标、许可或后置不符就停止交回模型；失败或未知不自动重复。\n")
+            append("不可逆操作仍须本次独立确认。编辑步骤会移除此数据路线。\n")
+        }
+        if (markdown.toByteArray(Charsets.UTF_8).size > PhoneTaskTrace.MAX_BYTES) return null
+        return Document(document.owner, document.skillName, markdown)
+    }
+
     private fun instruction(step: PhoneTaskTrace.Step, n: Int): String {
         val target = step.anchor?.let { "固定动作词「${anchor(it)}」（仍须核对唯一目标）" } ?: "{{target_$n}}"
         return when (step.action) {

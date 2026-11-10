@@ -10,6 +10,7 @@ import java.nio.file.Files
 import java.nio.file.StandardOpenOption
 import java.security.DigestInputStream
 import java.security.MessageDigest
+import org.json.JSONObject
 
 /**
  * Unpacks the bundled rootfs into app-private storage.
@@ -24,7 +25,8 @@ import java.security.MessageDigest
  *   runtime.reset/     the runtime being deleted
  *   runtime-keep/      what the reset keeps, mirrored under rootfs paths, until the next install
  *
- * Upgrading keeps the user's /root (DSH_HOME, workspaces) from the previous rootfs.
+ * First install creates the system; upgrades replace only app-owned engine paths.
+ * The user's Linux system, package databases and home are never rebuilt implicitly.
  */
 class RuntimeInstaller(
     private val context: Context,
@@ -39,8 +41,10 @@ class RuntimeInstaller(
     private val retiredDir = File(context.filesDir, "runtime.reset")
     private val keepDir = File(context.filesDir, "runtime-keep")
 
+    private val engineUpgrade = EngineUpgrade(baseDir, sync)
+
     fun installedVersion(): String? =
-        if (rootfs.isDirectory && versionFile.isFile) versionFile.readText().trim().ifEmpty { null } else null
+        if (!engineUpgrade.isPending() && rootfs.isDirectory && versionFile.isFile) versionFile.readText().trim().ifEmpty { null } else null
 
     fun isCurrent(): Boolean = installedVersion() == manifest.runtimeVersion
 
@@ -53,6 +57,9 @@ class RuntimeInstaller(
         // A reset killed halfway finishes first, so what it keeps is in runtime-keep for the restore.
         settleReset(retiredDir, keepDir, dropKept)
         baseDir.mkdirs()
+        // The transaction owns its payload outside staging. Finish it before any
+        // cleanup, including when a different APK resumes this install.
+        engineUpgrade.recover()
         staging.deleteRecursivelySafely()
         checkFreeSpace()
         staging.mkdirs()
@@ -96,9 +103,14 @@ class RuntimeInstaller(
         }
         onProgress(total, total)
 
+        val groupNames = appendAndroidGroupNames(staging,
+            runCatching { File("/proc/self/task/${android.os.Process.myTid()}/status").readText() }.getOrNull())
+        onLog("[dsh-app] install group names: " +
+            (groupNames.skipped?.let { "skipped ($it)" } ?: "added ${groupNames.added}"))
+
         timed("activate") {
-            activateRootfs(baseDir, manifest.runtimeVersion, keepDir, dropKept,
-                sync = { timed("sync") { sync() } })
+            activateRuntimeUpdate(baseDir, manifest.runtimeVersion, manifest.abi, manifest.raw,
+                keepDir, dropKept, sync = { timed("sync") { sync() } }, onLog = onLog)
         }
     }
 
@@ -129,6 +141,33 @@ class RuntimeInstaller(
         context.assets.openFd(path).use { it.length }
     } catch (_: Exception) {
         -1L // compressed asset; fall back to the manifest
+    }
+}
+
+/** The production activation route, also exercised without an Android Context in JVM tests. */
+internal fun activateRuntimeUpdate(
+    base: File,
+    version: String,
+    abi: String,
+    raw: JSONObject,
+    keep: File? = null,
+    dropKept: Boolean = false,
+    sync: () -> Unit,
+    onLog: (String) -> Unit = {},
+) {
+    val rootfs = File(base, "rootfs")
+    if (File(base, "home.carry").exists() || File(base, "rootfs.old").exists()) {
+        throw RuntimeUpgradeBlocked("legacy_interrupted")
+    }
+    if (Files.exists(rootfs.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        val spec = checkEngineCompatibility(base, raw, version, abi)
+        onLog("[dsh-app] upgrading engine; preserving installed Linux system and user tools")
+        EngineUpgrade(base, sync).activate(version, spec)
+        File(base, "staging").deleteRecursivelySafely()
+    } else {
+        // Only first install (or an explicit user-confirmed reset) may activate
+        // an entire rootfs. Never use this as an incompatible-upgrade fallback.
+        activateRootfs(base, version, keep, dropKept, sync = sync)
     }
 }
 

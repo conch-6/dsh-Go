@@ -23,6 +23,14 @@ class _Local extends LocalConnectionController {
 
 const _ssh = HostRef.ssh('lab');
 
+class _MutableConnection extends Notifier<HostConnection> {
+  _MutableConnection(this.initial);
+  final HostConnection initial;
+  @override
+  HostConnection build() => initial;
+  void set(HostConnection connection) => state = connection;
+}
+
 ChatAlert _alert(String session, AlertKind kind, {HostRef host = HostRef.local, String key = turnKey}) =>
     ChatAlert(host: host, sessionId: session, kind: kind, key: key, title: 't', text: 'x');
 
@@ -278,6 +286,65 @@ void main() {
       container.read(chatAlertsProvider.notifier).open(HostRef.local, 's1');
       expect(container.read(activeHostProvider), HostRef.local);
       expect(container.read(currentSessionProvider), 's1');
+    });
+
+    test('C907 a same-client rename retains request history; a new client retires it', () async {
+      final old = fakeHostConnection(local: false, kind: HostKind.ssh, hostId: 'lab');
+      final selected = NotifierProvider<_MutableConnection, HostConnection>(() => _MutableConnection(old));
+      final request = question('q1', 'r1', ['继续吗？']);
+      remote.pending = [request];
+      var sources = 0;
+      container = ProviderContainer(
+        overrides: [
+          notifyChannelProvider.overrideWithValue(channel),
+          alertSourceFactoryProvider.overrideWithValue((_) {
+            sources++;
+            return remote;
+          }),
+          alertTimingProvider.overrideWithValue((announce: Duration.zero, reconcile: const Duration(milliseconds: 30))),
+          localConnectionProvider.overrideWith(() => _Local(null)),
+          activeConnectionProvider.overrideWith((ref) => AsyncData(ref.watch(selected))),
+        ],
+      );
+      addTearDown(container.dispose);
+      final banners = <ChatAlert>[];
+      container.listen(chatAlertsProvider, (_, alert) {
+        if (alert != null) banners.add(alert);
+      });
+      await settle();
+      expect(banners, hasLength(1));
+      final first = banners.single;
+      final controller = container.read(chatAlertsProvider.notifier);
+      controller.dismissBanner(first);
+      final renamed = HostConnection(
+        client: old.client,
+        isLocal: false,
+        kind: HostKind.ssh,
+        hostId: 'lab',
+        name: 'renamed',
+      );
+      container.read(selected.notifier).set(renamed);
+      await settle();
+      expect(sources, 1);
+      expect(banners, hasLength(1));
+      expect(container.read(chatAlertsProvider), isNull);
+      // No ready generation in this fake; reaching 'failed' instead of 'gone'
+      // demonstrates that the original pet request scope/token survived rename.
+      expect(
+        await controller.answerFromPet(_ssh, 'q1', sessionId: 'r1', token: first.petToken!),
+        NotifyActionResult.failed,
+      );
+
+      final replacement = fakeHostConnection(local: false, kind: HostKind.ssh, hostId: 'lab');
+      container.read(selected.notifier).set(replacement);
+      await settle();
+      expect(sources, 2);
+      expect(banners, hasLength(2));
+      expect(banners.last.petToken, isNot(first.petToken));
+      expect(
+        await controller.answerFromPet(_ssh, 'q1', sessionId: 'r1', token: first.petToken!),
+        NotifyActionResult.gone,
+      );
     });
   });
 

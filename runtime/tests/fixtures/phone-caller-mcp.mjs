@@ -2,7 +2,7 @@
 import { closeSync, openSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
-// `--first-end=<exit|refuse>:<marker>`: the first run end this fixture sees across reconnected
+// `--first-end=<exit|refuse|drop>:<marker>`: the first run end this fixture sees across reconnected
 // processes (claimed by creating the marker) is lost before any ACK, or answered with a peer error.
 const firstEnd = process.argv.find(arg => arg.startsWith('--first-end='))?.slice('--first-end='.length);
 const claimFirstEnd = () => {
@@ -11,7 +11,7 @@ const claimFirstEnd = () => {
   try { closeSync(openSync(firstEnd.slice(split + 1), 'wx')); } catch { return undefined; }
   return firstEnd.slice(0, split);
 };
-const ends = [], refused = [];
+const ends = [], refused = [], dropped = [];
 for await (const line of createInterface({ input: process.stdin })) {
   const request = JSON.parse(line);
   if (request.id === undefined) continue;
@@ -37,6 +37,7 @@ for await (const line of createInterface({ input: process.stdin })) {
         args: request.params.arguments,
         ends,
         refused,
+        dropped,
         pid: process.pid,
         caller: request.params._meta?.['dsh-go/phone-caller'] ?? null,
       }) }] };
@@ -49,6 +50,10 @@ for await (const line of createInterface({ input: process.stdin })) {
     case 'dsh-go/phone-run-end': {
       const fault = claimFirstEnd();
       if (fault === 'exit') process.exit(0);
+      if (fault === 'drop') {
+        dropped.push(request.params);
+        continue; // Keep this transport live; the host must retry without another owned call.
+      }
       if (fault === 'refuse') {
         refused.push(request.params);
         process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: 'Synthetic end refusal' } }) + '\n');

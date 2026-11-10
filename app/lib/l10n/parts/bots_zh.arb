@@ -724,7 +724,29 @@
   "botsPetImport": "导入",
   "botsPetImportHint": "导入你自己的像素宠物：一个 zip，里面是 pack.json 和序列帧 PNG，格式见仓库里的 docs/design/pets.md。长按导入的宠物可以删除。",
   "botsPetImportDone": "「{name}」来了",
+  "botsPetCodexTitle": "「{name}」是从 Codex 宠物转过来的",
+  "botsPetCodexBody": "大部分照原样，有几处不完全一样：",
+  "botsPetCodexOk": "知道了",
+  "botsPetCodexLoops": "动作会一直循环到状态变化，不像 Codex 里跑几遍就回到待机",
+  "botsPetCodexRoamLeft": "往左走用的是往右走那一行的镜像",
+  "botsPetCodexDrag": "拖着它时一律用朝右的那一行",
+  "botsPetCodexSleep": "睡觉时用待机的第一帧",
+  "botsPetCodexLook": "看向不同方向的那些格子没用上",
+  "botsPetCodexWebp": "WebP 图转成了 PNG",
+  "botsPetCodexCustomTracks": "自定义的动作行没接到任何状态上",
+  "botsPetCodexFps": "帧率换算成毫秒时取了整",
+  "botsPetCodexOneShot": "只播一次的动作，播完回到哪里由 DSH 决定",
+  "botsPetCodexMissingAuthor": "包里没写作者",
+  "botsPetCodexMissingLicense": "包里没写授权",
+  "botsPetCodexMissingSource": "包里没写来源",
   "@botsPetImportDone": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "@botsPetCodexTitle": {
     "placeholders": {
       "name": {
         "type": "String"

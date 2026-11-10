@@ -20,6 +20,9 @@ internal class BackgroundPreviewDelivery {
     fun initial(task: Long): Map<String, Any?> =
         message?.takeIf { taskId == task } ?: event(task, "off")
 
+    /** Non-selected consumers never read the selected task's cached JPEG. */
+    fun placeholder(task: Long, inUse: Boolean): Map<String, Any?> = event(task, if (inUse) "inUse" else "off")
+
     fun failure(): Map<String, Any?>? {
         afterSequence = -1 // Re-fetch cached pixels even when the core sequence has not changed.
         if (message?.get("state") == "unavailable") return null

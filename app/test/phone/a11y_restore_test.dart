@@ -1,4 +1,4 @@
-import 'package:dsh_app/phone/phone_channel.dart';
+import 'package:dsh_app/state/phone_state.dart';
 import 'package:dsh_app/ui/phone/a11y_restore_sheet.dart';
 import 'package:dsh_app/ui/phone/phone_control_screen.dart';
 import 'package:flutter/material.dart';
@@ -27,6 +27,40 @@ void main() {
     expect(status.copyWith(enabled: false).a11yKeeper.granted, isTrue);
     expect(status.a11yKeeper.command, command);
     expect(PhoneResult.fromMap({'ok': false, 'pending': true}).pending, isTrue);
+  });
+
+  testWidgets('root restore rechecks availability after the risk confirmation', (tester) async {
+    final n = FakePhoneNative(status: {...privilegedStatus(), 'statusRevision': 1});
+    await pumpPhone(tester, const Scaffold(body: A11yRestoreSheet()), native: n);
+    await tester.tap(find.byKey(const Key('a11y-restore-root')));
+    await tester.pumpAndSettle();
+    n.onStatus = () async => throw PlatformException(code: 'offline');
+    expect(await containerOf(tester).read(phoneProvider.notifier).refreshStatus(), isFalse);
+    await tester.tap(find.byKey(const ValueKey('risk-confirm')));
+    await tester.pumpAndSettle();
+    expect(n.callsOf('prepareRoot'), isEmpty);
+    expect(n.callsOf('grantSecureSettings'), isEmpty);
+  });
+
+  testWidgets('an open restore sheet disables retained grant state when status becomes unavailable', (tester) async {
+    final n = native();
+    n.status = {...n.status, 'statusRevision': 1};
+    await pumpPhone(tester, const Scaffold(body: A11yRestoreSheet()), native: n);
+    final grant = find.byKey(const Key('a11y-restore-grant'));
+    expect(grant, findsOneWidget);
+    final queued = tester.widget<FilledButton>(grant).onPressed!;
+    n.onStatus = () async => throw PlatformException(code: 'offline');
+    expect(await containerOf(tester).read(phoneProvider.notifier).refreshStatus(), isFalse);
+    await settlePhone(tester);
+    expect(tester.widget<FilledButton>(grant).onPressed, isNull);
+    n.calls.clear();
+    queued();
+    await settlePhone(tester);
+    expect(n.calls, isEmpty);
+    n.onStatus = null;
+    n.push({...n.status, 'statusRevision': 2});
+    await settlePhone(tester);
+    expect(tester.widget<FilledButton>(grant).onPressed, isNotNull);
   });
 
   testWidgets('the row opens a disclosure; opening never grants, explicit tap does', (tester) async {

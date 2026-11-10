@@ -9,10 +9,11 @@ import '../../phone/phone_channel.dart';
 
 /// A fixed, visible dialog surface. It owns decoded images, bypassing ImageCache.
 class PhoneBackgroundPreviewDialog extends StatefulWidget {
-  const PhoneBackgroundPreviewDialog({required this.channel, required this.taskId, super.key});
+  const PhoneBackgroundPreviewDialog({required this.channel, required this.taskId, this.enabled = true, super.key});
 
   final PhoneChannel channel;
   final int taskId;
+  final bool enabled;
 
   @override
   State<PhoneBackgroundPreviewDialog> createState() => _PhoneBackgroundPreviewDialogState();
@@ -52,6 +53,12 @@ class _PhoneBackgroundPreviewDialogState extends State<PhoneBackgroundPreviewDia
     _syncVisibility();
   }
 
+  @override
+  void didUpdateWidget(PhoneBackgroundPreviewDialog oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.enabled != widget.enabled) _syncVisibility();
+  }
+
   void _clearImage() {
     _imageRevision++;
     _pending = null;
@@ -73,7 +80,7 @@ class _PhoneBackgroundPreviewDialogState extends State<PhoneBackgroundPreviewDia
   }
 
   void _syncVisibility() {
-    final visible = _resumed && _routeCurrent;
+    final visible = widget.enabled && _resumed && _routeCurrent;
     if (_visible == visible) return;
     _visible = visible;
     final epoch = ++_epoch;
@@ -106,6 +113,10 @@ class _PhoneBackgroundPreviewDialogState extends State<PhoneBackgroundPreviewDia
         frame.generation == _nativeGeneration && frame.sequence <= _nativeSequence) {
       return;
     }
+    if (frame.generation != _nativeGeneration) {
+      _clearImage();
+      setState(() => _state = 'waiting');
+    }
     _nativeGeneration = frame.generation;
     _nativeSequence = frame.sequence;
     if (frame.state != 'frame') {
@@ -113,7 +124,6 @@ class _PhoneBackgroundPreviewDialogState extends State<PhoneBackgroundPreviewDia
       setState(() => _state = frame.state);
       return;
     }
-    _imageRevision++;
     _pending = frame; // one latest pending frame; a slow decoder never accumulates a queue
     unawaited(_decodeLatest());
   }
@@ -135,7 +145,7 @@ class _PhoneBackgroundPreviewDialogState extends State<PhoneBackgroundPreviewDia
           decoded = (await codec.getNextFrame()).image;
         } catch (_) {
           // No exception details or image bytes enter logs or diagnostics.
-          if (mounted && _visible && _epoch == epoch && _imageRevision == revision) {
+          if (mounted && _visible && _epoch == epoch && _imageRevision == revision && _pending == null) {
             _clearImage();
             setState(() => _state = 'unavailable');
           }
@@ -178,6 +188,7 @@ class _PhoneBackgroundPreviewDialogState extends State<PhoneBackgroundPreviewDia
             ? IgnorePointer(child: RawImage(image: _image, fit: BoxFit.contain, filterQuality: FilterQuality.low))
             : Center(child: Text(switch (_state) {
                 'off' => l10n.phonePreviewOff,
+                'inUse' => l10n.phonePreviewInUse,
                 'unavailable' || 'protected' => l10n.phonePreviewUnavailable,
                 _ => l10n.phonePreviewWaiting,
               }, textAlign: TextAlign.center)),

@@ -4,8 +4,8 @@ import android.os.Bundle
 
 /** The three real resource callers share the envelope, not their action/release decoders. */
 internal object OwnerScopeProtocol {
-    fun supported(cap: Bundle): Boolean = cap.get(Proto.OWNER_SCOPE_VERSION) is Int &&
-        cap.get(Proto.OWNER_SCOPE_VERSION) == 1 && cap.get(Proto.SCOPE_LIMIT) is Int && cap.get(Proto.SCOPE_LIMIT) == 3
+    fun supported(cap: Bundle): Boolean = supported(cap.get(Proto.OWNER_SCOPE_VERSION), cap.get(Proto.SCOPE_LIMIT))
+    fun supported(version: Any?, limit: Any?): Boolean = version is Int && version == 1 && limit is Int && limit == 3
 
     fun request(source: Bundle): Bundle = Bundle(source).apply { putInt(Proto.OWNER_SCOPE_VERSION, 1) }
 

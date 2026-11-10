@@ -14,6 +14,7 @@ import '../channel/rpc_client.dart';
 import '../channel/secure_channel.dart';
 import '../crypto/noise_ik.dart';
 import '../protocol/control.dart' show maxRemoteCapabilityEntries;
+import '../pairing/device_pairing.dart';
 import '../server/server_api.dart';
 import '../state.dart';
 import '../transport/peer_connection.dart';
@@ -143,6 +144,108 @@ class RemoteLogin {
   void cancel() => _cancel();
 }
 
+/// The computer a finished pairing bound this phone to, and the account the
+/// phone is now signed in to.
+class RemotePairedHost {
+  const RemotePairedHost({required this.user, required this.host});
+
+  final RemoteUser user;
+
+  /// The Host from the scanned code (its key is pinned already).
+  final PairingDevice host;
+}
+
+/// A claimed pairing session: show [verificationCode] until the person typed
+/// it into the computer's Remote plugin; [result] completes once this phone's
+/// credentials are stored and the Host key is pinned.
+///
+/// The phone never confirms for the computer. The code has one attempt: a
+/// wrong one on the computer ends the session ([result] fails with
+/// `PAIRING_CODE_REJECTED`) and the whole scan starts over.
+class RemotePairing {
+  RemotePairing._(this.offer, this.mobile, this._claim, this._sendCancel);
+
+  final PairingOffer offer;
+
+  /// This phone's device as the session knows it.
+  final PairingDevice mobile;
+  final PairingClaim _claim;
+  final Future<void> Function() _sendCancel;
+  final Completer<RemotePairedHost> _result = Completer();
+  final StreamController<PairingState> _states = StreamController.broadcast();
+  PairingState _state = PairingState.claimed;
+  bool _committing = false;
+  bool _paused = false;
+  Completer<void>? _resumed;
+
+  /// Exactly 8 digits, leading zeros kept. Show it on the pairing screen only:
+  /// never log, notify, copy or share it.
+  String get verificationCode => _claim.verificationCode;
+
+  /// When the computer can no longer submit the code.
+  DateTime get codeExpiresAt => _claim.expiresAt;
+
+  PairingState get state => _state;
+  Stream<PairingState> get states => _states.stream;
+
+  /// Fails with [PairingException]: `PAIRING_CODE_REJECTED`,
+  /// `PAIRING_CANCELLED`, `PAIRING_EXPIRED`, `PAIRING_ACCOUNT_CONFLICT`,
+  /// `PAIRING_IDENTITY_MISMATCH`, another Server code, ...
+  Future<RemotePairedHost> get result => _result.future;
+
+  bool get isClosed => _result.isCompleted;
+
+  /// Stops polling while the app is in the background (a poll in flight
+  /// still lands). Resuming polls again at once.
+  set paused(bool value) {
+    if (_paused == value) return;
+    _paused = value;
+    if (!value) {
+      final resumed = _resumed;
+      _resumed = null;
+      resumed?.complete();
+    }
+  }
+
+  bool get paused => _paused;
+
+  /// Gives up before the credentials are being stored, and tells the Server
+  /// (best effort). A completed binding is undone by revoking it, not here.
+  Future<void> cancel() async {
+    if (_committing || isClosed) return;
+    _fail(const PairingException('PAIRING_CANCELLED', 'Pairing was cancelled on this phone.'));
+    await _sendCancel().catchError((Object _) {});
+  }
+
+  Future<void> _wait(Duration delay) async {
+    await Future<void>.delayed(delay);
+    while (_paused && !isClosed) {
+      await (_resumed ??= Completer<void>()).future;
+    }
+  }
+
+  void _emit(PairingState state) {
+    if (isClosed || state == _state) return;
+    _state = state;
+    _states.add(state);
+  }
+
+  void _complete(RemotePairedHost host) {
+    if (isClosed) return;
+    _state = PairingState.completed;
+    _states.add(PairingState.completed);
+    _result.complete(host);
+    unawaited(_states.close());
+  }
+
+  void _fail(PairingException error) {
+    if (isClosed) return;
+    _result.completeError(error);
+    unawaited(_states.close());
+    paused = false;
+  }
+}
+
 class _Identity {
   _Identity({
     required this.deviceId,
@@ -269,6 +372,7 @@ class RemoteAccount {
     HttpClient? httpClient,
     ControlSocketConnector? socketConnector,
     this.loginPollInterval = const Duration(seconds: 2),
+    this.pairingPollInterval = const Duration(milliseconds: 2500),
     this.controlTracer,
     this.peerConnector,
     this.preferredTransports,
@@ -292,6 +396,9 @@ class RemoteAccount {
   final String platform;
   final String clientVersion;
   final Duration loginPollInterval;
+
+  /// How often a claimed pairing asks for the computer's answer (2–3 s).
+  final Duration pairingPollInterval;
 
   /// Optional Control-frame tracer (tokens and ciphertext redacted).
   final ControlTracer? controlTracer;
@@ -676,6 +783,269 @@ class RemoteAccount {
     _storageState.credentialWrites = write.catchError((Object _) {});
     return write;
   }
+
+  // ---------------------------------------------------------------------------
+  // Device pairing: scan the computer's code (upstream docs/device-pairing-v1.md)
+
+  /// Whether this Server pairs devices by scanning. A failed discovery
+  /// throws ([PairingException]); it never reads as "unsupported".
+  Future<bool> supportsPairing() async {
+    try {
+      return (await api.serverCapabilities()).devicePairing == devicePairingProtocol;
+    } on RemoteApiException catch (error) {
+      throw _pairingException(error);
+    }
+  }
+
+  /// What a scanned code points at (read-only on the Server: it does not
+  /// use up the claim). The code must belong to this account's Server;
+  /// another fails with `PAIRING_SERVER_MISMATCH` (its [PairingException.origin]
+  /// says which), so the caller can switch Servers with the person's OK.
+  Future<PairingOffer> resolvePairing(PairingScan scan) async {
+    if (scan.origin != serverUrl) {
+      throw PairingException(
+        'PAIRING_SERVER_MISMATCH',
+        'The code belongs to ${scan.origin}, not $serverUrl.',
+        origin: scan.origin,
+      );
+    }
+    final RemoteServerCapabilities capabilities;
+    try {
+      capabilities = await api.serverCapabilities();
+    } on RemoteApiException catch (error) {
+      throw _pairingException(error);
+    }
+    if (capabilities.devicePairing != devicePairingProtocol) {
+      throw const PairingException('PAIRING_UNSUPPORTED', 'This Server does not pair devices by scanning.');
+    }
+    switch (scan) {
+      case PairingLegacyScan(:final offer):
+        return offer;
+      case PairingTicketScan(:final ticket):
+        if (capabilities.devicePairingQr != devicePairingQrFormat) {
+          throw const PairingException('PAIRING_UNSUPPORTED', 'This Server does not resolve short pairing codes.');
+        }
+        final body = await _pairingRequest(
+          () => api.resolvePairing(ticket),
+          until: DateTime.now().add(const Duration(seconds: 30)),
+        );
+        return PairingOffer.parse(body, origin: serverUrl, ticket: ticket);
+    }
+  }
+
+  /// Claims [offer] with this phone's own device identity, once the person
+  /// confirmed the computer on the phone. Returns the code to show; the
+  /// phone then polls until the computer submitted it. No access exists
+  /// before [RemotePairing.result] completes.
+  ///
+  /// [deepseekUserId] is optional unverified metadata (a DeepSeek account
+  /// id from a non-sensitive profile read); never credentials.
+  Future<RemotePairing> claimPairing(PairingOffer offer, {String? deepseekUserId}) async {
+    if (offer.origin != serverUrl) {
+      throw PairingException('PAIRING_SERVER_MISMATCH', 'The session belongs to another Server.', origin: offer.origin);
+    }
+    await _restore();
+    final identity = await _ensureIdentity();
+    final mobile = PairingDevice(
+      deviceId: identity.deviceId,
+      name: identity.name,
+      role: 'client',
+      platform: identity.platform,
+      identityKey: identity.publicKey,
+    );
+    if (mobile.deviceId == offer.host.deviceId || mobile.identityKey == offer.host.identityKey) {
+      throw const PairingException('PAIRING_IDENTITY_MISMATCH', 'The computer and this phone share an identity.');
+    }
+    final privateKey = fromBase64Url(identity.privateKey);
+    String proof(String path, String raw) => pairingProof(
+      devicePrivateKey: privateKey,
+      serverPublicKey: offer.serverPublicKey,
+      sessionId: offer.sessionId,
+      side: 'mobile',
+      path: path,
+      rawJson: raw,
+    );
+    // One serialization; a lost response is recovered by resending exactly
+    // these bytes, never by claiming again with other content.
+    final raw = pairingClaimBody(scanSecret: offer.scanSecret, device: mobile, deepseekUserId: deepseekUserId);
+    final path = offer.path('claim');
+    final claimProof = proof(path, raw);
+    final claim = PairingClaim.parse(
+      await _pairingRequest(() => api.pairingPost(path, raw, claimProof), until: offer.expiresAt),
+    );
+    final cancelPath = offer.path('mobile/cancel');
+    final cancelProof = proof(cancelPath, '{}');
+    final pairing = RemotePairing._(offer, mobile, claim, () => api.pairingPost(cancelPath, '{}', cancelProof));
+    unawaited(_followPairing(pairing, identity, proof(offer.path('mobile/status'), '{}')));
+    return pairing;
+  }
+
+  Future<void> _followPairing(RemotePairing pairing, _Identity identity, String statusProof) async {
+    final path = pairing.offer.path('mobile/status');
+    // Results stay retrievable until `recoverUntil` (creation + 480 s).
+    var deadline = pairing.offer.expiresAt.add(const Duration(seconds: 300));
+    var delay = pairingPollInterval;
+    try {
+      while (!pairing.isClosed) {
+        await pairing._wait(delay);
+        if (pairing.isClosed) return;
+        if (DateTime.now().isAfter(deadline.add(PairingOffer.clockSkew))) {
+          throw const PairingException('PAIRING_EXPIRED', 'The pairing session expired.');
+        }
+        final Object? body;
+        try {
+          body = await api.pairingPost(path, '{}', statusProof);
+          delay = pairingPollInterval;
+        } on RemoteApiException catch (error) {
+          if (error.code == 'PAIRING_NOT_FOUND') {
+            throw const PairingException('PAIRING_EXPIRED', 'The pairing session expired.');
+          }
+          if (!_pairingRetryable(error)) throw _pairingException(error);
+          // Back off on 429 and outages; never start a new session.
+          delay = delay * 2 > const Duration(seconds: 15) ? const Duration(seconds: 15) : delay * 2;
+          continue;
+        }
+        if (pairing.isClosed) return;
+        final status = PairingStatus.parse(body, offer: pairing.offer, mobile: pairing.mobile);
+        if (status.recoverUntil case final recover?) deadline = recover;
+        // Completed is announced once the credentials are stored.
+        if (status.state != PairingState.completed) pairing._emit(status.state);
+        switch (status.state) {
+          case PairingState.created || PairingState.claimed || PairingState.approved:
+            continue;
+          case PairingState.completed:
+            final RemoteUser user;
+            try {
+              user = await _commitPairing(pairing, identity, status.credentials!);
+            } on PairingException {
+              rethrow;
+            } on Object {
+              // Storage failed before the credentials were stored: the same
+              // ones can be fetched again until `recoverUntil`.
+              pairing._committing = false;
+              continue;
+            }
+            // Stored: from here on nothing is committed twice.
+            await _pinPairedHost(pairing.offer.host);
+            pairing._complete(RemotePairedHost(user: user, host: pairing.offer.host));
+            return;
+          case PairingState.failed:
+            final reason = status.failureReason;
+            throw reason == null || reason == 'verification_failed'
+                ? const PairingException('PAIRING_CODE_REJECTED', 'The computer submitted a wrong code.')
+                : PairingException(reason, 'The Server refused the binding ($reason).');
+          case PairingState.cancelled:
+            throw const PairingException('PAIRING_CANCELLED', 'The pairing was cancelled.');
+          case PairingState.expired:
+            throw const PairingException('PAIRING_EXPIRED', 'The pairing session expired.');
+        }
+      }
+    } on PairingException catch (error) {
+      pairing._fail(error);
+    } on Object catch (error) {
+      pairing._fail(PairingException('PAIRING_FAILED', '$error'));
+    }
+  }
+
+  /// Stores this phone's credentials, unless they would replace another
+  /// account's. A storage failure throws (the caller fetches them again);
+  /// only an undecodable stored record counts as none.
+  Future<RemoteUser> _commitPairing(RemotePairing pairing, _Identity identity, PairingCredentials credentials) async {
+    await _restore();
+    const identityChanged = PairingException('PAIRING_IDENTITY_MISMATCH', 'This phone signed out or changed identity.');
+    late String? provider;
+    // Decide at the serialized commit point, from what is stored now: another
+    // sign-in (here, or in another RemoteAccount on the same store) may have
+    // committed since this pairing started.
+    final write = _storageState.credentialWrites.then((_) async {
+      // Still cancellable while queued behind other writes.
+      if (pairing.isClosed) throw const PairingException('PAIRING_CANCELLED', 'Pairing was cancelled on this phone.');
+      final storedIdentity = asMap(tryDecodeJson(await _secrets.read(_identityKey) ?? ''));
+      if (!identical(_identity, identity) || storedIdentity?['deviceId'] != identity.deviceId) throw identityChanged;
+      // A failed read is not "no credentials": it must not let this write
+      // replace another account's sign-in.
+      final raw = await _secrets.read(_credentialsKey);
+      _Credentials? stored;
+      try {
+        final map = asMap(tryDecodeJson(raw ?? ''));
+        stored = map == null ? null : _Credentials.fromJson(map);
+      } on Object {
+        stored = null;
+      }
+      final current =
+          stored != null &&
+          stored.deviceId == identity.deviceId &&
+          stored.refreshTokenExpiresAt.isAfter(DateTime.now().add(const Duration(seconds: 30)));
+      if (current && stored.account != credentials.account) {
+        throw const PairingException(
+          'PAIRING_ACCOUNT_CONFLICT',
+          'This phone is signed in to another account; its credentials are kept.',
+        );
+      }
+      provider = current ? stored.provider : 'pairing';
+      final saved = _Credentials.fromTokens(
+        identity.deviceId,
+        credentials.account,
+        credentials.tokens,
+        provider: provider,
+      );
+      pairing._committing = true;
+      await _secrets.write(_credentialsKey, jsonEncode(saved.toJson()));
+      _credentials = saved;
+      _storageState.signInEpoch++;
+    });
+    _storageState.credentialWrites = write.catchError((Object _) {});
+    await write;
+    return RemoteUser(
+      account: credentials.account,
+      deviceId: identity.deviceId,
+      serverUrl: serverUrl,
+      provider: provider,
+    );
+  }
+
+  /// Pins the Host key from the code the person confirmed, retrying the
+  /// read and the save. Never re-commits credentials: when the pin cannot be
+  /// stored the pairing fails with `PAIRING_PIN_SAVE_FAILED` and the stored
+  /// sign-in stays (pairing again pins it).
+  Future<void> _pinPairedHost(PairingDevice host) async {
+    for (var attempt = 1; ; attempt++) {
+      try {
+        final pins = await _loadPins();
+        pins[host.deviceId] = _Pin(host.identityKey, host.name, DateTime.now());
+        await _savePins(pins);
+        return;
+      } on Object {
+        if (attempt == 3) {
+          throw const PairingException(
+            'PAIRING_PIN_SAVE_FAILED',
+            'The computer key could not be stored on this phone; pair again.',
+          );
+        }
+        await Future<void>.delayed(Duration(milliseconds: 200 * attempt));
+      }
+    }
+  }
+
+  /// Retries outages and rate limits with the same request until [until];
+  /// any other refusal is final.
+  Future<Object?> _pairingRequest(Future<Object?> Function() send, {required DateTime until}) async {
+    var delay = const Duration(seconds: 1);
+    while (true) {
+      try {
+        return await send();
+      } on RemoteApiException catch (error) {
+        if (!_pairingRetryable(error) || DateTime.now().add(delay).isAfter(until)) throw _pairingException(error);
+      }
+      await Future<void>.delayed(delay);
+      if (delay < const Duration(seconds: 8)) delay *= 2;
+    }
+  }
+
+  static bool _pairingRetryable(RemoteApiException error) =>
+      error.retryable || error.code == 'CONNECTION_FAILED' || error.status == 429 || error.status == 503;
+
+  static PairingException _pairingException(RemoteApiException error) => PairingException(error.code, error.message);
 
   // ---------------------------------------------------------------------------
   // Hosts and pins

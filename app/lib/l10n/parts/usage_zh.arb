@@ -1,7 +1,7 @@
 {
   "usageStatsTitle": "发送匿名使用统计",
   "usageStatsSection": "改进 DSH Go",
-  "usageStatsFooter": "只含使用次数、版本和手机品牌，不含对话、文件和账号。",
+  "usageStatsFooter": "这个开关只控制 dsh-go 自身的使用次数、版本、手机品牌和型号、系统版本统计，不含对话、文件和账号；它不控制 Google ML Kit SDK 的统计。",
   "usageNoticeBody": "不含对话和个人信息，可随时关闭",
   "usageUpgradeNotice": "新增匿名使用统计，帮助改进 DSH Go。\n不含对话和个人信息",
   "usageUpgradeLearn": "了解",

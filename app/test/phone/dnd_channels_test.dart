@@ -4,6 +4,8 @@
 // in-use channel's own switch, and that an old native module keeps the
 // three-way page.
 
+import 'package:dsh_app/l10n/l10n.dart';
+import 'package:dsh_app/ui/phone/background_preview.dart';
 import 'package:dsh_app/state/phone_state.dart';
 import 'package:dsh_app/ui/common/app_sheet.dart';
 import 'package:dsh_app/ui/common/list_page_row.dart';
@@ -12,6 +14,7 @@ import 'package:dsh_app/ui/engine_settings/field_row.dart' show FieldBadge;
 import 'package:dsh_app/ui/phone/dnd_mode_page.dart';
 import 'package:dsh_app/ui/phone/phone_widgets.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -40,6 +43,102 @@ Future<void> open(WidgetTester tester, String title) async {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  Map<String, Object?> previewStatus(int revision) {
+    final status = privilegedStatus(mode: 'shizuku', ready: true, provider: 'shizuku', running: true, granted: true);
+    return {
+      ...status, 'statusRevision': revision, 'task': {'id': 7, 'active': true},
+      'background': {...(status['background'] as Map).cast<String, Object?>(),
+        'preview': {'v': 1, 'enabled': true}},
+    };
+  }
+
+  testWidgets('a root risk confirmation cannot dispatch after status becomes unavailable', (tester) async {
+    final native = FakePhoneNative(status: {...privilegedStatus(), 'statusRevision': 1});
+    await pumpPhone(tester, const PhoneDndPage(), native: native);
+    await open(tester, 'Root');
+    await tester.tap(find.text('用 Root 开启'));
+    await tester.pumpAndSettle();
+    expect(find.byType(RiskNoticeSheet), findsOneWidget);
+    native.onStatus = () async => throw PlatformException(code: 'offline');
+    expect(await containerOf(tester).read(phoneProvider.notifier).refreshStatus(), isFalse);
+    await tester.tap(find.byKey(const ValueKey('risk-confirm')));
+    await tester.pumpAndSettle();
+    expect(acting(native), isEmpty);
+  });
+
+  testWidgets('unavailable retained DND status disables device controls and a queued preview entry', (tester) async {
+    final native = FakePhoneNative(status: previewStatus(1));
+    await pumpPhone(tester, const PhoneDndPage(), native: native);
+    final previewRow = channel(appL10n.phonePreviewOpen);
+    expect(previewRow, findsOneWidget);
+    final queuedPreview = tester.widget<ListPageRow>(previewRow).onTap!;
+    final close = button(tester, appL10n.commonClose).onPressed!;
+    native.onStatus = () async => throw PlatformException(code: 'offline');
+    expect(await containerOf(tester).read(phoneProvider.notifier).refreshStatus(), isFalse);
+    await settlePhone(tester);
+    expect(phoneOf(tester).status.task.id, 7);
+    expect(tester.widget<ListPageRow>(previewRow).onTap, isNull);
+    expect(button(tester, appL10n.commonClose).onPressed, isNull);
+    final previewSwitch = find.descendant(of: channel(appL10n.phonePreviewTitle), matching: find.byType(Switch));
+    expect(tester.widget<Switch>(previewSwitch).onChanged, isNull);
+    native.calls.clear();
+    queuedPreview();
+    close();
+    await settlePhone(tester);
+    expect(find.byType(PhoneBackgroundPreviewDialog), findsNothing);
+    expect(native.calls, isEmpty);
+    native.onStatus = null;
+    native.push(previewStatus(2));
+    await settlePhone(tester);
+    expect(tester.widget<ListPageRow>(previewRow).onTap, isNotNull);
+    expect(button(tester, appL10n.commonClose).onPressed, isNotNull);
+  });
+
+  testWidgets('an open preview follows status availability without rebinding its task', (tester) async {
+    const events = EventChannel('dsh/phone/preview');
+    final calls = <String>[];
+    final arguments = <Object?>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockStreamHandler(events,
+      MockStreamHandler.inline(onListen: (args, sink) { calls.add('listen'); arguments.add(args); },
+        onCancel: (_) { calls.add('cancel'); }));
+    void resume() {
+      if (tester.binding.lifecycleState == AppLifecycleState.paused) {
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      }
+      if (tester.binding.lifecycleState == AppLifecycleState.hidden) {
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      }
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    }
+    resume();
+    try {
+      final native = FakePhoneNative(status: previewStatus(1));
+      await pumpPhone(tester, const PhoneDndPage(), native: native);
+      await tester.tap(find.text(appL10n.phonePreviewOpen));
+      await tester.pumpAndSettle();
+      expect(calls, ['listen']);
+      expect(arguments, [{'taskId': 7}]);
+      native.onStatus = () async => throw PlatformException(code: 'offline');
+      expect(await containerOf(tester).read(phoneProvider.notifier).refreshStatus(), isFalse);
+      await tester.pumpAndSettle();
+      expect(calls, ['listen', 'cancel']);
+      expect(find.byType(PhoneBackgroundPreviewDialog), findsOneWidget);
+      native.onStatus = null;
+      native.push({...previewStatus(2), 'task': {'id': 8, 'active': true}});
+      await tester.pumpAndSettle();
+      expect(calls, ['listen', 'cancel', 'listen']);
+      expect(arguments, [{'taskId': 7}, {'taskId': 7}]);
+      await tester.tap(find.descendant(of: find.byType(PhoneBackgroundPreviewDialog), matching: find.text(appL10n.commonClose)));
+      await tester.pumpAndSettle();
+      expect(calls, ['listen', 'cancel', 'listen', 'cancel']);
+    } finally {
+      resume();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    }
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('the five-way block lists four channels, each with who it is for and where it stands', (tester) async {
     final h = await pumpPhone(

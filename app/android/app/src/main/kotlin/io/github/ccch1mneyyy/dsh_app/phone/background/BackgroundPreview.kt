@@ -19,16 +19,21 @@ data class BackgroundPreviewTarget(
 /** Local-only pixels. Main-thread consumers share one low-priority, non-cancellable IPC lane. */
 class BackgroundPreview(
     context: Context,
-    private val target: () -> BackgroundPreviewTarget?,
+    private val target: (Long) -> BackgroundPreviewTarget?,
     private val allowed: (Long) -> Boolean,
     private val onSettingChanged: () -> Unit,
 ) {
-    private data class Consumer(val taskId: Long, val callback: (Map<String, Any?>) -> Unit)
+    enum class ConsumerKind { APP_DIALOG, OVERLAY }
+    internal enum class DeliveryRole { SELECTED, IN_USE, OFF }
+    internal class Consumer(val taskId: Long, val kind: ConsumerKind, val callback: (Map<String, Any?>) -> Unit) {
+        var role: DeliveryRole? = null
+    }
     private val main = Handler(Looper.getMainLooper())
     private val prefs = context.getSharedPreferences("phone-background-preview", Context.MODE_PRIVATE)
     @Volatile var enabled = prefs.getBoolean("enabled", false)
         private set
     private val consumers = LinkedHashMap<Any, Consumer>()
+    private var selectedTaskId: Long? = null // Selection survives a not-yet-ready target.
     private var current: BackgroundPreviewTarget? = null
     private var unsupported: BackgroundPreviewTarget? = null
     private val delivery = BackgroundPreviewDelivery()
@@ -56,12 +61,11 @@ class BackgroundPreview(
         return true
     }
 
-    fun addConsumer(owner: Any, taskId: Long, onFrame: (Map<String, Any?>) -> Unit) {
+    fun addConsumer(owner: Any, taskId: Long, kind: ConsumerKind, onFrame: (Map<String, Any?>) -> Unit) {
         checkMain()
-        consumers[owner] = Consumer(taskId, onFrame)
+        val consumer = Consumer(taskId, kind, onFrame)
+        consumers[owner] = consumer
         reconcile()
-        val value = delivery.initial(taskId)
-        runCatching { onFrame(value) }
     }
 
     fun removeConsumer(owner: Any) {
@@ -77,21 +81,37 @@ class BackgroundPreview(
 
     private fun checkMain() = check(Looper.myLooper() == Looper.getMainLooper())
 
+    private fun publishInitial(consumer: Consumer, force: Boolean) {
+        val role = when {
+            !enabled || !allowed(consumer.taskId) -> DeliveryRole.OFF
+            consumer.taskId == selectedTaskId -> DeliveryRole.SELECTED
+            selectedTaskId != null -> DeliveryRole.IN_USE
+            else -> DeliveryRole.OFF
+        }
+        if (!force && consumer.role == role) return
+        consumer.role = role
+        val value = if (role == DeliveryRole.SELECTED) delivery.initial(consumer.taskId)
+            else delivery.placeholder(consumer.taskId, role == DeliveryRole.IN_USE)
+        runCatching { consumer.callback(value) }
+    }
+
     private fun reconcile() {
-        val next = target()?.takeIf { t -> enabled && consumers.values.any { it.taskId == t.taskId } && allowed(t.taskId) }
-        if (next !== current) {
+        val selected = if (enabled) choosePreviewTask(consumers.values.filter { allowed(it.taskId) }, selectedTaskId) else null
+        val next = selected?.let(target)
+        val changed = selected != selectedTaskId || next !== current
+        if (changed) {
             val old = current
+            selectedTaskId = selected
             current = next
             unsupported = null
-            delivery.reset(next?.taskId)
+            delivery.reset(selected)
             requestToken = Any()
             main.removeCallbacks(tick)
             scheduled = false
-            consumers.values.toList().forEach { c ->
-                runCatching { c.callback(delivery.initial(c.taskId)) }
-            }
             if (old != null) disable(old)
         }
+        // A losing task can end while the selected source stays unchanged: it still needs OFF.
+        consumers.values.toList().forEach { publishInitial(it, changed) }
         schedule()
         retireIdleWorker()
     }
@@ -155,14 +175,14 @@ class BackgroundPreview(
     private fun poll() {
         val selected = current ?: return
         if (busy || pendingOff.isNotEmpty()) return
-        if (target() !== selected || !allowed(selected.taskId)) { reconcile(); return }
+        if (target(selected.taskId) !== selected || !allowed(selected.taskId)) { reconcile(); return }
         val ticket = delivery.generation
         val token = requestToken
         val after = delivery.afterSequence
         busy = true
         lastPollAt = SystemClock.uptimeMillis()
         io().execute {
-            fun wanted() = requestToken === token && target() === selected && allowed(selected.taskId)
+            fun wanted() = requestToken === token && target(selected.taskId) === selected && allowed(selected.taskId)
             val result = runCatching {
                 if (!wanted()) return@runCatching null
                 if (probed !== selected) {
@@ -177,7 +197,7 @@ class BackgroundPreview(
             }.getOrElse { Bundle().apply { putBoolean(Proto.OK, false) } }
             main.post {
                 busy = false
-                if (current === selected && delivery.generation == ticket && target() === selected && allowed(selected.taskId)) {
+                if (current === selected && delivery.generation == ticket && target(selected.taskId) === selected && allowed(selected.taskId)) {
                     if (result != null) accept(selected, result)
                     schedule()
                 } else reconcile()
@@ -199,4 +219,13 @@ class BackgroundPreview(
         if (value != null) consumers.values.filter { it.taskId == selected.taskId }
             .forEach { runCatching { it.callback(value) } }
     }
+}
+
+/** Actual controller selection: visibility/allowed filtering happens before this call, not readiness.
+ * Same-task consumers share the selection; no JPEG or second consumer registry lives here.
+ */
+internal fun choosePreviewTask(consumers: List<BackgroundPreview.Consumer>, current: Long?): Long? {
+    val app = consumers.filter { it.kind == BackgroundPreview.ConsumerKind.APP_DIALOG }
+    val highest = app.ifEmpty { consumers }
+    return highest.firstOrNull { it.taskId == current }?.taskId ?: highest.firstOrNull()?.taskId
 }

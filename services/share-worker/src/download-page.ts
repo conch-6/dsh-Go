@@ -79,7 +79,7 @@ const TEXT: Record<Lang, Text> = {
     footer: '社区作品，非 DeepSeek 官方应用',
     privacy:
       '隐私：我们只统计下载和更新检查的次数（含线路、版本、国家/地区），设备数用每天更换、无法还原的哈希估算。' +
-      'App 的匿名使用统计只含版本、系统、厂商、语言、运行方式和各功能使用次数，以随机安装编号区分设备，可在 App 里关闭。' +
+      'App 的匿名使用统计只含版本、系统及厂商系统版本、厂商和机型、语言、运行方式和各功能使用次数，以随机安装编号区分设备，可在 App 里关闭。' +
       '这些统计记录里没有 IP，也不收集账号、对话和文件。',
     other: { lang: 'en', label: 'English' },
   },
@@ -113,7 +113,7 @@ const TEXT: Record<Lang, Text> = {
     privacy:
       'Privacy: we count downloads and update checks (with route, version and country) and estimate device numbers ' +
       'with a one-way hash that changes daily. The app\'s anonymous usage stats hold only its version, Android version, ' +
-      'maker, language, engine mode and feature counts, tell devices apart by a random install ID, and can be turned ' +
+      'maker, model, the maker\'s system version, language, engine mode and feature counts, tell devices apart by a random install ID, and can be turned ' +
       'off in the app. These records hold no IP addresses, and we never collect accounts, chats or files.',
     other: { lang: 'zh', label: '中文' },
   },

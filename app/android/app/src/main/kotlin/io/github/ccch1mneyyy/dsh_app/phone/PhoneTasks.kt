@@ -160,9 +160,11 @@ class PhoneTasks(
 
     internal fun publish(change: Change) = fire(change.snapshot)
 
+    /** Commit a stop without listeners; callers publish only after their admission lock is released. */
+    internal fun stopDeferred(reason: String): Change = synchronized(lock) { stopLocked(reason) }
+
     fun stop(reason: String) {
-        val change = synchronized(lock) { stopLocked(reason) }
-        publish(change)
+        publish(stopDeferred(reason))
     }
 
     /** Ends the task without a stop hold (the engine went away). */
@@ -241,13 +243,15 @@ class PhoneTasks(
     /** A single system start and its optional fallback notice, bound to the original call owner.
      * Task cancellation and each commitment share [lock]; platform work runs AFTER this lock.
      * Committed work may finish after stop returns. Thread interruption is only sampled here.
+     * [allowed] is a memory-only last admission check: no IO or other registry locks.
      */
-    inner class SystemDispatch internal constructor(private val owner: Owner) {
+    inner class SystemDispatch internal constructor(private val owner: Owner, private val allowed: () -> Boolean) {
         private var startCommitted = false
         private var noticeCommitted = false
 
         fun commitStart(): Boolean = synchronized(lock) {
             if (startCommitted || !owner.active || !currentLocked(owner) || Thread.currentThread().isInterrupted) return false
+            if (!allowed()) return false
             startCommitted = true
             true
         }
@@ -259,7 +263,7 @@ class PhoneTasks(
         }
     }
 
-    fun systemDispatch(owner: Owner): SystemDispatch = SystemDispatch(owner)
+    fun systemDispatch(owner: Owner, allowed: () -> Boolean = { true }): SystemDispatch = SystemDispatch(owner, allowed)
 
     private fun currentLocked(owner: Owner): Boolean =
         owner.taskId == taskId && owner.lifecycle == lifecycle && owner.active == active &&

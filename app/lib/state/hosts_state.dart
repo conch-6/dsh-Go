@@ -400,6 +400,10 @@ class RelayServerController extends Notifier<String?> {
   /// Back to dsh.r2049.cn (each server keeps its own sign-in).
   Future<void> useDefault() => ref.read(_relayServerActionsProvider).useDefault();
 
+  /// Switches to [server] (a pairing code's Server, once the person agreed);
+  /// each Server keeps its own sign-in. Throws [HostLinkError] when invalid.
+  Future<void> useServer(String server) => ref.read(_relayServerActionsProvider).useServer(server);
+
   /// Switches to [server] (normalized; throws [HostLinkError] when invalid)
   /// and signs in there with email + password.
   Future<void> loginWithPassword({required String server, required String email, required String password}) =>
@@ -424,6 +428,14 @@ class _RelayServerActions {
     final operation = ++_operation;
     await ref.read(relayServerProvider.notifier)._set(null);
     if (_owns(operation, null)) ref.invalidate(relayAccountProvider);
+  }
+
+  Future<void> useServer(String server) async {
+    final origin = DshRemoteRelayBackend.normalizeServer(server);
+    final selection = origin == defaultRelayServer ? null : origin;
+    final operation = ++_operation;
+    await ref.read(relayServerProvider.notifier)._set(selection);
+    if (_owns(operation, selection)) ref.invalidate(relayAccountProvider);
   }
 
   Future<void> loginWithPassword({required String server, required String email, required String password}) async {

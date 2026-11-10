@@ -178,7 +178,8 @@ void main() {
 
   test('known native failure categories survive the actual Markdown entry', () {
     const stages = ['precondition', 'ui_dispatch', 'presentation_create', 'presentation_configure',
-      'presentation_show', 'view_layout_wait', 'frame_commit_wait', 'target_validate', 'input_send', 'receipt_wait', 'cleanup'];
+      'presentation_show', 'activity_start', 'activity_ready_wait',
+      'view_layout_wait', 'frame_commit_wait', 'target_validate', 'input_send', 'receipt_wait', 'cleanup'];
     const types = ['none', 'SecurityException', 'IllegalStateException', 'IllegalArgumentException',
       'InvalidDisplayException', 'BadTokenException', 'TimeoutException', 'InterruptedException', 'OtherException'];
     for (final stage in stages) {

@@ -19,6 +19,7 @@ void registerThirdPartyLicenses() {
       LicenseEntryWithLineBreaks(<String>['ds-harness-remote'], _dshRemoteMit),
       LicenseEntryWithLineBreaks(<String>['DSHA'], _dshaMit),
       // Libraries bundled by Gradle.
+      LicenseEntryWithLineBreaks(<String>['Google ML Kit Text Recognition (Chinese)'], _mlkitNotice),
       LicenseEntryWithLineBreaks(<String>['Shizuku-API'], _shizukuMit),
       LicenseEntryWithLineBreaks(<String>['libadb-android'], _libadbNotice + _apache2),
       LicenseEntryWithLineBreaks(<String>['spake2-android'], '$_spake2Notice$_lgpl3\n$_gpl3'),
@@ -42,6 +43,8 @@ void registerThirdPartyLicenses() {
     // Provenance and the binary/asset hashes are in THIRD_PARTY_NOTICES.md.
     final bundledNotices = await rootBundle.loadString('assets/licenses/webrtc-150.7871.04.md');
     yield LicenseEntryWithLineBreaks(<String>['WebRTC'], '$_webrtcBsd\n$bundledNotices');
+    final unicodeNotice = await rootBundle.loadString('assets/licenses/unicode-15.0.txt');
+    yield LicenseEntryWithLineBreaks(<String>['Unicode Character Database (15.0.0)'], unicodeNotice);
   });
 }
 
@@ -1372,4 +1375,27 @@ may consider it more useful to permit linking proprietary applications with
 the library.  If this is what you want to do, use the GNU Lesser General
 Public License instead of this License.  But first, please read
 <https://www.gnu.org/licenses/why-not-lgpl.html>.
+''';
+
+const _mlkitNotice = '''
+Google ML Kit Text Recognition (Chinese)
+com.google.mlkit:text-recognition-chinese:16.0.1
+
+This bundled Google SDK is subject to the Google ML Kit terms:
+https://developers.google.com/ml-kit/terms
+Android SDK data disclosure:
+https://developers.google.com/ml-kit/android-data-disclosure
+
+Recognition runs on-device. Screenshots and recognized text are not sent to
+Google by this SDK. The SDK collects usage statistics such as device model,
+app version and processing time. Phone control may send screenshots and
+recognized text to the user's configured model.
+
+Local recognition is enabled by default. While off, recognition requests do not
+trigger SDK loading or initialization. Turning it off prevents new recognition,
+but does not uninstall
+the SDK or promise to clear or stop sending previously accumulated SDK statistics.
+The dsh-go anonymous usage statistics switch does not control this SDK.
+The Apache 2.0 license for documentation sample code is not the license for
+this SDK binary. This notice does not replace Google's SDK terms.
 ''';

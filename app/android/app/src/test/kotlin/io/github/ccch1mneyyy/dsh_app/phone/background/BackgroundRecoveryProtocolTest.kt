@@ -17,11 +17,49 @@ class BackgroundRecoveryProtocolTest {
             Proto.RESOURCE_RECOVERY_VERSION to 1, Proto.RECOVERY_PEER to peer,
             Proto.RECOVERY_BOOT to boot, Proto.RECOVERY_PID to 42, Proto.RECOVERY_UID to 2000,
             Proto.RECOVERY_PID_NS_DEV to 7L, Proto.RECOVERY_PID_NS_INO to 9L)
-        assertEquals(birth, BackgroundRecoveryProtocol.birth(cap::get))
+        assertEquals(birth, BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey))
         cap[Proto.RECOVERY_PID] = 42L
-        assertNull(BackgroundRecoveryProtocol.birth(cap::get))
+        assertNull(BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey))
         cap[Proto.RECOVERY_PID] = 42; cap.remove(Proto.RECOVERY_PID_NS_INO)
-        assertNull(BackgroundRecoveryProtocol.birth(cap::get))
+        assertNull(BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey))
+    }
+
+    @Test fun namespaceUnavailableRequiresExplicitBooleanAndExactZeroSentinels() {
+        val cap = mutableMapOf<String, Any?>(
+            Proto.RESOURCE_RECOVERY_VERSION to 1, Proto.RECOVERY_PEER to peer,
+            Proto.RECOVERY_BOOT to boot, Proto.RECOVERY_PID to 42, Proto.RECOVERY_UID to 2000,
+            Proto.RECOVERY_PID_NS_DEV to 0L, Proto.RECOVERY_PID_NS_INO to 0L,
+            Proto.RECOVERY_PID_NS_AVAILABLE to false)
+        assertEquals(birth.copy(pidNsDev = 0L, pidNsIno = 0L, pidNsAvailable = false),
+            BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey))
+        for ((key, value) in listOf(
+            Proto.RECOVERY_PID_NS_AVAILABLE to true, Proto.RECOVERY_PID_NS_AVAILABLE to null,
+            Proto.RECOVERY_PID_NS_AVAILABLE to 0, Proto.RECOVERY_PID_NS_AVAILABLE to "false",
+            Proto.RECOVERY_PID_NS_DEV to 7L, Proto.RECOVERY_PID_NS_INO to 9L,
+            Proto.RECOVERY_PID_NS_DEV to 0, Proto.RECOVERY_PID_NS_INO to 0,
+        )) {
+            val bad = cap + (key to value)
+            assertNull(BackgroundRecoveryProtocol.birth(bad::get, bad::containsKey))
+        }
+        cap.remove(Proto.RECOVERY_PID_NS_AVAILABLE)
+        assertNull(BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey))
+        cap[Proto.RECOVERY_PID_NS_DEV] = 7L; cap[Proto.RECOVERY_PID_NS_INO] = 9L
+        cap[Proto.RECOVERY_PID_NS_AVAILABLE] = true
+        assertEquals(birth, BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey))
+        cap[Proto.RECOVERY_PID_NS_AVAILABLE] = null
+        assertNull(BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey))
+    }
+
+    @Test fun unavailableNamespaceCannotConsumeDeadPeerEmptyButCanUseIndependentProofs() {
+        val unavailable = record(11).copy(birth = birth.copy(pidNsDev = 0L, pidNsIno = 0L, pidNsAvailable = false))
+        val receipt = mutableMapOf<String, Any?>(Proto.OK to true,
+            Proto.RESOURCE_RECOVERY_VERSION to 1, Proto.RECOVERY_PEER to peer,
+            Proto.OWNER to owner, Proto.RECOVERY_KIND to "deadPeerEmpty", Proto.DISPLAY_ID to 11)
+        assertFalse(BackgroundRecoveryProtocol.recovered(unavailable, receipt::get, receipt::containsKey))
+        receipt[Proto.RECOVERY_KIND] = "previousBoot"
+        assertTrue(BackgroundRecoveryProtocol.recovered(unavailable, receipt::get, receipt::containsKey))
+        receipt[Proto.RECOVERY_KIND] = "peerRetired"
+        assertTrue(BackgroundRecoveryProtocol.retired(peer, receipt::get))
     }
 
     @Test fun allocationConsumesTheAlreadyStrippedBodyAndNeverTreatsPinAsAnId() {

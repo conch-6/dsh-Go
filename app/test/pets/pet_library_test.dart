@@ -3,7 +3,12 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:dsh_app/l10n/gen/app_localizations.dart';
 import 'package:dsh_app/pets/pet_library.dart';
+import 'package:dsh_app/pets/pet_pack.dart';
+import 'package:dsh_app/pets/pet_pack_validator.dart' show petArchiveByteCap;
+import 'package:dsh_app/ui/pets/pet_picker.dart' show codexImportWarnings, codexWarningText;
+import 'package:flutter/widgets.dart' show Locale;
 import 'package:flutter_test/flutter_test.dart';
 
 /// A real (transparent) PNG of [w] × [h]; [data] replaces its image data
@@ -126,7 +131,9 @@ void main() {
     expect(pngIntact(Uint8List.fromList(whole)..[40] ^= 0xff), isFalse);
     // A chunk a decoder may skip (ancillary: lower-case first letter) is fine; an
     // unknown critical one (upper-case first) or a name that isn't four letters is not.
-    expect(pngIntact(png(32, 16, chunks: ['tEXt', 'abCd'])), isTrue);
+    expect(pngIntact(png(32, 16, chunks: ['abCd'])), isTrue);
+    // One a decoder knows but that is malformed (an empty tEXt has no keyword) is not.
+    expect(pngIntact(png(32, 16, chunks: ['tEXt'])), isFalse);
     expect(pngIntact(png(32, 16, chunks: ['ABCD'])), isFalse);
     expect(pngIntact(png(32, 16, chunks: ['ab1d'])), isFalse);
     // Interlaced 2 × 2: Adam7 passes 1, 6 and 7 hold a row each (1, 1 and 2 pixels).
@@ -339,6 +346,51 @@ void main() {
     });
   });
 
+  test('schema1 remains authoritative when an extra Codex manifest is present', () async {
+    final result = await library.install(
+      zip({
+        'pack.json': utf8.encode(jsonEncode(packJson())),
+        'idle.png': png(32, 16),
+        'pet.json': utf8.encode('{not a Codex manifest'),
+      }),
+    );
+    expect(result.id, 'user-cat');
+    final dir = await library.folder(result.id);
+    expect(dir.listSync().map((e) => e.uri.pathSegments.last).toSet(), {'pack.json', 'idle.png'});
+    // Falling back would report a missing Codex atlas. The authored pack's
+    // own schema error must remain the reason, and the installed pet survives.
+    await expectLater(
+      library.install(zip({'pack.json': utf8.encode('{'), 'pet.json': utf8.encode('{}')})),
+      problem(PetImportProblem.badPack),
+    );
+    expect((await library.load('user-cat')).name, '小猫');
+  });
+
+  test('failed replacement keeps the previous JSON and sheet byte for byte', () async {
+    await library.install(zip({'pack.json': utf8.encode(jsonEncode(packJson())), 'idle.png': png(32, 16)}));
+    final dir = await library.folder('user-cat');
+    final beforeJson = File('${dir.path}/pack.json').readAsBytesSync();
+    final beforePng = File('${dir.path}/idle.png').readAsBytesSync();
+    final broken = png(32, 16)..[29] ^= 1;
+    await expectLater(
+      library.install(zip({'pack.json': utf8.encode(jsonEncode(packJson(name: 'replacement'))), 'idle.png': broken})),
+      problem(PetImportProblem.badSheet),
+    );
+    expect(File('${dir.path}/pack.json').readAsBytesSync(), beforeJson);
+    expect(File('${dir.path}/idle.png').readAsBytesSync(), beforePng);
+    expect(leftovers(), isEmpty);
+  });
+
+  test('oversized archive is rejected before reading its payload', () async {
+    // A sparse file exercises the declared-file gate without a large fixture.
+    final file = File('${temp.path}/oversized.zip');
+    final handle = file.openSync(mode: FileMode.write);
+    handle.truncateSync(petArchiveByteCap + 1);
+    handle.closeSync();
+    await expectLater(library.install(file), problem(PetImportProblem.tooLarge));
+    expect(await Directory('${temp.path}/pets').exists(), isFalse);
+  });
+
   group('turned away, nothing left behind', () {
     tearDown(() async {
       if (await Directory('${temp.path}/pets').exists()) expect(leftovers(), isEmpty);
@@ -414,5 +466,27 @@ void main() {
         problem(PetImportProblem.badSheet),
       );
     });
+  });
+
+  test('a pet converted from a Codex pet says what did not carry over', () async {
+    final dir = Directory.systemTemp.createTempSync('codex-warnings');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final json = {
+      ...packJson(),
+      'codexImport': {
+        'warnings': ['roam-left-mirrors-right-track', 'missing-license', 'something-new'],
+      },
+    };
+    File('${dir.path}/pack.json').writeAsStringSync(jsonEncode(json));
+    final pack = PetPack.parse(json, dir: dir.path);
+    final warnings = codexImportWarnings(pack);
+    expect(warnings, ['roam-left-mirrors-right-track', 'missing-license', 'something-new']);
+    final l10n = lookupL10n(const Locale('zh'));
+    expect(codexWarningText(l10n, warnings[0]), '往左走用的是往右走那一行的镜像');
+    expect(codexWarningText(l10n, warnings[1]), '包里没写授权');
+    // One this app doesn't know yet: shown as it is.
+    expect(codexWarningText(l10n, warnings[2]), 'something-new');
+    // Any other pet: nothing to say.
+    expect(codexImportWarnings(PetPack.parse(packJson(), dir: dir.path.replaceAll('codex', 'none'))), isEmpty);
   });
 }

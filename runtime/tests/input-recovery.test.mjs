@@ -23,6 +23,26 @@ const { z } = require('zod');
 const { AgentModel, modelSelectionProjectionDefinition } = await import(pathToFileURL(join(deps, 'node_modules/@deepseek-ai/dsh-agent/lib/index.js')));
 const { ToolActivationError } = await import(pathToFileURL(join(deps, 'node_modules/@deepseek-ai/dsh-tools/lib/index.js')));
 const sessionApi = await import(pathToFileURL(join(deps, 'node_modules/@deepseek-ai/dsh-session/lib/index.js')));
+// The companion recall gates (runtime/patches/*-companion-recall-gates.diff)
+// add an import of dshGoRecall to the agent loop; the extracted classes need it
+// in scope. With no recall module registered its gates let everything through.
+// From the dependency tree, else from the patched candidate itself (a separate
+// deps prefix may be an older, unpatched install).
+async function recallBinding() {
+  for (const llm of [
+    join(deps, 'node_modules/@deepseek-ai/dsh-llm/lib/index.js'),
+    resolve(dirname(modulePath), '../../dsh-llm/lib/index.js'),
+  ]) {
+    try {
+      const { dshGoRecall: binding } = await import(pathToFileURL(llm));
+      if (binding !== undefined) return binding;
+    } catch {
+      // Not there: try the next tree.
+    }
+  }
+  throw Error('no patched @deepseek-ai/dsh-llm with dshGoRecall in the deps prefix or beside the candidate');
+}
+const dshGoRecall = await recallBinding();
 
 function region(name) {
   const start = source.indexOf(`//#region lib/types/${name}.js`);
@@ -33,7 +53,7 @@ function region(name) {
 
 class LlmError extends Error {}
 const bindings = {
-  z$1: z, AgentModel, ToolActivationError,
+  z$1: z, AgentModel, ToolActivationError, dshGoRecall,
   agentEvents: (ctx, agent) => { ctx.constructingAgent = agent; return ctx.dispatch; },
   createScope: ctx => ({ ctx }),
   assembleContextFor: (agent, signal) => ({ agent, signal }),

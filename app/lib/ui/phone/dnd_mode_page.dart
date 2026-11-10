@@ -78,6 +78,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
   late final AppLifecycleListener _lifecycle;
 
   PhoneController get _phone => ref.read(phoneProvider.notifier);
+  bool get _ready => ref.read(phoneProvider).status.ready;
 
   @override
   void initState() {
@@ -97,7 +98,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
   }
 
   Future<bool> _run(Future<PhoneResult> Function() action, {String? done}) async {
-    if (_busy) return false;
+    if (!_ready || _busy) return false;
     setState(() {
       _busy = true;
       _error = null;
@@ -129,7 +130,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
 
   /// The explicit choice. Root still requires its risk notice and the manager prompt.
   Future<void> _use(PhonePrivilegedMode mode) async {
-    if (_resourceBlocked) return;
+    if (!_ready || _resourceBlocked) return;
     if (mode == PhonePrivilegedMode.root && !await confirmRisk(context, RiskNotices.rootChannel)) return;
     if (!mounted) return;
     // Folded back once it works: the row says 使用中.
@@ -141,6 +142,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
   /// Not held back by a choice still pending: turning off is how a root
   /// prompt left unanswered is cancelled.
   Future<void> _close() async {
+    if (!_ready) return;
     final l10n = context.l10n;
     final result = await _phone.setPrivilegedMode(PhonePrivilegedMode.off);
     if (!mounted) return;
@@ -153,7 +155,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
 
   /// Shizuku's or Sui's own permission dialog.
   Future<void> _authorize(PhonePrivilegedMode mode) async {
-    if (_busy) return;
+    if (!_ready || _busy) return;
     final l10n = context.l10n;
     setState(() => _busy = true);
     final ok = await _phone.requestPrivilegedPermission(mode);
@@ -188,13 +190,27 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
     await _run(() => _phone.adbConnect(port: port), done: l10n.phoneDndConnected);
   }
 
+  bool _hasSlotMetadata(PhoneStatus status) => status.background.parallelism != null ||
+      status.task.backgroundSlot != null || status.tasks.any((task) => task.backgroundSlot != null);
+
+  Iterable<PhoneTaskStatus> _previewTasks(PhoneStatus status) {
+    final modern = _hasSlotMetadata(status);
+    return (modern ? status.tasks : [status.task]).where((task) =>
+      task.active && task.id != null && task.id! > 0 && (!modern || task.backgroundSlot == true));
+  }
+
   Future<void> _showPreview(int taskId) async {
-    if (_previewOpen) return;
+    final status = ref.read(phoneProvider).status;
+    if (_previewOpen || !status.ready || !status.background.previewEnabled ||
+        !_previewTasks(status).any((task) => task.id == taskId)) {
+      return;
+    }
     _previewOpen = true;
     try {
-      await showAppDialog<void>(context: context, builder: (_) => PhoneBackgroundPreviewDialog(
+      await showAppDialog<void>(context: context, builder: (_) => Consumer(builder: (_, ref, _) => PhoneBackgroundPreviewDialog(
         channel: ref.read(phoneChannelProvider), taskId: taskId,
-      ));
+        enabled: ref.watch(phoneProvider.select((s) => s.status.ready)),
+      )));
     } finally {
       _previewOpen = false;
     }
@@ -203,8 +219,10 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final bg = ref.watch(phoneProvider.select((s) => s.status.background));
-    final task = ref.watch(phoneProvider.select((s) => s.status.task));
+    final status = ref.watch(phoneProvider.select((s) => s.status));
+    final bg = status.background;
+    final hasSlotMetadata = _hasSlotMetadata(status);
+    final previewTasks = _previewTasks(status);
     final using = bg.effectiveMode;
     final waiting = using == PhonePrivilegedMode.root && bg.root.starting;
     final open = _open ?? (bg.effectiveReady ? PhonePrivilegedMode.off : using);
@@ -231,7 +249,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
                 subtitleMaxLines: 10,
                 trailing: TextButton(
                   key: const ValueKey('phone-resource-recovery-retry'),
-                  onPressed: !_busy && recovery.canRetry ? _retryResourceRecovery : null,
+                  onPressed: _ready && !_busy && recovery.canRetry ? _retryResourceRecovery : null,
                   child: Text(l10n.phoneResourceRecoveryRetry),
                 ),
               ),
@@ -249,7 +267,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
                 subtitleMaxLines: 8,
                 trailing: TextButton(
                   key: const ValueKey('phone-gate-cleanup-retry'),
-                  onPressed: !_busy && cleanup.canRetry ? () => _retryCleanup(cleanup.handle!) : null,
+                  onPressed: _ready && !_busy && cleanup.canRetry ? () => _retryCleanup(cleanup.handle!) : null,
                   child: Text(l10n.phoneGateCleanupRetry),
                 ),
               ),
@@ -266,7 +284,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
                 title: l10n.phoneDndUsing(using.label(l10n)),
                 titleMaxLines: 2,
                 subtitle: bg.effectiveReady ? l10n.phoneReady : (waiting ? bg.effectiveReason : null),
-                trailing: TextButton(onPressed: _close, child: Text(l10n.commonClose)),
+                trailing: TextButton(onPressed: _ready ? _close : null, child: Text(l10n.commonClose)),
               ),
               // Old native modules neither report nor save a keep choice.
               if (bg.privileged != null) _keepRow(using, bg.keep),
@@ -276,12 +294,19 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
                   title: l10n.phonePreviewTitle,
                   subtitle: l10n.phonePreviewDescription,
                   subtitleMaxLines: 4,
-                  trailing: Switch(value: bg.previewEnabled, onChanged: _busy ? null : (enabled) =>
+                  trailing: Switch(value: bg.previewEnabled, onChanged: !_ready || _busy ? null : (enabled) =>
                     unawaited(_run(() async => PhoneResult(await _phone.setBackgroundPreview(enabled))))),
                 ),
-                if (task.id case final taskId? when bg.previewEnabled && task.active)
-                  ListPageRow(leading: const SizedBox(), title: l10n.phonePreviewOpen,
-                    onTap: () => unawaited(_showPreview(taskId))),
+                if (bg.previewEnabled)
+                  for (final candidate in previewTasks)
+                    ListPageRow(
+                      key: ValueKey('phone-preview-task-${candidate.id}'),
+                      leading: const SizedBox(),
+                      title: !hasSlotMetadata ? l10n.phonePreviewOpen
+                          : l10n.phonePreviewTask(candidate.id!.toString()),
+                      subtitle: candidate.app,
+                      onTap: _ready ? () => unawaited(_showPreview(candidate.id!)) : null,
+                    ),
               ],
             ],
           ),
@@ -289,6 +314,40 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
           if (!bg.effectiveReady && !waiting)
             PhoneNote(tone: NoteTone.warn, text: bg.effectiveReason ?? l10n.phoneNotReadyYet),
         ],
+        if (bg.parallelism case final capacity? when status.ready)
+          ListPageCard(
+            margin: _groupMargin,
+            title: l10n.phoneBackgroundParallelTitle,
+            children: [
+              ListPageRow(
+                title: l10n.phoneBackgroundParallelStatus(capacity.configuredLimit, capacity.effectiveLimit, capacity.heldSlots),
+                titleMaxLines: 4,
+                subtitle: switch (capacity.reason) {
+                  'off' => l10n.phoneBackgroundParallelOff,
+                  'unsupported' => l10n.phoneBackgroundParallelUnsupported,
+                  'connectionRequired' => l10n.phoneBackgroundParallelConnection,
+                  'busy' => l10n.phoneBackgroundParallelBusy,
+                  'resourceRecovery' => l10n.phoneBackgroundParallelRecovery,
+                  'peerUnsupported' => l10n.phoneBackgroundParallelPeer,
+                  'transportSerial' => l10n.phoneBackgroundParallelSerial,
+                  _ => l10n.phoneBackgroundParallelDescription,
+                },
+                subtitleMaxLines: 5,
+              ),
+              for (final limit in const [1, 2, 3])
+                Semantics(
+                  selected: capacity.configuredLimit == limit,
+                  inMutuallyExclusiveGroup: true,
+                  child: ListPageRow(
+                    key: ValueKey('phone-background-limit-$limit'),
+                    leading: Icon(capacity.configuredLimit == limit ? AppIcons.radioOn : AppIcons.radioOff),
+                    title: l10n.phoneBackgroundParallelChoice(limit),
+                    onTap: !_ready || _busy || capacity.configuredLimit == limit ? null : () =>
+                      unawaited(_run(() => _phone.setBackgroundParallelLimit(limit))),
+                  ),
+                ),
+            ],
+          ),
         if (bg.viewport case final viewport? when bg.androidOk)
           ListPageCard(
             margin: _groupMargin,
@@ -307,7 +366,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
                     key: ValueKey('phone-viewport-${preset.name}'),
                     leading: Icon(viewport == preset ? AppIcons.radioOn : AppIcons.radioOff),
                     title: preset == PhoneBackgroundViewport.portrait ? l10n.phoneViewportPortrait : l10n.phoneViewportLandscape,
-                    onTap: _busy || viewport == preset ? null : () =>
+                    onTap: !_ready || _busy || viewport == preset ? null : () =>
                       unawaited(_run(() => _phone.setBackgroundViewport(preset))),
                   ),
                 ),
@@ -366,8 +425,8 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
         subtitleColor: color,
         // What keeping means is the consent: never cut short.
         subtitleMaxLines: 8,
-        onTap: _busy ? null : () => toggle(!keep.enabled),
-        trailing: Switch(value: keep.enabled, onChanged: _busy ? null : toggle),
+        onTap: !_ready || _busy ? null : () => toggle(!keep.enabled),
+        trailing: Switch(value: keep.enabled, onChanged: !_ready || _busy ? null : toggle),
       ),
     );
   }
@@ -472,7 +531,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
   Widget _useButton(PhonePrivilegedMode mode, PhoneBackgroundStatus bg) {
     final l10n = context.l10n;
     return FilledButton(
-      onPressed: bg.androidOk && !_busy && !_resourceBlocked ? () => _use(mode) : null,
+      onPressed: _ready && bg.androidOk && !_busy && !_resourceBlocked ? () => _use(mode) : null,
       child: Text(
         bg.effectiveMode == mode
             ? l10n.phoneGateRetest
@@ -484,7 +543,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
   }
 
   Widget _grantButton(PhonePrivilegedMode mode) =>
-      FilledButton(onPressed: _busy ? null : () => _authorize(mode), child: Text(context.l10n.phoneDndGrantShizuku));
+      FilledButton(onPressed: !_ready || _busy ? null : () => _authorize(mode), child: Text(context.l10n.phoneDndGrantShizuku));
 
   List<Widget> _shizuku(PhoneBackgroundStatus bg) {
     final l10n = context.l10n;
@@ -556,7 +615,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
             ? null
             : using
             ? FilledButton(
-                onPressed: bg.androidOk && !_busy && !_resourceBlocked ? () => _use(PhonePrivilegedMode.root) : null,
+                onPressed: _ready && bg.androidOk && !_busy && !_resourceBlocked ? () => _use(PhonePrivilegedMode.root) : null,
                 child: Text(r.connected ? l10n.phoneGateRetest : l10n.phoneDndRootRetry),
               )
             : _useButton(PhonePrivilegedMode.root, bg),
@@ -567,7 +626,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
   List<Widget> _adb(PhoneBackgroundStatus bg) {
     final l10n = context.l10n;
     final a = bg.adb;
-    final usable = bg.androidOk;
+    final usable = _ready && bg.androidOk;
     final maker = ref.watch(phoneProvider.select((s) => s.status.device.manufacturer));
     final xiaomi = RomFamily.of(maker) == RomFamily.xiaomi;
     return [

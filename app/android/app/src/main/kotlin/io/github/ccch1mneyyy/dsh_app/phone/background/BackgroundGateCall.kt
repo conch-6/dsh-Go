@@ -16,9 +16,9 @@ internal class BackgroundGateCall<C : Any>(
     private var probing = true
     private var phase = "pending"
 
-    fun status(peerAlive: Boolean): Map<String, Any?> = synchronized(lock) {
+    fun status(): Map<String, Any?> = synchronized(lock) {
         mapOf("v" to 1, "state" to phase, "handle" to if (phase == "idle") null else handle,
-            "canRetry" to (!probing && phase == "unknown" && (peerAlive || resource.physicalComplete)))
+            "canRetry" to (!probing && phase == "unknown"))
     }
 
     /** Called only after the original call has drained, including a lost/throwing reply. */
@@ -28,7 +28,7 @@ internal class BackgroundGateCall<C : Any>(
             probing = false
             phase = "cleaning"
         }
-        return releaseClaimed(release)
+        return releaseClaimed { resource.cleanup { release(it, io.owner) } }
     }
 
     /** A UI retry cannot overtake initial cleanup or clear an already completed caller's slot. */
@@ -37,12 +37,23 @@ internal class BackgroundGateCall<C : Any>(
             if (probing || phase != "unknown") return false
             phase = "cleaning"
         }
-        return releaseClaimed(release)
+        return releaseClaimed { resource.cleanup { release(it, io.owner) } }
     }
 
-    private fun releaseClaimed(release: (C, String) -> Boolean): Boolean {
+    /** Same original drained scope; a dead pin is not itself evidence of absent resources. */
+    fun retryRecovery(dead: (C) -> Boolean, verify: (BackgroundResourceJournal.Record) -> Boolean): Boolean {
+        synchronized(lock) {
+            if (probing || phase != "unknown") return false
+            phase = "cleaning"
+        }
+        return releaseClaimed { resource.recover(dead, verify) }
+    }
+
+    fun recoveryPending(): Boolean = synchronized(lock) { !probing && phase == "unknown" }
+
+    private fun releaseClaimed(cleanup: () -> Boolean): Boolean {
         io.seal()
-        val released = try { resource.cleanup { release(it, io.owner) } } catch (_: Exception) { false }
+        val released = try { cleanup() } catch (_: Exception) { false }
         synchronized(lock) { phase = if (released) "idle" else "unknown" }
         return released
     }

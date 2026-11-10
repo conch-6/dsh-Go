@@ -14,6 +14,8 @@
 #                    code per IP + browser, so it undercounts behind NAT)
 #   app (0.9.9 on)   daily active installs (hashed install ids), day-7 retention,
 #                    version / ABI / maker / engine / language, feature totals;
+#                    model and system (1.0.15 on), each one shown only once
+#                    MIN_GROUP installs share it;
 #                    a device's repeats on one day count once
 #
 # The token needs Account → Account Analytics → Read. It's only read from
@@ -63,11 +65,12 @@ WHERE timestamp > NOW() - INTERVAL '$SPAN' DAY
 GROUP BY day, device, app, abi
 FORMAT JSON"
 SQL[usage]="SELECT blob1 AS day, blob2 AS device, blob3 AS app, blob4 AS abi, blob5 AS maker, blob6 AS lang, blob7 AS engine,
+  blob8 AS model, blob9 AS rom,
   max(double1) AS build, max(double2) AS sdk, max(double3) AS turns, max(double4) AS voice, max(double5) AS phone,
   max(double6) AS share, max(double7) AS gen, max(double8) AS plugins
 FROM dshgo_usage
 WHERE timestamp > NOW() - INTERVAL '$USAGE_SPAN' DAY
-GROUP BY day, device, app, abi, maker, lang, engine
+GROUP BY day, device, app, abi, maker, lang, engine, model, rom
 FORMAT JSON"
 
 if [[ $DRY == 1 ]]; then

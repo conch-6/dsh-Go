@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 原生界面文字（通知、悬浮窗、前台服务、Toast），经 i18n/AppStrings.kt 跟随 App 语言。 -->
 <resources>
+    <string name="self_update_confirm_title">安装这次 DSH Go 更新？</string>
+    <string name="self_update_confirm">通道：%1$s（UID %2$d）\n版本：%3$s（%4$d）\nSHA-256：%5$s\n\n只允许这一次已校验的 DSH Go 更新。应用将关闭，正在进行的任务可能中断。现有应用数据会保留。系统签名验证和安全策略仍然生效，系统仍可能拒绝安装。</string>
+    <string name="self_update_allow_once">安装本次更新</string>
+    <string name="self_update_wait_title">结束本次安装等待？</string>
+    <string name="self_update_wait_confirm">先前的请求可能仍在系统安装器中执行。清除此本地记录不等于取消安装，请先确认系统没有正在进行的安装。清除记录不会安装、重试或切换安装通道。</string>
+    <string name="self_update_wait_end">清除等待记录</string>
+    <string name="phone_shell_confirm">执行 Android 系统命令（%1$s，UID %2$s）。这可能修改系统或应用数据；屏幕操作的免确认不适用。仅允许本条命令：\n\n%3$s</string>
     <!-- background -->
     <string name="background_shizuku_missing">未检测到可用的 Shizuku / Sui 接口</string>
     <string name="background_sui_stopped">Sui 接口当前不可用</string>

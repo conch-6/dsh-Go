@@ -3,6 +3,7 @@ package io.github.ccch1mneyyy.dsh_app.phone.skills
 import io.github.ccch1mneyyy.dsh_app.phone.*
 import io.github.ccch1mneyyy.dsh_app.runtime.PhoneSkillInstallResult
 import io.github.ccch1mneyyy.dsh_app.runtime.PhoneSkillWrite
+import io.github.ccch1mneyyy.dsh_app.runtime.PhoneSkillBundleInstaller as B
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -120,6 +121,25 @@ class PhoneSkillDraftsTest {
         assertNotSame(write, (f.save(edited) as PhoneSkillDrafts.Started).write)
     }
 
+    @Test fun viewingAnAsynchronousFailureReportsTheFixedOutcomeWithoutRetrying() {
+        for (failure in PhoneSkillInstallResult.Refused.values()) {
+            val f = Fixture(); val view = f.open()
+            val write = (f.save(view) as PhoneSkillDrafts.Started).write
+            assertTrue(write.beginCommit())
+            assertEquals(PhoneSkillWrite.Phase.COMMITTING,
+                (f.manager.view(f.client, view.draftId, 1) as PhoneSkillDrafts.Shown).view.phase)
+            write.finish(failure) // The installer may finish before its notification callback runs.
+            val expected = PhoneSkillDrafts.Code.valueOf(failure.name)
+            repeat(2) {
+                assertEquals(expected, code(f.manager.view(f.client, view.draftId, 1)))
+                assertEquals(expected, code(f.save(view)))
+            }
+            val edited = (f.manager.edit(f.client, view.draftId, 1, 1, changes()) as PhoneSkillDrafts.Shown).view
+            assertEquals(2L, edited.revision)
+            assertNotSame(write, (f.save(edited) as PhoneSkillDrafts.Started).write)
+        }
+    }
+
     @Test fun retiredQueuedClientCanNeverOpenAndOldDetachCannotCancelReplacement() {
         val f = Fixture(); f.manager.retireClient(f.client)
         assertEquals(PhoneSkillDrafts.Code.STALE, code(f.manager.open(f.client, f.source.owner, true)))
@@ -205,5 +225,252 @@ class PhoneSkillDraftsTest {
                 assertEquals(PhoneSkillDrafts.Code.STALE, code(f.save(view)))
             }
         }
+    }
+    private fun bundle(view: PhoneSkillDrafts.View, revision: Long = view.revision + 1,
+        markdown: String = view.markdown): B.Document {
+        val rev = "b".repeat(32)
+        val route = """{"schema":1,"skillName":"${view.skillName}","bundleRevision":"$rev",
+            "descriptorSet":"fixture-only","appSlots":[{"key":"app1","kind":"user_selected_app"}],
+            "parameters":[],"steps":[{"op":"open_app","appSlot":"app1","screen":"main",
+            "post":{"kind":"page_is","pageKey":"home"}}]}""".toByteArray()
+        val descriptor = PhoneSkillRoute.Descriptor("fixture-only", setOf("app1"), emptyList(),
+            setOf(PhoneSkillRoute.Step(PhoneSkillRoute.Op.OPEN_APP, "app1", PhoneScreen.MAIN,
+                post = PhoneSkillRoute.Post.PageIs("home"))))
+        return (B.freeze(view.skillName, rev, revision, markdown.toByteArray(), route,
+            mapOf("fixture-only" to descriptor)) as B.Frozen.Ready).document
+    }
+
+    @Test fun nativeBundleBindingRevokesTheAlreadyShownTemplateConfirmation() {
+        val f = Fixture(); val old = f.open(); val doc = bundle(old)
+        val current = (f.manager.bindBundle(f.manager.currentEpoch(), old.owner, old.draftId,
+            old.revision, doc) as PhoneSkillDrafts.Shown).view
+        assertEquals(old.revision + 1, current.revision)
+        assertEquals(doc.identity.revision, current.bundleRevision)
+        assertEquals(PhoneSkillDrafts.Code.STALE, code(f.save(old)))
+        val write = (f.save(current) as PhoneSkillDrafts.Started).write
+        assertSame(doc, write.bundle)
+        assertSame(write, (f.save(current) as PhoneSkillDrafts.Existing).write)
+        assertEquals(PhoneSkillDrafts.Code.BUSY, code(f.manager.bindBundle(f.manager.currentEpoch(),
+            current.owner, current.draftId, current.revision, bundle(current))))
+    }
+
+    @Test fun witnessBindingRequiresExactEpochOwnerNameMarkdownAndNextRevision() {
+        val f = Fixture(); val old = f.open(); val epoch = f.manager.currentEpoch()
+        assertEquals(PhoneSkillDrafts.Code.STALE, code(f.manager.bindBundle(epoch + 1, old.owner,
+            old.draftId, old.revision, bundle(old))))
+        assertEquals(PhoneSkillDrafts.Code.STALE, code(f.manager.bindBundle(epoch,
+            old.owner.copy(lifecycle = old.owner.lifecycle + 1), old.draftId, old.revision, bundle(old))))
+        for (doc in listOf(bundle(old, old.revision), bundle(old, markdown = old.markdown + "changed"),
+            bundle(old.copy(skillName = "phone-task-" + "c".repeat(32))))) {
+            assertEquals(PhoneSkillDrafts.Code.INVALID, code(f.manager.bindBundle(epoch, old.owner,
+                old.draftId, old.revision, doc)))
+        }
+        assertEquals(old, (f.manager.view(f.client, old.draftId, old.owner.taskId) as PhoneSkillDrafts.Shown).view)
+        assertNull((f.save(old) as PhoneSkillDrafts.Started).write.bundle) // No route is inferred from Trace.
+    }
+
+    @Test fun anyAcceptedEditDropsThePreviousRouteAndReturnsToTemplateSaving() {
+        val f = Fixture(); val old = f.open()
+        val bound = (f.manager.bindBundle(f.manager.currentEpoch(), old.owner, old.draftId, old.revision,
+            bundle(old)) as PhoneSkillDrafts.Shown).view
+        val edited = (f.manager.edit(f.client, bound.draftId, bound.owner.taskId, bound.revision,
+            changes()) as PhoneSkillDrafts.Shown).view
+        assertNull(edited.bundleRevision)
+        assertEquals(bound.revision + 1, edited.revision)
+        assertEquals(PhoneSkillDrafts.Code.STALE, code(f.save(bound)))
+        assertNull((f.save(edited) as PhoneSkillDrafts.Started).write.bundle)
+    }
+
+    @Test fun committingUnverifiedSurvivesRetirementAndReleasesTheEditorOnlyAfterPhysicalFinish() {
+        for (publication in B.Publication.entries) {
+            val f = Fixture(); val old = f.open(); val doc = bundle(old)
+            val bound = (f.manager.bindBundle(f.manager.currentEpoch(), old.owner, old.draftId,
+                old.revision, doc) as PhoneSkillDrafts.Shown).view
+            val write = (f.save(bound) as PhoneSkillDrafts.Started).write
+            assertTrue(write.beginCommit())
+            f.manager.onEngineRetired()
+            assertEquals(PhoneSkillWrite.Phase.COMMITTING, write.phase())
+            assertFalse(write.cancel())
+            assertEquals(PhoneSkillDrafts.Code.CANNOT_CANCEL,
+                code(f.manager.discard(f.client, bound.draftId, bound.owner.taskId)))
+            val result = PhoneSkillInstallResult.BundleUnverified(doc.identity, publication, B.Verification.BUNDLE_INVALID)
+            write.finish(result)
+            val receipt = f.manager.saved(bound.draftId, write) as PhoneSkillDrafts.Unverified
+            assertEquals(doc.identity, receipt.bundle)
+            assertEquals(publication, receipt.publication)
+            assertEquals(receipt, f.manager.view(f.client, bound.draftId, bound.owner.taskId))
+            assertEquals(receipt, f.manager.saved(bound.draftId, write))
+            val next = candidate(2)
+            assertTrue(f.manager.offer(f.manager.currentEpoch(), next))
+            assertTrue(f.manager.open(f.client, next.owner, true) is PhoneSkillDrafts.Shown)
+            assertEquals(receipt, f.manager.saved(bound.draftId, write)) // Late callback cannot replace new editor.
+        }
+    }
+
+    @Test fun clientRetirementCannotErasePublishedBundleMetadataOrPermitAnotherCommit() {
+        val f = Fixture(); val old = f.open(); val doc = bundle(old)
+        val bound = (f.manager.bindBundle(f.manager.currentEpoch(), old.owner, old.draftId,
+            old.revision, doc) as PhoneSkillDrafts.Shown).view
+        val write = (f.save(bound) as PhoneSkillDrafts.Started).write
+        assertTrue(write.beginCommit()); f.manager.retireClient(f.client)
+        write.finish(PhoneSkillInstallResult.BundleSaved(doc.identity))
+        val receipt = f.manager.saved(bound.draftId, write) as PhoneSkillDrafts.Saved
+        assertEquals(doc.identity, receipt.bundle)
+        assertFalse(write.beginCommit()); assertFalse(write.cancel())
+        write.finish(PhoneSkillInstallResult.Refused.STALE)
+        assertTrue(write.result() is PhoneSkillInstallResult.BundleSaved)
+        assertEquals(receipt, f.manager.saved(bound.draftId, write))
+        assertEquals(PhoneSkillDrafts.Code.STALE, code(f.manager.view(f.client, bound.draftId, bound.owner.taskId)))
+    }
+
+    @Test fun cancellingBundleBeforePermissionKeepsTheRealWriteFromPublishing() {
+        val f = Fixture(); val old = f.open()
+        val bound = (f.manager.bindBundle(f.manager.currentEpoch(), old.owner, old.draftId,
+            old.revision, bundle(old)) as PhoneSkillDrafts.Shown).view
+        val write = (f.save(bound) as PhoneSkillDrafts.Started).write
+        assertSame(PhoneSkillDrafts.Discarded, f.manager.discard(f.client, bound.draftId, bound.owner.taskId))
+        assertFalse(write.canStage()); assertFalse(write.beginCommit())
+        write.finish(PhoneSkillInstallResult.Refused.STALE)
+        assertEquals(PhoneSkillDrafts.Code.STALE, code(f.manager.saved(bound.draftId, write)))
+    }
+
+    @Test fun nativePublicSummaryIsShownAndSavedAtTheSameNewRevision() {
+        val f = Fixture(); val old = f.open()
+        val original = PhoneSkillDraft.render(f.source, old.skillName, true) as PhoneSkillDraft.Ready
+        val preview = PhoneSkillDraft.withRouteSummary(original, "1. 核对公共页面与唯一目标；执行后核对预期状态。")!!
+        val doc = bundle(old, markdown = preview.markdown)
+        val shown = (f.manager.bindBundle(f.manager.currentEpoch(), old.owner, old.draftId,
+            old.revision, doc, preview) as PhoneSkillDrafts.Shown).view
+        assertEquals(old.revision + 1, shown.revision)
+        assertEquals(preview.markdown, shown.markdown)
+        assertFalse(shown.markdown.contains("{{check_"))
+        assertEquals(PhoneSkillDrafts.Code.STALE, code(f.save(old)))
+        val write = (f.save(shown) as PhoneSkillDrafts.Started).write
+        assertEquals(shown.markdown, write.document.markdown)
+        assertArrayEquals(shown.markdown.toByteArray(Charsets.UTF_8), write.bundle!!.bytes()[0])
+    }
+
+    @Test fun mismatchedSummaryOrOwnerCannotChangeTheShownDocument() {
+        val f = Fixture(); val old = f.open()
+        val original = PhoneSkillDraft.render(f.source, old.skillName, true) as PhoneSkillDraft.Ready
+        val preview = PhoneSkillDraft.withRouteSummary(original, "公开摘要")!!
+        assertEquals(PhoneSkillDrafts.Code.INVALID, code(f.manager.bindBundle(f.manager.currentEpoch(),
+            old.owner, old.draftId, old.revision, bundle(old), preview)))
+        val foreign = PhoneSkillDraft.render(candidate(2), old.skillName, true) as PhoneSkillDraft.Ready
+        val other = PhoneSkillDraft.withRouteSummary(foreign, "公开摘要")!!
+        assertEquals(PhoneSkillDrafts.Code.INVALID, code(f.manager.bindBundle(f.manager.currentEpoch(),
+            old.owner, old.draftId, old.revision, bundle(old, markdown = other.markdown), other)))
+        assertEquals(old, (f.manager.view(f.client, old.draftId, old.owner.taskId) as PhoneSkillDrafts.Shown).view)
+    }
+
+    private fun frozenSave(manager: PhoneSkillDrafts, client: PhoneSkillDrafts.Client, task: Long,
+        finish: Boolean = true): Pair<PhoneSkillDrafts.View, PhoneSkillWrite> {
+        val source = candidate(task)
+        assertTrue(manager.offer(manager.currentEpoch(), source))
+        val old = (manager.open(client, source.owner, true) as PhoneSkillDrafts.Shown).view
+        val bound = (manager.bindBundle(manager.currentEpoch(), old.owner, old.draftId, old.revision, bundle(old)) as PhoneSkillDrafts.Shown).view
+        val write = (manager.beginSave(client, bound.draftId, task, bound.revision, true) as PhoneSkillDrafts.Started).write
+        assertTrue(write.beginCommit())
+        if (finish) {
+            write.finish(PhoneSkillInstallResult.BundleUnverified(write.bundle!!.identity,
+                B.Publication.PUBLISHED, B.Verification.VERIFICATION_UNAVAILABLE))
+            assertTrue(manager.saved(bound.draftId, write) is PhoneSkillDrafts.Unverified)
+        }
+        return bound to write
+    }
+    private fun checkArgs(view: PhoneSkillDrafts.View) = mapOf<String, Any?>("action" to "check_save",
+        "taskId" to view.owner.taskId, "draftId" to view.draftId, "name" to view.skillName, "bundleRevision" to view.bundleRevision)
+
+    @Test fun actualBridgeCoalescesQueriesAndRetirementDoesNotReleaseTheOriginalPin() {
+        val manager = PhoneSkillDrafts(); val oldClient = manager.attachClient()
+        val (view, write) = frozenSave(manager, oldClient, 10)
+        var reads = 0; var installs = 0
+        var completed: ((PhoneSkillInstallResult) -> Unit)? = null
+        val bridge = PhoneSkillBridge(manager, { _, _ -> installs++ }, {}, check = { _, _, done -> reads++; completed = done })
+        var first: Map<String, Any?>? = null
+        bridge.checkSave(oldClient, checkArgs(view)) { first = it }
+        assertNull(first); assertEquals(1, reads)
+        manager.retireClient(oldClient); manager.onEngineRetired()
+        val current = manager.attachClient()
+        var duplicate: Map<String, Any?>? = null
+        bridge.checkSave(current, checkArgs(view)) { duplicate = it }
+        assertEquals("unverified", duplicate!!["kind"]); assertEquals(1, reads)
+        assertEquals(view.draftId, manager.saveResults().single()["draftId"])
+        checkNotNull(completed)(PhoneSkillInstallResult.BundleSaved(write.bundle!!.identity))
+        assertEquals("saved", first!!["kind"])
+        bridge.checkSave(current, checkArgs(view)) { duplicate = it }
+        assertEquals("saved", duplicate!!["kind"]); assertEquals(1, reads); assertEquals(0, installs)
+        bridge.checkSave(oldClient, checkArgs(view)) { assertEquals("stale", it["code"]) }
+        bridge.checkSave(PhoneSkillDrafts().attachClient(), checkArgs(view)) { assertEquals("stale", it["code"]) }
+        assertEquals(1, reads)
+    }
+
+    @Test fun queryMetadataSurvivesWeakWriteAndWrongDigestCannotPromoteOriginalReceipt() {
+        val manager = PhoneSkillDrafts(); val client = manager.attachClient()
+        val (view, write) = frozenSave(manager, client, 20)
+        fun begin() = manager.beginCheck(client, view.draftId, 20, view.skillName, view.bundleRevision!!) as PhoneSkillDrafts.Query
+        val first = begin()
+        val identity = write.bundle!!.identity
+        first.receipt.write.clear() // Real WeakReference cleared; Receipt owns its original small metadata.
+        assertEquals(identity, first.binding.identity)
+        val bad = manager.completeCheck(first, PhoneSkillInstallResult.BundleSaved(identity.copy(skillSha256 = "0".repeat(64))))
+        assertEquals(B.Verification.BUNDLE_INVALID, (bad as PhoneSkillDrafts.Unverified).code)
+        assertEquals(B.Publication.PUBLISHED, bad.publication)
+        val second = begin()
+        val originUnavailable = manager.completeCheck(second, PhoneSkillInstallResult.BundleUnverified(identity,
+            B.Publication.UNKNOWN, B.Verification.ORIGIN_UNAVAILABLE)) as PhoneSkillDrafts.Unverified
+        assertEquals(B.Publication.PUBLISHED, originUnavailable.publication)
+        assertEquals(B.Verification.ORIGIN_UNAVAILABLE, originUnavailable.code)
+        assertTrue(manager.completeCheck(begin(), PhoneSkillInstallResult.BundleSaved(identity)) is PhoneSkillDrafts.Saved)
+    }
+
+    @Test fun allPinnedReceiptsBlockNewSaveButAnUnpinnedUnverifiedReceiptCanBeEvicted() {
+        val manager = PhoneSkillDrafts(); val client = manager.attachClient()
+        val pinned = (1L..8L).map { task ->
+            val (view, _) = frozenSave(manager, client, task)
+            manager.beginCheck(client, view.draftId, task, view.skillName, view.bundleRevision!!) as PhoneSkillDrafts.Query
+        }
+        val source = candidate(9); assertTrue(manager.offer(manager.currentEpoch(), source))
+        val old = (manager.open(client, source.owner, true) as PhoneSkillDrafts.Shown).view
+        val view = (manager.bindBundle(manager.currentEpoch(), old.owner, old.draftId, old.revision, bundle(old)) as PhoneSkillDrafts.Shown).view
+        assertEquals(PhoneSkillDrafts.Code.BUSY, code(manager.beginSave(client, view.draftId, 9, view.revision, true)))
+        val evicted = pinned.first()
+        manager.completeCheck(evicted, PhoneSkillInstallResult.BundleUnverified(evicted.binding.identity,
+            B.Publication.PUBLISHED, B.Verification.ORIGIN_UNAVAILABLE))
+        val write = (manager.beginSave(client, view.draftId, 9, view.revision, true) as PhoneSkillDrafts.Started).write
+        assertEquals(8, manager.saveResults().size) // Seven pinned receipts + one reserved in-flight write.
+        assertTrue(write.beginCommit()); write.finish(PhoneSkillInstallResult.BundleSaved(write.bundle!!.identity))
+        assertTrue(manager.saved(view.draftId, write) is PhoneSkillDrafts.Saved)
+        assertEquals(8, manager.saveResults().size)
+        val oldQuery = manager.beginCheck(client, evicted.draftId, 1, evicted.binding.identity.name, evicted.binding.identity.revision)
+        assertEquals(PhoneSkillDrafts.Code.STALE, code((oldQuery as PhoneSkillDrafts.Check.Immediate).reply))
+        assertTrue(pinned.drop(1).all { it.receipt.queryInFlight })
+    }
+
+    @Test fun aWriteReservesItsReceiptBeforeOtherQueriesPinAllExistingRecords() {
+        val manager = PhoneSkillDrafts(); val client = manager.attachClient()
+        val records = (1L..7L).map { frozenSave(manager, client, it).first }
+        val (view, write) = frozenSave(manager, client, 8, finish = false)
+        val queries = records.map { manager.beginCheck(client, it.draftId, it.owner.taskId, it.skillName, it.bundleRevision!!) as PhoneSkillDrafts.Query }
+        assertEquals(8, manager.saveResults().size)
+        manager.onEngineRetired()
+        write.finish(PhoneSkillInstallResult.BundleUnverified(write.bundle!!.identity, B.Publication.PUBLISHED, B.Verification.BUNDLE_INVALID))
+        assertTrue(manager.saved(view.draftId, write) is PhoneSkillDrafts.Unverified)
+        assertEquals(8, manager.saveResults().size)
+        assertTrue(queries.all { it.receipt.queryInFlight })
+    }
+
+    @Test fun checkSaveUsesFrozenIdentityAndNeverQueuesAnInFlightWriteAgain() {
+        val manager = PhoneSkillDrafts(); val client = manager.attachClient()
+        val (view, _) = frozenSave(manager, client, 30, finish = false)
+        var reads = 0; var installs = 0
+        val bridge = PhoneSkillBridge(manager, { _, _ -> installs++ }, {}, check = { _, _, _ -> reads++ })
+        bridge.checkSave(client, checkArgs(view)) {
+            assertEquals("saving", it["kind"]); assertEquals("committing", it["phase"])
+            assertEquals(view.skillName, it["name"]); assertEquals(view.bundleRevision, it["bundleRevision"])
+        }
+        bridge.checkSave(client, checkArgs(view) + ("bundleRevision" to "0".repeat(32))) { assertEquals("stale", it["code"]) }
+        bridge.checkSave(client, checkArgs(view) + ("root" to "/other")) { assertEquals("invalid", it["code"]) }
+        assertEquals(0, reads); assertEquals(0, installs)
     }
 }

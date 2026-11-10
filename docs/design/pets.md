@@ -317,9 +317,9 @@ app/assets/pets/<id>/<anim>.png     # 序列帧图，默认单行横条；帧多
 | 彩蛋 | 无 | smile-hearts、thumbs-up |
 | 包体积 | 约 422 KB | 约 57 KB |
 
-### 3.5 第二期：Codex Pet 导入映射
+### 3.5 Codex Pet 导入映射（C901）
 
-Codex Pet 的图集是 8 列 × 9 行，每格 192×208。也有 11 行的 v2 版本，多出来的两行忽略。导入时按下表转成我们的 pack，`pixelArt: false`。
+Codex Pet zip 复用 `PetLibrary.install`，无 `pack.json` 时才识别唯一顶层或一层文件夹中的 `pet.json`。无版本号按 v1；v1 图集 1536×1872，默认 8 列 × 9 行，每格 192×208；v2 图集 1536×2288，固定 8 列 × 11 行。读取本地 PNG 或静态 WebP；WebP 转成 PNG，保持原像素网格。转换结果按下表生成 schema 1，`pixelArt: false`、`scale: 1`，再走与普通包相同的完整校验。
 
 | 我们的状态或反应 | Codex 行 |
 |---|---|
@@ -333,24 +333,26 @@ Codex Pet 的图集是 8 列 × 9 行，每格 192×208。也有 11 行的 v2 �
 | sweeping、carrying | running |
 | sleeping | idle（停在首帧） |
 | waking | jumping |
-| roam | running-right（向左走时用 running-left） |
+| roam | running-right；当前运行时向左镜像同一轨道，未选择独立 running-left |
 | tapLeft、tapRight | waving |
 | tickle | jumping |
-| drag | 按拖动方向用 running-left 或 running-right |
+| drag | running-right；当前运行时没有按拖动方向切轨道的入口 |
+
+转换保留 Codex 默认逐帧时长和轨道别名。v1 可覆盖动画、帧网格及受限 fps，但图集尺寸必须精确匹配；v2 自定义网格/动画拒绝。v2 多出的 look 行不绑定；sleeping 使用 idle 首帧，DSH 持续态循环，和 Codex 非 idle 播三轮后回 idle 有差别。每个这些损失都写进 `codexImport.warnings`，来源图摘要写进 `codexImport.sourceSha256`，供主线导入结果页展示；没有上传或联网取图。作者、授权、来源按原字段保留，缺失仅作提示，不推断可公开发布。
 
 Clawd 主题 zip 的导入走宠物包转换工具（`app/tool/make_pet_pack.py`），在手机端运行之前要先确定 APNG 和 GIF 怎么解码。
 
 ### 3.6 导入自己的宠物包（已做）
 
-宠物设置的选择器最后一格是「导入」，收 schema 1 的宠物包 zip。实现在 `app/lib/pets/pet_library.dart`。
+宠物设置的选择器最后一格是「导入」，收 schema 1 或上述 Codex Pet zip。实现在 `app/lib/pets/pet_library.dart`。
 
-- **zip 结构**：`pack.json` 放在 zip 顶层，或者放在 zip 里唯一的那个文件夹中。只保留 `pack.json` 和它引用的序列帧图，其余文件丢掉。
+- **zip 结构**：`pack.json` 放在 zip 顶层，或一层文件夹中，候选必须唯一；有 Schema-1 清单时以它为准，坏包不回退到同时出现的 Codex 清单。拒绝路径穿越、重复文件名和 Unicode 15 NFC/full-casefold 别名冲突、加密、链接/非普通文件和重叠的 ZIP 条目；不按归档路径直接解压。仅保留清单和它引用的图。归档压缩及声明展开量各不超过 64 MiB、最多 256 条目，实际成员解压也受配额约束。
 - **检查**：
-  - 先过 `PetPack.parse`，和内置宠物用同一套解析。
-  - 再过悬浮窗那套更严的解析（`PetPack.kt`）：`scale`、`canvas`、帧格宽高、`cols`、每帧的 `i` 和 `ms` 必须是整数；`frames` 里不能有缺字段的项（App 会跳过，悬浮窗会整包拒绝）；`frameW`、`frameH` 必须正好等于 `box × scale`。
+  - JSON 严格 UTF-8，拒绝转义后重复键、孤立代理码点、非有限数和过深嵌套；再过 `PetPack.parse`，和内置宠物用同一套解析。
+  - 再过悬浮窗那套更严的解析（`PetPack.kt`）：`scale`、`canvas`、帧格宽高、`cols`、每帧的 `i` 和 `ms` 必须是整数；`frames` 里不能有缺字段的项（App 会跳过，悬浮窗会整包拒绝）；`frameW`、`frameH` 必须正好等于 Kotlin Float32 算法下 `box × scale` 的截断值。沿用 c76c0db2 的限值：scale/帧格/cols 最多 4096，canvas 及帧 i/ms 最多 2³⁰。
   - 序列帧图必须是平铺在同一层的 PNG 文件名，不能有路径，不能以 `.` 开头。
   - 每张图每边不超过 4096 像素，解码后不超过 16 MB，压缩后不超过 8 MB。
-  - 每张图要完整读一遍：每个块的 CRC 对得上，IDAT 解压出来的行数和字节数正好是 IHDR 说的，没有不认识的关键块（块名首字母大写的，解码器不认识就会放弃整张图），有 IEND。只有头完整、后面被截断的图会被拒绝，不会替换掉已有的那只。
+  - PNG 要完整读一遍：合法且有序的 IHDR/PLTE/tRNS，所有 CRC、连续 IDAT、精确 zlib EOF/Adler32、Adam7 或普通扫描行长度及过滤值都要通过；拒绝 APNG、未知关键块、尾随数据。附属压缩元数据有独立解压预算。最后用实际像素解码器校验绘制所需块，仍保留原验证后的 PNG 字节。截断/损坏图不会替换已有宠物。
   - 每段动画的每一帧都必须落在图内。
   - 整包最多 64 张图，合计不超过 48 MB。
 - **存放**：装到 `<应用支持目录>/pets/user-<id>/`，并把 pack.json 里的 `id` 改写成这个值；`scale` 和 `pixelArt` 按 App 的读法写明（悬浮窗要求有 `scale`，缺 `pixelArt` 时两边默认值相反）。在 Android 上这就是 `files/pets/<id>/`，悬浮窗（`PetSprites.kt` 的 `sourceFor`）在 APK 资源里找不到时就读这里，所以 App 内和悬浮窗看到的是同一只。
@@ -360,7 +362,7 @@ Clawd 主题 zip 的导入走宠物包转换工具（`app/tool/make_pet_pack.py`
 - **加载**：`PetPack.dir` 指向这个目录，`PetSheets` 从文件解码。重新导入或删除时调用 `PetSheets.forget`，清掉旧的解码缓存，正在解码的旧图作废，不会再写回缓存；同时经 `reloadPack` 通知悬浮窗，它只按 id 和大小缓存，不通知就会一直显示旧图。
 - **删除**：在选择器里长按导入的宠物。删掉的如果正是当前选中的那只，就换回默认宠物。删除先把这只的 `.old-*` 备份、再把目录本身改名成 `.trash-*` 移走（备份留着的话，下次收拾会把它当成换到一半的宠物恢复回来），失败时宠物完整留着、选中状态恢复，并提示「没能删除」。删除时临时换成默认宠物和失败后换回来都不算用户自己选，「藏起来 1 小时」保持不变；删除期间又选回这只的，删完换成默认宠物。悬浮窗收到 `reloadPack` 时，没在显示的这只也丢掉缓存，实时活动的宠物头像缓存一起作废。
 - **作者与授权**：宠物页底部原样显示包里的 `author · license`（§9）。
-- **以后**：Codex Pet 导入（§3.5）和宠物市场的下载，都走同一个安装入口。
+- **共用入口**：Codex Pet 导入（§3.5）与市场下载都调用 `PetLibrary.install`。转换提示已保存在清单，主线负责结果页展示；缓存失效及 `reloadPack` 保持现有流程。市场规范化产物也必须通过当前 App 导入门，不能仅满足旧底层解析器的取整规则。
 
 ## 4. 状态归约 `PetMood`
 

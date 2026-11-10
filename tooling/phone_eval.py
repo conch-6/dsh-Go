@@ -20,6 +20,7 @@ FIELDS = {
     "start": {"case_id", "mode", "build_sha", "model_config_id", "android_api", "backend", "screen"},
     "check": {"check_id", "result", "evidence"},
     "metric": {"name", "value", "source"},
+    "coordinate": {"result", "reason", "evidence"},
     "end": {"outcome", "reason"},
 }
 CATEGORIES = {"read", "write", "login", "irreversible", "web", "skills", "visual"}
@@ -110,7 +111,7 @@ def validate(events, cases):
             require(event["model_config_id"] is None or opaque_id(event["model_config_id"]), "invalid_model_id")
             require(event["android_api"] is None or type(event["android_api"]) is int and 30 <= event["android_api"] <= 37, "invalid_api")
             require(event["backend"] in ("accessibility", "shizuku", "adb", "root", "sui") and event["screen"] in ("main", "background"), "invalid_backend")
-            runs[key] = {"start": event, "checks": {}, "metrics": {}, "end": None, "seq": 0, "last_at": at}
+            runs[key] = {"start": event, "checks": {}, "metrics": {}, "coordinates": [], "end": None, "seq": 0, "last_at": at}
             continue
         require(key in runs, "missing_start")
         run = runs[key]
@@ -126,6 +127,15 @@ def validate(events, cases):
             expected = ("simulation",) if simulated else ("device_probe", "manual_device")
             require(evidence == "none" if event["result"] == "unknown" else evidence in expected, "invalid_check_evidence")
             run["checks"][check] = event
+        elif kind == "coordinate":
+            result, reason = event["result"], event["reason"]
+            require(isinstance(result, str) and result in ("refused", "dispatched", "unknown"), "invalid_coordinate_result")
+            reasons = {"refused": ("observation", "policy", "halted", "other"),
+                       "dispatched": ("none",), "unknown": ("unknown",)}
+            require(reason in reasons[result], "invalid_coordinate_reason")
+            expected = ("simulation",) if simulated else ("device_probe", "manual_device")
+            require(event["evidence"] in expected, "invalid_coordinate_evidence")
+            run["coordinates"].append(event)
         elif kind == "metric":
             name, value, source = event["name"], event["value"], event["source"]
             require(isinstance(name, str) and name in METRICS and name not in run["metrics"], "invalid_metric_name")
@@ -216,6 +226,22 @@ def stats(values, unknown, na, excluded):
             "p95": ordered[math.ceil(len(values) * .95) - 1] if values else None}
 
 
+def coordinate_stats(rows):
+    # These are recorded attempts, including incomplete/skipped runs, not an automatic census.
+    attempts = [event for _, run, _ in rows for event in run["coordinates"]]
+    counts = Counter(event["result"] for event in attempts)
+    total, refused, unknown = len(attempts), counts["refused"], counts["unknown"]
+    return {"coverage": "recorded_tap_xy_attempts_only", "recorded_attempts": total,
+            "runs_with_attempts": sum(bool(run["coordinates"]) for _, run, _ in rows),
+            "refused": refused, "dispatched": counts["dispatched"], "unknown": unknown,
+            "refusal_rate": refused / total if total and not unknown else None,
+            "refusal_rate_bounds": [refused / total, (refused + unknown) / total] if total else None,
+            "refusal_reasons": dict(Counter(event["reason"] for event in attempts if event["result"] == "refused")),
+            "incomplete_attempts": sum(len(run["coordinates"]) for _, run, _ in rows if run["end"] is None),
+            "skipped_attempts": sum(len(run["coordinates"]) for _, run, _ in rows
+                                    if run["end"] is not None and run["end"]["outcome"] == "skipped")}
+
+
 def summarize(runs, cases):
     group_fields = ("mode", "build_sha", "model_config_id", "android_api", "backend", "screen")
     groups = defaultdict(list)
@@ -250,6 +276,7 @@ def summarize(runs, cases):
         output.append({**dict(zip(group_fields + ("partition", "category"), key)),
                        "runs": len(rows), "verdicts": dict(Counter(j["verdict"] for j in judged)),
                        "false_completions": sum(j["false_completion"] for j in judged), "metrics": metrics,
+                       "coordinates": coordinate_stats(rows),
                        "results": [{"run_id": rid, "case_id": r["start"]["case_id"], **v} for (rid, r, _), v in zip(rows, judged)]})
     return {"v": 1, "evidence_scope": "recorded_attestations_not_automatic_device_verification", "groups": output}
 

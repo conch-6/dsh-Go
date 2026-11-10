@@ -360,6 +360,16 @@ void main() {
     expect(read().error, isNull, reason: 'the owner may have turned it on since: calls work without reconnecting');
   });
 
+  test('the link coming back lists again when nothing could be listed', () async {
+    final fake = FakeTerminalBackend()..offOnHost = true;
+    await open(fake);
+    expect(read().error, TerminalCopy.disabledOnHost);
+    fake.reconnects.add(null);
+    await _settle();
+    expect(read().error, isNull, reason: 'the owner turned it on and the link returned');
+    expect(read().tabs, hasLength(1));
+  });
+
   test('connections without terminal support and no connection', () async {
     await open(FakeTerminalBackend(supported: false));
     expect(read().supported, isFalse);

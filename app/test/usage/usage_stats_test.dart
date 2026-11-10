@@ -283,7 +283,10 @@ void main() {
 
   test('a body the host would refuse is never sent', () async {
     // No native side: no build number, no ABI.
-    final c = await start(prefs: noticed, phoneFacts: const UsageDevice(app: '0.9.9', sdk: 34, maker: 'vivo'));
+    final c = await start(
+      prefs: noticed,
+      phoneFacts: const UsageDevice(app: '0.9.9', sdk: 34, maker: 'vivo'),
+    );
     await c.count(UsageCount.turns);
     now = DateTime(2026, 10, 29, 9);
     await c.comeBack();
@@ -306,6 +309,32 @@ void main() {
       expect(usageProblem(body, now), isNull, reason: '$body');
       expect(body['iid'], matches(RegExp(r'^[A-Za-z0-9_-]{21}[AQgw]$')));
     }
+  });
+
+  test('v2 with the model and system; a host that refuses it gets v1, for the rest of the run', () async {
+    const phone = UsageDevice(
+      app: '0.9.9',
+      build: 10301000,
+      sdk: 34,
+      abi: 'arm64-v8a',
+      maker: 'vivo',
+      model: 'v2405a',
+      rom: 'originos 5.0',
+    );
+    http = FakeUsageHttp()..replies.add(400);
+    final ledger = UsageLedger()
+      ..touch(DateTime(2026, 10, 26, 9))
+      ..touch(DateTime(2026, 10, 27, 9));
+    await start(prefs: {...noticed, UsageStatsController.daysKey: ledger.encode()}, phoneFacts: phone);
+    expect(
+      [for (final r in http.requests) '${r['day']} v${r['v']}'],
+      ['2026-10-26 v2', '2026-10-26 v1', '2026-10-27 v1'],
+    );
+    expect(http.requests.first.keys.toSet(), usagePayloadKeysV2);
+    expect([http.requests.first['model'], http.requests.first['rom']], ['v2405a', 'originos 5.0']);
+    expect(http.requests[1].keys.toSet(), usagePayloadKeys);
+    final left = UsageLedger.decode((await stored())[UsageStatsController.daysKey] as String?);
+    expect(left.days.keys, ['2026-10-28'], reason: 'both days went out');
   });
 
   test('the request: the endpoint, and nothing but the contract\'s fields', () async {
@@ -354,7 +383,9 @@ void main() {
   test('phone control: each task counts once, when it starts', () async {
     final phone = FakePhone();
     final c = await start(prefs: noticed, phone: phone);
-    PhoneStatus task(bool active, int id) => PhoneStatus(task: PhoneTaskStatus(id: id, active: active));
+    PhoneStatus task(bool active, int id) => PhoneStatus(
+      task: PhoneTaskStatus(id: id, active: active),
+    );
     for (final s in [task(true, 1), task(true, 1), task(false, 1), task(true, 2), task(true, 3), task(false, 3)]) {
       phone.pushes.add(s);
       await settle();

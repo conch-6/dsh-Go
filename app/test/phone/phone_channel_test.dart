@@ -11,6 +11,23 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final channel = PhoneChannel();
 
+  test('status revision distinguishes absent metadata from malformed native snapshots', () {
+    expect(PhoneStatus.fromMap({}).statusRevisionPresent, isFalse);
+    for (final value in <Object?>[null, true, '1', 1.0, 0, -1]) {
+      final parsed = PhoneStatus.fromMap({'statusRevision': value});
+      expect(parsed.ready, isTrue);
+      expect(parsed.statusRevisionPresent, isTrue);
+      expect(parsed.statusRevision, isNull);
+    }
+    final parsed = PhoneStatus.fromMap({'statusRevision': 42});
+    expect(parsed.statusRevision, 42);
+    expect(parsed.copyWith(enabled: true).statusRevision, 42);
+    final unavailable = parsed.copyWith(ready: false, error: 'offline');
+    expect(unavailable.ready, isFalse);
+    expect(unavailable.statusRevision, 42);
+    expect(unavailable.copyWith(ready: false, error: null).error, isNull);
+  });
+
   test('task protocol parses selected identity and keeps legacy isolated', () async {
     FakePhoneNative(status: {
       ...phoneStatus(taskId: 9, taskActive: true),

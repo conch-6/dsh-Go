@@ -25,19 +25,21 @@ class PhoneDisplaySelection {
     fun clear() = synchronized(lock) { selected = null }
 
     /** Captured inside a status's guard: the controls stay bound to that ticket's owner, never to a later selection. */
-    fun controls(stopOwner: (PhoneTasks, PhoneTasks.Owner, String) -> Unit): TaskControls? {
+    fun controls(stopOwner: (PhoneTasks, PhoneTasks.Owner, String) -> Boolean): TaskControls? {
         val ticket = ticket() ?: return null
         val task = ticket.task
         val owner = ticket.owner
         return object : TaskControls {
+            override val taskId = owner.taskId
+            override val lifecycle = owner.lifecycle
             override fun isPaused(): Boolean {
                 var paused = false
                 task.runIfCurrent(owner) { paused = task.isPaused }
                 return paused
             }
-            override fun setPaused(paused: Boolean) { task.setPausedIfCurrent(owner, paused) }
+            override fun setPaused(paused: Boolean) = task.setPausedIfCurrent(owner, paused)
             override fun stop(reason: String) = stopOwner(task, owner, reason)
-            override fun interject(text: String) { task.interjectIfCurrent(owner, text) }
+            override fun interject(text: String) = task.interjectIfCurrent(owner, text)
         }
     }
 

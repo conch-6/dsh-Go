@@ -24,8 +24,8 @@ class BackgroundGateCallTest {
             fail("the real I/O call must propagate its missing reply")
         } catch (_: java.io.IOException) { }
         assertFalse(call.finishProbeAndCleanup { peer, owner -> attempts += peer to owner; false })
-        assertEquals("unknown", call.status(true)["state"])
-        assertEquals(true, call.status(true)["canRetry"])
+        assertEquals("unknown", call.status()["state"])
+        assertEquals(true, call.status()["canRetry"])
         assertTrue(call.retryCleanup { peer, owner ->
             attempts += peer to owner
             BackgroundReleaseReceipt.accepts(call.io.owner, 1, owner, true, true, true)
@@ -63,13 +63,13 @@ class BackgroundGateCallTest {
             worker.interrupt()
             call.io.seal()
             assertFalse(call.retryCleanup { _, _ -> fail("in-flight begin cannot release early"); true })
-            assertEquals("pending", call.status(true)["state"])
+            assertEquals("pending", call.status()["state"])
         } finally { reply.countDown() }
         assertTrue(completed.await(2, TimeUnit.SECONDS))
         worker.join(2000)
         assertTrue(interrupted.get())
         assertTrue(releasedAfterReply.get())
-        assertEquals("idle", call.status(true)["state"])
+        assertEquals("idle", call.status()["state"])
     }
 
     @Test fun cancellationBeforePinUsesUnusedCompletionWithoutReleaseOrAllocation() {
@@ -102,8 +102,8 @@ class BackgroundGateCallTest {
         val call = call()
         call.io.call { call.io.startResource(call.peer, { beforeSend -> beforeSend(); Unit }) { true } }
         assertFalse(call.finishProbeAndCleanup { _, _ -> false })
-        assertEquals("unknown", call.status(false)["state"])
-        assertEquals(false, call.status(false)["canRetry"])
+        assertEquals("unknown", call.status()["state"])
+        assertEquals(true, call.status()["canRetry"])
         val entered = CountDownLatch(1)
         val proceed = CountDownLatch(1)
         val done = CountDownLatch(1)
@@ -115,11 +115,73 @@ class BackgroundGateCallTest {
         thread.start()
         try {
             assertTrue(entered.await(2, TimeUnit.SECONDS))
-            assertEquals("cleaning", call.status(true)["state"])
+            assertEquals("cleaning", call.status()["state"])
             assertFalse(call.retryCleanup { _, _ -> releases.incrementAndGet(); true })
         } finally { proceed.countDown() }
         assertTrue(done.await(2, TimeUnit.SECONDS))
         thread.join(2000)
         assertEquals(1, releases.get())
     }
+    @Test fun deadGateRecoveryUsesExactOriginalRecordAndNeverReleasesReplacement() {
+        val pin = AtomicBoolean(true)
+        val gate = BackgroundGateState()
+        val journal = BackgroundResourceJournal({ null }, { true }).apply { load() }
+        val call = BackgroundGateCall(pin, gate.begin { true }!!, journal)
+        val birth = BackgroundResourceJournal.Birth(
+            "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", 23, 0, 1L, 2L)
+        call.io.call {
+            assertTrue(call.resource.begin(birth))
+            call.io.startResource(pin, { beforeSend -> beforeSend(); true }, { it })
+            assertTrue(call.resource.allocated(41) { true })
+        }
+        val releases = AtomicInteger()
+        assertFalse(call.finishProbeAndCleanup { _, _ -> releases.incrementAndGet(); false })
+        var queries = 0
+        fun receipt(id: Int): (BackgroundResourceJournal.Record) -> Boolean = { saved ->
+            queries++
+            assertEquals(call.io.owner, saved.owner)
+            assertEquals(birth, saved.birth)
+            assertEquals(41, saved.displayId)
+            val reply = mapOf<String, Any?>(Proto.OK to true, Proto.RESOURCE_RECOVERY_VERSION to 1,
+                Proto.RECOVERY_PEER to birth.peer, Proto.OWNER to call.io.owner,
+                Proto.RECOVERY_KIND to "deadPeerEmpty", Proto.DISPLAY_ID to id)
+            BackgroundRecoveryProtocol.recovered(saved, reply::get, reply::containsKey)
+        }
+        assertFalse(call.retryRecovery({ !it.get() }, receipt(41)))
+        assertEquals(0, queries) // A live original pin is not bypassed by a replacement query.
+        pin.set(false)
+        assertFalse(call.retryRecovery({ !it.get() }, receipt(42)))
+        assertFalse(call.resource.physicalComplete)
+        assertEquals(1, journal.status().count)
+        assertTrue(call.retryRecovery({ !it.get() }, receipt(41)))
+        assertEquals(2, queries)
+        assertEquals(1, releases.get()) // Only the original initial cleanup attempted RELEASE.
+        assertTrue(call.resource.physicalComplete)
+        assertEquals(0, journal.status().count)
+        assertEquals("idle", call.status()["state"])
+        assertFalse(call.retryRecovery({ true }) { fail("completed handle cannot query again"); true })
+    }
+
+    @Test fun replacementRecoveryCannotOvertakeProbeOrAnotherOriginalCleanup() {
+        val call = call()
+        assertFalse(call.retryRecovery({ true }) { fail("probe is still in flight"); true })
+        call.io.call { call.io.startResource(call.peer, { beforeSend -> beforeSend(); Unit }) { true } }
+        val entered = CountDownLatch(1)
+        val finish = CountDownLatch(1)
+        val done = CountDownLatch(1)
+        val worker = Thread {
+            try { call.finishProbeAndCleanup { _, _ -> entered.countDown(); check(finish.await(5, TimeUnit.SECONDS)); false } }
+            finally { done.countDown() }
+        }
+        worker.start()
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertFalse(call.retryRecovery({ true }) { fail("original cleanup owns the lane"); true })
+        } finally { finish.countDown() }
+        assertTrue(done.await(5, TimeUnit.SECONDS))
+        worker.join(5000)
+        assertEquals("unknown", call.status()["state"])
+        assertTrue(call.retryCleanup { _, _ -> true })
+    }
+
 }

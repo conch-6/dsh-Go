@@ -58,6 +58,39 @@ class _Link implements DshMuxLink {
 const _options = MuxOptions(retryCaps: [Duration.zero]);
 
 void main() {
+  for (final (name, stream) in <(String, Stream<Object?> Function(DshMux))>[
+    ('receipts', (mux) => mux.hostEventReceipts),
+    ('events', (mux) => mux.hostEvents),
+    ('states', (mux) => mux.states),
+    ('generations', (mux) => mux.generations),
+  ]) {
+    test('C907 close does not await a paused $name listener', () async {
+      final carrier = _Carrier();
+      final client = DshClient.withCarrier(carrier, muxOptions: _options);
+      addTearDown(client.close);
+      final next = carrier.nextLink.future;
+      final receipt = client.mux.hostEventReceipts.first;
+      final ready = client.mux.ready();
+      final link = await next;
+      await link.eventsOpened.future;
+      link.ready();
+      await ready;
+      final proof = (await receipt).provenance;
+      final sub = stream(client.mux).listen((_) {})..pause();
+      final closing = client.close();
+      expect(proof.current, isFalse, reason: 'revocation is synchronous');
+      try {
+        await closing.timeout(const Duration(milliseconds: 200));
+        expect(client.mux.state, DshConnectionState.closed);
+        expect(client.mux.generation, isNull);
+      } finally {
+        // The pre-fix failure must still release the paused stream in teardown.
+        await sub.cancel();
+        await closing;
+      }
+    });
+  }
+
   test('accepted ready history is synchronous and survives close without granting a live generation', () async {
     final carrier = _Carrier();
     final client = DshClient.withCarrier(carrier, muxOptions: _options);

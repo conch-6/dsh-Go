@@ -32,7 +32,7 @@ class ManagedSkillInstallerTest {
         noTemps(root)
     }
 
-    @Test fun actualThreeBundlesFitBudgetAndMatchEveryByte() = withRoot { root ->
+    @Test fun actualBundlesFitBudgetAndMatchEveryByte() = withRoot { root ->
         // Gradle runs unit tests in app/android/app; the Flutter app (and its
         // assets/) is two levels up. phase2.app still overrides it.
         val app = listOfNotNull(System.getProperty("phase2.app"), "../..", ".")
@@ -40,7 +40,7 @@ class ManagedSkillInstallerTest {
             .first { File(it, "assets/skills").isDirectory }
         var count = 0
         var size = 0
-        for (name in listOf("dsh-go-ui", "dsh-go-plugin", "dsh-go-guide")) {
+        for (name in listOf("dsh-go-ui", "dsh-go-plugin", "dsh-go-guide", "dsh-go-support", "companion-adapt")) {
             val assets = File(app, "assets/skills/$name")
             val manifest = Json.parse(File(assets, "manifest.json").readText()) as Map<*, *>
             val bundled = (manifest["files"] as Map<*, *>).entries.associate { (asset, target) ->

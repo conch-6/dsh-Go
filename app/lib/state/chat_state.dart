@@ -1235,16 +1235,31 @@ class ChatController extends Notifier<ChatState> {
   ///
   /// While a turn runs, [mode] picks how the message reaches the agent; when
   /// idle every mode just starts a turn.
-  Future<bool> send(String text, {List<DraftAttachment> attachments = const [], SendMode mode = SendMode.now}) async {
+  ///
+  /// [verbatim] sends [text] exactly as given (trimmed only to decide it is
+  /// empty): the pending bubble, the retry key and the prompt all carry it.
+  /// [beforeDeliver] runs once this send has chosen its request id (a retry of
+  /// an unsettled send keeps the old one) and before anything goes out, for a
+  /// side channel keyed by that id (伙伴小屋's context). Its failure fails the
+  /// send like any other; false drops the send quietly.
+  Future<bool> send(
+    String text, {
+    List<DraftAttachment> attachments = const [],
+    SendMode mode = SendMode.now,
+    bool verbatim = false,
+    Future<bool> Function(String requestId)? beforeDeliver,
+    bool Function()? deliveryAllowed,
+  }) async {
     final client = _client;
     final trimmed = text.trim();
     if (client == null || (trimmed.isEmpty && attachments.isEmpty)) {
       return false;
     }
+    final body = verbatim ? text : trimmed;
     if (!_canControl && (mode == SendMode.interrupt || !await waitForSync())) return false;
     if (!ref.mounted || !identical(client, _client) || !_canControl) return false;
     final operation = _ChatOperation(ref, client, _syncScope);
-    final content = _contentKey(trimmed, attachments);
+    final content = _contentKey(body, attachments);
     final retrying = _unsettled?.content == content;
     final requestId = retrying ? _unsettled!.requestId : _requestId();
     _unsettled = null;
@@ -1254,7 +1269,7 @@ class ChatController extends Notifier<ChatState> {
       ..._pending,
       PendingPrompt(
         requestId: requestId,
-        text: trimmed,
+        text: body,
         time: DateTime.now(),
         mode: effective,
         attachments: List.unmodifiable(attachments),
@@ -1269,6 +1284,17 @@ class ChatController extends Notifier<ChatState> {
       clearNotice: true,
     );
     try {
+      if (beforeDeliver != null) {
+        final go = await beforeDeliver(requestId);
+        if (!_currentOperation(operation)) return false;
+        if (!go) {
+          // The caller let it go (伙伴小屋 left this conversation meanwhile):
+          // nothing went out, so nothing waits and nothing failed.
+          _pending = List.unmodifiable(_pending.where((p) => p.requestId != requestId));
+          state = state.copyWith(pending: _placePending());
+          return false;
+        }
+      }
       final receipts = await _stageFiles(operation, attachments);
       if (!_currentOperation(operation)) return false;
       var promptMode = effective == SendMode.steer ? PromptMode.steer : PromptMode.queue;
@@ -1290,7 +1316,8 @@ class ChatController extends Notifier<ChatState> {
           state = state.copyWith(pending: _placePending());
         }
       }
-      final notice = await _deliver(operation, trimmed, attachments, receipts, requestId: requestId, mode: promptMode);
+      final notice = await _deliver(operation, body, attachments, receipts, requestId: requestId, mode: promptMode,
+        deliveryAllowed: deliveryAllowed);
       _sent();
       if (!_currentOperation(operation)) return false;
       state = state.copyWith(error: stopFailed, notice: notice);
@@ -1407,6 +1434,7 @@ class ChatController extends Notifier<ChatState> {
     ({List<String> receipts, List<String> paths}) staged, {
     required String requestId,
     required PromptMode mode,
+    bool Function()? deliveryAllowed,
   }) async {
     final client = operation.client;
     final images = [
@@ -1415,6 +1443,9 @@ class ChatController extends Notifier<ChatState> {
     ];
     Future<void> prompt(List<PromptImage> images, ({List<String> receipts, List<String> paths}) files) {
       _requireCurrent(operation);
+      if (deliveryAllowed != null && !deliveryAllowed()) {
+        throw const DshClosedException('Prepared phone route source changed');
+      }
       final paths = files.paths.map((path) => '- ${jsonEncode(path)}').join('\n');
       final content = paths.isEmpty
           ? text

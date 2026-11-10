@@ -1,10 +1,13 @@
 // PhoneController: loading, events, the master switch and its engine restart,
 // safe mode and remote hosts, app rules.
 
+import 'dart:async';
+
 import 'package:dsh_app/runtime/runtime_bridge.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/phone_state.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +38,103 @@ void main() {
   }
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  Map<String, Object?> orderedStatus(int revision, int taskId, {bool active = true}) => {
+    ...phoneStatus(taskId: taskId, taskActive: active),
+    'statusRevision': revision,
+    'taskProtocol': 1,
+    'selectedTaskId': taskId,
+    'tasks': [{'id': taskId, 'active': active, 'stopped': !active}],
+  };
+
+  test('status reads and events share one revision gate before task side effects', () async {
+    final old = orderedStatus(1, 71, active: false);
+    final latest = orderedStatus(2, 72);
+    final native = FakePhoneNative(status: old)..install();
+    final c = make();
+    c.read(phoneProvider);
+    await settle();
+    expect(c.read(phoneProvider).status.task.id, 71);
+    native.status = latest;
+    expect(await c.read(phoneProvider.notifier).refreshStatus(), isTrue);
+    expect(c.read(phoneProvider).status.task.id, 72);
+    native.calls.clear();
+    native.push(old);
+    await settle();
+    expect(c.read(phoneProvider).status.task.id, 72);
+    expect(c.read(phoneProvider).status.task.active, isTrue);
+    expect(native.callsOf('actionLog'), isEmpty);
+    expect(await c.read(phoneProvider.notifier).refreshStatus(), isFalse);
+    expect(c.read(phoneProvider).status.task.id, 72);
+    expect(native.callsOf('actionLog'), isEmpty);
+    for (final revision in <Object?>[null, 0, -1, 2, 1.0, '3', true]) {
+      native.push({...old, 'statusRevision': revision});
+      await settle();
+      expect(c.read(phoneProvider).status.task.id, 72);
+    }
+    native.push(phoneStatus(taskId: 71));
+    await settle();
+    expect(c.read(phoneProvider).status.task.id, 72);
+    expect(native.callsOf('actionLog'), isEmpty);
+    native.push(orderedStatus(3, 73));
+    await settle();
+    expect(c.read(phoneProvider).status.task.id, 73);
+    expect(c.read(phoneProvider).status.statusRevision, 3);
+  });
+
+  test('transport failure preserves modern task facts and cannot erase a newer event', () async {
+    final native = FakePhoneNative(status: orderedStatus(1, 71))..install();
+    final c = make();
+    c.read(phoneProvider);
+    await settle();
+    final late = Completer<Map<String, Object?>>();
+    native.onStatus = () => late.future;
+    final pending = c.read(phoneProvider.notifier).refreshStatus();
+    await settle();
+    native.push(orderedStatus(2, 72));
+    await settle();
+    late.completeError(PlatformException(code: 'offline', message: 'old failure'));
+    expect(await pending, isFalse);
+    expect(c.read(phoneProvider).status.ready, isTrue);
+    expect(c.read(phoneProvider).status.task.id, 72);
+    native.calls.clear();
+    native.onStatus = () async => throw PlatformException(code: 'offline', message: 'current failure');
+    expect(await c.read(phoneProvider.notifier).refreshStatus(), isFalse);
+    expect(c.read(phoneProvider).status.ready, isFalse);
+    expect(c.read(phoneProvider).status.error, 'current failure');
+    expect(c.read(phoneProvider).status.task.id, 72);
+    expect(c.read(phoneProvider).status.task.active, isTrue);
+    expect(c.read(phoneProvider).status.statusRevision, 2);
+    expect(native.callsOf('actionLog'), isEmpty);
+    native.push(orderedStatus(1, 71, active: false));
+    await settle();
+    expect(c.read(phoneProvider).status.ready, isFalse);
+    expect(c.read(phoneProvider).status.task.id, 72);
+    native.push(orderedStatus(3, 73));
+    await settle();
+    expect(c.read(phoneProvider).status.ready, isTrue);
+    expect(c.read(phoneProvider).status.error, isNull);
+    expect(c.read(phoneProvider).status.task.id, 73);
+  });
+
+  test('missing revision remains compatible until the first modern snapshot', () async {
+    final native = FakePhoneNative(status: phoneStatus(taskId: 71))..install();
+    final c = make();
+    c.read(phoneProvider);
+    await settle();
+    expect(c.read(phoneProvider).status.task.id, 71);
+    native.push({...phoneStatus(taskId: 99), 'statusRevision': 'invalid'});
+    await settle();
+    expect(c.read(phoneProvider).status.task.id, 71);
+    native.push(phoneStatus(taskId: 72));
+    await settle();
+    expect(c.read(phoneProvider).status.task.id, 72);
+    native.push(orderedStatus(1, 73));
+    await settle();
+    native.push(phoneStatus(taskId: 74));
+    await settle();
+    expect(c.read(phoneProvider).status.task.id, 73);
+  });
 
   test('loads status, policies and the log; then follows events', () async {
     final native = FakePhoneNative()..install();

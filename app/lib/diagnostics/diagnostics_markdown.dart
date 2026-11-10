@@ -203,7 +203,8 @@ void _backgroundInputProbe(StringBuffer b, Object? raw) {
   if (raw['observed'] != true || result != 'failure') return;
   const stages = {
     'precondition', 'ui_dispatch', 'presentation_create', 'presentation_configure',
-    'presentation_show', 'view_layout_wait', 'frame_commit_wait', 'target_validate',
+    'presentation_show', 'activity_start', 'activity_ready_wait',
+    'view_layout_wait', 'frame_commit_wait', 'target_validate',
     'input_send', 'receipt_wait', 'cleanup',
   };
   const types = {

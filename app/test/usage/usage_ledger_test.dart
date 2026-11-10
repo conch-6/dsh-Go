@@ -135,7 +135,10 @@ void main() {
       'engine': 'direct',
       'counts': {'turns': 5, 'voice': 0, 'phone': 0, 'share': 0, 'gen': 1, 'plugins': 2},
     });
-    expect(usagePayload(iid: 'x', day: 'd', record: UsageDayRecord(), device: const UsageDevice(), lang: 'en')['engine'], 'none');
+    expect(
+      usagePayload(iid: 'x', day: 'd', record: UsageDayRecord(), device: const UsageDevice(), lang: 'en')['engine'],
+      'none',
+    );
   });
 
   test('a count over the share host\'s ceiling goes as the ceiling', () {
@@ -197,7 +200,7 @@ void main() {
 
     test('each field by its rule', () {
       final cases = <String, List<Object?>>{
-        'v': [2, '1', null],
+        'v': [3, '1', null],
         'iid': ['short', 'AAAAAAAAAAAAAAAAAAAAAB', 'AAAAAAAAAAAAAAAAAAAA+A', 7],
         'day': ['2026-10-30x', '2026-02-30', '2026-10-21', '2026-11-01', 20261029],
         'app': ['0.9.9+10301000', 'v0.9.9', '0.9', ''],
@@ -222,6 +225,44 @@ void main() {
         expect(usageProblem(counts(key, -1), now), 'counts.$key');
         expect(usageProblem(counts(key, 1.5), now), 'counts.$key');
       }
+    });
+
+    test('v2: the model and system, both or neither', () {
+      const phone = UsageDevice(
+        app: '0.9.9',
+        build: 10301000,
+        sdk: 34,
+        abi: 'arm64-v8a',
+        maker: 'vivo',
+        model: 'v2405a',
+        rom: 'originos 5.0',
+      );
+      Map<String, Object> body({bool v2 = true, UsageDevice device = phone}) => usagePayload(
+        iid: 'AAAAAAAAAAAAAAAAAAAAAA',
+        day: '2026-10-29',
+        record: UsageDayRecord(),
+        device: device,
+        lang: 'zh',
+        v2: v2,
+      );
+      expect(body()['v'], 2);
+      expect(body().keys.toSet(), usagePayloadKeysV2);
+      expect([body()['model'], body()['rom']], ['v2405a', 'originos 5.0']);
+      expect(usageProblem(body(), now), isNull);
+      // Asked for v1, or no facts from the native side: v1 exactly.
+      for (final v1 in [
+        body(v2: false),
+        body(
+          device: const UsageDevice(app: '0.9.9', build: 1, sdk: 34, abi: 'x86', maker: 'vivo'),
+        ),
+      ]) {
+        expect(v1['v'], 1);
+        expect(v1.keys.toSet(), usagePayloadKeys);
+      }
+      expect(usageProblem({...body()}..remove('rom'), now), 'rom');
+      expect(usageProblem({...body(), 'model': '华为'}, now), 'model');
+      expect(usageProblem({...body(), 'rom': ''}, now), 'rom');
+      expect(usageProblem({...body(v2: false), 'v': 2}, now), 'model');
     });
 
     test('makers are cut to what the host takes, as UsagePlugin.kt does', () {

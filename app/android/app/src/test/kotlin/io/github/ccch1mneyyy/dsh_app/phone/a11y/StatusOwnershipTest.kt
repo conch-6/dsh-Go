@@ -1,10 +1,62 @@
 package io.github.ccch1mneyyy.dsh_app.phone.a11y
 
+import io.github.ccch1mneyyy.dsh_app.phone.PhoneDisplaySelection
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneTasks
+import java.util.concurrent.atomic.AtomicLong
 import org.junit.Assert.*
 import org.junit.Test
 
 class StatusOwnershipTest {
+    @Test fun editorKeepsOriginalControlsAcrossSameOwnerStatusAndClearsOnAnotherTask() {
+        val ids = AtomicLong()
+        val a = PhoneTasks(idSource = ids::incrementAndGet)
+        val b = PhoneTasks(idSource = ids::incrementAndGet)
+        val selection = PhoneDisplaySelection()
+        val shown = StatusOwnership()
+        val stop = { task: PhoneTasks, owner: PhoneTasks.Owner, reason: String -> task.stopIfCurrent(owner, reason) }
+        val oa = (a.begin() as PhoneTasks.Begin.Go).owner
+        val ta = selection.select(a, oa)!!
+        assertTrue(shown.publish(selection.guard(ta)) { selection.controls(stop) })
+        assertTrue(shown.beginEditing())
+        val editor = shown.editingControls!!
+        assertTrue(shown.publish(selection.guard(ta)) { selection.controls(stop) })
+        assertNotSame(editor, shown.controls) // Each publish allocates controls; identity is not ownership.
+        assertSame(editor, shown.editingControls)
+        assertTrue(editor.interject("for original A"))
+        assertEquals(listOf("for original A"), a.drainInterjections())
+
+        val ob = (b.begin() as PhoneTasks.Begin.Go).owner
+        val tb = selection.select(b, ob)!!
+        assertTrue(shown.publish(selection.guard(tb)) { selection.controls(stop) })
+        assertNull(shown.editingControls)
+        assertTrue(b.drainInterjections().isEmpty())
+        assertTrue(shown.beginEditing())
+        shown.clear()
+        assertNull(shown.editingControls)
+        assertFalse(shown.beginEditing())
+    }
+
+    @Test fun editorIsRevokedWhenTheSameTaskObjectHasANewOwner() {
+        val task = PhoneTasks()
+        val selection = PhoneDisplaySelection()
+        val shown = StatusOwnership()
+        val stop = { t: PhoneTasks, owner: PhoneTasks.Owner, reason: String -> t.stopIfCurrent(owner, reason) }
+        val old = (task.begin() as PhoneTasks.Begin.Go).owner
+        val ticket = selection.select(task, old)!!
+        assertTrue(shown.publish(selection.guard(ticket)) { selection.controls(stop) })
+        assertTrue(shown.beginEditing())
+        val editor = shown.editingControls!!
+        task.invalidateOwners()
+        val next = task.activeOwner()!!
+        assertEquals(old.taskId, next.taskId)
+        assertNotEquals(old.lifecycle, next.lifecycle)
+        val nextTicket = selection.select(task, next)!!
+        assertTrue(shown.publish(selection.guard(nextTicket)) { selection.controls(stop) })
+        assertNull(shown.editingControls)
+        assertFalse(editor.interject("late"))
+        assertTrue(task.drainInterjections().isEmpty())
+    }
+
     @Test fun replacementInvalidatesCleanupTicketButDoesNotKeepTheOldDisplayedStatus() {
         val tasks = PhoneTasks()
         val shown = StatusOwnership()

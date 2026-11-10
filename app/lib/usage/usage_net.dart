@@ -17,7 +17,7 @@ import 'usage_ledger.dart';
 /// statistics on in a debug or profile build.
 const _endpointOverride = String.fromEnvironment('DSH_USAGE_ENDPOINT');
 
-/// The share host's endpoint (services/share-worker), contract v1.
+/// The share host's endpoint (services/share-worker), contracts v1 and v2.
 final defaultUsageEndpoint = Uri.parse('https://go.dshtui.com/api/usage/v1');
 
 /// [defaultUsageEndpoint], or the build's override when it is usable.
@@ -93,6 +93,8 @@ class UsageDeviceChannel {
         sdk: number('sdk'),
         abi: text('abi'),
         maker: usageMaker(text('maker')),
+        model: text('model').isEmpty ? '' : usageMaker(text('model')),
+        rom: text('rom').isEmpty ? '' : usageMaker(text('rom')),
       );
     } on MissingPluginException {
       return UsageDevice(app: fallback);

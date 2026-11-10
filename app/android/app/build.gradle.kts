@@ -138,7 +138,11 @@ flutter {
 }
 
 dependencies {
+    // Bundled Chinese OCR. SDK statistics disclosed separately; initialization is opt-in per use.
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
     testImplementation("junit:junit:4.13.2")
+    // Android stubs do not implement JSONObject in local JVM upgrade tests.
+    testImplementation("org.json:json:20240303")
 
     // .tar.xz support for the rootfs bundle.
     implementation("org.tukaani:xz:1.10")

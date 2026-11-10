@@ -16,6 +16,7 @@ import 'package:dsh_app/ui/phone/restricted_settings_guide.dart';
 import 'package:dsh_app/ui/settings/background_guide_page.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,6 +32,56 @@ Switch masterSwitch(WidgetTester tester) => tester.widget<Switch>(find.byType(Sw
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  for (final kind in ['active', 'waiting', 'stopped', 'cleanup', 'interruption']) {
+    testWidgets('unavailable modern status retains $kind facts but disables its controls', (tester) async {
+      Map<String, Object?> snapshot(int revision) => {
+        ...phoneStatus(a11y: true),
+        'statusRevision': revision, 'taskProtocol': 1, 'selectedTaskId': 12,
+        'tasks': [{
+          'id': 12, 'sessionId': 'original', 'app': '美团',
+          'active': kind == 'active' || kind == 'waiting',
+          'stopped': kind == 'stopped' || kind == 'cleanup',
+          if (kind == 'waiting') 'waitingForScreen': 'background',
+          if (kind == 'cleanup') 'cleanupFailed': true,
+        }],
+        if (kind == 'interruption') 'taskInterruption': {
+          'version': 1, 'state': 'ready', 'count': 1,
+          'batchToken': '00000000-0000-0000-0000-000000000001',
+        },
+      };
+      final native = FakePhoneNative(status: snapshot(1));
+      await pumpPhone(tester, const PhoneControlScreen(), native: native);
+      final button = switch (kind) {
+        'active' => inTile('正在操作「美团」', find.byType(FixButton)),
+        'waiting' => find.descendant(of: find.byKey(const ValueKey('phone-waiting-12')), matching: find.byType(FixButton)),
+        'interruption' => find.byKey(const ValueKey('phone-task-interruption-action')),
+        _ => find.byKey(const ValueKey('phone-resume-12')),
+      };
+      expect(button, findsOneWidget);
+      expect(tester.widget<FixButton>(button).onPressed, isNotNull);
+      native.onStatus = () async => throw PlatformException(code: 'offline');
+      expect(await containerOf(tester).read(phoneProvider.notifier).refreshStatus(), isFalse);
+      await settlePhone(tester);
+      expect(phoneOf(tester).status.ready, isFalse);
+      expect(phoneOf(tester).status.task.id, 12);
+      expect(button, findsOneWidget);
+      expect(tester.widget<FixButton>(button).onPressed, isNull);
+      expect(masterSwitch(tester).onChanged, isNull);
+      native.calls.clear();
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await settlePhone(tester);
+      expect(native.calls, isEmpty);
+      native.onStatus = null;
+      native.push(snapshot(2));
+      await settlePhone(tester);
+      expect(phoneOf(tester).status.ready, isTrue);
+      expect(phoneOf(tester).status.task.id, 12);
+      expect(button, findsOneWidget);
+      expect(tester.widget<FixButton>(button).onPressed, isNotNull);
+    });
+  }
 
   group('问 AI', () {
     const question = '/dsh-go-guide 手机操控是怎么工作的？有什么风险？';
@@ -323,6 +374,53 @@ void main() {
     shownForA();
     await tester.pump();
     expect(h.native!.callsOf('stopTask').single.arguments, {'taskId': 12});
+  });
+
+  testWidgets('each waiting row stops its own task without stopping the selected holder', (tester) async {
+    Map<String, Object?> selected(int id) => {
+      ...phoneStatus(a11y: true), 'taskProtocol': 1, 'selectedTaskId': id,
+      'tasks': [
+        {'id': 70, 'sessionId': 'holder', 'active': true, 'app': '美团'},
+        {'id': 71, 'sessionId': 'waiter-a', 'active': true, 'waitingForApp': {'kind': 'unknown'}},
+        {'id': 72, 'sessionId': 'waiter-b', 'active': true, 'waitingForScreen': 'background'},
+      ],
+    };
+    final h = await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: selected(70)));
+    Finder stopFor(int id) => find.descendant(
+      of: find.byKey(ValueKey('phone-waiting-$id')),
+      matching: find.byType(FixButton),
+    );
+    final holder = find.text('正在操作「美团」');
+    expect(holder, findsOneWidget);
+    expect(stopFor(71), findsOneWidget);
+    expect(stopFor(72), findsOneWidget);
+    final shownFor71 = tester.widget<FixButton>(stopFor(71)).onPressed!;
+    await tester.ensureVisible(stopFor(72));
+    await tester.tap(stopFor(72));
+    await tester.pump();
+    expect(h.native!.callsOf('stopTask').map((call) => call.arguments).toList(), [
+      {'taskId': 72},
+    ]);
+    final selectedHolder = phoneOf(tester).status.task;
+    expect(selectedHolder.id, 70);
+    expect(selectedHolder.active, isTrue);
+    expect(selectedHolder.stopped, isFalse);
+    // ensureVisible(waiter) can scroll the earlier holder out of the lazy list.
+    await tester.scrollUntilVisible(holder, -200, scrollable: find.byType(Scrollable).first);
+    expect(find.text('正在操作「美团」'), findsOneWidget);
+
+    // The already-displayed row keeps its identity even if selection changes.
+    h.native!.push(selected(72));
+    await settlePhone(tester);
+    shownFor71();
+    await tester.pump();
+    expect(h.native!.callsOf('stopTask').map((call) => call.arguments).toList(), [
+      {'taskId': 72},
+      {'taskId': 71},
+    ]);
+    expect(h.native!.callsOf('connectBackground'), isEmpty);
+    expect(h.native!.callsOf('startBackground'), isEmpty);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('resource wait rows consume native targets and elapsed snapshots without exposing holders', (tester) async {

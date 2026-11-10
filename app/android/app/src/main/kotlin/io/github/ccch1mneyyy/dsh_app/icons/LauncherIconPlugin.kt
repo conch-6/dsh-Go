@@ -34,6 +34,7 @@ import io.github.ccch1mneyyy.dsh_app.shortcuts.ShortcutsPlugin
  * When the original entry has to wait (a task of ours was opened through it), it is switched off
  * as soon as the app is in the background with nothing of another app on top — or at the next
  * start, if the process ends first. The foreground screen and external pickers are left alone.
+ * Old entries also wait if recent-shortcut migration fails; later lifecycle events try again.
  */
 class LauncherIconPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
@@ -133,7 +134,7 @@ class LauncherIconPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             started.remove(activity)
             visible = started.isNotEmpty()
             if (!visible && !activity.isChangingConfigurations && waiting) {
-                // Home must show only the chosen entry. The worker checks visibility/task tops
+                // Finish pending switches when Home appears. The worker checks visibility/task tops
                 // again, so another activity starting first still protects its task.
                 main.post(settleInBackground)
             }
@@ -194,7 +195,7 @@ class LauncherIconPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         /** AdaptiveIconDrawable's mask space (config_icon_mask is drawn in 100 × 100). */
         private const val MASK_SIZE = 100f
 
-        /** The original entry is still on and waits to be switched off. */
+        /** Old entries wait for safe removal or successful recent-shortcut migration. */
         @Volatile private var waiting = false
 
         private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -234,7 +235,10 @@ class LauncherIconPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val pm = context.packageManager
             for (step in plan.enable) set(pm, context, step)
             // Before the old entry goes off: the system would delete them with it.
-            ShortcutsPlugin.rebind(context, component(context, plan.target))
+            if (!ShortcutsPlugin.rebind(context, component(context, plan.target))) {
+                waiting = true
+                return
+            }
             for (step in plan.disable) set(pm, context, step)
         }
 

@@ -45,9 +45,10 @@ JSONL, one object per line, at most 4096 UTF-8 bytes per line and 16 MiB per fil
 | start | case_id, mode, build_sha, model_config_id, android_api, backend, screen | Known case; device/simulated; 40 lowercase hex build; random model-config UUID or null; API30–37 or null; accessibility/shizuku/adb/root/sui; main/background |
 | check | check_id, result, evidence | Case check ID; pass/fail/unknown; device_probe/manual_device/simulation/none |
 | metric | name, value, source | Metric below; nonnegative integer or null; runtime_counter/manual_device/simulation/unknown/not_applicable |
+| coordinate | result, reason, evidence | One observed explicit tap_xy attempt, defined below; no production telemetry hook |
 | end | outcome, reason | completed/confirmation/handoff/failed/blocked/cancelled/skipped; fixed reason below |
 
-Reasons: none, precondition_missing, unsupported, user_cancelled, timeout, verification_failed, safety_refusal, runtime_error. Completed requires none; skipped requires precondition_missing or unsupported. Unknown checks require evidence none. Device runs reject simulation evidence, and simulated runs reject device evidence. Manual checks must follow inspection of the actual device state, not the agent's claim.
+End reasons: none, precondition_missing, unsupported, user_cancelled, timeout, verification_failed, safety_refusal, runtime_error. Completed requires none; skipped requires precondition_missing or unsupported. Unknown checks require evidence none. Device runs reject simulation evidence, and simulated runs reject device evidence. Manual checks must follow inspection of the actual device state, not the agent's claim.
 
 There are no screenshot, OCR, answer/body, URL, account, package name, secret token, device serial or evidence-path fields. Token metrics are counts only. Do not encode secrets into UUIDs/build hashes; structural validation cannot prove that human users did not misuse a field. Rejected input values are not echoed.
 
@@ -59,6 +60,27 @@ There are no screenshot, OCR, answer/body, URL, account, package name, secret to
 - `elapsed_ms`: end minus start only if both times are known; total task time includes model, platform and human confirmation waiting. No invented component latency.
 
 Device model/token counts require runtime_counter; device misoperation/interruption counts require manual_device. Simulated values require simulation. Null requires unknown, except MAIN interruptions may be not_applicable. Record each final counter once to avoid double counting cumulative values.
+
+### Coordinate refusal statistics: recorded tap_xy attempts only
+
+An optional `coordinate` event records one explicit `tap_xy` call (tap, long press or swipe). Do not include internal coordinate fallbacks of ordinary tap/scroll. This is a manual/experimental input, not automatic device logging or production telemetry. Append after the matching start and before end with the next sequence number. Record a call once, not once per observation; an explicitly repeated call is a separate attempt. Old logs need no new events.
+
+- `result=refused`: explicit evidence of refusal **before input dispatch**. Reason is observation (unaccepted screenshot, stale ID/TTL, viewport/window/target qualification change), policy (known safety refusal), halted (pause/stop), or other (known refusal without a more specific supported category).
+- `result=dispatched, reason=none`: evidence that input was submitted. This does not prove target accuracy, business success or a postcondition; keep the existing checks.
+- `result=unknown, reason=unknown`: dispatch is uncertain, including timeout, transport failure or possible partial effects. An isError/ActionResult.ok=false, unchanged frame or model claim alone cannot establish refusal.
+- Evidence must be simulation in simulated runs and manual_device/device_probe in device runs. An unknown result still requires evidence that the attempt occurred. Missing whole calls do not automatically become unknown events. Do not claim a device probe exists when evidence is manual or simulated.
+
+Example only, using a matching start ID and its next sequence (not device evidence):
+
+```json
+{"v":1,"run_id":"5f610b72-1c27-43c9-9422-8c83205cde65","seq":1,"kind":"coordinate","at_ms":null,"result":"refused","reason":"observation","evidence":"simulation"}
+```
+
+Each existing group gains `coordinates`, with recorded_attempts=N, refused/dispatched/unknown counts, refusal_reasons and runs_with_attempts. The denominator is **recorded attempts**, not runs, all device calls, or only classified calls. With N=0, rate and bounds are null, not zero. With any unknown result, the exact rate is null and bounds are `[refused/N,(refused+unknown)/N]`: all unknowns treated as non-refusals/refusals. These are missing-result bounds for the recorded sample, not population confidence intervals. With no unknowns, refusal_rate is refused/N.
+
+Recorded attempts from incomplete/skipped runs remain included and are separately counted as incomplete_attempts/skipped_attempts. A crash or changed end classification must not erase observed attempts; this is separate from existing run-level metric exclusions. Missing events can still bias the sample: coverage=recorded_tap_xy_attempts_only does not attest to complete monitoring. Existing device/simulated, build, API, backend, screen, model and partition/category grouping remains intact.
+
+Compare stricter screenshot admission on the same synthetic cases and configuration across two builds. More observation refusals describes this recorded sample; it does not automatically attribute a change to one commit or prove device improvement. A safety refusal is not itself a misoperation or failed business postcondition. Existing task verdict rules are unchanged.
 
 ## Commands
 

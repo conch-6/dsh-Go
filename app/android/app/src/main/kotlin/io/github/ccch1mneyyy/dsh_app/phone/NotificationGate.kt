@@ -168,10 +168,11 @@ class NotificationGate(
             AppStrings.get(app, R.string.phone_prompt_result_channel), NotificationManager.IMPORTANCE_HIGH))
         if (!channelAvailable(CHANNEL_RESULT, NotificationManager.IMPORTANCE_MIN)) return false
         val intent = if (sessionId != null) EntryActivity.openChat(app, sessionId, host) else EntryActivity.openApp(app)
-        intent.data = Uri.parse("dsh-phone-result://task/$taskId")
+        val key = resultTag(taskId, sessionId, host)
+        intent.data = Uri.fromParts("dsh-phone-result", key, null)
         val pi = PendingIntent.getActivity(app, RESULT_ID, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        nm.notify(RESULT_TAG, RESULT_ID, builder(CHANNEL_RESULT).setSmallIcon(R.drawable.ic_stat_dsh)
+        nm.notify(key, RESULT_ID, builder(CHANNEL_RESULT).setSmallIcon(R.drawable.ic_stat_dsh)
             .setContentTitle(AppStrings.get(app, R.string.phone_prompt_result_title))
             .setContentText(AppStrings.get(app, R.string.phone_prompt_result_text))
             .setContentIntent(pi).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build())
@@ -261,6 +262,9 @@ class NotificationGate(
         const val CHANNEL_CONFIRM = "dsh-phone-confirm"
         const val CHANNEL_RESULT = "dsh-phone-result"
         private const val RESULT_TAG = "dsh-phone-result"
+        // Keep the full Long identity: truncating to a notification Int id can collide.
+        internal fun resultTag(taskId: Long, sessionId: String?, host: String?): String =
+            "$RESULT_TAG:$taskId:${sessionId?.length ?: -1}:${sessionId.orEmpty()}:${host?.length ?: -1}:${host.orEmpty()}"
         private const val RESULT_ID = 4300
         private const val EXTRA_CHOICE = "choice"
     }

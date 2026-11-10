@@ -236,7 +236,7 @@ internal class PhoneSelfCheck(
                     update(run, Stage.CHANNEL, State.UNKNOWN, false, Reason.CHANNEL_UNAVAILABLE, clock() - probeStarted)
                     return@call
                 }
-                val birth = BackgroundRecoveryProtocol.birth(cap::get)
+                val birth = BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey)
                 if (!OwnerScopeProtocol.supported(cap) || (cap.get(Proto.SELF_CHECK_PROBE_VERSION) as? Int) != 1 ||
                     (cap.get(Proto.RELEASE_RECEIPT) as? Int) != 1 || birth == null) {
                     update(run, Stage.CHANNEL, State.FAIL, true, Reason.UNSUPPORTED_PEER, clock() - probeStarted)
@@ -325,7 +325,7 @@ internal class PhoneSelfCheck(
                         clock() - beganStageAt)
                     return@call null
                 }
-                val birth = BackgroundRecoveryProtocol.birth(cap::get)
+                val birth = BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey)
                 if (!OwnerScopeProtocol.supported(cap) || (cap.get(run.targetVersionKey) as? Int) != 1 ||
                     (cap.get(Proto.RELEASE_RECEIPT) as? Int) != 1 || birth == null) {
                     update(run, Stage.CHANNEL, State.FAIL, true, Reason.UNSUPPORTED_PEER,

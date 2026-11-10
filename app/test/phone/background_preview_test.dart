@@ -77,6 +77,16 @@ class _DeliveryPhoneChannel extends PhoneChannel {
   });
 }
 
+/// Forces delivery during a real codec callback; parser and decoder stay real.
+class _SynchronousPreviewChannel extends PhoneChannel {
+  final events = StreamController<PhonePreviewFrame?>(sync: true);
+
+  void emit(Object? event) => events.add(PhonePreviewFrame.parse(event));
+
+  @override
+  Stream<PhonePreviewFrame?> previewFrames(int taskId) => events.stream;
+}
+
 /// MockStreamHandler.onCancel is void. Delay only the encoded ACK, so the
 /// production subscription must await its actual cancel Future before re-listen.
 class _CancelAckMessenger implements BinaryMessenger {
@@ -198,10 +208,47 @@ Future<void> _unmount(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('availability suspension keeps the original cancel ACK barrier and task', (tester) async {
+    final native = _NativePreview()..install();
+    final gate = _CancelAckMessenger(TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger);
+    final channel = PhoneChannel(preview: EventChannel(_events.name, _events.codec, gate));
+    var enabled = true;
+    late StateSetter update;
+    _resume(tester);
+    await tester.pumpWidget(goldenApp(brightness: Brightness.light, home: StatefulBuilder(
+      builder: (_, setState) {
+        update = setState;
+        return PhoneBackgroundPreviewDialog(channel: channel, taskId: 7, enabled: enabled);
+      },
+    )));
+    await _flush(tester);
+    expect(gate.calls, ['listen']);
+    final ack = Completer<void>();
+    gate.cancelAck = ack;
+    try {
+      update(() => enabled = false);
+      await _flush(tester);
+      expect(gate.calls, ['listen', 'cancel']);
+      expect(find.byType(RawImage), findsNothing);
+      update(() => enabled = true);
+      await _flush(tester);
+      expect(gate.calls, ['listen', 'cancel']);
+      ack.complete();
+      await _flush(tester);
+      expect(gate.calls, ['listen', 'cancel', 'listen']);
+      expect(native.arguments, [{'taskId': 7}, {'taskId': 7}]);
+    } finally {
+      if (!ack.isCompleted) ack.complete();
+      gate.cancelAck = null;
+      await _unmount(tester);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('preview parser accepts every non-image state and rejects malformed identity', () {
-    for (final state in ['off', 'waiting', 'unavailable', 'protected']) {
+    for (final state in ['off', 'waiting', 'unavailable', 'protected', 'inUse']) {
       final value = PhonePreviewFrame.parse(_event(state, 0));
       expect(value?.state, state);
       expect(value?.imageBytes, isNull);
@@ -349,6 +396,99 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('continuous same-generation frames do not retire every decoding image', (tester) async {
+    await tester.runAsync<void>(() async {
+      final channel = _SynchronousPreviewChannel();
+      final images = _Images()..install();
+      final lastCreated = Completer<ui.Image>();
+      ui.Image? first;
+      bool? firstRetiredBeforeSecond;
+      try {
+        await _mount(tester, channel);
+        images.retireOnCreate = () {
+          first = images.created.last;
+          images.retireOnCreate = () {
+            firstRetiredBeforeSecond = first!.debugDisposed;
+            images.next = lastCreated;
+            channel.emit(_event('frame', 3));
+          };
+          channel.emit(_event('frame', 2));
+        };
+        channel.emit(_event('frame', 1));
+        final last = await lastCreated.future.timeout(const Duration(seconds: 10));
+        await _flush(tester);
+        expect(firstRetiredBeforeSecond, isFalse,
+            reason: 'The first decode must be held by the viewer while the next decode starts.');
+        expect(tester.widget<RawImage>(find.byType(RawImage)).image, same(last));
+        expect(first!.debugDisposed, isTrue);
+        expect(last.debugDisposed, isFalse);
+      } finally {
+        try {
+          await _unmount(tester);
+          await channel.events.close();
+          expect(images.created.every((image) => image.debugDisposed), isTrue);
+        } finally { images.restore(); }
+      }
+    });
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a new generation retires the in-flight decode before its replacement', (tester) async {
+    await tester.runAsync<void>(() async {
+      final channel = _SynchronousPreviewChannel();
+      final images = _Images()..install();
+      final replacement = Completer<ui.Image>();
+      ui.Image? old;
+      bool? oldRetired;
+      try {
+        await _mount(tester, channel);
+        images.retireOnCreate = () {
+          old = images.created.last;
+          images.next = replacement;
+          images.retireOnCreate = () { oldRetired = old!.debugDisposed; };
+          channel.emit(_event('frame', 1, generation: 2));
+        };
+        channel.emit(_event('frame', 1));
+        final next = await replacement.future.timeout(const Duration(seconds: 10));
+        await _flush(tester);
+        expect(oldRetired, isTrue);
+        expect(tester.widget<RawImage>(find.byType(RawImage)).image, same(next));
+      } finally {
+        try {
+          await _unmount(tester);
+          await channel.events.close();
+          expect(images.created.every((image) => image.debugDisposed), isTrue);
+        } finally { images.restore(); }
+      }
+    });
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a failed decode preserves a newer pending frame', (tester) async {
+    await tester.runAsync<void>(() async {
+      final channel = _SynchronousPreviewChannel();
+      final images = _Images()..install();
+      final recovered = Completer<ui.Image>();
+      try {
+        await _mount(tester, channel);
+        images.next = recovered;
+        channel.emit({..._event('frame', 1), 'imageBytes': _png.sublist(0, 8)});
+        channel.emit(_event('frame', 2));
+        final next = await recovered.future.timeout(const Duration(seconds: 10));
+        await _flush(tester);
+        expect(tester.widget<RawImage>(find.byType(RawImage)).image, same(next));
+        expect(find.text(appL10n.phonePreviewUnavailable), findsNothing);
+      } finally {
+        try {
+          await _unmount(tester);
+          await channel.events.close();
+          expect(images.created.every((image) => image.debugDisposed), isTrue);
+        } finally { images.restore(); }
+      }
+    });
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('cover and background release decoded images without ImageCache', (tester) async {
     await tester.runAsync<void>(() async {
       final native = _NativePreview()..install();
@@ -456,6 +596,45 @@ void main() {
         expect(images.disposed.where((value) => identical(value, late)), hasLength(1));
         expect(find.byType(RawImage), findsNothing);
         expect(native.calls, ['listen', 'cancel']);
+      } finally {
+        try {
+          await _unmount(tester);
+          expect(images.created.every((image) => image.debugDisposed), isTrue,
+              reason: 'Both owner handles and RawImage render clones must retire.');
+        } finally { images.restore(); }
+      }
+    });
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('in-use preview clears its image and rejects old or foreign frames', (tester) async {
+    await tester.runAsync<void>(() async {
+      final native = _NativePreview()..install();
+      final channel = _DeliveryPhoneChannel();
+      final images = _Images()..install();
+      try {
+        await _mount(tester, channel);
+        final image = await _frame(tester, native, images, 1);
+        final inUse = channel.expectDelivery(1);
+        native.emit(_event('inUse', 2));
+        await inUse;
+        await _flush(tester);
+        expect(image.debugDisposed, isTrue);
+        expect(find.byType(RawImage), findsNothing);
+        expect(find.text(appL10n.phonePreviewInUse), findsOneWidget);
+
+        final rejected = channel.expectDelivery(2);
+        native.emit(_event('frame', 1));
+        native.emit(_event('frame', 99, task: 8));
+        await rejected;
+        await _flush(tester);
+        expect(find.byType(RawImage), findsNothing);
+        expect(find.text(appL10n.phonePreviewInUse), findsOneWidget);
+
+        final waiting = channel.expectDelivery(1);
+        native.emit(_event('waiting', 3, generation: 2));
+        await waiting;
+        await _flush(tester);
+        expect(find.text(appL10n.phonePreviewWaiting), findsOneWidget);
       } finally {
         try {
           await _unmount(tester);

@@ -17,6 +17,7 @@
   "companionNotConnected": "现在连不上引擎，等一下再和我说吧。",
   "companionSendFailed": "这句话没送出去，要不要再说一次？",
   "companionLogTitle": "聊天记录",
+  "companionContextUnsupported": "这台主机的伙伴还不支持上下文：她的名字、设定和刚才发生的事传不过去，只发你说的话。升级主机或换成轻量模式就好。",
   "companionLogEmpty": "还没有说过话。",
   "companionLogYou": "你",
   "companionLogOpenChat": "在主对话里看",
@@ -151,8 +152,16 @@
   "companionInviteDecline": "等会儿",
   "companionInviteYes1": "嘿嘿，就歇一小会儿。",
   "companionInviteYes2": "那我先躺好啦，你也放松点。",
-  "companionMenuInvite": "主动邀请",
-  "companionMenuInviteHint": "你安静陪着她时，她偶尔会邀你一起歇一会儿",
+  "companionMenuPace": "她多主动",
+  "companionPaceHint": "她只在你安静陪着她时开口：邀你歇一会儿，或提一句别的对话。深夜不说，每次进门最多邀一次。",
+  "companionPaceQuiet": "安静",
+  "companionPaceQuietHint": "不主动开口，你找她时才说话",
+  "companionPaceRare": "偶尔",
+  "companionPaceRareHint": "一天最多 2 次，至少隔 6 小时",
+  "companionPaceOften": "常常",
+  "companionPaceOftenHint": "一天最多 6 次，至少隔 2 小时",
+  "companionPaceChatty": "话多",
+  "companionPaceChattyHint": "一天最多 12 次，至少隔半小时",
   "companionSetupBundled": "接她回家",
   "companionSetupBodyBundled": "她就在 App 里，点一下就到，素材只解压到这台手机上。也可以导入别的素材包，或者把 Live2D 模型的文件夹打成 zip 直接导入。",
   "companionSetupImportOther": "导入别的素材包",
@@ -170,43 +179,31 @@
   "companionCloser3": "以后也要常来哦，我会想你的。",
   "companionPatClose": "最喜欢被你摸头了。",
   "companionHugClose": "抱紧一点也没关系哦。",
-  "companionTaskDone": "「{title}」那边跑完啦。",
-  "@companionTaskDone": {
-    "placeholders": {
-      "title": {
-        "type": "String"
-      }
-    }
-  },
   "companionTaskDoneUntitled": "你那边的任务跑完啦。",
-  "companionTaskFailed": "「{title}」好像出错了，要去看看吗？",
-  "@companionTaskFailed": {
-    "placeholders": {
-      "title": {
-        "type": "String"
-      }
-    }
-  },
   "companionTaskFailedUntitled": "你那边的任务好像出错了，要去看看吗？",
-  "companionTaskApproval": "「{title}」在等你批准。",
-  "@companionTaskApproval": {
-    "placeholders": {
-      "title": {
-        "type": "String"
-      }
-    }
-  },
-  "companionTaskApprovalUntitled": "你那边有件事在等你批准。",
-  "companionTaskQuestion": "「{title}」有事想问你。",
-  "@companionTaskQuestion": {
-    "placeholders": {
-      "title": {
-        "type": "String"
-      }
-    }
-  },
-  "companionTaskQuestionUntitled": "你那边有个问题在等你回答。",
   "companionTaskOpen": "去看看",
+  "companionMenuSignals": "她会提起什么",
+  "companionSignalsHint": "这些只在小屋里说给你听，不会发给模型。说多说少跟着「她多主动」，和邀请共用次数，深夜不说；选「安静」她也不说。",
+  "companionSignalState": "留意别的对话",
+  "companionSignalStateHint": "这台主机上别的对话跑完或出错时，她心里有数",
+  "companionSignalSpeech": "提一句",
+  "companionSignalSpeechHint": "挑你安静的时候说一句",
+  "companionSignalVoice": "用声音说出来",
+  "companionSignalVoiceHint": "她的声音开着时，把这句读出来",
+  "companionSignalNight": "深夜提醒你休息",
+  "companionSignalNightHint": "深夜在小屋里待了一阵，她轻轻提醒一次",
+  "companionSignalLateUse": "这么晚了还陪着我……要不要早点歇一会儿？",
+  "companionRecallTitle": "完整模式里自动想起记忆",
+  "companionRecallHint": "打开时换一段新对话；改动她记得的事会自动关掉",
+  "companionRecallConfirm": "打开后，她确认过的记忆（最多 12 条）会跟着完整模式里她的每次回复一起发给模型。会开始一段新对话，现在这段留在主对话列表里。改动记忆后会自动关掉，到时可以再打开。",
+  "companionRecallTurnOn": "打开",
+  "companionRecallOn": "好，从这段新对话起，我会想着你让我记住的事。",
+  "companionRecallBusy": "另一个对话正在用自动想起记忆，先在那边关掉再来",
+  "companionRecallUnsupported": "这台主机现在开不了自动想起记忆",
+  "companionRecallFailed": "自动想起记忆没打开，再试一次吧",
+  "companionRecallOff": "自动想起记忆关了，下一句会开始一段新对话",
+  "companionRecallOffFailed": "自动想起记忆没关掉，再试一次吧",
+  "companionRecallStopped": "自动想起记忆停了（她记得的事有改动），换成了一段新对话。想要的话可以在菜单里再打开。",
   "companionMenuVoice": "她的声音",
   "companionMenuVoiceHint": "用手机自带的语音读出她说的话",
   "companionVoiceHello": "你好呀，这是我的声音。喜欢的话就留着吧。",

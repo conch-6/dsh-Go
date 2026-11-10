@@ -668,6 +668,9 @@
   "phonePreviewTitle": "实时查看后台屏",
   "phonePreviewDescription": "仅在预览可见时取帧。画面只留在本机；预览不可点击。",
   "phonePreviewOpen": "查看后台屏",
+  "phonePreviewTask": "预览任务 {taskId}",
+  "@phonePreviewTask": {"placeholders": {"taskId": {"type": "String"}}},
+  "phonePreviewInUse": "正在预览另一任务",
   "phonePreviewOff": "任务已结束或预览已关闭",
   "phonePreviewUnavailable": "画面暂不可预览，或受到保护",
   "phonePreviewWaiting": "等待后台屏的新画面",
@@ -734,7 +737,7 @@
       }
     }
   },
-  "phoneSelfCheckReason": "{reason, select, busy{手机或通道正忙。} unsupported{设备或特权端不支持这项自检。} cancelled{本次请求已取消或退役。} disabled{手机操控尚未开启。} locked{设备已锁定。} identity{原运行或通道身份已改变。} invalid{请求或结果无法验证。} display{临时展示屏未能确认。} input{输入受理或送达未确认，不会重放已派发输入。} cleanup{资源清理未确认，仅可重试清理。} denied{系统拒绝了操作。} timeout{操作超时，已派发工作仍可能完成。} unavailable{本机状态或已选通道不可用。} target_unavailable{无法核实固定目标，请完成清理后再开始。} target_changed{原目标已变化，请仅继续清理。} target_cleanup{目标清理未确认，请仅重试清理。} target_main{目标曾出现在主屏，已停止后续步骤，请完成清理。} target_readback{固定目标计数或文本回读不符，不要重复操作，请完成清理。} tree_cleanup{树连接清理未确认，请仅重试清理。} target_launch{目标启动被拒绝或未确认，请检查设备并完成清理。} frame_unavailable{未取得可用的本地图样帧，请完成清理后再开始新的自检。} frame_mismatch{实际画面与本次目标及阶段不符，请完成清理。} continuity{有限受控刷新序列未确认；这不是帧率结果。} main_changed{主屏采样点发生变化，也可能包含用户操作；请完成清理，不能据此判定原因。} main_unchanged{这些有限采样点未见变化，采样之间是否受扰仍未知。} main_incomplete{主屏样本不完整，不能据此证明没有受扰。} not_installed{未安装本机 OCR 识别器，未执行 OCR 测试。} other{收到无法识别的结果。}}",
+  "phoneSelfCheckReason": "{reason, select, busy{手机或通道正忙。} unsupported{设备或特权端不支持这项自检。} cancelled{本次请求已取消或退役。} disabled{手机操控尚未开启。} locked{设备已锁定。} identity{原运行或通道身份已改变。} invalid{请求或结果无法验证。} display{临时展示屏未能确认。} input{输入受理或送达未确认，不会重放已派发输入。} cleanup{资源清理未确认，仅可重试清理。} denied{系统拒绝了操作。} timeout{操作超时，已派发工作仍可能完成。} unavailable{本机状态或已选通道不可用。} target_unavailable{无法核实固定目标，请完成清理后再开始。} target_changed{原目标已变化，请仅继续清理。} target_cleanup{目标清理未确认，请仅重试清理。} target_main{目标曾出现在主屏，已停止后续步骤，请完成清理。} target_readback{固定目标计数或文本回读不符，不要重复操作，请完成清理。} tree_cleanup{树连接清理未确认，请仅重试清理。} target_launch{目标启动被拒绝或未确认，请检查设备并完成清理。} frame_unavailable{未取得可用的本地图样帧，请完成清理后再开始新的自检。} frame_mismatch{实际画面与本次目标及阶段不符，请完成清理。} continuity{有限受控刷新序列未确认；这不是帧率结果。} main_changed{主屏采样点发生变化，也可能包含用户操作；请完成清理，不能据此判定原因。} main_unchanged{这些有限采样点未见变化，采样之间是否受扰仍未知。} main_incomplete{主屏样本不完整，不能据此证明没有受扰。} not_installed{本自检未接入 OCR，未执行识别测试。} other{收到无法识别的结果。}}",
   "@phoneSelfCheckReason": {
     "placeholders": {
       "reason": {
@@ -760,7 +763,7 @@
       }
     }
   },
-  "phoneSelfCheckTargetC2Scope": "使用固定本机目标核验启动、控件树、单次按钮点按、ASCII／中文 ACTION_SET_TEXT 整框替换与回读、本地图样截图和有限受控刷新；不衡量 FPS 或流畅度。有限主屏样本不能证明采样间全程无扰。OCR 未安装；触摸接收探针、滚动和返回不在本次范围。仅清理完成也不证明曾创建展示屏。",
+  "phoneSelfCheckTargetC2Scope": "使用固定本机目标核验启动、控件树、单次按钮点按、ASCII／中文 ACTION_SET_TEXT 整框替换与回读、本地图样截图和有限受控刷新；不衡量 FPS 或流畅度。有限主屏样本不能证明采样间全程无扰。OCR、触摸接收探针、滚动和返回不在本次范围。仅清理完成也不证明曾创建展示屏。",
   "phoneTaskWaiting": "任务 {taskId} · 等待资源",
   "phoneTaskWaitingApp": "等待应用 {packageName}，已等待 {seconds} 秒。",
   "phoneTaskWaitingUnknown": "等待界面资源（应用身份未确认），已等待 {seconds} 秒。",
@@ -814,5 +817,54 @@
         "type": "int"
       }
     }
-  }
+  },
+  "phoneLocalOcrTitle": "本机文字识别（ML Kit）",
+  "phoneLocalOcrUnknown": "暂时无法读取本机文字识别设置，请刷新后再试。",
+  "phoneLocalOcrDisclosure": "识别在本机进行，截图和文字不会发给 Google；Google 的 SDK 会收集机型、应用版本、耗时等使用统计。",
+  "phoneLocalOcrDetails": "默认开启。关闭时，文字识别请求不会触发 SDK 加载或初始化；Remote 扫码配对会独立按需初始化共用的 SDK，不会开启文字识别。截图和识别文字可能发送给你配置的模型。关闭后不再开始新的本机文字识别；已经开始的识别可能仍在收尾。关闭不会卸载 SDK，也不承诺清除或停止发送此前积累的 SDK 统计。",
+  "phoneBackgroundParallelTitle": "后台任务上限",
+  "phoneBackgroundParallelStatus": "设置上限：{configured} · 当前可用上限：{effective} · 已占用：{held}",
+  "phoneBackgroundParallelDescription": "调低上限会保留已有任务。新任务仍需等待应用和主屏资源可用。",
+  "phoneBackgroundParallelChoice": "{limit} 个后台任务槽位",
+  "phoneBackgroundParallelOff": "后台通道已关闭。保存此偏好不会开启通道。",
+  "phoneBackgroundParallelUnsupported": "此设备当前无法使用后台操作。",
+  "phoneBackgroundParallelConnection": "建立连接后才能接纳新的后台任务。",
+  "phoneBackgroundParallelBusy": "后台通道正在准备或维护，暂不能接纳新任务。",
+  "phoneBackgroundParallelRecovery": "请先处理未完成的后台资源恢复，再开始新任务。",
+  "phoneBackgroundParallelPeer": "当前连接的服务不支持所需的后台能力。",
+  "phoneBackgroundParallelSerial": "此连接支持一个后台槽位，设置偏好仍会保留。",
+  "@phoneBackgroundParallelStatus": {
+    "placeholders": {
+      "configured": {
+        "type": "int"
+      },
+      "effective": {
+        "type": "int"
+      },
+      "held": {
+        "type": "int"
+      }
+    }
+  },
+  "@phoneBackgroundParallelChoice": {
+    "placeholders": {
+      "limit": {
+        "type": "int"
+      }
+    }
+  },
+  "phoneSkillBundlePublishedUnverified": "文件已发布，但尚未通过完整核验。不要重复保存。",
+  "phoneSkillBundleUnknown": "保存结果尚未确认，文件可能已经写入。不要重复保存。",
+  "phoneSkillBundleRevision": "路线版本：{revision}",
+  "@phoneSkillBundleRevision": {"placeholders": {"revision": {"type": "String"}}},
+  "phoneSkillReplayReview": "核对手机路线",
+  "phoneSkillReplaySourceChanged": "本机会话或连接已改变，请返回当前本机会话重新选择。",
+  "phoneSkillReplayUnavailable": "此路线尚不能在当前本机安全执行。仍可按普通技能模板使用。",
+  "phoneSkillReplayConfirm": "我已核对这条路线与本次选择的 App。",
+  "phoneSkillReplayToComposer": "放入当前对话",
+  "phoneSkillReplayStartText": "本机已选择并核对手机路线。请仅调用 mcp__phone__replay，参数 {request}。若不可用或被拒绝，交回用户/模型，不要改为普通动作重放。",
+  "@phoneSkillReplayStartText": {"placeholders": {"request": {"type": "String"}}},
+  "phoneSkillReplayQueue": "发送路线（排队）",
+  "phoneSkillReplayQueued": "路线消息已被接收或排队，尚不代表路线执行成功。",
+  "phoneSkillReplaySendUncertain": "路线消息未确认发送成功；没有自动重新准备或重放。请核对原对话结果。"
 }

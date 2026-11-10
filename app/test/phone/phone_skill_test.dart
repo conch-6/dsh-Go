@@ -21,6 +21,26 @@ Map<String, Object?> _view({int revision = 1, int taskId = 7, String id = _id}) 
   },
 };
 
+const _bundle = 'cccccccccccccccccccccccccccccccc';
+Map<String, Object?> _bundleView() {
+  final raw = _view();
+  (raw['draft'] as Map<String, Object?>)['bundleRevision'] = _bundle;
+  return raw;
+}
+Map<String, Object?> _bundleSaved() => {'kind': 'saved', 'name': _name,
+  'relativePath': 'skills/$_name/SKILL.md', 'bundleRevision': _bundle};
+Map<String, Object?> _unverified(String publication) => {..._bundleSaved(), 'kind': 'unverified',
+  'publication': publication, 'code': 'verification_unavailable'};
+Future<void> _openAndSaveBundle(WidgetTester tester) async {
+  await tester.pumpWidget(MaterialApp(home: PhoneSkillEditor(channel: PhoneChannel(), candidate: _candidate)));
+  await tester.pumpAndSettle();
+  await tester.ensureVisible(find.byType(CheckboxListTile));
+  await tester.tap(find.byType(CheckboxListTile));
+  await tester.pump();
+  await tester.tap(find.widgetWithText(FilledButton, appL10n.commonSave));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -141,6 +161,40 @@ void main() {
     await tester.pump();
   });
 
+  for (final code in ['io', 'no_home', 'conflict', 'busy', 'cannot_cancel', 'unavailable', 'stale']) {
+    testWidgets('checking a pending write handles $code without another write', (tester) async {
+      var writes = 0;
+      messenger.setMockMethodCallHandler(_methods, (call) async {
+        if (call.method == 'saveSkillDraft') {
+          writes++;
+          return {'kind': 'saving', 'phase': 'committing'};
+        }
+        if (call.method == 'discardSkillDraft') return {'kind': 'discarded'};
+        if ((call.arguments as Map)['action'] == 'view') return {'kind': 'rejected', 'code': code};
+        return _view();
+      });
+      await tester.pumpWidget(MaterialApp(home: PhoneSkillEditor(channel: PhoneChannel(), candidate: _candidate)));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(CheckboxListTile));
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, appL10n.commonSave));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byType(TextField).first).enabled, isFalse);
+      await tester.tap(find.text(appL10n.phoneSkillCheckWrite));
+      await tester.pumpAndSettle();
+      final terminal = ['io', 'no_home', 'conflict'].contains(code);
+      expect(find.text(appL10n.phoneSkillCheckWrite), terminal ? findsNothing : findsOneWidget);
+      expect(tester.widget<TextField>(find.byType(TextField).first).enabled, terminal);
+      expect(find.text('# Safe parameterized template\n'), findsOneWidget);
+      expect(find.text(appL10n.phoneSkillSavedBody), findsNothing);
+      expect(tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value, isFalse);
+      expect(writes, 1);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+  }
+
   testWidgets('a shown draft for another task never enables saving', (tester) async {
     messenger.setMockMethodCallHandler(_methods, (_) async => _view(taskId: 8));
     await tester.pumpWidget(MaterialApp(home: PhoneSkillEditor(channel: PhoneChannel(), candidate: _candidate)));
@@ -149,4 +203,151 @@ void main() {
     expect(find.byType(CheckboxListTile), findsNothing);
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, appL10n.commonSave)).onPressed, isNull);
   });
+  test('phase2 model requires exact bundle syntax and terminal publication facts', () {
+    final view = _bundleView()['draft'] as Map<String, Object?>;
+    expect(PhoneSkillDraftView.parse(view)!.bundleRevision, _bundle);
+    for (final invalid in [null, 7, 'ABC', 'c' * 31]) {
+      expect(PhoneSkillDraftView.parse({...view, 'bundleRevision': invalid}), isNull);
+      expect(PhoneSkillReply.parse({..._bundleSaved(), 'bundleRevision': invalid}).kind, PhoneSkillReplyKind.rejected);
+    }
+    for (final publication in ['published', 'unknown']) {
+      final reply = PhoneSkillReply.parse(_unverified(publication));
+      expect(reply.kind, PhoneSkillReplyKind.unverified);
+      expect((reply.name, reply.bundleRevision, reply.publication, reply.code),
+        (_name, _bundle, publication, 'verification_unavailable'));
+    }
+    for (final patch in <Map<String, Object?>>[
+      {'publication': 'not_written'}, {'code': 'raw private error'},
+      {'relativePath': '../other'}, {'bundleRevision': null},
+    ]) {
+      expect(PhoneSkillReply.parse({..._unverified('published'), ...patch}).kind, PhoneSkillReplyKind.rejected);
+    }
+    expect(PhoneSkillReply.parse({'kind': 'saving', 'phase': 'staging', 'name': _name}).kind, PhoneSkillReplyKind.rejected);
+  });
+
+  for (final publication in ['published', 'unknown']) {
+    testWidgets('phase2 saving to $publication stops pending and keeps exact bundle locked', (tester) async {
+      final calls = <MethodCall>[];
+      var views = 0;
+      messenger.setMockMethodCallHandler(_methods, (call) async {
+        calls.add(call);
+        if (call.method == 'saveSkillDraft') return {'kind': 'saving', 'phase': 'committing', 'name': _name, 'bundleRevision': _bundle};
+        if (call.method == 'discardSkillDraft') return {'kind': 'discarded'};
+        if ((call.arguments as Map)['action'] == 'check_save') return ++views == 1 ? _unverified(publication) : _bundleSaved();
+        return _bundleView();
+      });
+      await _openAndSaveBundle(tester);
+      expect(find.text(appL10n.phoneSkillWriting), findsOneWidget);
+      await tester.tap(find.text(appL10n.phoneSkillCheckWrite));
+      await tester.pumpAndSettle();
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.text(appL10n.phoneSkillWriting), findsNothing);
+      expect(find.text(publication == 'published' ? appL10n.phoneSkillBundlePublishedUnverified : appL10n.phoneSkillBundleUnknown), findsOneWidget);
+      expect(find.text('skills/$_name/SKILL.md'), findsOneWidget);
+      expect(find.text(appL10n.phoneSkillBundleRevision(_bundle)), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, appL10n.commonSave), findsNothing);
+      expect(tester.widget<TextField>(find.byType(TextField).first).enabled, isFalse);
+      expect(tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).onChanged, isNull);
+      expect(find.text(appL10n.phoneSkillSavedBody), findsNothing);
+      await tester.tap(find.text(appL10n.phoneSkillCheckWrite));
+      await tester.pumpAndSettle();
+      expect(find.text(appL10n.phoneSkillSavedBody), findsOneWidget);
+      expect(find.text(appL10n.phoneSkillBundleRevision(_bundle)), findsOneWidget);
+      expect(find.text(appL10n.phoneSkillCheckWrite), findsNothing);
+      final writes = calls.where((c) => c.method == 'saveSkillDraft').toList();
+      expect(writes.length, 1);
+      expect(writes.single.arguments, {'taskId': 7, 'draftId': _id, 'revision': 1, 'confirmed': true});
+      expect(calls.where((c) => c.method == 'skillDraft' && (c.arguments as Map)['action'] == 'check_save').length, 2);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+  }
+
+  for (final wrong in <Map<String, Object?>>[
+    {'kind': 'saved', 'name': _name, 'relativePath': 'skills/$_name/SKILL.md'},
+    {..._bundleSaved(), 'bundleRevision': 'd' * 32},
+    {..._bundleSaved(), 'name': 'phone-task-${'e' * 32}', 'relativePath': 'skills/phone-task-${'e' * 32}/SKILL.md'},
+    {..._unverified('published'), 'bundleRevision': 'd' * 32},
+  ]) {
+    testWidgets('phase2 wrong terminal $wrong never downgrades to phase1 success', (tester) async {
+      var writes = 0;
+      messenger.setMockMethodCallHandler(_methods, (call) async {
+        if (call.method == 'saveSkillDraft') { writes++; return wrong; }
+        if (call.method == 'discardSkillDraft') return {'kind': 'discarded'};
+        return _bundleView();
+      });
+      await _openAndSaveBundle(tester);
+      expect(find.text(appL10n.phoneSkillSavedBody), findsNothing);
+      expect(find.text(appL10n.phoneSkillStale), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, appL10n.commonSave), findsNothing);
+      expect(tester.widget<TextField>(find.byType(TextField).first).enabled, isFalse);
+      expect(find.text(appL10n.phoneSkillCheckWrite), findsOneWidget);
+      expect(writes, 1);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+  }
+
+  testWidgets('phase2 missing save ACK stays uncertain and check_save does not reinstall', (tester) async {
+    var writes = 0;
+    var discards = 0;
+    messenger.setMockMethodCallHandler(_methods, (call) async {
+      if (call.method == 'saveSkillDraft') {
+        writes++;
+        throw PlatformException(code: 'IO', message: 'private native detail');
+      }
+      if (call.method == 'discardSkillDraft') { discards++; return _unverified('unknown'); }
+      if ((call.arguments as Map)['action'] == 'check_save') return _unverified('unknown');
+      return _bundleView();
+    });
+    await _openAndSaveBundle(tester);
+    expect(find.text(appL10n.phoneSkillBundleUnknown), findsOneWidget);
+    expect(find.textContaining('private native detail'), findsNothing);
+    expect(find.widgetWithText(FilledButton, appL10n.commonSave), findsNothing);
+    await tester.tap(find.text(appL10n.phoneSkillCheckWrite));
+    await tester.pumpAndSettle();
+    expect(find.text(appL10n.phoneSkillWriting), findsNothing);
+    expect(find.text(appL10n.phoneSkillBundleUnknown), findsOneWidget);
+    expect(writes, 1);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(discards, 0); // A known terminal result owns no active editor write to cancel.
+  });
+
+  for (final terminal in <Map<String, Object?>>[
+    {'kind': 'saved', 'name': _name, 'relativePath': 'skills/$_name/SKILL.md'},
+    _bundleSaved(), _unverified('published'), _unverified('unknown'),
+  ]) {
+    testWidgets('initial owner open can return read-only terminal $terminal', (tester) async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(_methods, (call) async {
+        calls.add(call);
+        return terminal;
+      });
+      await tester.pumpWidget(MaterialApp(home: PhoneSkillEditor(channel: PhoneChannel(), candidate: _candidate)));
+      await tester.pumpAndSettle();
+      expect(find.text('skills/$_name/SKILL.md'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      expect(find.byType(CheckboxListTile), findsNothing);
+      expect(find.text(appL10n.phoneSkillStale), findsNothing);
+      expect(find.text(appL10n.phoneSkillCheckWrite), findsNothing);
+      expect(find.widgetWithText(FilledButton, appL10n.commonSave), findsNothing);
+      if (terminal['kind'] == 'saved') {
+        expect(find.text(appL10n.phoneSkillSavedBody), findsOneWidget);
+      } else {
+        expect(find.text(appL10n.phoneSkillSavedBody), findsNothing);
+        expect(find.text(terminal['publication'] == 'published'
+          ? appL10n.phoneSkillBundlePublishedUnverified : appL10n.phoneSkillBundleUnknown), findsOneWidget);
+      }
+      if (terminal.containsKey('bundleRevision')) {
+        expect(find.text(appL10n.phoneSkillBundleRevision(_bundle)), findsOneWidget);
+      }
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      expect(calls.length, 1);
+      expect(calls.single.method, 'skillDraft');
+      expect((calls.single.arguments as Map)['action'], 'open');
+    });
+  }
+
 }

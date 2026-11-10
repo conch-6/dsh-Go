@@ -18,6 +18,19 @@ object Json {
         return v
     }
 
+    /** Bounded internal documents only. The caller must decode bytes with UTF-8 REPORT.
+     * Root value is depth 0; each object value/array item adds 1 (including empty containers).
+     * Decimal/exponent numbers remain Double; callers requiring integers must require Long. */
+    internal fun parseStrict(text: String, maxDepth: Int = 8): Any? {
+        require(maxDepth in 0..64)
+        val p = Parser(text, strict = true, maxDepth = maxDepth)
+        p.ws()
+        val v = p.value(0)
+        p.ws()
+        if (p.i != text.length) throw JsonException("trailing data at ${p.i}")
+        return v
+    }
+
     fun write(value: Any?): String = StringBuilder().also { write(it, value) }.toString()
 
     private fun write(out: StringBuilder, value: Any?) {
@@ -81,7 +94,9 @@ object Json {
         out.append('"')
     }
 
-    private class Parser(val s: String) {
+    private val STRICT_NUMBER = Regex("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
+
+    private class Parser(val s: String, val strict: Boolean = false, val maxDepth: Int = 64) {
         var i = 0
 
         fun ws() {
@@ -89,7 +104,7 @@ object Json {
         }
 
         fun value(depth: Int): Any? {
-            if (depth > 64) throw JsonException("nested too deep")
+            if (depth > maxDepth) throw JsonException("nested too deep")
             if (i >= s.length) throw JsonException("unexpected end")
             return when (val c = s[i]) {
                 '{' -> obj(depth)
@@ -117,6 +132,7 @@ object Json {
                 ws()
                 if (i >= s.length || s[i] != '"') throw JsonException("expected key at $i")
                 val k = str()
+                if (strict && m.containsKey(k)) throw JsonException("duplicate object key")
                 ws()
                 if (i >= s.length || s[i] != ':') throw JsonException("expected ':' at $i")
                 i++
@@ -157,7 +173,11 @@ object Json {
                 if (i >= s.length) throw JsonException("unterminated string")
                 val c = s[i++]
                 when {
-                    c == '"' -> return b.toString()
+                    c == '"' -> {
+                        val value = b.toString()
+                        if (strict) unicode(value)
+                        return value
+                    }
                     c == '\\' -> {
                         if (i >= s.length) throw JsonException("bad escape")
                         when (val e = s[i++]) {
@@ -171,7 +191,11 @@ object Json {
                             't' -> b.append('\t')
                             'u' -> {
                                 if (i + 4 > s.length) throw JsonException("bad \\u escape")
-                                b.append(s.substring(i, i + 4).toIntOrNull(16)?.toChar() ?: throw JsonException("bad \\u escape"))
+                                val hex = s.substring(i, i + 4)
+                                if (strict && hex.any { it !in '0'..'9' && it !in 'a'..'f' && it !in 'A'..'F' }) {
+                                    throw JsonException("bad \\u escape")
+                                }
+                                b.append(hex.toIntOrNull(16)?.toChar() ?: throw JsonException("bad \\u escape"))
                                 i += 4
                             }
                             else -> throw JsonException("bad escape \\$e")
@@ -179,6 +203,22 @@ object Json {
                     }
                     c < ' ' -> throw JsonException("control character in string")
                     else -> b.append(c)
+                }
+            }
+        }
+
+        private fun unicode(value: String) {
+            var offset = 0
+            while (offset < value.length) {
+                val c = value[offset]
+                if (c.isHighSurrogate()) {
+                    if (offset + 1 >= value.length || !value[offset + 1].isLowSurrogate()) {
+                        throw JsonException("unpaired surrogate")
+                    }
+                    offset += 2
+                } else {
+                    if (c.isLowSurrogate()) throw JsonException("unpaired surrogate")
+                    offset++
                 }
             }
         }
@@ -200,9 +240,12 @@ object Json {
                 while (i < s.length && s[i] in '0'..'9') i++
             }
             val t = s.substring(start, i)
+            if (strict && !STRICT_NUMBER.matches(t)) throw JsonException("bad number at $start")
             if (t == "-" || t.isEmpty()) throw JsonException("bad number at $start")
             if (integral) t.toLongOrNull()?.let { return it }
-            return t.toDoubleOrNull() ?: throw JsonException("bad number at $start")
+            val number = t.toDoubleOrNull() ?: throw JsonException("bad number at $start")
+            if (strict && !number.isFinite()) throw JsonException("non-finite number")
+            return number
         }
     }
 }

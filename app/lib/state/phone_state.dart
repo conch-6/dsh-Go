@@ -85,6 +85,7 @@ class PhoneController extends Notifier<PhoneState> {
 
   StreamSubscription<PhoneStatus>? _sub;
   Future<bool>? _applying;
+  int? _statusRevision;
 
   PhoneChannel get _channel => ref.read(phoneChannelProvider);
 
@@ -109,37 +110,63 @@ class PhoneController extends Notifier<PhoneState> {
   }
 
   /// Status, app list and recent log, all at once.
-  Future<void> refresh() async {
-    await refreshStatus();
-    if (!ref.mounted || !state.status.ready) return;
+  Future<bool> refresh() async {
+    final ready = await refreshStatus();
+    if (!ref.mounted || !ready) return false;
     await Future.wait([refreshPolicies(), refreshLog()]);
+    return ready;
   }
 
-  Future<void> refreshStatus() async {
+  /// True only when this read supplies an accepted, ready native snapshot.
+  Future<bool> refreshStatus() async {
+    final revisionAtRequest = _statusRevision;
     final status = await _channel.status();
-    if (!ref.mounted) return;
-    _apply(status);
-    if (status.ready) {
+    if (!ref.mounted) return false;
+    if (!status.ready) {
+      if (_statusRevision != revisionAtRequest) return false;
+      if (_statusRevision != null) {
+        // A transport failure is not evidence that the last task ended.
+        state = state.copyWith(status: state.status.copyWith(ready: false, error: status.error), loaded: true);
+      } else {
+        _apply(status);
+      }
+      return false;
+    }
+    final accepted = _apply(status);
+    if (accepted) {
       // Only now: activating the event stream with no native side reports an error.
       _sub ??= _channel.statusChanges.listen(_apply, onError: (_) {});
     }
+    return accepted;
   }
 
-  void _apply(PhoneStatus status) {
-    if (!ref.mounted) return;
+  bool _apply(PhoneStatus status) {
+    if (!ref.mounted) return false;
+    final revision = status.statusRevision;
+    if (status.statusRevisionPresent && revision == null) return false;
+    final previous = _statusRevision;
+    if (previous != null && (revision == null || revision <= previous)) return false;
+    if (revision != null) _statusRevision = revision;
     final taskEnded = state.status.task.active && !status.task.active;
     state = state.copyWith(status: status, loaded: true);
     if (taskEnded) unawaited(refreshLog());
+    return true;
   }
 
   Future<void> refreshPolicies() async {
     final policies = await _channel.getPolicies();
-    if (ref.mounted && policies != null) {
-      state = state.copyWith(policies: policies);
-      // A first-run choice the native side didn't take yet goes in now.
-      if (await _pendingConfirmMode() != null && ref.mounted) {
-        unawaited(applyPendingConfirmMode());
+    if (!ref.mounted) return;
+    if (policies == null) {
+      final current = state.policies;
+      if (current != null) {
+        state = state.copyWith(policies: current.withLocalOcrEnabled(null));
       }
+      return;
+    }
+    state = state.copyWith(policies: policies);
+    // A first-run choice the native side didn't take yet goes in now.
+    if (await _pendingConfirmMode() != null && ref.mounted) {
+      unawaited(applyPendingConfirmMode());
     }
   }
 
@@ -246,6 +273,12 @@ class PhoneController extends Notifier<PhoneState> {
   Future<PhoneResult> setBackgroundViewport(PhoneBackgroundViewport preset) =>
       _thenRefresh(_channel.setBackgroundViewport(preset));
 
+  Future<PhoneResult> setBackgroundParallelLimit(int limit) async {
+    final result = await _channel.setBackgroundParallelLimit(limit);
+    if (ref.mounted) await refreshStatus();
+    return result;
+  }
+
   Future<bool> setBackgroundPreview(bool enabled) => _thenRefresh(_channel.setBackgroundPreview(enabled));
 
   /// Refused before any channel call when the native side doesn't offer [mode].
@@ -289,7 +322,7 @@ class PhoneController extends Notifier<PhoneState> {
     final ok = await _channel.setPolicies(next);
     if (!ok || !ref.mounted) return false;
     state = state.copyWith(
-      policies: next,
+      policies: _acceptedPolicyWrite(next),
       retained: state.retained.contains(package) ? state.retained : [...state.retained, package],
     );
     return true;
@@ -304,9 +337,39 @@ class PhoneController extends Notifier<PhoneState> {
     final next = current.withConfirmMode(mode);
     final ok = await _channel.setPolicies(next);
     if (!ok || !ref.mounted) return false;
-    state = state.copyWith(policies: next);
+    state = state.copyWith(policies: _acceptedPolicyWrite(next));
     await _clearPendingConfirmMode();
     return true;
+  }
+
+  // The old setter writes these three fields. Preserve newer read-only settings,
+  // unlocks and OCR state rather than restoring the pre-await object.
+  PhonePolicies? _acceptedPolicyWrite(PhonePolicies written) {
+    final current = state.policies;
+    if (current == null) return null;
+    return PhonePolicies(
+      denyPackages: written.denyPackages,
+      confirmEveryWritePackages: written.confirmEveryWritePackages,
+      confirmMode: written.confirmMode,
+      labels: current.labels,
+      defaultDeny: current.defaultDeny,
+      defaultConfirm: current.defaultConfirm,
+      unlocks: current.unlocks,
+      localOcrEnabled: current.localOcrEnabled,
+    );
+  }
+
+  Future<bool> setLocalOcrEnabled(bool enabled) async {
+    if (state.policies?.localOcrEnabled == null) return false;
+    final ok = await _channel.setLocalOcrEnabled(enabled);
+    if (!ref.mounted) return ok;
+    final readback = await _channel.getPolicies();
+    if (!ref.mounted) return ok;
+    final current = state.policies;
+    if (current != null) {
+      state = state.copyWith(policies: current.withLocalOcrEnabled(readback?.localOcrEnabled));
+    }
+    return ok;
   }
 
   /// First run's 关键步骤先问我 / 全程自动, through the same `setPolicies` as
@@ -438,6 +501,16 @@ final phoneStopWatcherProvider = Provider<void>((ref) {
   final channel = ref.watch(phoneChannelProvider);
   StreamSubscription<PhoneStatus>? sub;
   var disposed = false;
+  int? statusRevision;
+  bool acceptStatus(PhoneStatus status) {
+    if (!status.ready) return false;
+    final revision = status.statusRevision;
+    if (status.statusRevisionPresent && revision == null) return false;
+    final previous = statusRevision;
+    if (previous != null && (revision == null || revision <= previous)) return false;
+    if (revision != null) statusRevision = revision;
+    return true;
+  }
   ref.onDispose(() {
     disposed = true;
     unawaited(sub?.cancel());
@@ -445,12 +518,29 @@ final phoneStopWatcherProvider = Provider<void>((ref) {
   unawaited(() async {
     final status = await channel.status();
     // No native side (tests, an older build): nothing to watch.
-    if (disposed || !status.ready) return;
+    if (disposed || !acceptStatus(status)) return;
     var stopped = status.task.stopped;
+    var launch = status.callerCapability?.launch;
+    var modernSeen = status.callerCapability?.modernSeen == true || status.tasks.any((task) => task.sessionId != null);
+    var versioned = status.taskProtocol == 1 || launch != null;
     sub = channel.statusChanges.listen((s) {
+      if (disposed || !acceptStatus(s)) return;
+      final capability = s.callerCapability;
+      final previousLaunch = launch;
+      if (capability != null && previousLaunch != null && capability.launch < previousLaunch) return;
+      final modernTasks = s.tasks.any((task) => task.sessionId != null);
+      if (capability != null && (previousLaunch == null || capability.launch > previousLaunch)) {
+        launch = capability.launch;
+        modernSeen = (previousLaunch == null && modernSeen) || capability.modernSeen || modernTasks;
+        versioned = true;
+        stopped = s.task.stopped;
+        return; // A new launch is a baseline, not a stop edge.
+      }
+      modernSeen = modernSeen || capability?.modernSeen == true || modernTasks;
+      versioned = versioned || s.taskProtocol == 1 || capability != null;
       // Session-aware native owns targeted stopping. The host API has no atomic
       // expected-run cancellation, so never cancel a later turn or every conversation.
-      if ((s.taskProtocol != 1 || !s.tasks.any((task) => task.sessionId != null)) && s.task.stopped && !stopped) unawaited(_cancelLocalTurns(ref));
+      if (!modernSeen && (capability != null || !versioned) && s.task.stopped && !stopped) unawaited(_cancelLocalTurns(ref));
       stopped = s.task.stopped;
     }, onError: (_) {});
   }());

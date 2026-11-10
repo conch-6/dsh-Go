@@ -36,7 +36,7 @@
     "html_handling": "none",
     "not_found_handling": "none"
   },
-  // Every 10 minutes: the plugin market onto dshgo-dl (src/market.ts publishMarket).
+  // Every 10 minutes: plugins plus verified pet/adapter artifacts onto dshgo-dl.
   "triggers": { "crons": ["*/10 * * * *"] },
   "r2_buckets": [
     // Lifecycle rules on this bucket: 7d/ → 7 days, 30d/ → 30 days (provision.sh).
@@ -74,6 +74,7 @@
     { "name": "USAGE_LIMIT", "namespace_id": "42003", "simple": { "limit": 20, "period": 60 } }
   ],
   "vars": {
+    "PET_MARKET_ENABLED": "1",
     "UPLOADS_PER_HOUR": "20",
     "MAX_BYTES": "20971520",
     // "key": /beta asks for an access key (the private beta). "public": anyone

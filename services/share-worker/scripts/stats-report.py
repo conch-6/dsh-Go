@@ -55,6 +55,10 @@ def table(headers, rows):
     return "\n".join(out)
 
 
+# Fewest installs a model or system must share to be named in the report.
+MIN_GROUP = 20
+
+
 def spread(counter, top=6, unknown="未上报"):
     total = sum(counter.values())
     if not total:
@@ -182,6 +186,21 @@ def main():
         for field, label in [("app", "版本"), ("abi", "ABI"), ("maker", "厂商"), ("engine", "运行方式"), ("lang", "语言"), ("sdk", "系统 API")]:
             values = Counter(str(int(num(v.get(field)))) if field == "sdk" else (v.get(field) or "") for _, v in latest.values())
             print(f"{label}：{spread(values)}")
+        # Model and system come from 1.0.15 on. A value fewer than MIN_GROUP
+        # installs share would point at too few people: it goes under 其他.
+        for field, label in [("model", "机型"), ("rom", "系统版本")]:
+            values = Counter(v.get(field) for _, v in latest.values() if v.get(field))
+            if not values:
+                print(f"{label}：—（1.0.15 起才上报）")
+                continue
+            kept = Counter({k: n for k, n in values.items() if n >= MIN_GROUP})
+            kept["其他"] = 0
+            small = sum(n for k, n in values.items() if n < MIN_GROUP)
+            if small:
+                kept["其他"] = small
+            else:
+                del kept["其他"]
+            print(f"{label}（{fmt(sum(values.values()))} 个安装上报）：{spread(kept, top=10)}")
 
 
 if __name__ == "__main__":

@@ -45,6 +45,12 @@ data class ScreenSnapshot(
     /** Optional numbered screenshot (same element ids drawn on it), PNG or JPEG bytes. */
     val image: ByteArray? = null,
     val imageMime: String? = null,
+    /** Known root packages contributing to this local observation; not pixel/UID attestation. */
+    internal val readPackages: Set<String> = emptySet(),
+    /** Internal candidate for an INPUT retained in text; whole-screen refusals clear it. */
+    internal val focus: FocusObservation? = null,
+    /** Known packages in the image capture scope; independent of text and not pixel attestation. */
+    internal val imageReadPackages: Set<String> = emptySet(),
 )
 
 /** What an element looks like to the safety rules, resolved from a snapshot id + element id. */
@@ -109,7 +115,12 @@ data class ActionResult(
     val staleSnapshot: Boolean = false,
     /** Internal, this BG open only: the original peer confirmed its valid VD and full target identity. */
     val backgroundOpenConfirmed: Boolean = false,
+    /** Same-call native navigation facts; never supplied by a tool argument or serialized. */
+    internal val navigationWitness: io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillNavigationWitness? = null,
 )
+
+/** A definite refusal before collection starts; normal empty and partial results have none. */
+enum class CollectRejection { UNAVAILABLE, INVALID_TARGET, READ_REFUSED }
 
 data class CollectResult(
     /** De-duplicated items, one per line, in on-screen order. */
@@ -118,6 +129,9 @@ data class CollectResult(
     /** Stopped because: end of list / `until` matched / page limit / list lost. */
     val stopReason: String,
     val screen: ScreenSnapshot?,
+    /** Union of known packages whose pages contributed items, independent of the last screen. */
+    internal val readPackages: Set<String> = emptySet(),
+    internal val rejection: CollectRejection? = null,
 )
 
 /** Whether a driver can work right now, and if not, a sentence the model can relay. */
@@ -135,7 +149,12 @@ interface PhoneDriver {
 
     fun observe(detail: Boolean, image: Boolean): ScreenSnapshot
 
-    /** Pure local commit after the current task's final image filter; not model-delivery evidence. */
+    /** An omitted image argument may return an image only for this observation's poor tree.
+     * Old drivers and explicit two-argument callers keep their original image behavior. */
+    fun observe(detail: Boolean, image: Boolean, automaticImage: Boolean): ScreenSnapshot = observe(detail, image)
+
+    /** Accepts only a driver-recorded candidate after the task's final screen filter, including
+     * text-only visual observations. A missing candidate is a no-op; not model-delivery evidence. */
     fun acceptVisualObservation(screenId: String) {}
 
     fun collect(screenId: String, listElementId: Int, maxPages: Int, until: String?): CollectResult
@@ -145,12 +164,30 @@ interface PhoneDriver {
         if (allowed()) collect(screenId, listElementId, maxPages, until)
         else CollectResult(emptyList(), 0, PhoneTasks.STOPPED_MESSAGE, null)
 
+    /** Local source gate. Legacy drivers retain their existing behavior without guessing a package. */
+    fun collect(screenId: String, listElementId: Int, maxPages: Int, until: String?,
+                allowed: () -> Boolean, canRead: (String?) -> Boolean): CollectResult =
+        collect(screenId, listElementId, maxPages, until, allowed)
+
+    /** Same-capture sources for a physical collect scroll, separate from the page's read source. */
+    fun collect(screenId: String, listElementId: Int, maxPages: Int, until: String?,
+                allowed: () -> Boolean, canRead: (String?) -> Boolean,
+                scrollSourcesAllowed: (Set<String>) -> Boolean): CollectResult =
+        collect(screenId, listElementId, maxPages, until, allowed, canRead)
+
     /**
      * Resolves an element of a recent snapshot for the safety rules. Null when the
      * snapshot is stale or the element no longer matches its fingerprint
      * (window, bounds, text); the bridge then refuses and re-observes.
      */
     fun target(screenId: String, elementId: Int): TargetInfo?
+
+    /** Captures only the original committed observation's editor. */
+    fun prepareFocusInput(screenId: String): Either<String, FocusInput> =
+        Either.Left("当前屏幕不能核实原焦点输入连接；请 handoff，不要改用全文替换或重复输入。") // l10n:keep agent focus result
+    /** Native reviewed-route operation; default drivers cannot execute it. */
+    fun prepareSkillReplayStep(step: SkillReplayStep): Either<String, SkillReplayPlan> =
+        Either.Left("当前屏幕不支持已核手机路线，未执行。") // l10n:keep agent replay result
 
     /** Pure memory, tied to this exact published observation; independent of image acceptance. */
     fun visualScope(screenId: String): VisualScope? = null
@@ -168,8 +205,18 @@ interface PhoneDriver {
     fun perform(action: PhoneAction, allowed: () -> Boolean,
                 coordinateAdmission: ((() -> Boolean) -> Boolean)?): ActionResult = perform(action, allowed)
 
+    /** Actual action sources from the same capture; legacy drivers retain their old behavior. */
+    fun perform(action: PhoneAction, allowed: () -> Boolean,
+                coordinateAdmission: ((() -> Boolean) -> Boolean)?,
+                actionSourcesAllowed: (Set<String>) -> Boolean): ActionResult =
+        perform(action, allowed, coordinateAdmission)
+
     /** Launches the native-resolved [target] on this screen (BACKGROUND moves the task to the virtual display). */
     fun open(target: PhoneAppIdentity): ActionResult
+
+    /** Original-call admission; asynchronous drivers recheck at their physical launch gate. */
+    fun open(target: PhoneAppIdentity, allowed: () -> Boolean): ActionResult =
+        if (allowed()) open(target) else ActionResult(false, PhoneTasks.STOPPED_MESSAGE)
 
     /** Package of the app in front on this screen, if known (for per-app approval and deny lists). */
     fun foregroundPackage(): String?
@@ -261,16 +308,19 @@ interface UserGate {
  * it never reaches a task selected later. Main thread; must return quickly.
  */
 interface TaskControls {
+    val taskId: Long
+    val lifecycle: Long
+
     fun isPaused(): Boolean
 
     /** 暂停 (true) / 继续 (false). While paused, MAIN actions are refused by the driver as well. */
-    fun setPaused(paused: Boolean)
+    fun setPaused(paused: Boolean): Boolean
 
     /** [reason] is Chinese (for the agent). */
-    fun stop(reason: String)
+    fun stop(reason: String): Boolean
 
     /** Text the person typed into 插话 and sent; meant for the agent as a user message. */
-    fun interject(text: String)
+    fun interject(text: String): Boolean
 }
 
 /**

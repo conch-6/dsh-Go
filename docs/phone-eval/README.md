@@ -49,9 +49,10 @@ JSONL每行一个对象；v=1，run_id 为随机 UUID，seq 每run从0连续递�
 | start | case_id, mode, build_sha, model_config_id, android_api, backend, screen | 已知case；mode=device/simulated；40hex版本；随机模型配置UUID或null；API30–37或null；accessibility/shizuku/adb/root/sui；main/background |
 | check | check_id, result, evidence | 该题check ID；pass/fail/unknown；device_probe/manual_device/simulation/none。unknown只能none |
 | metric | name, value, source | 下面指标名；非负整数或null；runtime_counter/manual_device/simulation/unknown/not_applicable |
+| coordinate | result, reason, evidence | 每次显式tap_xy的已观察分类，见下；不接入生产遥测 |
 | end | outcome, reason | completed/confirmation/handoff/failed/blocked/cancelled/skipped；固定原因枚举 |
 
-`reason` 仅 none、precondition_missing、unsupported、user_cancelled、timeout、verification_failed、safety_refusal、runtime_error。completed必须none；skipped必须precondition_missing/unsupported。设备模式拒绝simulation证据；模拟模式拒绝设备证据。人工check必须在设备最终状态核对后写入；不要用Agent的自述给pass。
+`end.reason` 仅 none、precondition_missing、unsupported、user_cancelled、timeout、verification_failed、safety_refusal、runtime_error。completed必须none；skipped必须precondition_missing/unsupported。设备模式拒绝simulation证据；模拟模式拒绝设备证据。人工check必须在设备最终状态核对后写入；不要用Agent的自述给pass。
 
 日志没有截图、OCR、正文、回答、URL、账户、包名、token密钥、设备序列号或证据文件路径字段。`input_tokens` 等仅数字计数。UUID/build_sha也不得拿来编码秘密；结构白名单不能证明人工没有滥用字段。原始输入校验失败不会回显其值。
 
@@ -63,6 +64,27 @@ JSONL每行一个对象；v=1，run_id 为随机 UUID，seq 每run从0连续递�
 - elapsed_ms：只有start/end的at_ms均已知才计算，是任务总时间，**包含模型、人类确认等待与平台工作**；此版本不伪造分层延迟。
 
 数值须有来源：模型计数/token用runtime_counter，误操作/主屏受扰用manual_device（未来真实探针可由明确新协议接入）；模拟统一simulation。null的source只能unknown或合法not_applicable。每项每run只写最终一次，避免累计值重复相加。
+
+### 坐标拒绝统计：仅已记录的 tap_xy 尝试
+
+可选 `coordinate` 事件每次显式 `tap_xy` 工具调用记一条，包含该工具的点击、长按或滑动；不把普通 tap/scroll 内部的坐标回退混入分母。它是人工/实验记录入口，没有自动挂接设备、生产日志或遥测。必须先记录对应 start，并在 end 前按正常 seq 追加。同一调用只记一次，不因多次观察重复追加；手动重新发起一次调用才是另一次尝试。旧日志无需补事件。
+
+- `result=refused`：有明确的**派发前拒绝**证据。`reason` 为 observation（截图未实际接受、编号/TTL/视口/窗口/目标资格变化等）、policy（已知安全策略拒绝）、halted（暂停/停止）、other（确实拒绝但无法据证据分到前述原因）。不能把普通失败都称作拒绝。
+- `result=dispatched, reason=none`：有明确已提交输入的证据。它不证明命中、业务成功或后置条件成立，仍按原check核验。
+- `result=unknown, reason=unknown`：无法确定是否派发，例如超时、通道失败或“可能产生部分效果”。单看 isError/ActionResult.ok=false、画面没变化或模型自述不足以分类为refused。
+- `evidence` 在simulated中必须simulation，device中必须manual_device/device_probe。unknown结果也须有尝试发生的记录依据；缺整次调用记录不会自动生成unknown事件。真实探针若不存在就用人工核验，不能把模拟脚本标成device_probe。
+
+示意事件（须使用对应start的run_id和下一seq；这不是设备结果）：
+
+```json
+{"v":1,"run_id":"5f610b72-1c27-43c9-9422-8c83205cde65","seq":1,"kind":"coordinate","at_ms":null,"result":"refused","reason":"observation","evidence":"simulation"}
+```
+
+每个现有分组新增 `coordinates`：`recorded_attempts=N`，并列refused、dispatched、unknown、refusal_reasons、runs_with_attempts。分母是**已记录的尝试数，不是run数、设备全部调用数或仅已知结果数**。N=0时率和区间均null，不填0；unknown>0时精确率null，区间为 `[refused/N,(refused+unknown)/N]`，分别把所有未知视为未拒绝/拒绝。这只是该批记录缺失结果的边界，不是总体置信区间。没有unknown时refusal_rate=refused/N。
+
+已记录的未结束/跳过run尝试也保留，并用incomplete_attempts/skipped_attempts单列，防止崩溃或改写结局删掉已观察分母；这与原任务级耗时/计数排除规则分开。遗漏事件仍可能造成选择偏差，`coverage=recorded_tap_xy_attempts_only` 不证明全程覆盖。设备/模拟、build、API、backend、screen、model、partition/category仍分组，不能跨组拼率。
+
+用于比较更严格的截图资格门时，应在同一合成任务及配置下分别记录两个build；observation类上升只能说明这批记录中的该类拒绝变化，不能自动归因某提交，也不是安全性下降或“真机已改善”的证明。安全拒绝和误操作是不同统计，任务成功判定保持原规则。
 
 ## 使用记录器
 

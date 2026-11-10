@@ -4,6 +4,7 @@ import io.github.ccch1mneyyy.dsh_app.phone.PhoneScreen
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneTasks
 import io.github.ccch1mneyyy.dsh_app.runtime.PhoneSkillInstallResult
 import io.github.ccch1mneyyy.dsh_app.runtime.PhoneSkillWrite
+import io.github.ccch1mneyyy.dsh_app.runtime.PhoneSkillBundleInstaller as B
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -51,6 +52,21 @@ class PhoneSkillBridgeTest {
         write.finish(result); f.done.single()(result)
         assertEquals(mapOf("kind" to "saved", "name" to result.name, "relativePath" to result.relativePath), f.save(view))
         assertEquals(1, f.notifications); assertEquals(1, f.writes.size)
+    }
+
+    @Test fun asynchronousIoNotificationRemainsVisibleToTheEditorsViewRequest() {
+        val f = Fixture(); val view = f.open()
+        assertEquals("saving", f.save(view)["kind"])
+        val write = f.writes.single(); assertTrue(write.beginCommit())
+        write.finish(PhoneSkillInstallResult.Refused.IO)
+        f.done.single()(PhoneSkillInstallResult.Refused.IO)
+        assertEquals(1, f.notifications)
+        repeat(2) {
+            assertEquals(mapOf("kind" to "rejected", "code" to "io"),
+                f.call("skillDraft", f.identity(view) + ("action" to "view")))
+            assertEquals("io", f.save(view)["code"])
+        }
+        assertEquals(1, f.writes.size)
     }
 
     @Test fun finalEditPreviewContainsNoRawValuesAndOldRevisionCannotSave() {
@@ -104,6 +120,51 @@ class PhoneSkillBridgeTest {
         assertEquals(mapOf("kind" to "rejected", "code" to "stale"), bridge.call(f.client, "saveSkillDraft", args))
         assertEquals("stale", bridge.call(f.client, "saveSkillDraft", args)["code"])
         assertEquals(1, writes)
+    }
+
+    @Test fun bundleWireUsesNewRevisionAndKeepsPublishedUnverifiedDistinctFromSaved() {
+        val f = Fixture(); val old = f.open()
+        val view = (f.drafts.view(f.client, old["draftId"] as String, 7) as PhoneSkillDrafts.Shown).view
+        val revision = "d".repeat(32)
+        val route = """{"schema":1,"skillName":"${view.skillName}","bundleRevision":"$revision",
+            "descriptorSet":"fixture-only","appSlots":[{"key":"app1","kind":"user_selected_app"}],
+            "parameters":[],"steps":[{"op":"open_app","appSlot":"app1","screen":"main",
+            "post":{"kind":"page_is","pageKey":"home"}}]}""".toByteArray()
+        val descriptor = PhoneSkillRoute.Descriptor("fixture-only", setOf("app1"), emptyList(),
+            setOf(PhoneSkillRoute.Step(PhoneSkillRoute.Op.OPEN_APP, "app1", PhoneScreen.MAIN,
+                post = PhoneSkillRoute.Post.PageIs("home"))))
+        val doc = (B.freeze(view.skillName, revision, view.revision + 1, view.markdown.toByteArray(), route,
+            mapOf("fixture-only" to descriptor)) as B.Frozen.Ready).document
+        assertTrue(f.drafts.bindBundle(f.drafts.currentEpoch(), view.owner, view.draftId,
+            view.revision, doc) is PhoneSkillDrafts.Shown)
+        assertEquals("stale", f.save(old)["code"])
+        assertTrue(f.writes.isEmpty())
+        val bound = f.call("skillDraft", f.identity(old) + ("action" to "view"))["draft"] as Map<*, *>
+        assertEquals(revision, bound["bundleRevision"])
+        assertEquals(mapOf("kind" to "saving", "phase" to "staging", "name" to view.skillName,
+            "bundleRevision" to revision), f.save(bound))
+        val write = f.writes.single(); assertSame(doc, write.bundle); assertTrue(write.beginCommit())
+        val result = PhoneSkillInstallResult.BundleUnverified(doc.identity, B.Publication.PUBLISHED,
+            B.Verification.VERIFICATION_UNAVAILABLE)
+        write.finish(result); f.done.single()(result)
+        val expected = mapOf("kind" to "unverified", "name" to view.skillName,
+            "relativePath" to "skills/${view.skillName}/SKILL.md", "bundleRevision" to revision,
+            "publication" to "published", "code" to "verification_unavailable")
+        assertEquals(expected, f.save(bound))
+        assertEquals(expected, f.call("skillDraft", f.identity(bound) + ("action" to "view")))
+        assertEquals(1, f.writes.size)
+        assertEquals(1, f.notifications)
+    }
+
+    @Test fun flutterCannotAttachARouteOrChooseBundleRevisionThroughExistingSaveWire() {
+        val f = Fixture(); val view = f.open()
+        for (extra in listOf(mapOf("route" to "{}"), mapOf("bundleRevision" to "d".repeat(32)),
+            mapOf("descriptorSet" to "fixture-only"))) {
+            assertEquals(mapOf("kind" to "rejected", "code" to "invalid"), f.call("saveSkillDraft",
+                f.identity(view) + mapOf("revision" to view["revision"], "confirmed" to true) + extra))
+        }
+        assertEquals(mapOf("kind" to "saving", "phase" to "staging"), f.save(view))
+        assertNull(f.writes.single().bundle)
     }
 
 }

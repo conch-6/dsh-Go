@@ -2,6 +2,13 @@
 <!-- Native UI text (notifications, overlays, foreground service, toasts), read through
      i18n/AppStrings.kt so it follows the app language. English here, Chinese in values-zh/. -->
 <resources>
+    <string name="self_update_confirm_title">Install this DSH Go update?</string>
+    <string name="self_update_confirm">Channel: %1$s (UID %2$d)\nVersion: %3$s (%4$d)\nSHA-256: %5$s\n\nAllow only this verified DSH Go update. The app will close and running tasks may be interrupted. Existing app data is kept. System signature and security policies still apply; the system can still refuse installation.</string>
+    <string name="self_update_allow_once">Install this update</string>
+    <string name="self_update_wait_title">End this installation wait?</string>
+    <string name="self_update_wait_confirm">The previous request may still be running in the system installer. Clearing this local record does not cancel it. First check that no installation is in progress. Nothing is installed or retried by clearing this record.</string>
+    <string name="self_update_wait_end">Clear waiting record</string>
+    <string name="phone_shell_confirm">Run an Android system command (%1$s, UID %2$s). It may change system settings or app data. Screen-control confirmation exemptions do not apply. Allow only this command:\n\n%3$s</string>
     <!-- background -->
     <string name="background_shizuku_missing">No available Shizuku / Sui interface detected</string>
     <string name="background_sui_stopped">The Sui interface is currently unavailable</string>

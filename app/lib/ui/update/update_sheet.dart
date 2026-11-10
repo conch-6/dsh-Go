@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -8,11 +9,13 @@ import '../../l10n/l10n.dart';
 import '../../state/star_prompt.dart' show starPromptGateProvider, starPromptProvider;
 import '../../state/update_state.dart';
 import '../../update/release.dart' show releaseNotesFor;
+import '../../update/privileged_installer.dart';
 import '../../update/update_config.dart';
 import '../chat/render/markdown_body.dart';
 import '../common/app_sheet.dart';
 import '../common/sheet_title_bar.dart';
 import '../settings/settings_widgets.dart' show SettingsSection;
+import '../phone/android_shell_page.dart';
 import '../shell/brand_mark.dart';
 import '../star/star_prompt_dialog.dart' show openStarProject;
 import '../theme/app_icons.dart';
@@ -28,7 +31,10 @@ Future<void> showUpdateSheet(BuildContext context) =>
 /// one, otherwise says so in a snack bar.
 Future<void> checkForUpdates(BuildContext context, WidgetRef ref) async {
   final controller = ref.read(appUpdateProvider.notifier);
-  if (ref.read(appUpdateProvider).hasUpdate) return showUpdateSheet(context);
+  await controller.ready;
+  if (!context.mounted) return;
+  final update = ref.read(appUpdateProvider);
+  if (update.hasUpdate || update.hasSelfUpdateResult) return showUpdateSheet(context);
   final messenger = ScaffoldMessenger.maybeOf(context);
   final phase = await controller.check();
   if (!context.mounted) return;
@@ -88,8 +94,44 @@ String _date(DateTime t) {
   return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
 }
 
-class UpdateSheet extends ConsumerWidget {
+class UpdateSheet extends ConsumerStatefulWidget {
   const UpdateSheet({super.key});
+
+  @override
+  ConsumerState<UpdateSheet> createState() => _UpdateSheetState();
+}
+
+class _UpdateSheetState extends ConsumerState<UpdateSheet> {
+  final _adbPort = TextEditingController();
+
+  @override
+  void dispose() {
+    _adbPort.dispose();
+    super.dispose();
+  }
+
+  int? get _port => int.tryParse(_adbPort.text);
+  bool get _validPort => _adbPort.text.isEmpty || (_port != null && _port! >= 1 && _port! <= 65535);
+
+  void _submitInstall({bool retry = false}) {
+    if (!mounted) return;
+    final update = ref.read(appUpdateProvider);
+    if (update.busy || update.loadingInstallStatus) return;
+    if (update.installRoute == UpdateInstallRoute.shizuku &&
+        update.privilegedStatus.shizukuUid != null && update.privilegedStatus.shizukuUid != 2000) {
+      return;
+    }
+    final rawPort = update.installRoute == UpdateInstallRoute.adb ? _adbPort.text : '';
+    final port = rawPort.isEmpty ? null : int.tryParse(rawPort);
+    // A queued callback may run before the invalid input disables its button.
+    if (rawPort.isNotEmpty && (port == null || port < 1 || port > 65535)) return;
+    final controller = ref.read(appUpdateProvider.notifier);
+    if (retry) {
+      unawaited(controller.retry(port: port));
+    } else {
+      unawaited(controller.install(route: update.installRoute, port: port));
+    }
+  }
 
   static const _buttonSize = Size.fromHeight(48);
 
@@ -101,7 +143,7 @@ class UpdateSheet extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final l10n = context.l10n;
     final update = ref.watch(appUpdateProvider);
     final theme = Theme.of(context);
@@ -118,7 +160,25 @@ class UpdateSheet extends ConsumerWidget {
             SheetTitleBar(l10n.updateCheck),
             Padding(
               padding: const EdgeInsets.fromLTRB(SheetTitleBar.inset, 8, SheetTitleBar.inset, 32),
-              child: Text(l10n.updateUpToDateVersion(update.current.name), style: theme.textTheme.bodyLarge),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(update.hasSelfUpdateResult ? l10n.updateCurrentVersion(update.current.name) :
+                    l10n.updateUpToDateVersion(update.current.name), style: theme.textTheme.bodyLarge),
+                  if (_selfUpdateStatus(context, update) case final status?) ...[
+                    const SizedBox(height: 16),
+                    status,
+                    if (update.selfUpdate.canAcknowledge && update.selfUpdate.state == SelfUpdatePendingState.unknown)
+                      _endWaiting(context, update),
+                    if (update.selfUpdate.unresolved)
+                      TextButton(
+                        onPressed: () => unawaited(ref.read(appUpdateProvider.notifier).reconcileSelfUpdate()),
+                        child: Text(l10n.selfUpdateReadResult),
+                      ),
+                  ],
+                ],
+              ),
             ),
           ],
         ),
@@ -163,6 +223,12 @@ class UpdateSheet extends ConsumerWidget {
                   ),
                   const SizedBox(height: 16),
                   if (_status(context, update) case final status?) ...[status, const SizedBox(height: 16)],
+                  if (!update.busy && (update.task == UpdateTaskPhase.ready ||
+                      update.task == UpdateTaskPhase.needsPermission ||
+                      update.task == UpdateTaskPhase.failed && _systemInstallerHelps.contains(update.problem))) ...[
+                    _routeControls(context, update),
+                    const SizedBox(height: 16),
+                  ],
                   Padding(
                     padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
                     child: Text(l10n.updateReleaseNotes, style: SettingsSection.titleStyle(context)),
@@ -205,11 +271,116 @@ class UpdateSheet extends ConsumerWidget {
     );
   }
 
+  Widget _routeControls(BuildContext context, AppUpdateState update) {
+    final l10n = context.l10n;
+    final controller = ref.read(appUpdateProvider.notifier);
+    final status = update.privilegedStatus;
+    final route = update.installRoute;
+    final small = Theme.of(context).textTheme.bodySmall;
+    final uid = status.shizukuUid;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<UpdateInstallRoute>(
+          key: ValueKey('update-route-${route.name}'),
+          initialValue: route,
+          isExpanded: true,
+          decoration: InputDecoration(labelText: l10n.selfUpdateTransport),
+          items: [
+            DropdownMenuItem(value: UpdateInstallRoute.system, child: Text(l10n.selfUpdateSystem)),
+            DropdownMenuItem(value: UpdateInstallRoute.shizuku, child: Text(l10n.selfUpdateShizuku)),
+            DropdownMenuItem(value: UpdateInstallRoute.adb, child: Text(l10n.selfUpdateAdb)),
+          ],
+          onChanged: update.loadingInstallStatus ? null : (value) {
+            if (value == null) return;
+            _adbPort.clear();
+            controller.selectInstallRoute(value);
+          },
+        ),
+        const SizedBox(height: 8),
+        Text(l10n.selfUpdateSecurityNote, style: small),
+        if (route != UpdateInstallRoute.system) ...[
+          const SizedBox(height: 8),
+          Text(l10n.selfUpdateNativeConfirm, style: small),
+          if (route == UpdateInstallRoute.shizuku) ...[
+            const SizedBox(height: 8),
+            Text(l10n.selfUpdateShizukuStatus(
+              uid != null && uid != 2000 ? l10n.selfUpdateUnsupportedIdentity :
+                status.shizukuInstalled && status.shizukuRunning && status.shizukuGranted
+                  ? l10n.selfUpdateReady : l10n.selfUpdatePermissionRequired,
+            )),
+            Text('${l10n.androidShellUid}: ${uid ?? l10n.androidShellUidUnknown}', style: small),
+            TextButton(
+              key: const ValueKey('update-authorize-shizuku'),
+              onPressed: update.loadingInstallStatus ? null : () => unawaited(controller.requestUpdateShizukuPermission()),
+              child: Text(l10n.selfUpdateAuthorize),
+            ),
+          ] else ...[
+            const SizedBox(height: 8),
+            Text(status.adbPaired ? l10n.selfUpdateAdbPaired : l10n.selfUpdateAdbNotPaired),
+            Text(l10n.selfUpdateAdbHint, style: small),
+            TextField(
+              key: const ValueKey('update-adb-port'),
+              controller: _adbPort,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                labelText: l10n.androidShellConnectPort,
+                helperText: l10n.androidShellConnectPortHint,
+                helperMaxLines: 4,
+                errorText: _validPort ? null : l10n.androidShellErrorInvalidArguments,
+              ),
+            ),
+            TextButton(
+              key: const ValueKey('update-adb-pairing'),
+              onPressed: update.loadingInstallStatus ? null : () async {
+                await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => const AndroidShellPage()));
+                if (mounted) unawaited(controller.refreshInstallStatus());
+              },
+              child: Text(l10n.selfUpdatePairing),
+            ),
+          ],
+          if (update.privilegedErrorCode case final code?)
+            Text(l10n.selfUpdateErrorCode(code), style: small),
+          TextButton(
+            onPressed: update.loadingInstallStatus ? null : () => unawaited(controller.refreshInstallStatus()),
+            child: Text(l10n.selfUpdateRefresh),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget? _selfUpdateStatus(BuildContext context, AppUpdateState update) {
+    final pending = update.selfUpdate;
+    if (pending.state == SelfUpdatePendingState.none) return null;
+    final l10n = context.l10n;
+    final colors = DshColors.of(context);
+    final verified = pending.verified;
+    final (title, message) = switch (pending.state) {
+      SelfUpdatePendingState.pending => (l10n.selfUpdatePendingTitle, l10n.selfUpdatePendingMessage),
+      SelfUpdatePendingState.unknown => (l10n.selfUpdateUnknownTitle, l10n.selfUpdateUnknownMessage),
+      SelfUpdatePendingState.installed || SelfUpdatePendingState.superseded => (
+        l10n.selfUpdateVerifiedTitle, l10n.selfUpdateVerifiedVersion(update.current.name, update.current.build ?? 0),
+      ),
+      _ => (l10n.selfUpdateFailedTitle, l10n.selfUpdateFailedMessage),
+    };
+    return _Notice(
+      icon: verified ? AppIcons.completed : AppIcons.info,
+      background: verified ? colors.successContainer : colors.warningContainer,
+      foreground: verified ? colors.onSuccessContainer : colors.onWarningContainer,
+      title: title,
+      text: [message, if (pending.errorCode case final code?) l10n.selfUpdateErrorCode(code)].join('\n'),
+    );
+  }
+
   Widget? _status(BuildContext context, AppUpdateState update) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final colors = DshColors.of(context);
     final scheme = theme.colorScheme;
+    if (_selfUpdateStatus(context, update) case final status?) return status;
     if (update.asset == null) {
       final abi = update.flavor?.name;
       return _Notice(
@@ -238,7 +409,10 @@ class UpdateSheet extends ConsumerWidget {
       case UpdateTaskPhase.verifying:
         return _Progress(title: l10n.updateVerifyingPackage, note: l10n.updateVerifyingPackageNote);
       case UpdateTaskPhase.installing:
-        return _Progress(title: l10n.updateInstalling, note: l10n.updateConfirmInstallNote);
+        return _Progress(
+          title: l10n.updateInstalling,
+          note: update.installRoute == UpdateInstallRoute.system ? l10n.updateConfirmInstallNote : l10n.selfUpdateNativeConfirm,
+        );
       case UpdateTaskPhase.ready:
         final unfinished = _installUnfinished.contains(update.problem);
         final (title, text) = unfinished
@@ -279,6 +453,21 @@ class UpdateSheet extends ConsumerWidget {
         return null;
     }
   }
+
+  Widget _endWaiting(BuildContext context, AppUpdateState update) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const SizedBox(height: 8),
+      Text(context.l10n.selfUpdateEndWaitingNote, style: Theme.of(context).textTheme.bodySmall),
+      TextButton(
+        key: const ValueKey('update-end-waiting'),
+        onPressed: update.loadingInstallStatus ? null :
+          () => unawaited(ref.read(appUpdateProvider.notifier).acknowledgeUnknownSelfUpdate()),
+        child: Text(context.l10n.selfUpdateEndWaiting),
+      ),
+    ],
+  );
 
   Widget _actions(BuildContext context, WidgetRef ref, AppUpdateState update) {
     final l10n = context.l10n;
@@ -331,6 +520,18 @@ class UpdateSheet extends ConsumerWidget {
       child: Text(label),
     );
 
+    if (update.selfUpdate.unresolved) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          pair(l10n.commonClose, close, l10n.selfUpdateReadResult,
+              () => unawaited(controller.reconcileSelfUpdate())),
+          if (update.selfUpdate.state == SelfUpdatePendingState.unknown && update.selfUpdate.canAcknowledge)
+            _endWaiting(context, update),
+        ],
+      );
+    }
     if (update.asset == null) {
       return pair(l10n.commonLater, close, l10n.updateOpenReleasePage, () => unawaited(_openPage(context, page)));
     }
@@ -395,9 +596,20 @@ class UpdateSheet extends ConsumerWidget {
       case UpdateTaskPhase.installing:
         return busy(l10n.updateInstallingBusy);
       case UpdateTaskPhase.ready:
-        final install = pair(l10n.commonLater, close, l10n.commonInstall, () => unawaited(controller.install()));
-        return _installUnfinished.contains(update.problem) ? withSystemInstaller(install) : install;
+        final unsupportedUid = update.installRoute == UpdateInstallRoute.shizuku &&
+            update.privilegedStatus.shizukuUid != null && update.privilegedStatus.shizukuUid != 2000;
+        final install = pair(l10n.commonLater, close, l10n.commonInstall,
+          update.loadingInstallStatus || !_validPort || unsupportedUid ? null :
+            () => _submitInstall(),
+        );
+        return update.installRoute == UpdateInstallRoute.system && _installUnfinished.contains(update.problem)
+            ? withSystemInstaller(install) : install;
       case UpdateTaskPhase.needsPermission:
+        if (update.installRoute != UpdateInstallRoute.system) {
+          return pair(l10n.commonLater, close, l10n.commonInstall,
+            update.loadingInstallStatus || !_validPort ? null :
+              () => _submitInstall());
+        }
         return pair(
           l10n.commonLater,
           close,
@@ -408,8 +620,10 @@ class UpdateSheet extends ConsumerWidget {
         if (_browserOnly.contains(update.problem)) {
           return pair(l10n.commonClose, close, l10n.updateOpenReleasePage, () => unawaited(_openPage(context, page)));
         }
-        final retry = pair(l10n.commonLater, close, l10n.commonRetry, () => unawaited(controller.retry()));
-        return _systemInstallerHelps.contains(update.problem) ? withSystemInstaller(retry) : retry;
+        final retry = pair(l10n.commonLater, close, l10n.commonRetry,
+          update.loadingInstallStatus || !_validPort ? null : () => _submitInstall(retry: true));
+        return update.installRoute == UpdateInstallRoute.system && _systemInstallerHelps.contains(update.problem)
+            ? withSystemInstaller(retry) : retry;
     }
   }
 }

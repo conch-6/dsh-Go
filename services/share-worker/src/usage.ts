@@ -5,6 +5,11 @@
 //    "build":10301000,"sdk":34,"abi":"arm64-v8a","maker":"vivo","lang":"zh",
 //    "engine":"direct|proot|none",
 //    "counts":{"turns":0,"voice":0,"phone":0,"share":0,"gen":0,"plugins":0}}
+//
+//   v2 (1.0.15 on) is the same with "v":2 and two more fields: "model"
+//   (Build.MODEL, "v2405a") and "rom" (the maker's system and its version,
+//   "originos 5.0"). Both are taken on this same path; a phone whose v2 is
+//   refused with a 400 sends its v1 body again.
 //   → 204; 400 {error, field} for anything else; 413, 415, 429.
 //
 // Nothing about the sender is kept: no IP (it only keys the per-minute limit,
@@ -27,6 +32,9 @@ export const MAX_BODY = 2048;
 export const COUNT_LIMITS = { turns: 5000, voice: 2000, phone: 2000, share: 1000, gen: 1000, plugins: 500 } as const;
 const COUNT_KEYS = Object.keys(COUNT_LIMITS) as (keyof typeof COUNT_LIMITS)[];
 const FIELDS = ['v', 'iid', 'day', 'app', 'build', 'sdk', 'abi', 'maker', 'lang', 'engine', 'counts'] as const;
+const FIELDS_V2 = [...FIELDS, 'model', 'rom'] as const;
+/** maker, model and rom: what usageMaker() on the phone leaves. */
+const DEVICE_TEXT = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$/;
 const ABIS = ['arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'];
 const ENGINES = ['direct', 'proot', 'none'];
 
@@ -38,6 +46,9 @@ export interface UsageReport {
   sdk: number;
   abi: string;
   maker: string;
+  /** v2 on; empty for a v1 report. */
+  model: string;
+  rom: string;
   lang: string;
   engine: string;
   counts: Record<keyof typeof COUNT_LIMITS, number>;
@@ -69,8 +80,8 @@ function str(v: unknown, field: string, pattern: RegExp): string {
 /** The report, or an Invalid naming the first field that's wrong. */
 export function validateReport(body: unknown, now = Date.now()): UsageReport {
   if (!isObject(body)) throw new Invalid('invalid', 'body');
-  only(body, FIELDS, '');
-  if (body.v !== 1) throw new Invalid('invalid', 'v');
+  if (body.v !== 1 && body.v !== 2) throw new Invalid('invalid', 'v');
+  only(body, body.v === 2 ? FIELDS_V2 : FIELDS, '');
   // 16 random bytes in base64url: 22 characters (the last one carries 2 bits);
   // a padded "==" form is taken too and stored the same.
   const iid = str(body.iid, 'iid', /^[A-Za-z0-9_-]{21}[AQgw](?:==)?$/).slice(0, 22);
@@ -85,7 +96,9 @@ export function validateReport(body: unknown, now = Date.now()): UsageReport {
   const sdk = int(body.sdk, 'sdk', 26, 60);
   const abi = str(body.abi, 'abi', /^[a-z0-9_-]{1,16}$/);
   if (!ABIS.includes(abi)) throw new Invalid('invalid', 'abi');
-  const maker = str(body.maker, 'maker', /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$/).trim().toLowerCase();
+  const maker = str(body.maker, 'maker', DEVICE_TEXT).trim().toLowerCase();
+  const model = body.v === 2 ? str(body.model, 'model', DEVICE_TEXT).trim().toLowerCase() : '';
+  const rom = body.v === 2 ? str(body.rom, 'rom', DEVICE_TEXT).trim().toLowerCase() : '';
   const lang = str(body.lang, 'lang', /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/);
   const engine = str(body.engine, 'engine', /^[a-z]{1,8}$/);
   if (!ENGINES.includes(engine)) throw new Invalid('invalid', 'engine');
@@ -93,7 +106,7 @@ export function validateReport(body: unknown, now = Date.now()): UsageReport {
   only(body.counts, COUNT_KEYS, 'counts.');
   const counts = {} as UsageReport['counts'];
   for (const k of COUNT_KEYS) counts[k] = int(body.counts[k], `counts.${k}`, 0, COUNT_LIMITS[k]);
-  return { iid, day, app, build, sdk, abi, maker, lang, engine, counts };
+  return { iid, day, app, build, sdk, abi, maker, model, rom, lang, engine, counts };
 }
 
 // Repeats this isolate has already written: (day, hashed iid). Bounded.
@@ -131,10 +144,11 @@ export async function usage(request: Request, env: Env, now = Date.now()): Promi
   seen.add(key);
   const c = report.counts;
   // dshgo_usage: blob1 day, blob2 device, blob3 app, blob4 abi, blob5 maker,
-  // blob6 lang, blob7 engine; double1 build, double2 sdk, double3..8 counts.
+  // blob6 lang, blob7 engine, blob8 model, blob9 rom (empty before v2);
+  // double1 build, double2 sdk, double3..8 counts.
   writeStat(env.USAGE, {
     indexes: [device],
-    blobs: [report.day, device, report.app, report.abi, report.maker, report.lang, report.engine],
+    blobs: [report.day, device, report.app, report.abi, report.maker, report.lang, report.engine, report.model, report.rom],
     doubles: [report.build, report.sdk, c.turns, c.voice, c.phone, c.share, c.gen, c.plugins],
   });
   return noContent();

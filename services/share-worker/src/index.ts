@@ -34,6 +34,7 @@ export { StatsSalt } from './stats';
 import { usage } from './usage';
 import { githubStars } from './github';
 import { isMarketPath, market, publishMarket } from './market';
+import { isPetMarketPath, petMarket, publishPetMarket } from './pet-market';
 import type { Ctx } from './files';
 import { notFound, redirect, viewer } from './site';
 
@@ -64,6 +65,7 @@ async function route(request: Request, env: Env, ctx: Ctx): Promise<Response> {
     return json(404, { error: 'not_found' });
   }
 
+  if (isPetMarketPath(path)) return petMarket(request, env, ctx);
   if (isMarketPath(path)) return market(request, env, ctx);
   if (isBetaPath(path)) return beta(request, env, ctx);
   if (isDownloadPath(path) && accessMode(env) === 'public') return download(request, env, ctx);
@@ -85,6 +87,10 @@ export default {
     }
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    await publishMarket(env);
+    if (env.PET_MARKET_ENABLED !== '1') return publishMarket(env);
+    // A plugin publication failure must not settle the scheduled handler while
+    // the independently started companion publication is still in flight.
+    const results = await Promise.allSettled([publishMarket(env), publishPetMarket(env)]);
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
   },
 } satisfies ExportedHandler<Env>;

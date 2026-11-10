@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { applyEvent, EVENT_TYPES, initialState, publicState } from "./state.js";
+import { selectRecallContext } from "./recall-selector.js";
 import { CompanionError, MAX_FILE_BYTES, MAX_MEMORIES, MAX_TIME, codePoints, corrupt,
   invalid, ioError, uuid, validDocument, validMemory, validateContext, validateWrite } from "./schema.js";
 
@@ -141,6 +142,13 @@ export function createCompanionStore({ filePath, now = Date.now, io = fs } = {})
   }
 
   return {
+    // Internal recall seam: same transaction, schema and authoritative clock
+    // as CRUD. Keep the legacy /context selector and wire response unchanged.
+    now: clock,
+    getRecallContext() {
+      return transaction((doc, at) => ({ ...envelope(doc), storeId: doc.storeId.toLowerCase(),
+        asOf: at, ...selectRecallContext(doc.memories, at) }));
+    },
     getSnapshot() { return transaction((doc, at) => snapshot(doc, at)); },
     getMemories() { return transaction((doc) => ({ ...envelope(doc), memories: copy(doc.memories) })); },
     getContext(input) {

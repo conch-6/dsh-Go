@@ -96,65 +96,82 @@ class SyncHarness {
     void Function(DshEvent)? observe,
   }) async {
     final host = await FakeDsh.start();
-    final connection = DshConnection(host.baseUri);
-    await connection.login(FakeDsh.token);
-    final carrier = DshHttpCarrier(connection);
-    final transport = hold == null ? carrier : HeldReplyCarrier(carrier, hold);
-    final client = observe == null
-        ? DshClient.withCarrier(transport, muxOptions: _muxOptions)
-        : ObservedSyncClient(transport, observe);
-    await client.mux.ready();
-    final h = SyncHarness(host, client);
-    if (!initialSnapshot) h.followMode = 'hold';
-    host.handlers['session/cancel'] = (args) {
-      h.cancelledBackendRuns.add(h.backendRun);
-      h.boundary.add({'endpoint': 'session/cancel', 'backendRun': h.backendRun, 'request': args['request']});
-      return {'ok': true};
-    };
-    for (final endpoint in ['session/updateQueue', 'session/prompt']) {
-      host.handlers[endpoint] = (args) {
-        h.boundary.add({'endpoint': endpoint, 'backendRun': h.backendRun, 'request': args['request']});
+    DshClient? openedClient;
+    SyncHarness? openedHarness;
+    var hasContainer = false;
+    try {
+      final connection = DshConnection(host.baseUri);
+      await connection.login(FakeDsh.token);
+      final carrier = DshHttpCarrier(connection);
+      final transport = hold == null ? carrier : HeldReplyCarrier(carrier, hold);
+      final client = observe == null
+          ? DshClient.withCarrier(transport, muxOptions: _muxOptions)
+          : ObservedSyncClient(transport, observe);
+      openedClient = client;
+      await client.mux.ready();
+      final h = SyncHarness(host, client);
+      openedHarness = h;
+      if (!initialSnapshot) h.followMode = 'hold';
+      host.handlers['session/cancel'] = (args) {
+        h.cancelledBackendRuns.add(h.backendRun);
+        h.boundary.add({'endpoint': 'session/cancel', 'backendRun': h.backendRun, 'request': args['request']});
         return {'ok': true};
       };
-    }
-    host.handlers['session/page'] = (args) => {
-      'ok': true,
-      'value': {'records': <Object?>[], 'hasMore': false},
-    };
-    host.onOpen = (socket, id, endpoint, payload) {
-      if (endpoint != 'session/follow') throw StateError('Unexpected stream $endpoint');
-      h.follows.add((socket: socket, id: id));
-      switch (h.followMode) {
-        case 'snapshot':
-          socket.item(id, syncSnapshot(h.backendRun));
-        case 'error':
-          h.failFollow(socket, id);
-        case 'hold':
-          break;
-        default:
-          throw StateError(h.followMode);
+      for (final endpoint in ['session/updateQueue', 'session/prompt']) {
+        host.handlers[endpoint] = (args) {
+          h.boundary.add({'endpoint': endpoint, 'backendRun': h.backendRun, 'request': args['request']});
+          return {'ok': true};
+        };
       }
-    };
-    h.container = ProviderContainer(
-      overrides: [
-        ...overrides,
-        activeConnectionProvider.overrideWithValue(
-          AsyncData(HostConnection(client: client, label: 'G54 loopback', isLocal: true)),
-        ),
-      ],
-    );
-    h.container.listen(chatProvider('S'), (_, _) {});
-    if (initialSnapshot) {
-      await waitSync(
-        () => h.state.running && h.state.pending.length == 1 && h.state.controlReady,
-        'first real follow snapshot',
+      host.handlers['session/page'] = (args) => {
+        'ok': true,
+        'value': {'records': <Object?>[], 'hasMore': false},
+      };
+      host.onOpen = (socket, id, endpoint, payload) {
+        if (endpoint != 'session/follow') throw StateError('Unexpected stream $endpoint');
+        h.follows.add((socket: socket, id: id));
+        switch (h.followMode) {
+          case 'snapshot':
+            socket.item(id, syncSnapshot(h.backendRun));
+          case 'error':
+            h.failFollow(socket, id);
+          case 'hold':
+            break;
+          default:
+            throw StateError(h.followMode);
+        }
+      };
+      h.container = ProviderContainer(
+        overrides: [
+          ...overrides,
+          activeConnectionProvider.overrideWithValue(
+            AsyncData(HostConnection(client: client, label: 'G54 loopback', isLocal: true)),
+          ),
+        ],
       );
-      expect(h.observedTurns, [1]);
-      expect(h.state.streamLost, isFalse);
-    } else {
-      await waitSync(() => h.follows.isNotEmpty, 'first follow opened');
+      hasContainer = true;
+      final initialReady = Completer<void>();
+      h.container.listen(chatProvider('S'), (_, state) {
+        if (state.running && state.pending.length == 1 && state.controlReady && !initialReady.isCompleted) {
+          initialReady.complete();
+        }
+      }, fireImmediately: true);
+      if (initialSnapshot) {
+        await initialReady.future.timeout(const Duration(seconds: 4));
+        expect(h.observedTurns, [1]);
+        expect(h.state.streamLost, isFalse);
+      } else {
+        await waitSync(() => h.follows.isNotEmpty, 'first follow opened');
+      }
+      return h;
+    } catch (_) {
+      try {
+        if (hasContainer) openedHarness!.container.dispose();
+      } finally {
+        try { await openedClient?.close(); } finally { await host.close(); }
+      }
+      rethrow;
     }
-    return h;
   }
 
   void failFollow(FakeMuxSocket socket, String id) => socket.send({
@@ -224,8 +241,11 @@ class SyncHarness {
 
   Future<void> close() async {
     container.dispose();
-    await client.close();
-    await host.close();
+    try {
+      await client.close();
+    } finally {
+      await host.close();
+    }
   }
 }
 

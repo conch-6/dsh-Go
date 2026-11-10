@@ -53,4 +53,19 @@ class UsageDeviceTest {
             java.util.Locale.setDefault(before)
         }
     }
+
+    @Test fun theMakersSystemAndItsVersion() {
+        fun rom(vararg props: Pair<String, String>) = UsageDevice.romOf(mapOf(*props)::get)
+        assertEquals("originos 5.0", rom("ro.vivo.os.name" to "OriginOS", "ro.vivo.os.version" to "5.0"))
+        assertEquals("hyperos os2.0", rom("ro.mi.os.version.name" to "OS2.0", "ro.miui.ui.version.name" to "V816"))
+        assertEquals("miui v140", rom("ro.miui.ui.version.name" to "V140"))
+        assertEquals("realme ui v6.0", rom("ro.build.version.realmeui" to "V6.0", "ro.build.version.oplusrom" to "V15.0.0"))
+        assertEquals("coloros v15.0.0", rom("ro.build.version.oplusrom" to "V15.0.0"))
+        assertEquals("harmonyos 4.2.0", rom("hw_sc.build.platform.version" to "4.2.0", "ro.build.version.emui" to "EmotionUI_14.2.0"))
+        assertEquals("magicos magicos_9.0", rom("ro.build.version.magic" to "MagicOS_9.0"))
+        assertEquals("oneui 60100", rom("ro.build.version.oneui" to "60100"))
+        assertEquals("android", rom())
+        val rule = Regex("^[a-z0-9][a-z0-9 ._-]{0,31}$")
+        assertTrue(rule.matches(rom("ro.vivo.os.name" to "原系统", "ro.vivo.os.version" to "x".repeat(50))))
+    }
 }

@@ -6,7 +6,11 @@ class ToolOutput(
     val isError: Boolean = false,
     val image: ByteArray? = null,
     val imageMime: String? = null,
-)
+) {
+    // Associated by the native producer with this call only; never serialized into MCP.
+    internal var nativeReplyCommit: PhoneReplyCommit? = null
+    internal var focusObservation: FocusObservation? = null
+}
 
 /** Host attribution, separate from tool arguments. It is not an approval or a task lease. */
 data class PhoneCaller(val sessionId: String, val runId: String, val callId: String, val runLifecycle: Int = 0) {
@@ -54,6 +58,10 @@ class McpServer(
             /** Runs the tool (blocking) and returns the response line. */
             fun run(handler: ((String, Map<String, Any?>, PhoneCaller?) -> ToolOutput)? = null): String =
                 server.runCall(id, name, args, caller, handler)
+
+            internal fun runWithCommit(commit: PhoneReplyCommit,
+                handler: (String, Map<String, Any?>, PhoneCaller?) -> ToolOutput): String =
+                server.runCall(id, name, args, caller, handler, commit)
         }
     }
 
@@ -122,19 +130,27 @@ class McpServer(
         "protocolVersion" to (requested?.takeIf { it in KNOWN_VERSIONS } ?: LATEST_VERSION),
         "capabilities" to mapOf(
             "tools" to mapOf("listChanged" to false),
-            "experimental" to mapOf(PhoneCaller.META_KEY to mapOf("v" to 1, "taskIsolation" to 1, "parallelLimit" to 1, "runLifecycle" to 1)),
+            "experimental" to mapOf(PhoneCaller.META_KEY to mapOf("v" to 1, "taskIsolation" to 1, "parallelLimit" to 1, "runLifecycle" to 1,
+                "backgroundParallelism" to mapOf("v" to 1, "maxLimit" to 3, "defaultLimit" to 1))),
         ),
         "serverInfo" to linkedMapOf("name" to "dsh-app-phone", "version" to serverVersion),
     )
 
-    internal fun runCall(id: Any?, name: String, args: Map<String, Any?>, caller: PhoneCaller?, handler: ((String, Map<String, Any?>, PhoneCaller?) -> ToolOutput)? = null): String {
+    internal fun runCall(id: Any?, name: String, args: Map<String, Any?>, caller: PhoneCaller?, handler: ((String, Map<String, Any?>, PhoneCaller?) -> ToolOutput)? = null,
+                         nativeReplyCommit: PhoneReplyCommit? = null): String {
         val out = try {
             (handler ?: call)(name, args, caller)
         } catch (e: Throwable) {
             // l10n:keep agent tool error
             ToolOutput("手机操控出错：${e.javaClass.simpleName}${e.message?.let { "：$it" } ?: ""}", isError = true)
         }
-        return result(id, toolResult(out))
+        val line = result(id, toolResult(out))
+        // Only the exact, fully encoded original response can bind its displayed focus evidence.
+        if (!out.isError && nativeReplyCommit != null && out.focusObservation?.bind(nativeReplyCommit) == true)
+            out.nativeReplyCommit = nativeReplyCommit
+        if (nativeReplyCommit != null && out.nativeReplyCommit === nativeReplyCommit)
+            nativeReplyCommit.encoded()
+        return line
     }
 
     companion object {

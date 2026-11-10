@@ -1916,7 +1916,9 @@ internal object PetOverlay {
             callDart("voiceFallback", mapOf("text" to askDraft)) { raw ->
                 if (listener !== owner || generation != voiceHandoff) return@callDart
                 val text = (raw as? Map<*, *>)?.get("text") as? String ?: return@callDart
-                askDraft = text.take(AskBarView.MAX_TEXT)
+                val limit = AskBarView.MAX_TEXT
+                val cut = if (text.length > limit && text[limit - 1].isHighSurrogate() && text[limit].isLowSurrogate()) limit - 1 else limit
+                askDraft = text.take(cut)
                 prefs.edit().putString("ask_draft", askDraft).apply()
                 returnAsk = true
                 activity.moveTaskToBack(true)

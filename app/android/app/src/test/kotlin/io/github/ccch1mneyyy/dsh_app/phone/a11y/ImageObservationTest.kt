@@ -8,6 +8,39 @@ class ImageObservationTest {
     private fun frame(width: Int = 96, height: Int = 96, pixel: (Int, Int) -> Int = { _, _ -> 0xff808080.toInt() }) =
         VisualFrame.capture(width, height) { y, row -> for (x in row.indices) row[x] = pixel(x, y) }
 
+    @Test fun onlyOcrCoordinatesAreRevokedByOffAndStayRevokedAfterOn() {
+        assertTrue(mainOcrEpochCurrent(4L, 4L))
+        assertFalse(mainOcrEpochCurrent(4L, null))
+        assertFalse(mainOcrEpochCurrent(4L, 6L))
+        assertTrue(mainOcrEpochCurrent(6L, 6L))
+        // A publicly returned image has independent existing visual qualification.
+        assertTrue(mainOcrEpochCurrent(null, null))
+        assertTrue(mainOcrEpochCurrent(null, 6L))
+    }
+
+    @Test fun textOnlyShotRetainsRawGeometryAndLocalRecognitionWithoutImageBytes() {
+        val text = LocalOcrResult.Recognized(listOf(LocalOcrResult.Line("合成", 0, 0, 20, 20)))
+        val viewport = io.github.ccch1mneyyy.dsh_app.phone.VisualBounds(20, 80, 500, 880)
+        val shot = Shot(null, null, geometry, false, null, 1_000L,
+            ImageObservation(geometry, 1_000, frame()), text, 480, 800, viewport)
+        assertNull(shot.bytes)
+        assertSame(text, shot.localText)
+        assertEquals(480, shot.rawWidth)
+        assertEquals(800, shot.rawHeight)
+        assertEquals(viewport, shot.viewport)
+        assertEquals(geometry, shot.observation!!.geometry)
+        val output = shot.visualText()!!
+        assertTrue(output.text.contains("point=(0,0)"))
+        assertTrue(output.hasPoints)
+        assertFalse(output.sensitiveText)
+        val privateShot = Shot(null, null, geometry, false, null, localText =
+            LocalOcrResult.Recognized(listOf(LocalOcrResult.Line("验证码 123456", 0, 0, 20, 20))),
+            rawWidth = 480, rawHeight = 800, viewport = viewport)
+        assertTrue(privateShot.visualText()!!.sensitiveText)
+        assertFalse(privateShot.visualText()!!.hasPoints)
+        assertFalse(privateShot.visualText()!!.text.contains("123456"))
+    }
+
     @Test fun pixelsMapBackToWindowOriginAndRejectEveryOutsideEdge() {
         assertEquals(20 to 80, geometry.toScreen(0, 0))
         assertEquals(498 to 878, geometry.toScreen(239, 399))

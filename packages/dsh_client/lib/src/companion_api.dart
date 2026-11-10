@@ -19,6 +19,8 @@ import 'connection.dart';
 import 'dsh_go_api.dart';
 import 'errors.dart';
 import 'json.dart';
+import 'models.dart';
+import 'mux.dart';
 import 'session_api.dart';
 
 const dshGoCompanionPath = '/dsh-go/v1/companion';
@@ -219,8 +221,188 @@ DateTime? _time(Object? value) {
   return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
 }
 
+/// The bridge's process identity and this session's setting revision. Clear
+/// locally acknowledged settings whenever instanceId changes or on reconnect.
+class CompanionPromptCapability {
+  const CompanionPromptCapability({
+    required this.instanceId,
+    required this.sessionId,
+    required this.profileRevision,
+    this.profileAccepted,
+    this.memoryMode = 'query',
+    this.memoryEpoch,
+  });
+  final String instanceId;
+  final String sessionId;
+  final int profileRevision;
+  final bool? profileAccepted;
+
+  /// Older prompt-context hosts omit this field and use query sidecars.
+  /// `automatic` means C902 is the sole memory provider for this target;
+  /// it is not a claim that a recall binding is still ready.
+  final String memoryMode;
+
+  /// Host-owned memory generation, when advertised. Clients may suppress an
+  /// unnecessary query but cannot grant or restore memory using this value.
+  final int? memoryEpoch;
+
+  static CompanionPromptCapability? fromJson(Object? value) {
+    final map = asMap(value);
+    if (map == null) return null;
+    final instance = asString(map['instanceId']), session = asString(map['sessionId']);
+    final revision = asInt(map['profileRevision']);
+    final memoryMode = map.containsKey('memoryMode') ? asString(map['memoryMode']) : 'query';
+    final memoryEpoch = asInt(map['memoryEpoch']);
+    if (map['v'] != 1 ||
+        map['supported'] != true ||
+        instance == null ||
+        instance.isEmpty ||
+        session == null ||
+        session.isEmpty ||
+        revision == null ||
+        revision < 0 ||
+        revision > 9007199254740991 ||
+        (memoryMode != 'query' && memoryMode != 'automatic') ||
+        (map.containsKey('memoryEpoch') &&
+            (memoryEpoch == null || memoryEpoch < 0 || memoryEpoch > 9007199254740991)) ||
+        (map.containsKey('profileAccepted') && map['profileAccepted'] is! bool)) {
+      return null;
+    }
+    return CompanionPromptCapability(
+      instanceId: instance,
+      sessionId: session,
+      profileRevision: revision,
+      profileAccepted: map['profileAccepted'] as bool?,
+      memoryMode: memoryMode!,
+      memoryEpoch: memoryEpoch,
+    );
+  }
+}
+
+/// Ownership captured when a synchronized session/follow subscription accepts
+/// events, before any asynchronous UI delivery. Never construct a new scope to
+/// label a late event from an old subscription. [sessionScope] is the App's
+/// actual target/watch identity, replaced on mode/target changes (also A→B→A).
+final class CompanionPromptScope {
+  const CompanionPromptScope({
+    required this.client,
+    required this.generation,
+    required this.followEpoch,
+    required this.sessionScope,
+    required this.instanceId,
+    required this.sessionId,
+  });
+
+  final DshClient client;
+  final MuxGeneration generation;
+  final SessionFollowEpoch followEpoch;
+  final Object sessionScope;
+  final String instanceId;
+  final String sessionId;
+
+  bool get isCurrent =>
+      followEpoch.isCurrent &&
+      identical(followEpoch.generation, generation) &&
+      identical(client.mux.generation, generation);
+
+  bool _sameAs(CompanionPromptScope other) =>
+      identical(client, other.client) &&
+      identical(generation, other.generation) &&
+      identical(followEpoch, other.followEpoch) &&
+      identical(sessionScope, other.sessionScope) &&
+      instanceId == other.instanceId &&
+      sessionId == other.sessionId;
+}
+
+/// Matches one prepared event snapshot to the Host's durable human commit.
+/// This does not subscribe, send, or consume anything. Supply events from the
+/// synchronized session/follow log (or its validated snapshot), not inbox or
+/// optimistic UI messages. POST ACK and prompt/chat.send success only mean
+/// preparation/acceptance and cannot call this path as a commit.
+final class CompanionPromptCommit {
+  CompanionPromptCommit({required this.scope, required this.requestId, required Iterable<String> eventIds})
+    : eventIds = List.unmodifiable(eventIds) {
+    if (!_promptIdentity(scope.instanceId) ||
+        !_promptIdentity(scope.sessionId) ||
+        !_promptIdentity(requestId) ||
+        this.eventIds.length > 8 ||
+        this.eventIds.any((id) => !_promptIdentity(id)) ||
+        this.eventIds.toSet().length != this.eventIds.length) {
+      throw const FormatException('Invalid companion commit identity');
+    }
+  }
+
+  final CompanionPromptScope scope;
+  final String requestId;
+  final List<String> eventIds;
+
+  /// [from] belongs to the original event callback; [current] is the current
+  /// selected target. A typed user/message alone carries no session identity,
+  /// so both ownership proofs are required. The caller already established
+  /// that this is an actual durable event, not a locally fabricated DTO.
+  List<String> committedEventIds(
+    DshEvent event, {
+    required CompanionPromptScope from,
+    required CompanionPromptScope current,
+  }) {
+    if (!scope._sameAs(from) ||
+        !scope._sameAs(current) ||
+        !scope.isCurrent ||
+        event is! UserMessageEvent ||
+        event.seq < 0 ||
+        event.message.role != MessageRole.user ||
+        event.message.source.kind != 'user' ||
+        event.message.source.raw.containsKey('principal') ||
+        event.requestId != requestId) {
+      return const [];
+    }
+    // Queue edits legitimately change text while preserving rpcId and the
+    // physical-event snapshot. Text comparison would discard that receipt.
+    return eventIds;
+  }
+}
+
+bool _promptIdentity(String value) =>
+    value.isNotEmpty && value.runes.length <= 128 && !RegExp(r'[\x00-\x1f\x7f]').hasMatch(value);
+
 extension CompanionApi on DshClient {
   DshConnection get _bridge => (carrier as DshHttpCarrier).connection;
+
+  /// Null only for a carrier/old bridge without this route. Authentication,
+  /// invalid sessions, malformed success and network failures are not fallback.
+  Future<CompanionPromptCapability?> companionPromptCapability(String sessionId) async {
+    if (!canReachDshGo) return null;
+    const path = '$dshGoCompanionPath/prompt-context';
+    final response = await _bridge.get(path, query: {'sessionId': sessionId}, timeout: const Duration(seconds: 8));
+    if (response.statusCode == 404 && (_codeOf(response) == null || _codeOf(response) == 'companion/not-found')) {
+      return null;
+    }
+    return _promptCapability(path, response, sessionId);
+  }
+
+  /// Send the pure App plan's update, then prompt with the SAME requestId.
+  /// Retry an uncertain HTTP outcome with identical bytes/id; never a new id.
+  /// The acknowledgement prepares context; it is not a human user/message
+  /// commit and must not consume the App's local event snapshot.
+  Future<CompanionPromptCapability> prepareCompanionPromptContext(Map<String, Object?> update) async {
+    if (!canReachDshGo) throw const DshProtocolException('Companion context needs an HTTP bridge');
+    const path = '$dshGoCompanionPath/prompt-context';
+    final response = await _bridge.postJson(path, update, timeout: const Duration(seconds: 8));
+    final value = _promptCapability(path, response, update['sessionId'] as String);
+    if (value.instanceId != update['instanceId']) {
+      throw const DshProtocolException('Companion context acknowledgement is from another instance');
+    }
+    return value;
+  }
+
+  CompanionPromptCapability _promptCapability(String path, DshHttpResponse response, String sessionId) {
+    if (response.statusCode != 200) throw companionHttpError(path, response);
+    final value = CompanionPromptCapability.fromJson(tryDecodeJson(response.text));
+    if (response.contentType != 'application/json' || value == null || value.sessionId != sessionId) {
+      throw DshProtocolException('$path: not a companion prompt capability');
+    }
+    return value;
+  }
 
   /// `GET /dsh-go/v1/companion`. Null when this Host can't keep her state:
   /// the relay, or a bridge without these routes.

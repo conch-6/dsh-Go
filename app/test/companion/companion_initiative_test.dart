@@ -33,6 +33,7 @@ CompanionInitiativeView _room({
 );
 
 _Controller _ready() => _Controller(
+  enforceLocalQuietHours: false,
   now: _now(0),
   restored: CompanionInitiativeRestore.loaded({
     'v': 1,
@@ -75,11 +76,28 @@ _Event _event(Map<String, dynamic> value) => switch (value['type']) {
 };
 
 _Controller _fromTrace(Map<String, dynamic> initial) => _Controller(
+  enforceLocalQuietHours: false,
   now: _clock(initial['now'] as Map<String, dynamic>),
   restored: _restore(initial['restored'] as Map<String, dynamic>),
 );
 
-List<Map<String, Object?>> _effects(List<CompanionInitiativeEffect> values) => values.map((e) => e.toJson()).toList();
+// C212 remains an unchanged legacy oracle. Projection verifies that the new
+// signal ledger is empty before comparing its old v1 representation.
+Object? _legacy(Object? value) {
+  if (value is List) return value.map(_legacy).toList();
+  if (value is Map) {
+    final copy = <String, Object?>{for (final e in value.entries) e.key as String: _legacy(e.value)};
+    if (copy['v'] == 2 && copy.containsKey('inviteAtMs')) {
+      expect(copy.remove('signalAtMs'), isEmpty);
+      expect(copy.remove('night'), isNull);
+      copy['v'] = 1;
+    }
+    return copy;
+  }
+  return value;
+}
+
+List<Object?> _effects(List<CompanionInitiativeEffect> values) => values.map((e) => _legacy(e.toJson())).toList();
 
 void main() {
   final fixture =
@@ -96,7 +114,7 @@ void main() {
           final now = _clock(transition['now'] as Map<String, dynamic>);
           final effects = controller.handle(_event(transition['event'] as Map<String, dynamic>), now);
           final expected = transition['result'] as Map<String, dynamic>;
-          expect(controller.inspect(), expected['state'], reason: 'state at transition $index');
+          expect(_legacy(controller.inspect()), expected['state'], reason: 'state at transition $index');
           expect(_effects(effects), expected['effects'], reason: 'effects at transition $index');
         }
       }
@@ -118,14 +136,14 @@ void main() {
           _clock(transition['now'] as Map<String, dynamic>),
         );
       }
-      expect(controller.inspect(), example['fromState']);
+      expect(_legacy(controller.inspect()), example['fromState']);
       final expected = example[fork] as Map<String, dynamic>;
       final expectedState = expected['state'] as Map<String, dynamic>;
       final effects = controller.handle(
         _Event.present(controller.offer!.id),
         _clock(expectedState['lastNow'] as Map<String, dynamic>),
       );
-      expect(controller.inspect(), expectedState);
+      expect(_legacy(controller.inspect()), expectedState);
       expect(_effects(effects), expected['effects']);
       permissions += effects.where((e) => e.type == _Effect.show).length;
     }
@@ -218,7 +236,11 @@ void main() {
   test('restore input, persisted records and diagnostic copies cannot mutate the owner', () {
     final invitations = <int>[_wall - CompanionInitiativeRules.windowMs];
     final input = {'v': 1, 'lastGreetingAtMs': _wall, 'inviteAtMs': invitations, 'declinedUntilMs': 0};
-    final controller = _Controller(now: _now(0), restored: CompanionInitiativeRestore.loaded(input));
+    final controller = _Controller(
+      enforceLocalQuietHours: false,
+      now: _now(0),
+      restored: CompanionInitiativeRestore.loaded(input),
+    );
     invitations.add(_wall);
     input['declinedUntilMs'] = _wall + CompanionInitiativeRules.windowMs;
     controller.handle(_Event.enter(_room()), _now(0));
@@ -234,6 +256,56 @@ void main() {
     expect((controller.inspect()['stay'] as Map)['invited'], isTrue);
   });
 
+  group('pace', () {
+    _Controller spent(List<int> invites) => _Controller(
+      enforceLocalQuietHours: false,
+      now: _now(0),
+      restored: CompanionInitiativeRestore.loaded({
+        'v': 1,
+        'lastGreetingAtMs': _wall,
+        'inviteAtMs': invites,
+        'declinedUntilMs': 0,
+      }),
+    );
+
+    test('two lines already today: the original pace waits, a livelier one goes on', () {
+      final today = [_wall - 20 * 3600000, _wall - 3 * 3600000];
+      final rare = spent(today);
+      rare.handle(_Event.enter(_room()), _now(0));
+      rare.handle(const _Event.check(), _now(60000));
+      expect(rare.offer, isNull);
+
+      final often = spent(today)..pace = CompanionInitiativePace.often;
+      often.handle(_Event.enter(_room()), _now(0));
+      often.handle(const _Event.check(), _now(29999));
+      expect(often.offer, isNull);
+      often.handle(const _Event.check(), _now(30000));
+      expect(often.offer?.kind, CompanionPromptKind.invite);
+    });
+
+    test('each pace keeps its own distance from the last line', () {
+      final often = spent([_wall - 3600000])..pace = CompanionInitiativePace.often;
+      often.handle(_Event.enter(_room()), _now(0));
+      often.handle(const _Event.check(), _now(60000));
+      expect(often.offer, isNull);
+
+      final chatty = spent([_wall - 3600000])..pace = CompanionInitiativePace.chatty;
+      chatty.handle(_Event.enter(_room()), _now(0));
+      chatty.handle(const _Event.check(), _now(20000));
+      expect(chatty.offer?.kind, CompanionPromptKind.invite);
+    });
+
+    test('a ledger written at the chattiest pace still reads at any pace', () {
+      final full = [for (var i = 0; i < 12; i++) _wall - 23 * 3600000 + i * 1800000];
+      final controller = spent(full);
+      expect(controller.fault, isNull);
+      expect(controller.record!.inviteAtMs, full);
+      controller.handle(_Event.enter(_room()), _now(0));
+      controller.handle(const _Event.check(), _now(60000));
+      expect(controller.offer, isNull);
+    });
+  });
+
   test('invalid ledgers never become a fresh quota, while a future refusal is valid', () {
     final valid = {'v': 1, 'lastGreetingAtMs': null, 'inviteAtMs': <int>[], 'declinedUntilMs': 0};
     final invalid = <Object?>[
@@ -247,19 +319,29 @@ void main() {
       },
       {
         ...valid,
-        'inviteAtMs': [0, 21600000, 43200000],
+        // More than the chattiest pace ever spends in a day.
+        'inviteAtMs': [for (var i = 0; i < 13; i++) i * 3600000],
+      },
+      {
+        ...valid,
+        'inviteAtMs': [0, 60000],
       },
       {...valid, 'declinedUntilMs': -1},
       {...valid, 'lastGreetingAtMs': '0'},
     ];
     for (final value in invalid) {
-      final controller = _Controller(now: _now(0), restored: CompanionInitiativeRestore.loaded(value));
+      final controller = _Controller(
+        enforceLocalQuietHours: false,
+        now: _now(0),
+        restored: CompanionInitiativeRestore.loaded(value),
+      );
       expect(controller.fault, 'ledger-invalid');
       final effects = controller.handle(_Event.enter(_room()), _now(0));
       expect(effects.where((e) => e.type == _Effect.offer || e.type == _Effect.persist), isEmpty);
       expect(controller.record, isNull);
     }
     final declined = _Controller(
+      enforceLocalQuietHours: false,
       now: _now(0),
       restored: CompanionInitiativeRestore.loaded({...valid, 'declinedUntilMs': _wall + 21600000}),
     );
@@ -278,7 +360,11 @@ void main() {
     controller.handle(_Event.observe(_room()), _now(45000));
     expect(controller.offer, isNull);
     expect(
-      () => _Controller(now: _now(-1), restored: const CompanionInitiativeRestore.newLedger()),
+      () => _Controller(
+        enforceLocalQuietHours: false,
+        now: _now(-1),
+        restored: const CompanionInitiativeRestore.newLedger(),
+      ),
       throwsArgumentError,
     );
   });

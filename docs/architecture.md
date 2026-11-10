@@ -79,6 +79,15 @@ EventChannel `dsh/runtime/events`，事件 map：
 - `targetSdk = 28`（与 Termux 相同），避开 Android 10+ 对应用私有目录 `exec` 的限制；上架前再评估提升。
 - Maven / Gradle / pub 走国内镜像（阿里云、腾讯云、flutter-io.cn）。
 
+## 持久化系统与引擎更新
+
+- 首次安装或用户明确确认的重置才允许激活整套 rootfs。普通更新不替换 rootfs，只替换打包器与 Android 安装器共同固定的精确引擎路径；不得扩大为整个 /usr、/usr/local 或 /opt。
+- manifest 与归档内 runtime.json 共享 upgrade 元数据。baseId 由 ABI、Ubuntu 原始归档、额外 deb 与 Python 输入计算，不包含 DSH/Node/桥接/补丁或构建时间。Python 与用户 pip 包一起保留，不作为引擎目录替换。
+- 旧运行时没有 upgrade 时，核对其 ABI、Ubuntu 版本、系统发行标识与 Python 二进制后采用；以后要求 baseId 匹配。基础身份变化、未知清单和旧版中断现场均返回 runtime_upgrade_blocked 错误，不进行破坏性兜底。此兼容门不等于对用户自行修改的动态库或第三方原生扩展作兼容保证。
+- 升级前确认引擎及遗留进程已停止。新载荷先在 engine.prepare 落盘，再发布为 engine.upgrade；旧引擎临时保存在该事务中。按精确路径改名，数据屏障后原子提交 rootfs.version，最后把事务改名为 engine.done 再清理。启动不得将未完成事务当作可运行版本，重试必须先恢复事务，再清理 staging。
+- 必须重新构建运行时资产，使归档与 manifest 都带新契约；只重建 Flutter APK、复用旧 runtime/out 不能启用分层升级。旧资产遇到已有环境会安全停止，而不是整根覆盖。
+- 不兼容时原始系统保留在 App 私有目录。此实现不自动迁移基础系统，也不提供一键全环境备份；迁移或重置前应离线导出完整环境，保留模式、符号链接与包数据库，并验证备份，不能用诊断 ZIP 代替。
+
 ## 本地连接
 
 1. 原生层启动 `dsh web --host 127.0.0.1 --port 3080 --no-open`，从 stdout 解析 token。

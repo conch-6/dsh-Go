@@ -19,6 +19,7 @@ class PhoneTaskTrace {
     data class Step internal constructor(
         val action: Action, val screen: PhoneScreen, val role: Role, val anchor: Anchor?,
         val receipt: Receipt = Receipt.CALLED, val postObservationAvailable: Boolean = false,
+        internal val navigation: PhoneSkillNavigationWitness? = null,
     )
     data class Snapshot internal constructor(
         val owner: OwnerKey, val steps: List<Step>, val ended: Boolean, val eligible: Boolean, val gap: Gap?,
@@ -120,11 +121,20 @@ class PhoneTaskTrace {
         return Ticket(key, entry.serial, entry.steps.lastIndex)
     }
 
-    @Synchronized fun finish(ticket: Ticket?, ok: Boolean, staleRejected: Boolean, postObservationAvailable: Boolean) {
+    @Synchronized fun finish(ticket: Ticket?, ok: Boolean, staleRejected: Boolean, postObservationAvailable: Boolean,
+                             navigation: PhoneSkillNavigationWitness? = null) {
         val entry = pending(ticket) ?: return
         val t = ticket!!
         val receipt = when { !ok && staleRejected -> Receipt.STALE_REJECTED; ok -> Receipt.RETURNED_OK; else -> Receipt.RETURNED_ERROR }
-        entry.steps[t.index] = entry.steps[t.index].copy(receipt = receipt, postObservationAvailable = postObservationAvailable)
+        val step = entry.steps[t.index]
+        val qualified = navigation?.takeIf { ok && !staleRejected && postObservationAvailable &&
+            step.action == Action.TAP && step.screen == PhoneScreen.MAIN }
+        val retained = if (qualified != null && reservedBytes() + NAVIGATION_BYTES > MAX_BYTES) {
+            entry.gap = entry.gap ?: Gap.LIMIT
+            null
+        } else qualified
+        entry.steps[t.index] = step.copy(receipt = receipt, postObservationAvailable = postObservationAvailable,
+            navigation = retained)
         if (!ok) entry.gap = entry.gap ?: Gap.UNCERTAIN_RESULT
     }
 
@@ -159,15 +169,16 @@ class PhoneTaskTrace {
     }
     @Synchronized fun discard(owner: OwnerKey) { entries.remove(owner) }
     @Synchronized fun clear() { entries.clear() }
-    @Synchronized fun reservedBytes(): Int = entries.values.sumOf { TASK_BYTES + it.steps.size * STEP_BYTES }
+    @Synchronized fun reservedBytes(): Int = entries.values.sumOf { TASK_BYTES + it.steps.size * STEP_BYTES + it.steps.count { step -> step.navigation != null } * NAVIGATION_BYTES }
 
     companion object {
         const val MAX_TASKS = 8
         const val MAX_STEPS = 60
         const val MAX_BYTES = 32 * 1024
-        // Conservative UTF-8 summary reservation, not a JVM heap measurement. Only fixed enums/bools are stored.
+        // Conservative UTF-8 summary reservation, not a JVM heap measurement. Fixed enums/bools plus separately reserved bounded native navigation identity.
         private const val TASK_BYTES = 256
         private const val STEP_BYTES = 256
+        private const val NAVIGATION_BYTES = 512
         fun key(owner: PhoneTasks.Owner) = OwnerKey(owner.taskId, owner.lifecycle)
     }
 }

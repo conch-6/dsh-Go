@@ -2942,6 +2942,378 @@ abstract class L10n {
   /// **'、'**
   String get activityToolListSeparator;
 
+  /// No description provided for @androidShellTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'Android Shell'**
+  String get androidShellTitle;
+
+  /// No description provided for @androidShellEntryHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'独立的系统命令通道，默认关闭'**
+  String get androidShellEntryHint;
+
+  /// No description provided for @androidShellSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'通过 Shizuku 或自连 ADB 在这台手机上执行 Android 系统命令，不是 Ubuntu 里的 bash。'**
+  String get androidShellSubtitle;
+
+  /// No description provided for @androidShellEnable.
+  ///
+  /// In zh, this message translates to:
+  /// **'允许 Android Shell'**
+  String get androidShellEnable;
+
+  /// No description provided for @androidShellEnableHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'独立开关，不随不打扰模式或屏幕免确认设置开启。'**
+  String get androidShellEnableHint;
+
+  /// No description provided for @androidShellConfirmationNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'每条命令都要经过手机上的原生确认；屏幕操控的「免确认」不适用于这里。Shell 权限范围与屏幕操控不同，不能依靠应用名单拦截所有命令。'**
+  String get androidShellConfirmationNote;
+
+  /// No description provided for @androidShellMasterOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'先在上一页打开「手机操控」，才能启用 Android Shell。你仍可在这里查看授权和配对引导。'**
+  String get androidShellMasterOff;
+
+  /// No description provided for @androidShellRiskTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'允许执行 Android 系统命令？'**
+  String get androidShellRiskTitle;
+
+  /// No description provided for @androidShellRiskBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'命令使用所选通道的实际 UID，可能修改应用、系统设置和共享文件。它不受屏幕应用名单完整保护；每条命令仍会单独请求原生确认。只允许你理解并信任的命令。'**
+  String get androidShellRiskBody;
+
+  /// No description provided for @androidShellRiskAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'允许 Android Shell'**
+  String get androidShellRiskAction;
+
+  /// No description provided for @androidShellBackend.
+  ///
+  /// In zh, this message translates to:
+  /// **'执行通道'**
+  String get androidShellBackend;
+
+  /// No description provided for @androidShellShizukuHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用已安装并启动的 Shizuku，需单独授权；不需要 Android 14、无障碍或不打扰模式。'**
+  String get androidShellShizukuHint;
+
+  /// No description provided for @androidShellAdb.
+  ///
+  /// In zh, this message translates to:
+  /// **'自连 ADB'**
+  String get androidShellAdb;
+
+  /// No description provided for @androidShellAdbHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接本机的无线调试，复用 App 的私有 ADB 身份；不会连接其他设备。'**
+  String get androidShellAdbHint;
+
+  /// No description provided for @androidShellInstalled.
+  ///
+  /// In zh, this message translates to:
+  /// **'Shizuku 已安装'**
+  String get androidShellInstalled;
+
+  /// No description provided for @androidShellRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'Shizuku 正在运行'**
+  String get androidShellRunning;
+
+  /// No description provided for @androidShellGranted.
+  ///
+  /// In zh, this message translates to:
+  /// **'Shizuku 已授权'**
+  String get androidShellGranted;
+
+  /// No description provided for @androidShellPaired.
+  ///
+  /// In zh, this message translates to:
+  /// **'ADB 已配对'**
+  String get androidShellPaired;
+
+  /// No description provided for @androidShellConnected.
+  ///
+  /// In zh, this message translates to:
+  /// **'ADB 已连接'**
+  String get androidShellConnected;
+
+  /// No description provided for @androidShellAuthorize.
+  ///
+  /// In zh, this message translates to:
+  /// **'申请 Shizuku 授权'**
+  String get androidShellAuthorize;
+
+  /// No description provided for @androidShellAuthorizeHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'先安装并启动 Shizuku，再点此按钮允许 dsh-Go。打开本页或刷新不会申请授权。'**
+  String get androidShellAuthorizeHint;
+
+  /// No description provided for @androidShellStatus.
+  ///
+  /// In zh, this message translates to:
+  /// **'执行状态'**
+  String get androidShellStatus;
+
+  /// No description provided for @androidShellUid.
+  ///
+  /// In zh, this message translates to:
+  /// **'实际 UID'**
+  String get androidShellUid;
+
+  /// No description provided for @androidShellUidUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'尚未报告'**
+  String get androidShellUidUnknown;
+
+  /// No description provided for @androidShellRefresh.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新状态'**
+  String get androidShellRefresh;
+
+  /// No description provided for @androidShellStop.
+  ///
+  /// In zh, this message translates to:
+  /// **'停止 Android Shell'**
+  String get androidShellStop;
+
+  /// No description provided for @androidShellStopHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消当前命令并停止独立 Shell 执行，不关闭屏幕操控。'**
+  String get androidShellStopHint;
+
+  /// No description provided for @androidShellPairingGuide.
+  ///
+  /// In zh, this message translates to:
+  /// **'在开发者选项中打开「无线调试」，选择「使用配对码配对设备」。配对码只在本次配对中使用，不保存、不写入日志。'**
+  String get androidShellPairingGuide;
+
+  /// No description provided for @androidShellStartPairing.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开配对引导'**
+  String get androidShellStartPairing;
+
+  /// No description provided for @androidShellPair.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入配对码'**
+  String get androidShellPair;
+
+  /// No description provided for @androidShellPairSubmit.
+  ///
+  /// In zh, this message translates to:
+  /// **'配对'**
+  String get androidShellPairSubmit;
+
+  /// No description provided for @androidShellPairCode.
+  ///
+  /// In zh, this message translates to:
+  /// **'六位配对码'**
+  String get androidShellPairCode;
+
+  /// No description provided for @androidShellPairPort.
+  ///
+  /// In zh, this message translates to:
+  /// **'配对端口（可选）'**
+  String get androidShellPairPort;
+
+  /// No description provided for @androidShellPairPortHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'填配对弹窗里的端口，不是无线调试主页的连接端口；留空时尝试自动发现。'**
+  String get androidShellPairPortHint;
+
+  /// No description provided for @androidShellConnect.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接 ADB'**
+  String get androidShellConnect;
+
+  /// No description provided for @androidShellConnectChannel.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接所选通道'**
+  String get androidShellConnectChannel;
+
+  /// No description provided for @androidShellConnectPort.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接端口（可选）'**
+  String get androidShellConnectPort;
+
+  /// No description provided for @androidShellConnectPortHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'填无线调试主页「IP 地址和端口」中的端口，不是配对端口。只连接本机；留空时尝试自动发现。'**
+  String get androidShellConnectPortHint;
+
+  /// No description provided for @androidShellErrorCode.
+  ///
+  /// In zh, this message translates to:
+  /// **'错误码：{code}'**
+  String androidShellErrorCode(String code);
+
+  /// No description provided for @androidShellLimits.
+  ///
+  /// In zh, this message translates to:
+  /// **'单次最长 {seconds} 秒，输出最多 {bytes} 字节'**
+  String androidShellLimits(int seconds, int bytes);
+
+  /// No description provided for @androidShellErrorDisabled.
+  ///
+  /// In zh, this message translates to:
+  /// **'Android Shell 已关闭。'**
+  String get androidShellErrorDisabled;
+
+  /// No description provided for @androidShellErrorNotConnected.
+  ///
+  /// In zh, this message translates to:
+  /// **'所选通道尚未连接。'**
+  String get androidShellErrorNotConnected;
+
+  /// No description provided for @androidShellErrorShizukuMissing.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先安装 Shizuku。'**
+  String get androidShellErrorShizukuMissing;
+
+  /// No description provided for @androidShellErrorShizukuStopped.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先启动 Shizuku，再刷新状态。'**
+  String get androidShellErrorShizukuStopped;
+
+  /// No description provided for @androidShellErrorPermissionRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要你在 Shizuku 中明确授权。'**
+  String get androidShellErrorPermissionRequired;
+
+  /// No description provided for @androidShellErrorAdbNotPaired.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先完成本机无线调试配对，再连接 ADB。'**
+  String get androidShellErrorAdbNotPaired;
+
+  /// No description provided for @androidShellErrorConnectFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接未成功。请检查所选通道和当前无线调试连接端口，再重试。'**
+  String get androidShellErrorConnectFailed;
+
+  /// No description provided for @androidShellErrorIdentityChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'通道身份已改变，请停止后重新授权或连接。'**
+  String get androidShellErrorIdentityChanged;
+
+  /// No description provided for @androidShellErrorBusy.
+  ///
+  /// In zh, this message translates to:
+  /// **'另一项操作尚未结束，请稍后重试，或先停止 Android Shell。'**
+  String get androidShellErrorBusy;
+
+  /// No description provided for @androidShellErrorInvalidArguments.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入无效。配对码须为六位数字，端口须在 1–65535 之间。'**
+  String get androidShellErrorInvalidArguments;
+
+  /// No description provided for @androidShellErrorCancelled.
+  ///
+  /// In zh, this message translates to:
+  /// **'操作已取消。'**
+  String get androidShellErrorCancelled;
+
+  /// No description provided for @androidShellErrorTimeout.
+  ///
+  /// In zh, this message translates to:
+  /// **'操作超时。先核实结果；已派发的命令不要自动重试。'**
+  String get androidShellErrorTimeout;
+
+  /// No description provided for @androidShellErrorConfirmationDenied.
+  ///
+  /// In zh, this message translates to:
+  /// **'未获准执行命令。'**
+  String get androidShellErrorConfirmationDenied;
+
+  /// No description provided for @androidShellErrorCleanupFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'未能完成停止清理。请重试停止，暂勿执行新命令。'**
+  String get androidShellErrorCleanupFailed;
+
+  /// No description provided for @androidShellErrorLocked.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机已锁定，请解锁后重试。'**
+  String get androidShellErrorLocked;
+
+  /// No description provided for @androidShellErrorConfirmationUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前无法显示原生确认，请回到 App 并检查通知权限。'**
+  String get androidShellErrorConfirmationUnavailable;
+
+  /// No description provided for @androidShellErrorTransportLost.
+  ///
+  /// In zh, this message translates to:
+  /// **'通道已断开。先核实结果；已派发的命令不要自动重试，需要时重新连接。'**
+  String get androidShellErrorTransportLost;
+
+  /// No description provided for @androidShellErrorProtocolMismatch.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前原生模块不支持此 Shell 协议，请更新 App。'**
+  String get androidShellErrorProtocolMismatch;
+
+  /// No description provided for @androidShellErrorNativeUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'此构建的 Android Shell 原生模块不可用。'**
+  String get androidShellErrorNativeUnavailable;
+
+  /// No description provided for @androidShellErrorInvalidResponse.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有收到有效的原生状态，请刷新或更新 App。'**
+  String get androidShellErrorInvalidResponse;
+
+  /// No description provided for @androidShellErrorStopFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'未确认已停止，请刷新状态并重试停止。'**
+  String get androidShellErrorStopFailed;
+
+  /// No description provided for @androidShellErrorUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'未能确认操作结果。先核实结果；已派发的命令不要自动重试。'**
+  String get androidShellErrorUnknown;
+
   /// No description provided for @botsFolderGone.
   ///
   /// In zh, this message translates to:
@@ -4765,6 +5137,96 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'「{name}」来了'**
   String botsPetImportDone(String name);
+
+  /// No description provided for @botsPetCodexTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'「{name}」是从 Codex 宠物转过来的'**
+  String botsPetCodexTitle(String name);
+
+  /// No description provided for @botsPetCodexBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'大部分照原样，有几处不完全一样：'**
+  String get botsPetCodexBody;
+
+  /// No description provided for @botsPetCodexOk.
+  ///
+  /// In zh, this message translates to:
+  /// **'知道了'**
+  String get botsPetCodexOk;
+
+  /// No description provided for @botsPetCodexLoops.
+  ///
+  /// In zh, this message translates to:
+  /// **'动作会一直循环到状态变化，不像 Codex 里跑几遍就回到待机'**
+  String get botsPetCodexLoops;
+
+  /// No description provided for @botsPetCodexRoamLeft.
+  ///
+  /// In zh, this message translates to:
+  /// **'往左走用的是往右走那一行的镜像'**
+  String get botsPetCodexRoamLeft;
+
+  /// No description provided for @botsPetCodexDrag.
+  ///
+  /// In zh, this message translates to:
+  /// **'拖着它时一律用朝右的那一行'**
+  String get botsPetCodexDrag;
+
+  /// No description provided for @botsPetCodexSleep.
+  ///
+  /// In zh, this message translates to:
+  /// **'睡觉时用待机的第一帧'**
+  String get botsPetCodexSleep;
+
+  /// No description provided for @botsPetCodexLook.
+  ///
+  /// In zh, this message translates to:
+  /// **'看向不同方向的那些格子没用上'**
+  String get botsPetCodexLook;
+
+  /// No description provided for @botsPetCodexWebp.
+  ///
+  /// In zh, this message translates to:
+  /// **'WebP 图转成了 PNG'**
+  String get botsPetCodexWebp;
+
+  /// No description provided for @botsPetCodexCustomTracks.
+  ///
+  /// In zh, this message translates to:
+  /// **'自定义的动作行没接到任何状态上'**
+  String get botsPetCodexCustomTracks;
+
+  /// No description provided for @botsPetCodexFps.
+  ///
+  /// In zh, this message translates to:
+  /// **'帧率换算成毫秒时取了整'**
+  String get botsPetCodexFps;
+
+  /// No description provided for @botsPetCodexOneShot.
+  ///
+  /// In zh, this message translates to:
+  /// **'只播一次的动作，播完回到哪里由 DSH 决定'**
+  String get botsPetCodexOneShot;
+
+  /// No description provided for @botsPetCodexMissingAuthor.
+  ///
+  /// In zh, this message translates to:
+  /// **'包里没写作者'**
+  String get botsPetCodexMissingAuthor;
+
+  /// No description provided for @botsPetCodexMissingLicense.
+  ///
+  /// In zh, this message translates to:
+  /// **'包里没写授权'**
+  String get botsPetCodexMissingLicense;
+
+  /// No description provided for @botsPetCodexMissingSource.
+  ///
+  /// In zh, this message translates to:
+  /// **'包里没写来源'**
+  String get botsPetCodexMissingSource;
 
   /// No description provided for @botsPetImportReplaced.
   ///
@@ -8396,6 +8858,12 @@ abstract class L10n {
   /// **'聊天记录'**
   String get companionLogTitle;
 
+  /// No description provided for @companionContextUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台主机的伙伴还不支持上下文：她的名字、设定和刚才发生的事传不过去，只发你说的话。升级主机或换成轻量模式就好。'**
+  String get companionContextUnsupported;
+
   /// No description provided for @companionLogEmpty.
   ///
   /// In zh, this message translates to:
@@ -9032,17 +9500,65 @@ abstract class L10n {
   /// **'那我先躺好啦，你也放松点。'**
   String get companionInviteYes2;
 
-  /// No description provided for @companionMenuInvite.
+  /// No description provided for @companionMenuPace.
   ///
   /// In zh, this message translates to:
-  /// **'主动邀请'**
-  String get companionMenuInvite;
+  /// **'她多主动'**
+  String get companionMenuPace;
 
-  /// No description provided for @companionMenuInviteHint.
+  /// No description provided for @companionPaceHint.
   ///
   /// In zh, this message translates to:
-  /// **'你安静陪着她时，她偶尔会邀你一起歇一会儿'**
-  String get companionMenuInviteHint;
+  /// **'她只在你安静陪着她时开口：邀你歇一会儿，或提一句别的对话。深夜不说，每次进门最多邀一次。'**
+  String get companionPaceHint;
+
+  /// No description provided for @companionPaceQuiet.
+  ///
+  /// In zh, this message translates to:
+  /// **'安静'**
+  String get companionPaceQuiet;
+
+  /// No description provided for @companionPaceQuietHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'不主动开口，你找她时才说话'**
+  String get companionPaceQuietHint;
+
+  /// No description provided for @companionPaceRare.
+  ///
+  /// In zh, this message translates to:
+  /// **'偶尔'**
+  String get companionPaceRare;
+
+  /// No description provided for @companionPaceRareHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'一天最多 2 次，至少隔 6 小时'**
+  String get companionPaceRareHint;
+
+  /// No description provided for @companionPaceOften.
+  ///
+  /// In zh, this message translates to:
+  /// **'常常'**
+  String get companionPaceOften;
+
+  /// No description provided for @companionPaceOftenHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'一天最多 6 次，至少隔 2 小时'**
+  String get companionPaceOftenHint;
+
+  /// No description provided for @companionPaceChatty.
+  ///
+  /// In zh, this message translates to:
+  /// **'话多'**
+  String get companionPaceChatty;
+
+  /// No description provided for @companionPaceChattyHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'一天最多 12 次，至少隔半小时'**
+  String get companionPaceChattyHint;
 
   /// No description provided for @companionSetupBundled.
   ///
@@ -9146,23 +9662,11 @@ abstract class L10n {
   /// **'抱紧一点也没关系哦。'**
   String get companionHugClose;
 
-  /// No description provided for @companionTaskDone.
-  ///
-  /// In zh, this message translates to:
-  /// **'「{title}」那边跑完啦。'**
-  String companionTaskDone(String title);
-
   /// No description provided for @companionTaskDoneUntitled.
   ///
   /// In zh, this message translates to:
   /// **'你那边的任务跑完啦。'**
   String get companionTaskDoneUntitled;
-
-  /// No description provided for @companionTaskFailed.
-  ///
-  /// In zh, this message translates to:
-  /// **'「{title}」好像出错了，要去看看吗？'**
-  String companionTaskFailed(String title);
 
   /// No description provided for @companionTaskFailedUntitled.
   ///
@@ -9170,35 +9674,143 @@ abstract class L10n {
   /// **'你那边的任务好像出错了，要去看看吗？'**
   String get companionTaskFailedUntitled;
 
-  /// No description provided for @companionTaskApproval.
-  ///
-  /// In zh, this message translates to:
-  /// **'「{title}」在等你批准。'**
-  String companionTaskApproval(String title);
-
-  /// No description provided for @companionTaskApprovalUntitled.
-  ///
-  /// In zh, this message translates to:
-  /// **'你那边有件事在等你批准。'**
-  String get companionTaskApprovalUntitled;
-
-  /// No description provided for @companionTaskQuestion.
-  ///
-  /// In zh, this message translates to:
-  /// **'「{title}」有事想问你。'**
-  String companionTaskQuestion(String title);
-
-  /// No description provided for @companionTaskQuestionUntitled.
-  ///
-  /// In zh, this message translates to:
-  /// **'你那边有个问题在等你回答。'**
-  String get companionTaskQuestionUntitled;
-
   /// No description provided for @companionTaskOpen.
   ///
   /// In zh, this message translates to:
   /// **'去看看'**
   String get companionTaskOpen;
+
+  /// No description provided for @companionMenuSignals.
+  ///
+  /// In zh, this message translates to:
+  /// **'她会提起什么'**
+  String get companionMenuSignals;
+
+  /// No description provided for @companionSignalsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'这些只在小屋里说给你听，不会发给模型。说多说少跟着「她多主动」，和邀请共用次数，深夜不说；选「安静」她也不说。'**
+  String get companionSignalsHint;
+
+  /// No description provided for @companionSignalState.
+  ///
+  /// In zh, this message translates to:
+  /// **'留意别的对话'**
+  String get companionSignalState;
+
+  /// No description provided for @companionSignalStateHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台主机上别的对话跑完或出错时，她心里有数'**
+  String get companionSignalStateHint;
+
+  /// No description provided for @companionSignalSpeech.
+  ///
+  /// In zh, this message translates to:
+  /// **'提一句'**
+  String get companionSignalSpeech;
+
+  /// No description provided for @companionSignalSpeechHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'挑你安静的时候说一句'**
+  String get companionSignalSpeechHint;
+
+  /// No description provided for @companionSignalVoice.
+  ///
+  /// In zh, this message translates to:
+  /// **'用声音说出来'**
+  String get companionSignalVoice;
+
+  /// No description provided for @companionSignalVoiceHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'她的声音开着时，把这句读出来'**
+  String get companionSignalVoiceHint;
+
+  /// No description provided for @companionSignalNight.
+  ///
+  /// In zh, this message translates to:
+  /// **'深夜提醒你休息'**
+  String get companionSignalNight;
+
+  /// No description provided for @companionSignalNightHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'深夜在小屋里待了一阵，她轻轻提醒一次'**
+  String get companionSignalNightHint;
+
+  /// No description provided for @companionSignalLateUse.
+  ///
+  /// In zh, this message translates to:
+  /// **'这么晚了还陪着我……要不要早点歇一会儿？'**
+  String get companionSignalLateUse;
+
+  /// No description provided for @companionRecallTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'完整模式里自动想起记忆'**
+  String get companionRecallTitle;
+
+  /// No description provided for @companionRecallHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开时换一段新对话；改动她记得的事会自动关掉'**
+  String get companionRecallHint;
+
+  /// No description provided for @companionRecallConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开后，她确认过的记忆（最多 12 条）会跟着完整模式里她的每次回复一起发给模型。会开始一段新对话，现在这段留在主对话列表里。改动记忆后会自动关掉，到时可以再打开。'**
+  String get companionRecallConfirm;
+
+  /// No description provided for @companionRecallTurnOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开'**
+  String get companionRecallTurnOn;
+
+  /// No description provided for @companionRecallOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'好，从这段新对话起，我会想着你让我记住的事。'**
+  String get companionRecallOn;
+
+  /// No description provided for @companionRecallBusy.
+  ///
+  /// In zh, this message translates to:
+  /// **'另一个对话正在用自动想起记忆，先在那边关掉再来'**
+  String get companionRecallBusy;
+
+  /// No description provided for @companionRecallUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台主机现在开不了自动想起记忆'**
+  String get companionRecallUnsupported;
+
+  /// No description provided for @companionRecallFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动想起记忆没打开，再试一次吧'**
+  String get companionRecallFailed;
+
+  /// No description provided for @companionRecallOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动想起记忆关了，下一句会开始一段新对话'**
+  String get companionRecallOff;
+
+  /// No description provided for @companionRecallOffFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动想起记忆没关掉，再试一次吧'**
+  String get companionRecallOffFailed;
+
+  /// No description provided for @companionRecallStopped.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动想起记忆停了（她记得的事有改动），换成了一段新对话。想要的话可以在菜单里再打开。'**
+  String get companionRecallStopped;
 
   /// No description provided for @companionMenuVoice.
   ///
@@ -20144,6 +20756,18 @@ abstract class L10n {
   /// **'查看后台屏'**
   String get phonePreviewOpen;
 
+  /// No description provided for @phonePreviewTask.
+  ///
+  /// In zh, this message translates to:
+  /// **'预览任务 {taskId}'**
+  String phonePreviewTask(String taskId);
+
+  /// No description provided for @phonePreviewInUse.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在预览另一任务'**
+  String get phonePreviewInUse;
+
   /// No description provided for @phonePreviewOff.
   ///
   /// In zh, this message translates to:
@@ -20333,7 +20957,7 @@ abstract class L10n {
   /// No description provided for @phoneSelfCheckReason.
   ///
   /// In zh, this message translates to:
-  /// **'{reason, select, busy{手机或通道正忙。} unsupported{设备或特权端不支持这项自检。} cancelled{本次请求已取消或退役。} disabled{手机操控尚未开启。} locked{设备已锁定。} identity{原运行或通道身份已改变。} invalid{请求或结果无法验证。} display{临时展示屏未能确认。} input{输入受理或送达未确认，不会重放已派发输入。} cleanup{资源清理未确认，仅可重试清理。} denied{系统拒绝了操作。} timeout{操作超时，已派发工作仍可能完成。} unavailable{本机状态或已选通道不可用。} target_unavailable{无法核实固定目标，请完成清理后再开始。} target_changed{原目标已变化，请仅继续清理。} target_cleanup{目标清理未确认，请仅重试清理。} target_main{目标曾出现在主屏，已停止后续步骤，请完成清理。} target_readback{固定目标计数或文本回读不符，不要重复操作，请完成清理。} tree_cleanup{树连接清理未确认，请仅重试清理。} target_launch{目标启动被拒绝或未确认，请检查设备并完成清理。} frame_unavailable{未取得可用的本地图样帧，请完成清理后再开始新的自检。} frame_mismatch{实际画面与本次目标及阶段不符，请完成清理。} continuity{有限受控刷新序列未确认；这不是帧率结果。} main_changed{主屏采样点发生变化，也可能包含用户操作；请完成清理，不能据此判定原因。} main_unchanged{这些有限采样点未见变化，采样之间是否受扰仍未知。} main_incomplete{主屏样本不完整，不能据此证明没有受扰。} not_installed{未安装本机 OCR 识别器，未执行 OCR 测试。} other{收到无法识别的结果。}}'**
+  /// **'{reason, select, busy{手机或通道正忙。} unsupported{设备或特权端不支持这项自检。} cancelled{本次请求已取消或退役。} disabled{手机操控尚未开启。} locked{设备已锁定。} identity{原运行或通道身份已改变。} invalid{请求或结果无法验证。} display{临时展示屏未能确认。} input{输入受理或送达未确认，不会重放已派发输入。} cleanup{资源清理未确认，仅可重试清理。} denied{系统拒绝了操作。} timeout{操作超时，已派发工作仍可能完成。} unavailable{本机状态或已选通道不可用。} target_unavailable{无法核实固定目标，请完成清理后再开始。} target_changed{原目标已变化，请仅继续清理。} target_cleanup{目标清理未确认，请仅重试清理。} target_main{目标曾出现在主屏，已停止后续步骤，请完成清理。} target_readback{固定目标计数或文本回读不符，不要重复操作，请完成清理。} tree_cleanup{树连接清理未确认，请仅重试清理。} target_launch{目标启动被拒绝或未确认，请检查设备并完成清理。} frame_unavailable{未取得可用的本地图样帧，请完成清理后再开始新的自检。} frame_mismatch{实际画面与本次目标及阶段不符，请完成清理。} continuity{有限受控刷新序列未确认；这不是帧率结果。} main_changed{主屏采样点发生变化，也可能包含用户操作；请完成清理，不能据此判定原因。} main_unchanged{这些有限采样点未见变化，采样之间是否受扰仍未知。} main_incomplete{主屏样本不完整，不能据此证明没有受扰。} not_installed{本自检未接入 OCR，未执行识别测试。} other{收到无法识别的结果。}}'**
   String phoneSelfCheckReason(String reason);
 
   /// No description provided for @phoneSelfCheckTargetScope.
@@ -20363,7 +20987,7 @@ abstract class L10n {
   /// No description provided for @phoneSelfCheckTargetC2Scope.
   ///
   /// In zh, this message translates to:
-  /// **'使用固定本机目标核验启动、控件树、单次按钮点按、ASCII／中文 ACTION_SET_TEXT 整框替换与回读、本地图样截图和有限受控刷新；不衡量 FPS 或流畅度。有限主屏样本不能证明采样间全程无扰。OCR 未安装；触摸接收探针、滚动和返回不在本次范围。仅清理完成也不证明曾创建展示屏。'**
+  /// **'使用固定本机目标核验启动、控件树、单次按钮点按、ASCII／中文 ACTION_SET_TEXT 整框替换与回读、本地图样截图和有限受控刷新；不衡量 FPS 或流畅度。有限主屏样本不能证明采样间全程无扰。OCR、触摸接收探针、滚动和返回不在本次范围。仅清理完成也不证明曾创建展示屏。'**
   String get phoneSelfCheckTargetC2Scope;
 
   /// No description provided for @phoneTaskWaiting.
@@ -20443,6 +21067,168 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'任务记录尚未确认，请重试'**
   String get phoneInterruptionActionFailed;
+
+  /// No description provided for @phoneLocalOcrTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机文字识别（ML Kit）'**
+  String get phoneLocalOcrTitle;
+
+  /// No description provided for @phoneLocalOcrUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法读取本机文字识别设置，请刷新后再试。'**
+  String get phoneLocalOcrUnknown;
+
+  /// No description provided for @phoneLocalOcrDisclosure.
+  ///
+  /// In zh, this message translates to:
+  /// **'识别在本机进行，截图和文字不会发给 Google；Google 的 SDK 会收集机型、应用版本、耗时等使用统计。'**
+  String get phoneLocalOcrDisclosure;
+
+  /// No description provided for @phoneLocalOcrDetails.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认开启。关闭时，文字识别请求不会触发 SDK 加载或初始化；Remote 扫码配对会独立按需初始化共用的 SDK，不会开启文字识别。截图和识别文字可能发送给你配置的模型。关闭后不再开始新的本机文字识别；已经开始的识别可能仍在收尾。关闭不会卸载 SDK，也不承诺清除或停止发送此前积累的 SDK 统计。'**
+  String get phoneLocalOcrDetails;
+
+  /// No description provided for @phoneBackgroundParallelTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台任务上限'**
+  String get phoneBackgroundParallelTitle;
+
+  /// No description provided for @phoneBackgroundParallelStatus.
+  ///
+  /// In zh, this message translates to:
+  /// **'设置上限：{configured} · 当前可用上限：{effective} · 已占用：{held}'**
+  String phoneBackgroundParallelStatus(int configured, int effective, int held);
+
+  /// No description provided for @phoneBackgroundParallelDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'调低上限会保留已有任务。新任务仍需等待应用和主屏资源可用。'**
+  String get phoneBackgroundParallelDescription;
+
+  /// No description provided for @phoneBackgroundParallelChoice.
+  ///
+  /// In zh, this message translates to:
+  /// **'{limit} 个后台任务槽位'**
+  String phoneBackgroundParallelChoice(int limit);
+
+  /// No description provided for @phoneBackgroundParallelOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台通道已关闭。保存此偏好不会开启通道。'**
+  String get phoneBackgroundParallelOff;
+
+  /// No description provided for @phoneBackgroundParallelUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'此设备当前无法使用后台操作。'**
+  String get phoneBackgroundParallelUnsupported;
+
+  /// No description provided for @phoneBackgroundParallelConnection.
+  ///
+  /// In zh, this message translates to:
+  /// **'建立连接后才能接纳新的后台任务。'**
+  String get phoneBackgroundParallelConnection;
+
+  /// No description provided for @phoneBackgroundParallelBusy.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台通道正在准备或维护，暂不能接纳新任务。'**
+  String get phoneBackgroundParallelBusy;
+
+  /// No description provided for @phoneBackgroundParallelRecovery.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先处理未完成的后台资源恢复，再开始新任务。'**
+  String get phoneBackgroundParallelRecovery;
+
+  /// No description provided for @phoneBackgroundParallelPeer.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前连接的服务不支持所需的后台能力。'**
+  String get phoneBackgroundParallelPeer;
+
+  /// No description provided for @phoneBackgroundParallelSerial.
+  ///
+  /// In zh, this message translates to:
+  /// **'此连接支持一个后台槽位，设置偏好仍会保留。'**
+  String get phoneBackgroundParallelSerial;
+
+  /// No description provided for @phoneSkillBundlePublishedUnverified.
+  ///
+  /// In zh, this message translates to:
+  /// **'文件已发布，但尚未通过完整核验。不要重复保存。'**
+  String get phoneSkillBundlePublishedUnverified;
+
+  /// No description provided for @phoneSkillBundleUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存结果尚未确认，文件可能已经写入。不要重复保存。'**
+  String get phoneSkillBundleUnknown;
+
+  /// No description provided for @phoneSkillBundleRevision.
+  ///
+  /// In zh, this message translates to:
+  /// **'路线版本：{revision}'**
+  String phoneSkillBundleRevision(String revision);
+
+  /// No description provided for @phoneSkillReplayReview.
+  ///
+  /// In zh, this message translates to:
+  /// **'核对手机路线'**
+  String get phoneSkillReplayReview;
+
+  /// No description provided for @phoneSkillReplaySourceChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机会话或连接已改变，请返回当前本机会话重新选择。'**
+  String get phoneSkillReplaySourceChanged;
+
+  /// No description provided for @phoneSkillReplayUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'此路线尚不能在当前本机安全执行。仍可按普通技能模板使用。'**
+  String get phoneSkillReplayUnavailable;
+
+  /// No description provided for @phoneSkillReplayConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'我已核对这条路线与本次选择的 App。'**
+  String get phoneSkillReplayConfirm;
+
+  /// No description provided for @phoneSkillReplayToComposer.
+  ///
+  /// In zh, this message translates to:
+  /// **'放入当前对话'**
+  String get phoneSkillReplayToComposer;
+
+  /// No description provided for @phoneSkillReplayStartText.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机已选择并核对手机路线。请仅调用 mcp__phone__replay，参数 {request}。若不可用或被拒绝，交回用户/模型，不要改为普通动作重放。'**
+  String phoneSkillReplayStartText(String request);
+
+  /// No description provided for @phoneSkillReplayQueue.
+  ///
+  /// In zh, this message translates to:
+  /// **'发送路线（排队）'**
+  String get phoneSkillReplayQueue;
+
+  /// No description provided for @phoneSkillReplayQueued.
+  ///
+  /// In zh, this message translates to:
+  /// **'路线消息已被接收或排队，尚不代表路线执行成功。'**
+  String get phoneSkillReplayQueued;
+
+  /// No description provided for @phoneSkillReplaySendUncertain.
+  ///
+  /// In zh, this message translates to:
+  /// **'路线消息未确认发送成功；没有自动重新准备或重放。请核对原对话结果。'**
+  String get phoneSkillReplaySendUncertain;
 
   /// No description provided for @phoneTaskResultReady.
   ///
@@ -27230,6 +28016,312 @@ abstract class L10n {
   /// **'精简 简洁 历史 工具 传输 流量 远程 compact slim lite'**
   String get searchKwRemoteCompactHistory;
 
+  /// No description provided for @remotePairEntry.
+  ///
+  /// In zh, this message translates to:
+  /// **'扫码配对电脑'**
+  String get remotePairEntry;
+
+  /// No description provided for @remotePairEntryHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'扫电脑上 Remote 插件显示的二维码，不用注册 Remote 账号（需要先登录 DeepSeek）'**
+  String get remotePairEntryHint;
+
+  /// No description provided for @remotePairAddComputer.
+  ///
+  /// In zh, this message translates to:
+  /// **'扫码添加电脑'**
+  String get remotePairAddComputer;
+
+  /// No description provided for @remotePairTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'扫码配对电脑'**
+  String get remotePairTitle;
+
+  /// No description provided for @remotePairSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'不用注册 Remote 账号，也不会传 DeepSeek 密码或登录凭据'**
+  String get remotePairSubtitle;
+
+  /// No description provided for @remotePairNeedsDeepSeek.
+  ///
+  /// In zh, this message translates to:
+  /// **'先登录 DeepSeek 账号'**
+  String get remotePairNeedsDeepSeek;
+
+  /// No description provided for @remotePairNeedsDeepSeekBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'扫码配对要先在 DSH Go 里登录 DeepSeek 账号。配对时只附带账号 ID 用来标记这台手机，不传密码、Cookie 或 Token。'**
+  String get remotePairNeedsDeepSeekBody;
+
+  /// No description provided for @remotePairScanHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'对准电脑上 Remote 插件显示的配对二维码'**
+  String get remotePairScanHint;
+
+  /// No description provided for @remotePairPasteLink.
+  ///
+  /// In zh, this message translates to:
+  /// **'粘贴配对链接'**
+  String get remotePairPasteLink;
+
+  /// No description provided for @remotePairPasteEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'剪贴板里没有配对链接'**
+  String get remotePairPasteEmpty;
+
+  /// No description provided for @remotePairScannerFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'二维码识别器不可用。可以粘贴配对链接继续配对。'**
+  String get remotePairScannerFailed;
+
+  /// No description provided for @remotePairFromImage.
+  ///
+  /// In zh, this message translates to:
+  /// **'从相册识别'**
+  String get remotePairFromImage;
+
+  /// No description provided for @remotePairImageNoCode.
+  ///
+  /// In zh, this message translates to:
+  /// **'这张图里没找到二维码'**
+  String get remotePairImageNoCode;
+
+  /// No description provided for @remotePairCameraDenied.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有相机权限。可以在系统设置里打开，或者用「从相册识别」「粘贴配对链接」'**
+  String get remotePairCameraDenied;
+
+  /// No description provided for @remotePairCameraFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'相机打不开。可以用「从相册识别」或「粘贴配对链接」'**
+  String get remotePairCameraFailed;
+
+  /// No description provided for @remotePairReading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在读取配对信息…'**
+  String get remotePairReading;
+
+  /// No description provided for @remotePairConfirmTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'要连接这台电脑吗？'**
+  String get remotePairConfirmTitle;
+
+  /// No description provided for @remotePairComputer.
+  ///
+  /// In zh, this message translates to:
+  /// **'电脑'**
+  String get remotePairComputer;
+
+  /// No description provided for @remotePairServer.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器'**
+  String get remotePairServer;
+
+  /// No description provided for @remotePairFingerprint.
+  ///
+  /// In zh, this message translates to:
+  /// **'电脑指纹'**
+  String get remotePairFingerprint;
+
+  /// No description provided for @remotePairFingerprintHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'和电脑 Remote 插件上显示的指纹核对一致再继续。'**
+  String get remotePairFingerprintHint;
+
+  /// No description provided for @remotePairConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认是这台电脑，开始配对'**
+  String get remotePairConfirm;
+
+  /// No description provided for @remotePairNotThis.
+  ///
+  /// In zh, this message translates to:
+  /// **'不是这台，重新扫'**
+  String get remotePairNotThis;
+
+  /// No description provided for @remotePairClaiming.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在生成验证码…'**
+  String get remotePairClaiming;
+
+  /// No description provided for @remotePairCodeTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'在电脑上输入这 8 位验证码'**
+  String get remotePairCodeTitle;
+
+  /// No description provided for @remotePairCodeSemantics.
+  ///
+  /// In zh, this message translates to:
+  /// **'验证码 {digits}'**
+  String remotePairCodeSemantics(String digits);
+
+  /// No description provided for @remotePairCodeHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'在电脑的 Remote 插件里输入，点「确认绑定」。手机不用再操作。'**
+  String get remotePairCodeHint;
+
+  /// No description provided for @remotePairOneAttempt.
+  ///
+  /// In zh, this message translates to:
+  /// **'只有一次机会：输错后这次配对作废，要在电脑上重新生成二维码再扫。'**
+  String get remotePairOneAttempt;
+
+  /// No description provided for @remotePairWaiting.
+  ///
+  /// In zh, this message translates to:
+  /// **'等电脑确认 · 剩余 {countdown}'**
+  String remotePairWaiting(String countdown);
+
+  /// No description provided for @remotePairApproved.
+  ///
+  /// In zh, this message translates to:
+  /// **'电脑已确认，正在完成绑定…'**
+  String get remotePairApproved;
+
+  /// No description provided for @remotePairCodeExpired.
+  ///
+  /// In zh, this message translates to:
+  /// **'验证码已过期，请在电脑上重新生成二维码'**
+  String get remotePairCodeExpired;
+
+  /// No description provided for @remotePairConnecting.
+  ///
+  /// In zh, this message translates to:
+  /// **'配对完成，正在连接 {name}…'**
+  String remotePairConnecting(String name);
+
+  /// No description provided for @remotePairFailedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'没能配对'**
+  String get remotePairFailedTitle;
+
+  /// No description provided for @remotePairOtherServerBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个二维码来自 {server}，和 DSH Go 现在用的 Remote 服务器不同。切换过去继续吗？两个服务器的登录各自保留。'**
+  String remotePairOtherServerBody(String server);
+
+  /// No description provided for @remotePairSwitchServer.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换服务器并继续'**
+  String get remotePairSwitchServer;
+
+  /// No description provided for @remotePairScanAgain.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新扫码'**
+  String get remotePairScanAgain;
+
+  /// No description provided for @remotePairErrInvalidCode.
+  ///
+  /// In zh, this message translates to:
+  /// **'这不是 DSH Go 的配对二维码'**
+  String get remotePairErrInvalidCode;
+
+  /// No description provided for @remotePairErrOtherServer.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个二维码来自另一个 Remote 服务器'**
+  String get remotePairErrOtherServer;
+
+  /// No description provided for @remotePairErrUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个 Remote 服务器还不支持扫码配对'**
+  String get remotePairErrUnsupported;
+
+  /// No description provided for @remotePairErrExpired.
+  ///
+  /// In zh, this message translates to:
+  /// **'二维码已过期或已经用过了。请在电脑上重新生成二维码'**
+  String get remotePairErrExpired;
+
+  /// No description provided for @remotePairErrCodeRejected.
+  ///
+  /// In zh, this message translates to:
+  /// **'电脑上输入的验证码不对，这次配对已作废。请在电脑上重新生成二维码再扫'**
+  String get remotePairErrCodeRejected;
+
+  /// No description provided for @remotePairErrCancelled.
+  ///
+  /// In zh, this message translates to:
+  /// **'配对已取消'**
+  String get remotePairErrCancelled;
+
+  /// No description provided for @remotePairErrAccountConflict.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台手机已经登录了另一个 Remote 账号，和这台电脑的账号不一致。原来的登录保持不变；要换绑请先在 Remote 里退出登录'**
+  String get remotePairErrAccountConflict;
+
+  /// No description provided for @remotePairErrIdentity.
+  ///
+  /// In zh, this message translates to:
+  /// **'配对信息和这台电脑或这台手机对不上，已经停止。请在电脑上重新生成二维码'**
+  String get remotePairErrIdentity;
+
+  /// No description provided for @remotePairErrHostLimit.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个账号绑定的电脑已经到上限了'**
+  String get remotePairErrHostLimit;
+
+  /// No description provided for @remotePairErrNetwork.
+  ///
+  /// In zh, this message translates to:
+  /// **'连不上 Remote 服务器，检查网络后重试'**
+  String get remotePairErrNetwork;
+
+  /// No description provided for @remotePairErrFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'配对没有完成，请重新扫码'**
+  String get remotePairErrFailed;
+
+  /// No description provided for @remotePairSwitchFailedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'已和 {name} 配对'**
+  String remotePairSwitchFailedTitle(String name);
+
+  /// No description provided for @remotePairSwitchFailedBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'但没能切换到这台电脑。可以重试，或者回到「远程主机」里点这台电脑。'**
+  String get remotePairSwitchFailedBody;
+
+  /// No description provided for @remotePairDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'完成'**
+  String get remotePairDone;
+
+  /// No description provided for @remotePairErrPinSave.
+  ///
+  /// In zh, this message translates to:
+  /// **'已经配对，但没能在手机上保存这台电脑的指纹。请在电脑上重新生成二维码，再扫一次'**
+  String get remotePairErrPinSave;
+
   /// No description provided for @stateWorkspaceFilesHint.
   ///
   /// In zh, this message translates to:
@@ -27427,6 +28519,36 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'怎么连接自己的电脑或服务器？和用本机有什么不同？'**
   String get askAiQuestionRemote;
+
+  /// No description provided for @phoneRuntimeUpgradeBase.
+  ///
+  /// In zh, this message translates to:
+  /// **'新引擎与现有 Linux 环境不能确认兼容，更新已停止。原环境和已装工具没有删除。请先完整备份，再联系维护者迁移；不要直接重置或卸载 App。'**
+  String get phoneRuntimeUpgradeBase;
+
+  /// No description provided for @phoneRuntimeUpgradeManifest.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法安全识别运行时更新清单，更新已停止，原环境保留。请核对安装包并联系维护者，不要直接重置。'**
+  String get phoneRuntimeUpgradeManifest;
+
+  /// No description provided for @phoneRuntimeUpgradeInterrupted.
+  ///
+  /// In zh, this message translates to:
+  /// **'运行时升级尚未完成，数据与恢复现场已保留。请重试安装；仍失败时导出诊断并联系维护者，不要重置或删除恢复目录。'**
+  String get phoneRuntimeUpgradeInterrupted;
+
+  /// No description provided for @phoneRuntimeUpgradeSymlink.
+  ///
+  /// In zh, this message translates to:
+  /// **'现有环境的系统路径已被自定义链接替换，无法安全更新。原环境保留，请先备份并联系维护者处理。'**
+  String get phoneRuntimeUpgradeSymlink;
+
+  /// No description provided for @phoneRuntimeUpgradeRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'引擎或遗留进程尚未确认停止，更新未开始。请先停止本机引擎，等待清理完成后重试；不要重置环境。'**
+  String get phoneRuntimeUpgradeRunning;
 
   /// No description provided for @schemaDocumentationTitle.
   ///
@@ -28129,6 +29251,174 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'左滑,快捷入口,手势,滑动,目录,自定义目录,快捷,常用入口'**
   String get searchKwQuickPanel;
+
+  /// No description provided for @selfUpdateTransport.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装路线'**
+  String get selfUpdateTransport;
+
+  /// No description provided for @selfUpdateSystem.
+  ///
+  /// In zh, this message translates to:
+  /// **'正常安装（默认）'**
+  String get selfUpdateSystem;
+
+  /// No description provided for @selfUpdateShizuku.
+  ///
+  /// In zh, this message translates to:
+  /// **'Shizuku'**
+  String get selfUpdateShizuku;
+
+  /// No description provided for @selfUpdateAdb.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机 ADB'**
+  String get selfUpdateAdb;
+
+  /// No description provided for @selfUpdateSecurityNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'各路线仍受 APK 签名、Android 与厂商安全策略约束，不保证跳过扫描。不支持 root，也不会在失败后自动切换路线。'**
+  String get selfUpdateSecurityNote;
+
+  /// No description provided for @selfUpdateNativeConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'只安装已校验的本应用更新；稍后仍需原生安装确认。授权 Shizuku 不等于同意安装，不需要开启手机操控或 AI Shell。'**
+  String get selfUpdateNativeConfirm;
+
+  /// No description provided for @selfUpdateAuthorize.
+  ///
+  /// In zh, this message translates to:
+  /// **'申请更新用 Shizuku 授权'**
+  String get selfUpdateAuthorize;
+
+  /// No description provided for @selfUpdateRefresh.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新通道状态'**
+  String get selfUpdateRefresh;
+
+  /// No description provided for @selfUpdateShizukuStatus.
+  ///
+  /// In zh, this message translates to:
+  /// **'Shizuku：{status}'**
+  String selfUpdateShizukuStatus(String status);
+
+  /// No description provided for @selfUpdateReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'已授权'**
+  String get selfUpdateReady;
+
+  /// No description provided for @selfUpdatePermissionRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先安装、启动并授权 Shizuku'**
+  String get selfUpdatePermissionRequired;
+
+  /// No description provided for @selfUpdateUnsupportedIdentity.
+  ///
+  /// In zh, this message translates to:
+  /// **'仅支持 shell UID 2000；root 与其他身份不受支持'**
+  String get selfUpdateUnsupportedIdentity;
+
+  /// No description provided for @selfUpdateAdbHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用已配对的本机无线调试身份；点击安装才连接。未配对时可打开现有 Android Shell 配对页，无需开启手机操控或 AI Shell。配对码和端口不保存、不写入日志。'**
+  String get selfUpdateAdbHint;
+
+  /// No description provided for @selfUpdatePairing.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开 Android Shell 配对引导'**
+  String get selfUpdatePairing;
+
+  /// No description provided for @selfUpdateAdbPaired.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机 ADB 已配对'**
+  String get selfUpdateAdbPaired;
+
+  /// No description provided for @selfUpdateAdbNotPaired.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机 ADB 尚未配对'**
+  String get selfUpdateAdbNotPaired;
+
+  /// No description provided for @selfUpdatePendingTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在核实安装结果'**
+  String get selfUpdatePendingTitle;
+
+  /// No description provided for @selfUpdatePendingMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装请求可能仍在处理。不会自动重试或切换路线；请查看系统提示，再读取实际安装状态。'**
+  String get selfUpdatePendingMessage;
+
+  /// No description provided for @selfUpdateUnknownTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装结果未知'**
+  String get selfUpdateUnknownTitle;
+
+  /// No description provided for @selfUpdateUnknownMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'超时、失联或进程退出不能证明失败。不会自动重试或切换路线；请先读取实际安装状态。'**
+  String get selfUpdateUnknownMessage;
+
+  /// No description provided for @selfUpdateReadResult.
+  ///
+  /// In zh, this message translates to:
+  /// **'读取实际安装状态'**
+  String get selfUpdateReadResult;
+
+  /// No description provided for @selfUpdateVerifiedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'已核实当前安装版本'**
+  String get selfUpdateVerifiedTitle;
+
+  /// No description provided for @selfUpdateVerifiedVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本 {version}（构建 {code}），已由原生层核验。'**
+  String selfUpdateVerifiedVersion(String version, int code);
+
+  /// No description provided for @selfUpdateFailedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装未完成'**
+  String get selfUpdateFailedTitle;
+
+  /// No description provided for @selfUpdateFailedMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'原生层报告本次安装失败。请检查系统提示和错误码，再明确选择安装路线。'**
+  String get selfUpdateFailedMessage;
+
+  /// No description provided for @selfUpdateErrorCode.
+  ///
+  /// In zh, this message translates to:
+  /// **'错误码：{code}'**
+  String selfUpdateErrorCode(String code);
+
+  /// No description provided for @selfUpdateEndWaiting.
+  ///
+  /// In zh, this message translates to:
+  /// **'结束本次等待'**
+  String get selfUpdateEndWaiting;
+
+  /// No description provided for @selfUpdateEndWaitingNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'只有确认系统已不在安装时才结束等待。清除本次记录不等于取消系统安装；不会自动重试或切换路线，仍需再次原生确认。'**
+  String get selfUpdateEndWaitingNote;
 
   /// No description provided for @shellDeletePermanently.
   ///
@@ -32741,7 +34031,7 @@ abstract class L10n {
   /// No description provided for @usageStatsFooter.
   ///
   /// In zh, this message translates to:
-  /// **'只含使用次数、版本和手机品牌，不含对话、文件和账号。'**
+  /// **'这个开关只控制 dsh-go 自身的使用次数、版本、手机品牌和型号、系统版本统计，不含对话、文件和账号；它不控制 Google ML Kit SDK 的统计。'**
   String get usageStatsFooter;
 
   /// No description provided for @usageNoticeBody.

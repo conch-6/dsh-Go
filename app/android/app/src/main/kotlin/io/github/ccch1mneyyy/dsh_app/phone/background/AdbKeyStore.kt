@@ -21,6 +21,11 @@ import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
  * Generated once, then reused so a paired device stays paired.
  */
 class AdbKeyStore(context: Context) {
+    private companion object {
+        // Display and Android Shell use independent managers but the same private identity.
+        val identityLock = Any()
+    }
+
     private val dir = File(context.filesDir, "phone-adb").apply { mkdirs() }
     private val keyFile = File(dir, "adbkey.pk8")
     private val certFile = File(dir, "adbkey.crt")
@@ -33,11 +38,11 @@ class AdbKeyStore(context: Context) {
     @Synchronized
     fun certificate(): Certificate = load().second
 
-    private fun load(): Pair<PrivateKey, Certificate> {
-        cached?.let { return it }
+    private fun load(): Pair<PrivateKey, Certificate> = synchronized(identityLock) {
+        cached?.let { return@synchronized it }
         val pair = if (keyFile.isFile && certFile.isFile) read() else generate()
         cached = pair
-        return pair
+        pair
     }
 
     private fun read(): Pair<PrivateKey, Certificate> {

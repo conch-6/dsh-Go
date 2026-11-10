@@ -23,7 +23,15 @@ library;
 export 'package:dsh_client/dsh_client.dart';
 
 export 'src/account/remote_account.dart'
-    show HostTrustPrompt, RemoteAccount, RemoteHost, RemoteHostTrust, RemoteLogin, RemoteUser;
+    show
+        HostTrustPrompt,
+        RemoteAccount,
+        RemoteHost,
+        RemoteHostTrust,
+        RemoteLogin,
+        RemotePairedHost,
+        RemotePairing,
+        RemoteUser;
 export 'src/account/secret_store.dart';
 export 'src/carrier/tunnel_carrier.dart';
 export 'src/channel/rpc_client.dart';
@@ -38,6 +46,7 @@ export 'src/crypto/noise_ik.dart'
         formatFingerprint,
         identityFingerprint,
         noiseIkProtocol;
+export 'src/pairing/device_pairing.dart';
 export 'src/protocol/control.dart' show ControlFrame, ControlFrameLimits, ProtocolError, protocolVersion;
 export 'src/protocol/messages.dart' show RemoteMessage, SecureMessageCodec, maxSecureMessageBytes;
 export 'src/server/server_api.dart';

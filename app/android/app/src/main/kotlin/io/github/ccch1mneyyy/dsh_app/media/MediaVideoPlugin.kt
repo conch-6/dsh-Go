@@ -37,10 +37,7 @@ class MediaVideoPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallH
     private var activity: Activity? = null
     private var foreground = false
     private var attached = false
-    private var focused = false
-    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        if (change <= 0) main.post { focused = false; pauseAll() }
-    }
+    private var focusListener: AudioManager.OnAudioFocusChangeListener? = null
     private class Clip(val producer: TextureRegistry.SurfaceProducer, val player: MediaPlayer) {
         var prepared = false
         var pending: MethodChannel.Result? = null
@@ -86,8 +83,7 @@ class MediaVideoPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallH
             when (call.method) {
                 "play" -> {
                     if (!foreground) { result.error("background", "app is not in foreground", null); return }
-                    if (!focused) focused = audio.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-                    if (!focused) { result.error("audio_focus", "audio focus unavailable", null); return }
+                    if (!requestFocus()) { result.error("audio_focus", "audio focus unavailable", null); return }
                     clips.values.filter { it !== clip && it.prepared }.forEach { runCatching { it.player.pause() } }
                     clip.player.start()
                     result.success(null)
@@ -152,8 +148,29 @@ class MediaVideoPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallH
             }
         }
     }
+    private fun requestFocus(): Boolean {
+        if (focusListener != null) return true
+        val listener = object : AudioManager.OnAudioFocusChangeListener {
+            override fun onAudioFocusChange(change: Int) {
+                if (change <= 0) main.post {
+                    // A queued loss must not pause a later request; cleanup here is best effort.
+                    if (focusListener === this) runCatching { pauseAll() }
+                }
+            }
+        }
+        focusListener = listener
+        var granted = false
+        try {
+            granted = audio.requestAudioFocus(listener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            return granted
+        } finally {
+            if (!granted) abandonFocus()
+        }
+    }
     private fun abandonFocus() {
-        if (focused) { focused = false; audio.abandonAudioFocus(focusListener) }
+        val listener = focusListener ?: return
+        focusListener = null
+        audio.abandonAudioFocus(listener)
     }
     private fun pauseAll() {
         clips.values.filter { it.prepared }.forEach { runCatching { it.player.pause() } }

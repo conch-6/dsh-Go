@@ -24,6 +24,14 @@ You can add DSH to this phone anytime: tap **Install runtime** on the engine pag
 - **Logs**: the engine's live output.
 - **Background running** and **Diagnostics**: see [FAQ](11-faq.md).
 
+## Updates and installed tools
+
+Normal engine updates replace only app-managed engine components, without rebuilding your Linux system. Apt tools such as gh, npm global packages in their default location, Python/pip packages, settings and workspaces stay. Bundled DSH, Node, pnpm, the bridge and their dedicated directories remain app-managed; do not install your own software there. A Node version change may still require rebuilding third-party native extensions: preserving files does not guarantee extension compatibility.
+
+Older runtimes are adopted after checking the architecture, Ubuntu version and Python. If compatibility cannot be confirmed, the update manifest is invalid, or a leftover process has not stopped, the update stops with an explanation. It never automatically wipes or rebuilds the environment. Retry an interrupted installation; do not delete recovery directories by hand.
+
+Before changing the base system, make a full backup. Diagnostics bundles and exported chat logs are not environment backups. A complete backup must be taken with the engine stopped, include Linux files, permissions, symlinks, package databases and the home directory, be stored outside the runtime, and have a checked read/restore procedure. The app does not currently offer one-click full environment backup/restore. On a compatibility warning, keep the environment intact and contact the maintainer for help with offline export; do not reset or uninstall the app. Keeping the original environment is not an independent backup: clearing app data or uninstalling still loses it.
+
 ## Reset the runtime
 
 <!-- nav: commonSettings,hubSettingsEngine,phoneEngineReset -->
@@ -79,6 +87,8 @@ No network setup, end-to-end encrypted. Good for computers on another network.
 1. Install the remote plugin in the host's DSH and sign in.
 2. On the remote hosts page, choose the same sign-in provider you used on that host, for example “Continue with GitHub”, and sign in with the same account. If the page lists no providers and shows only **Sign in in browser**, tap that button.
 3. Select an online host. On first connection, check that the identity fingerprint matches the one the host's remote plugin shows, then tap **Trust and connect**.
+
+When the server supports it, you can also choose **Pair a computer by scanning**: sign in to DeepSeek in the app, scan the code shown by the computer’s Remote plugin, check the computer fingerprint, then enter the verification code as prompted. Camera permission is only for capturing the QR code; reading an image from photos or pasting the pairing link still works without it. Opening the scanner initializes the shared ML Kit SDK on demand, without requiring or enabling phone control’s text recognition. See the [FAQ](11-faq.md#local-text-recognition-and-google-ml-kit) for SDK statistics disclosures.
 
 Connections automatically try LAN / P2P, then TURN, and finally Relay without a direct-connection switch. Each path requires compatible server and Host support. Tap the route label on the connection card or beside a Host to see the actual route, connection time, available round-trip latency and fallback reason. WebRTC routes also show the selected ICE candidates' phone/Host IPv4 or IPv6 and UDP or TCP, never raw IP addresses. Unmeasured or unconfirmed values are not presented as known results.
 

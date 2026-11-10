@@ -25,7 +25,9 @@ internal data class BackgroundCoordinateRequest(
                 value(Proto.BACKGROUND_COORDINATES) != 1) return null
             val gesture = value(Proto.GESTURE) as? String ?: return null
             if (gesture !in setOf("tap", "long", "swipe") || !keys.containsAll(common) ||
-                keys.any { it !in common && (gesture != "swipe" || it !in swipe) }) return null
+                keys.any { it !in common && it != Proto.AFTER_LOCAL_VISUAL && (gesture != "swipe" || it !in swipe) }) return null
+            if (!BackgroundAfterVisual.validRequest(Proto.OP_COORDINATE, Proto.AFTER_LOCAL_VISUAL in keys,
+                    value(Proto.AFTER_LOCAL_VISUAL))) return null
             val nonce = (value(Proto.COORDINATE_OBSERVATION) as? String)?.takeIf { it.isNotEmpty() && it.length <= 128 } ?: return null
             val x = value(Proto.X) as? Int ?: return null
             val y = value(Proto.Y) as? Int ?: return null

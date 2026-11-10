@@ -108,9 +108,10 @@ class _WorkspaceUploadRowState extends ConsumerState<WorkspaceUploadRow> {
     final client = ref.watch(activeConnectionProvider.select((c) => c.value?.client));
     if (client == null) return _busy ? _row(context) : const SizedBox.shrink();
     // The Host may gain or lose the capability on a reconnect in place, which
-    // keeps the same client: look again on every new link.
+    // keeps the same client, and a dropped link has none: look again on every
+    // connection state change.
     return StreamBuilder<Object?>(
-      stream: client.mux.generations,
+      stream: client.mux.states,
       builder: (context, _) => client.supportsWorkspaceUpload || _busy ? _row(context) : const SizedBox.shrink(),
     );
   }

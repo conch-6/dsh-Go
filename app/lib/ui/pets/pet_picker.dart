@@ -5,6 +5,7 @@
 // is removed with a long press.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -121,6 +122,9 @@ class _PetPickerState extends ConsumerState<PetPicker> {
       messenger?.showSnackBar(
         SnackBar(content: Text(replaced ? l10n.botsPetImportReplaced(pack.name) : l10n.botsPetImportDone(pack.name))),
       );
+      // Brought over from a Codex pet: what doesn't carry over exactly, said once.
+      final warnings = codexImportWarnings(pack);
+      if (warnings.isNotEmpty && mounted) await _showCodexWarnings(pack, warnings);
     } on PetImportException catch (error) {
       messenger?.showSnackBar(SnackBar(content: Text(petImportProblemText(l10n, error))));
     } on Object {
@@ -130,6 +134,33 @@ class _PetPickerState extends ConsumerState<PetPicker> {
       if (mounted) setState(() => _importing = false);
     }
   }
+
+  Future<void> _showCodexWarnings(PetPack pack, List<String> warnings) => showDialog<void>(
+    context: context,
+    builder: (dialog) {
+      final l10n = dialog.l10n;
+      final theme = Theme.of(dialog);
+      return AlertDialog(
+        title: Text(l10n.botsPetCodexTitle(pack.name)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(l10n.botsPetCodexBody, style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 12),
+              for (final code in warnings)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text('· ${codexWarningText(l10n, code)}', style: theme.textTheme.bodyMedium),
+                ),
+            ],
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: Text(l10n.botsPetCodexOk))],
+      );
+    },
+  );
 
   Future<void> _remove(PetPack pack) async {
     final l10n = context.l10n;
@@ -353,3 +384,39 @@ class PetPreview extends StatelessWidget {
     );
   }
 }
+
+/// What a pet converted from a Codex pet left behind (C901 writes the codes
+/// into its pack.json); empty for any other pet, or when it can't be read.
+/// Read once, right after an import: a pack.json is small (256 KiB at most).
+List<String> codexImportWarnings(PetPack pack) {
+  final dir = pack.dir;
+  if (dir == null) return const [];
+  try {
+    final json = jsonDecode(File('$dir/pack.json').readAsStringSync());
+    final warnings = json is Map && json['codexImport'] is Map ? (json['codexImport'] as Map)['warnings'] : null;
+    return [
+      if (warnings is List)
+        for (final code in warnings)
+          if (code is String && code.isNotEmpty) code,
+    ];
+  } on Object {
+    return const [];
+  }
+}
+
+/// One conversion code in words; an unknown one as it is.
+String codexWarningText(L10n l10n, String code) => switch (code) {
+  'dsh-state-loops-replace-codex-settle-to-idle' => l10n.botsPetCodexLoops,
+  'roam-left-mirrors-right-track' => l10n.botsPetCodexRoamLeft,
+  'drag-direction-uses-right-track' => l10n.botsPetCodexDrag,
+  'sleep-uses-first-idle-frame' => l10n.botsPetCodexSleep,
+  'look-directions-not-bound' => l10n.botsPetCodexLook,
+  'webp-transcoded-to-png' => l10n.botsPetCodexWebp,
+  'custom-tracks-not-bound' => l10n.botsPetCodexCustomTracks,
+  'fps-rounded-to-milliseconds' => l10n.botsPetCodexFps,
+  'one-shot-return-controlled-by-dsh' => l10n.botsPetCodexOneShot,
+  'missing-author' => l10n.botsPetCodexMissingAuthor,
+  'missing-license' => l10n.botsPetCodexMissingLicense,
+  'missing-source' => l10n.botsPetCodexMissingSource,
+  _ => code,
+};

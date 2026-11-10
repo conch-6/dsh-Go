@@ -22,6 +22,7 @@ class PhoneScreenWorkersTest {
         val pool = Executors.newCachedThreadPool()
         @Volatile var read: (String?, PhoneScreen) -> Unit = { _, _ -> }
         @Volatile var apps: (String?) -> Unit = {}
+        @Volatile var clipboard: () -> SysResult = { error("unused") }
         @Volatile var cleanup: (Long) -> Unit = {}
         @Volatile var handoff: () -> Unit = {}
         @Volatile var changed: () -> Unit = {}
@@ -68,7 +69,7 @@ class PhoneScreenWorkersTest {
                     override fun launch(plan: SystemLaunch, dispatch: PhoneTasks.SystemDispatch): SysResult = error("unused")
                     override fun notify(title: String, text: String): SysResult = error("unused")
                     override fun clipboardSet(text: String): SysResult = error("unused")
-                    override fun clipboardGet(): SysResult = error("unused")
+                    override fun clipboardGet(): SysResult = this@Fixture.clipboard()
                 }
             }, tasks, ActionLog(), main)
         }
@@ -240,6 +241,36 @@ class PhoneScreenWorkersTest {
             assertTrue(old.resourcesReleased); assertNull(old.backgroundWorker)
             f.apps = {}; assertFalse(f.call("new").isError)
         } finally { bgExit.countDown(); mainExit.countDown() }
+    }
+
+    @Test fun retiredSessionDoesNotPublishReadTextWhenTheDeviceConsumesInterrupt() = Fixture().use { f ->
+        val entered = CountDownLatch(1); val interrupted = CountDownLatch(1)
+        val release = CountDownLatch(1); val drained = CountDownLatch(1)
+        val marker = "retired-fixture-read-value"
+        f.clipboard = {
+            entered.countDown()
+            hold(release, interrupted)
+            Thread.interrupted() // Model a device call that consumes the stop signal.
+            SysResult(true, marker)
+        }
+        val result = f.pool.submit<ToolOutput> {
+            f.sessions.run(f.admit("read"), PhoneToolCatalog.CLIPBOARD, mapOf("get" to true))
+        }
+        try {
+            waitFor(entered)
+            val old = f.task("read")
+            f.sessions.retire()
+            waitFor(interrupted)
+            f.main.afterDrained(old.tasks) { drained.countDown() }
+            assertEquals(1L, drained.count)
+            assertFalse(result.isDone)
+            release.countDown()
+            val output = result.get(5, TimeUnit.SECONDS)
+            assertTrue("retired read must be an error even when the device returns success", output.isError)
+            assertFalse("retired text must not reach ToolOutput", output.text.contains(marker))
+            waitFor(drained)
+            assertFalse(f.call("new").isError)
+        } finally { release.countDown() }
     }
 
     @Test fun failedCleanupRetainsLaneAndSuccessfulRetryClosesOnlyThatLane() = Fixture().use { f ->

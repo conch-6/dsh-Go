@@ -167,7 +167,7 @@ class ShizukuStarter(
             if (!probe.getBoolean(Proto.OK) || probe.getString("revision") != Proto.REVISION) return null
             val peer = MuxProtocol.peer(probe)
             peer?.let { MuxProtocol.acknowledge(remote.execute(MuxProtocol.optIn(it)), it) }
-            val candidate = ShizukuChannel(remote, peer)
+            val candidate = ShizukuChannel(remote, peer, backgroundRequestLimit(probe::get, probe::containsKey, peer != null))
             return synchronized(guard) {
                 if (!owner.valid || !owner.mayStart()) { candidate.close(); return null }
                 candidate.also { channel = it }

@@ -105,7 +105,7 @@ export function validateCatalog(index: unknown, sidecar: unknown): sidecar is Si
   }
   return true;
 }
-function source(env: Env): string {
+export function marketSource(env: Env): string {
   const url = new URL(env.MARKET_SOURCE_URL || DEFAULT_SOURCE);
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash)
     throw new Error('invalid-market-source');
@@ -217,7 +217,7 @@ async function remember(env: Env, key: string, value: Snapshot): Promise<void> {
   }
 }
 async function catalog(env: Env, ctx: Ctx): Promise<{ value: Snapshot; stale: boolean }> {
-  const base = source(env),
+  const base = marketSource(env),
     key = 'market:v1:' + base;
   let previous = memory.get(key);
   // KV intentionally has no expiry: keep the last valid snapshot through outages.
@@ -251,7 +251,7 @@ async function catalog(env: Env, ctx: Ctx): Promise<{ value: Snapshot; stale: bo
  *  and into the snapshot the /market/ routes serve. A failure leaves both as
  *  they were. */
 export async function publishMarket(env: Env): Promise<void> {
-  const base = source(env);
+  const base = marketSource(env);
   let value: Snapshot;
   try {
     value = await fetchCatalog(base);

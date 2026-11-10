@@ -184,7 +184,7 @@ class SafetyGateTest {
                         point = 10 to 20, coordinate = action, screen = PhoneScreen.BACKGROUND) as SafetyGate.Verdict.Confirm
                     assertFalse(verdict.request.offerTaskWaiver)
                     assertFalse(verdict.request.firstInApp)
-                    assertTrue(verdict.request.sentence.contains("本机文字识别未安装"))
+                    assertTrue(verdict.request.sentence.contains("这是最近后台截图的位置"))
                 }
             }
             assertTrue(gate.checkWrite(WriteKind.TAP_XY, null, SafetyRules.DEFAULT_DENY.first(), "Blocked",

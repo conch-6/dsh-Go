@@ -27,6 +27,20 @@ After granting permission, turning off the accessibility service in Android sett
 
 After a system force-stop, reopen DSH Go before it can recover. Repeated failures back off to about ten minutes between attempts. This permission does not keep the app alive indefinitely or fix the underlying cause of a service crash.
 
+## Android Shell (separate authorization)
+
+<!-- nav: commonSettings,hubSettingsPhoneControl,androidShellTitle -->
+`Settings › Phone control › Android Shell`. Off by default: enable Phone control, then separately accept the Shell risk notice. Commands run in Android `sh` on this phone, not Ubuntu bash. Accessibility, the background display, and Android 14 are not required.
+
+- Shizuku: install and start Shizuku yourself, explicitly request authorization here, then connect. The actual service identity may be shell (UID 2000) or root (UID 0); check the status and each command confirmation.
+- **Self-ADB**: enable Wireless debugging in Android Developer options, open its pairing-code dialog, and enter the six-digit code and pairing port here (or use discovery). Connect after pairing. The connection port differs from the pairing port; leave it blank to discover a local endpoint. Pairing codes are not saved or logged. This feature does not contact other devices.
+
+Every `android_shell` tool call requires native confirmation of the complete command and actual identity. Screen-control task/always confirmation exemptions do not apply. System authorization, background-display authorization, and accessibility-restoration authorization do not authorize arbitrary commands. App rules cannot constrain every Shell operation. Do not rewrite a refused command or switch channels to bypass a refusal.
+
+The default command deadline is 30 seconds, with a 60-second maximum. Commands are limited to 2048 UTF-8 bytes, with a shared 64 KiB text-output cap and explicit truncation. Results include the actual exit code, stdout, stderr and timeout/cancellation status. Output goes to the current model: do not run commands that print secrets, login state or other content you do not want sent. Interactive terminals, binary transfer and persistent background jobs are not supported. Ubuntu paths, working directories and environment are not inherited.
+
+**Stop Android Shell** cancels commands. Turning off Phone control, ending the task, turning off the screen or stopping the engine also invalidates execution. Cancellation attempts to terminate the owned process group; it cannot undo changes or requests already sent to Android services, nor guarantee cleanup of scripts that deliberately detach from the group. After timeout, disconnection or an unknown result, inspect the outcome rather than automatically retrying or replaying through another backend. This is not a sandbox: shell is not root and cannot arbitrarily read other apps’ private data.
+
 ## Ask DSH to do something
 
 Go back to a chat and say what you want done. While a task runs:

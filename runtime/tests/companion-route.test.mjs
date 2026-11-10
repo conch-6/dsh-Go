@@ -76,16 +76,30 @@ test('existing connection guard rejects every companion route before any storage
   const f = await fixture(t);
   for (const [path, method] of [[ROOT, 'GET'], [`${ROOT}/memories`, 'GET'], [`${ROOT}/memories`, 'POST'],
     [`${ROOT}/events`, 'POST'], [`${ROOT}/context`, 'POST'], [`${ROOT}/export`, 'GET'],
-    [`${ROOT}/memories/delete`, 'POST'], [`${ROOT}/memories/clear`, 'POST']]) {
+    [`${ROOT}/memories/delete`, 'POST'], [`${ROOT}/memories/clear`, 'POST'],
+    [`${ROOT}/recall`, 'GET'], [`${ROOT}/recall/bind`, 'POST'],
+    [`${ROOT}/recall/revoke`, 'POST'], [`${ROOT}/recall/bindings/${randomUUID()}`, 'GET']]) {
     const result = await f.request(path, { method, auth: false, ...(method === 'POST' ? { body: {} } : {}) });
     assert.equal(result.status, 401);
     assert.equal(result.headers.get('cache-control'), 'no-store');
   }
-  assert.equal(f.guarded.length, 8);
+  assert.equal(f.guarded.length, 12);
   await assert.rejects(stat(f.path), { code: 'ENOENT' });
   const absent = await fixture(t, { connection: false });
   assert.equal((await absent.request()).status, 503);
   await assert.rejects(stat(absent.path), { code: 'ENOENT' });
+});
+
+test('an unadapted Host keeps recall explicitly unsupported and basic companion routes usable', async (t) => {
+  const f = await fixture(t);
+  const result = await f.request(`${ROOT}/recall`);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.supported, false);
+  assert.equal(typeof result.body.reason, 'string');
+  assert.equal(result.body.busy, false);
+  assert.equal(result.body.activeBindingId, null);
+  await assert.rejects(stat(f.path), { code: 'ENOENT' });
+  assert.equal((await f.request()).status, 200);
 });
 
 test('HTTP lifecycle preserves memory across reads and removes it from every public surface', async (t) => {

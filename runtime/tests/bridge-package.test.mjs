@@ -20,7 +20,9 @@ function packedFiles() {
 
 function localImports(file) {
   const text = readFileSync(new URL(file, ROOT), "utf8");
-  return [...text.matchAll(/^\s*(?:import|export)\b[^'"]*?from\s*['"](\.[^'"]+)['"]/gm)].map((match) =>
+  const references = [...text.matchAll(/^\s*(?:import|export)\b[^'"]*?from\s*['"](\.[^'"]+)['"]/gm),
+    ...text.matchAll(/\bimport\(\s*['"](\.[^'"]+)['"]\s*\)/g)];
+  return references.map((match) =>
     posix.join(posix.dirname(file), match[1]),
   );
 }

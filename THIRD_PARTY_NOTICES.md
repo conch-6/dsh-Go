@@ -230,6 +230,9 @@ DS Bot 的 NOTICE 原文附在文末。
 | flutter_webrtc（pub 包，含 Android 插件代码） | 1.6.3 | MIT；其 NOTICE 另含 react-native-webrtc（MIT，Copyright (c) 2015 Howard Yang）与 `SimulcastVideoEncoderFactoryWrapper.kt`（Apache-2.0，Copyright 2017, Lyo Kato；Copyright 2017-2021, Shiguredo Inc.），原文见文末 | Copyright (c) 2018 湖北捷智云技术有限公司 | DSH Remote 直连（P2P / TURN）的 DataChannel；只用数据通道，不碰麦克风、摄像头和音频会话 |
 | WebRTC Android SDK（`io.github.webrtc-sdk:android`，libwebrtc m150） | 150.7871.04 | BSD-3-Clause，另附 Google 的专利授权（PATENTS） | Copyright (c) 2011, The WebRTC project authors | flutter_webrtc 的原生 WebRTC（`libjingle_peerconnection_so.so`，每个 ABI 一份） |
 | AudioSwitch（`com.github.davidliu:audioswitch`，twilio/audioswitch 的分支） | `039a35aefab7747c557242fa216c9ea11743b604` | Apache-2.0 | Copyright 2020 Twilio, inc. | flutter_webrtc 的音频路由依赖；DSH Go 不建音频轨，不会启用 |
+| mobile_scanner（pub 包，含 Android 插件代码） | 7.5.0 | BSD-3-Clause | Copyright (c) 2022, Julian Steenbakker | Remote「扫码配对电脑」的相机扫码和相册识图 |
+| ML Kit Barcode Scanning（`com.google.mlkit:barcode-scanning`，模型随 APK 打包） | 17.3.0 | [ML Kit 服务条款](https://developers.google.com/ml-kit/terms)（Google 免费分发的二进制，非开源） | Google LLC | mobile_scanner 的二维码识别，在手机本地运行，不需要 Google Play 服务 |
+| CameraX（`androidx.camera:*`，mobile_scanner 的依赖） | 随 mobile_scanner 7.5.0 | Apache-2.0 | The Android Open Source Project | 扫码时的相机预览 |
 
 ### WebRTC 150.7871.04 核对记录（2026-10-30）
 
@@ -320,6 +323,16 @@ GPL / LGPL 组件的对应源码：proot、libtalloc、libandroid-shmem 的二�
 | 其他 npm 直接及传递依赖 | 见 DSH 与 pnpm 的固定 lock | 各包各自许可 | lock 包含可选平台包，不能把全部条目当成每个 APK 都已打包；以实际 rootfs 文件清单为准 |
 
 `runtime/lib/rtbuild.py` 保留 Node 发行包的 `LICENSE` 为 `/opt/node/LICENSE`，保留 Ubuntu `/usr/share/doc/*/copyright`，npm 的许可文件不属于常规开发元数据裁剪项。仍须对最终归档检查许可文件和 symlink 目标是否可用，特别是 npm 包未附许可正文的情形。保留许可文本与提供 GPL/LGPL 等组件适用的对应源码是不同检查项；应为具体发行物记录版本、构建配方、修改和可获取的对应源码，不能只用项目主页或一份声明代替。
+
+### Unicode Character Database 15.0.0（Unicode 数据许可）
+
+宠物 ZIP 文件名去重使用从 CPython 3.12 / Unicode 15.0.0 生成的 NFC 与 full casefold 数据表；生成脚本为 `app/tool/generate_pet_validation_data.py`，表为 `app/lib/pets/pet_unicode_data.g.dart`。未复制 CPython 实现代码。
+
+Copyright © 1991-2026 Unicode, Inc.
+
+数据版本来源：https://www.unicode.org/Public/15.0.0/ucd/ReadMe.txt （原始数据通知 © 2022 Unicode®, Inc.）。完整 Unicode 当前许可原文取自 https://www.unicode.org/license.txt ，检索于 2026-11-07；这是当前 V3 通知，不把它冒称为 2022 发布时的许可版本。许可全文原样存于 `app/tool/unicode-15.0-LICENSE.txt`，同字节打包为 `app/assets/licenses/unicode-15.0.txt`，由现有 LicenseRegistry 页面展示。
+
+C710 新增的 `image` 4.12.0 是 MIT 许可 pub 依赖；其原许可由 Flutter 的依赖许可收集流程随包提供。Codex Pet 转换根据公开格式独立实现，不把源码许可当作第三方图集再分发授权。
 
 ## 五、格式兼容与致谢（未复制代码）
 
@@ -857,3 +870,26 @@ of the date such litigation is filed.
 - SIL Open Font License 1.1：`app/assets/fonts/OFL.txt`
 - GNU LGPL-3.0（spake2-android、libtalloc）：https://www.gnu.org/licenses/lgpl-3.0.txt ；它以 GNU GPL-3.0 为基础，两份全文一并附在 App 内许可页的 spake2-android 条目里：https://www.gnu.org/licenses/gpl-3.0.txt
 - GNU GPL-2.0（proot）：随 APK 附带于 `assets/runtime/licenses/proot-COPYING.txt`
+
+## Google ML Kit Text Recognition (Chinese)
+
+Google ML Kit Text Recognition (Chinese)
+com.google.mlkit:text-recognition-chinese:16.0.1
+
+This bundled Google SDK is subject to the Google ML Kit terms:
+https://developers.google.com/ml-kit/terms
+Android SDK data disclosure:
+https://developers.google.com/ml-kit/android-data-disclosure
+
+Recognition runs on-device. Screenshots and recognized text are not sent to
+Google by this SDK. The SDK collects usage statistics such as device model,
+app version and processing time. Phone control may send screenshots and
+recognized text to the user's configured model.
+
+Local recognition is enabled by default. While off, recognition requests do not
+trigger SDK loading or initialization. Turning it off prevents new recognition,
+but does not uninstall
+the SDK or promise to clear or stop sending previously accumulated SDK statistics.
+The dsh-go anonymous usage statistics switch does not control this SDK.
+The Apache 2.0 license for documentation sample code is not the license for
+this SDK binary. This notice does not replace Google's SDK terms.

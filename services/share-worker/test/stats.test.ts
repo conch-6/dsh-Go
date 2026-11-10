@@ -241,9 +241,37 @@ describe('usage reports', () => {
     expect(device).toMatch(/^[0-9a-f]{32}$/);
     expect(usage.points[0]).toEqual({
       indexes: [device],
-      blobs: [today, device, '0.9.9', 'arm64-v8a', 'vivo', 'zh', 'proot'],
+      blobs: [today, device, '0.9.9', 'arm64-v8a', 'vivo', 'zh', 'proot', '', ''],
       doubles: [10301000, 34, 12, 1, 0, 2, 0, 3],
     });
+  });
+
+  it('take v2 with the model and system, stored in lower case', async () => {
+    const { env, usage } = await setup();
+    const res = await run(env, post(report({ v: 2, model: 'V2405A', rom: 'originos 5.0' })));
+    expect(res.status).toBe(204);
+    expect(usage.points[0].blobs.slice(7)).toEqual(['v2405a', 'originos 5.0']);
+  });
+
+  it('take exactly the fields of v2', async () => {
+    const { env, usage } = await setup();
+    const v2 = (over: Record<string, unknown>) => report({ v: 2, model: 'pjz110', rom: 'coloros v15.0.0', ...over });
+    const bad: [Record<string, unknown>, string, string][] = [
+      [report({ v: 2 }), 'missing_field', 'model'],
+      [report({ v: 2, model: 'pjz110' }), 'missing_field', 'rom'],
+      [report({ model: 'pjz110' }), 'unknown_field', 'model'],
+      [v2({ extra: 1 }), 'unknown_field', 'extra'],
+      [v2({ model: '' }), 'invalid', 'model'],
+      [v2({ model: 'x'.repeat(33) }), 'invalid', 'model'],
+      [v2({ rom: '<b>' }), 'invalid', 'rom'],
+      [v2({ rom: 5 }), 'invalid', 'rom'],
+    ];
+    for (const [body, error, field] of bad) {
+      const res = await run(env, post(body));
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect(await res.json()).toEqual({ error, field });
+    }
+    expect(usage.points).toHaveLength(0);
   });
 
   it('count a device once a day', async () => {
@@ -265,7 +293,7 @@ describe('usage reports', () => {
       [{ ip: '1.2.3.4' }, 'unknown_field', 'ip'],
       [{ counts: { turns: 1, voice: 0, phone: 0, share: 0, gen: 0, plugins: 0, chats: 1 } }, 'unknown_field', 'counts.chats'],
       [{ counts: { turns: 1, voice: 0, phone: 0, share: 0, gen: 0 } }, 'missing_field', 'counts.plugins'],
-      [{ v: 2 }, 'invalid', 'v'],
+      [{ v: 3 }, 'invalid', 'v'],
       [{ v: '1' }, 'invalid', 'v'],
       [{ iid: 'short' }, 'invalid', 'iid'],
       [{ iid: 'q1w2e3r4t5y6u7i8o9p0aB' }, 'invalid', 'iid'],

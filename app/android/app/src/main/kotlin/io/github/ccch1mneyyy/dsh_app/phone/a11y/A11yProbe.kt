@@ -73,6 +73,17 @@ internal class A11yProbe(private val service: PhoneA11yService, private val driv
     }
 
     private fun run(seq: Int, cmd: String, a: Args) {
+        if (cmd == "navigation-material") {
+            // Never enter the generic body/Throwable logging or image output path below.
+            try {
+                PhoneControl.get(service).collectNavigationMaterial(driver, seq) { bytes ->
+                    val tmp = File(dir, "last.tmp")
+                    tmp.writeBytes(bytes)
+                    check(tmp.renameTo(File(dir, "last.txt")))
+                }
+            } catch (_: Exception) { /* No exception text or stale body is exported. */ }
+            return
+        }
         val t0 = SystemClock.uptimeMillis()
         var image: ByteArray? = null
         val out = try {

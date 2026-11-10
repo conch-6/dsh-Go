@@ -6,6 +6,7 @@ import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {performance} from 'node:perf_hooks';
 import {pathToFileURL} from 'node:url';
 import {NativeCore} from '../bridge/dsh-go-bridge/lib/native/core.js';
 import {effectiveLimits} from '../bridge/dsh-go-bridge/lib/native/limits.js';
@@ -71,17 +72,20 @@ for(const mode of ['replace','dispose','replace-invalid']) {
 
 test('micro queued value cannot flush after replacement before deferred sweep',async t=>{
   const f=await fixture(t);let emit,cleanups=0;
-  t.mock.timers.enable({apis:['Date'],now:10000});
+  let wall=Date.now(),mono=0;
+  t.mock.method(Date,'now',()=>wall);
+  t.mock.method(performance,'now',()=>mono);
   f.service.micro('caption',{data(scope,publish){emit=publish;publish({text:'first'});return()=>{cleanups++};}});
   f.subscribe('m');await f.next(m=>m.t==='micro.data');
-  // Freeze the producer clock, not the WebSocket: queue within 100ms, replace,
+  // Freeze both producer clocks, not the WebSocket: queue within 100ms, replace,
   // and drive its actual production timeout before setImmediate can sweep.
-  t.mock.timers.reset();
-  t.mock.timers.enable({apis:['setTimeout','Date'],now:10000});
+  t.mock.timers.enable({apis:['setTimeout'],now:0});
   emit({text:'queued old'});
   f.service.micro('caption',{data(scope,publish){publish({text:'new'});}});
+  wall+=100;mono+=100;
   t.mock.timers.tick(100);
   t.mock.timers.reset();
+  t.mock.restoreAll();
   await f.next(m=>m.t==='micro.end');await f.fence();
   assert.deepEqual(f.events.filter(m=>m.t==='micro.data').map(m=>m.data.text),['first']);
   assert.equal(cleanups,1);

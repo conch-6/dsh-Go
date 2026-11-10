@@ -13,10 +13,11 @@ internal class RecoveryPlatform {
     fun birth(peer: String): ResourceRecovery.Birth {
         val boot = ResourceRecovery.uuid(File("/proc/sys/kernel/random/boot_id").readText().trim())
             ?: throw ResourceRecovery.Failure("recoveryUnavailable")
-        val ns = Os.stat("/proc/self/ns/pid")
+        // Some OEMs deny this namespace path. Missing evidence must not become a fake namespace.
+        val ns = try { Os.stat("/proc/self/ns/pid") } catch (_: Exception) { null }
         val pid = Process.myPid(); val uid = Process.myUid()
-        if (pid <= 0 || uid < 0 || ns.st_ino <= 0) throw ResourceRecovery.Failure("recoveryUnavailable")
-        return ResourceRecovery.Birth(peer, boot, pid, uid, ns.st_dev, ns.st_ino)
+        if (pid <= 0 || uid < 0 || ns != null && ns.st_ino <= 0) throw ResourceRecovery.Failure("recoveryUnavailable")
+        return ResourceRecovery.Birth(peer, boot, pid, uid, ns?.st_dev ?: 0L, ns?.st_ino ?: 0L, ns != null)
     }
 
     private val managerType by lazy { Class.forName("android.hardware.display.IDisplayManager") }
