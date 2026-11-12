@@ -90,6 +90,7 @@ void main() {
       });
     }
     testWidgets('paused group golden ${brightness.name}', (tester) async {
+      useBotGoldenClock();
       await open(tester, brightness: brightness);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/room_paused_${brightness.name}.png'));
     }, skip: !const bool.fromEnvironment('DSBOT_GOLDENS'));

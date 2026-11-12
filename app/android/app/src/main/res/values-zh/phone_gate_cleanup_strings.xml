@@ -2,7 +2,7 @@
 <resources>
     <string name="background_gate_retest">上次设置探针需要重新检查。清理完成后，请再次明确选择通道进行测试。</string>
     <string name="background_gate_cleanup_pending">上次探针的清理尚未确认，新后台资源仍被阻止。只能重试原探针的清理。</string>
-    <string name="background_gate_peer_unsupported">此通道不提供所需的严格探针与清理回执。请明确更新或重连；没有发送旧版探针。</string>
+    <string name="background_gate_peer_unsupported">此通道运行的是旧版后台服务，无法确认安全收尾。请重启手机或安装最新版本后重试；没有向旧服务发送新探针。</string>
     <string name="background_gate_cleanup_stale">此清理请求已不对应当前待清理探针，请刷新状态。</string>
     <string name="background_gate_checking">正在准备或检查所选通道；此次检查与清理结束前，不启用新的后台资源。</string>
 </resources>

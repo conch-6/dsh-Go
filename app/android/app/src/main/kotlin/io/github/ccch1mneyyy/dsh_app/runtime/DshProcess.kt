@@ -29,7 +29,8 @@ class DshProcess(
     private val listener: Listener,
 ) {
     interface Listener {
-        fun onLog(line: String, stream: String)
+        /** Raw display line and a separate copy with streamed private-key bodies removed. */
+        fun onLog(line: String, stream: String, storageLine: String = line)
         fun onReady(source: DshProcess, baseUrl: String, token: String)
         fun onExit(source: DshProcess, code: Int, expected: Boolean)
         /** Called under the process monitor: enqueue owner updates without waiting for its lock. */
@@ -335,10 +336,11 @@ class DshProcess(
     }
 
     private fun pump(reader: java.io.BufferedReader, stream: String) = thread(name = "dsh-$stream", isDaemon = true) {
+        val redactor = LogRedactor()
         try {
             reader.useLines { lines ->
                 lines.forEach { line ->
-                    listener.onLog(line, stream)
+                    listener.onLog(line, stream, redactor.line(line))
                     if (!readyReported) detectToken(line)
                 }
             }

@@ -147,6 +147,19 @@ void main() {
     expect(copied.shown!, lessThanOrEqualTo(kBriefNoticeDuration + _step * 2));
   });
 
+  testWidgets('repeated message copies do not queue confirmation notices', (tester) async {
+    await _pumpPage(tester, (context) => copyMessage(context, 'hello'));
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.text(appL10n.commonCopied), findsOneWidget);
+    await tester.tap(find.text('go'));
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(find.byType(SnackBar), findsNothing);
+  });
+
   testWidgets('a notice with a button leaves at its written time, not the brief one', (tester) async {
     await _pumpPage(tester, (context) {
       ScaffoldMessenger.of(context).showSnackBar(

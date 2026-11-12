@@ -1,6 +1,7 @@
 // The row model between DSH ChatItems and the chat list.
 
 import 'package:dsh_client/dsh_client.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../../state/artifacts.dart';
 import '../../state/chat_state.dart';
@@ -175,6 +176,10 @@ final class CommandNoticeRow extends ChatRow {
 
 const toolGroupThreshold = 3;
 
+/// How many times [deriveRows] ran: the streaming guard tests count it.
+@visibleForTesting
+int debugDeriveRowsCount = 0;
+
 /// 把 transcript 折成列表行:
 /// - 按 seq 把内容分到 [turns] 的各轮(`turn/start` 到 `turn/end`);一段
 ///   (两条用户消息之间)里挤了几轮(自动触发的轮、目标轮次、后台任务回调)
@@ -208,6 +213,7 @@ List<ChatRow> deriveRows({
   bool foldTurns = false,
   List<TurnArtifacts> artifacts = const [],
 }) {
+  debugDeriveRowsCount++;
   final rows = <ChatRow>[];
   final attached = <String>{};
   var tools = <ToolChatItem>[];

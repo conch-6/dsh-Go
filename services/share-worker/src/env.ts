@@ -1,6 +1,11 @@
 import type { RateLimiter } from './limits';
 
 export interface Env {
+  /** Emergency switches. Absent/"1" is enabled; "0" pauses the new capability. */
+  WORKSHOP_UPLOAD_ENABLED?: string;
+  WORKSHOP_COMPANION_ENABLED?: string;
+  /** Fixed trusted HTTPS forum origin; never supplied by an API caller. */
+  WORKSHOP_FORUM_URL?: string;
   /** HTTPS publication root; defaults to dsh-go-market GitHub Pages. */
   MARKET_SOURCE_URL?: string;
   /** "1": cron also verifies and mirrors pets/adapters from the same market. */

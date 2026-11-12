@@ -99,10 +99,51 @@ class _DelayedDiscovery extends FakeProviderBackend {
   final response = Completer<List<DiscoveredModel>>();
 
   @override
-  Future<List<DiscoveredModel>> discover({String? provider, String? baseUrl, ProviderApi? api, String? apiKey}) {
-    calls.add(('discover', {'baseURL': ?baseUrl}));
+  Future<List<DiscoveredModel>> discover({
+    String? provider,
+    String? baseUrl,
+    ProviderApi? api,
+    String? apiKey,
+    Map<String, String>? headers,
+  }) {
+    calls.add(('discover', {'baseURL': ?baseUrl, 'headers': ?headers}));
     return response.future;
   }
+}
+
+const _headerProfile = ProviderProfile(
+  route: 'custom-header-gateway',
+  displayName: 'Header gateway',
+  api: 'openai-completions',
+  baseUrl: 'https://gw.example.com/v1',
+  models: [ProviderModelSpec(id: 'm1')],
+  headers: {'x-opencode-session': 'session-1'},
+);
+
+Finder _headerField(String field, [int index = 0]) => find.byKey(ValueKey('provider-header-$field-$index'));
+
+Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
+  await tester.tap(finder);
+  await settle(tester);
+}
+
+Future<void> _openHeaders(WidgetTester tester) => _tapVisible(tester, find.text('请求头（可选）'));
+
+Future<void> _addHeader(WidgetTester tester, String name, String value) async {
+  await _tapVisible(tester, find.text('添加请求头'));
+  final index = find.byType(TextFormField).evaluate().length ~/ 2 - 1;
+  await tester.enterText(_headerField('name', index), name);
+  await tester.enterText(_headerField('value', index), value);
+  await tester.pump();
+}
+
+Future<void> _manualModel(WidgetTester tester) async {
+  await _tapVisible(tester, find.text('手动添加'));
+  await tester.enterText(find.descendant(of: find.byType(AlertDialog), matching: find.byType(TextField)), 'm1');
+  await tester.tap(find.widgetWithText(FilledButton, '添加'));
+  await settle(tester);
 }
 
 void main() {
@@ -174,6 +215,248 @@ void main() {
     expect(find.text('模型 · 3'), findsNothing);
   });
 
+  group('request headers', () {
+    testWidgets('stored reserved headers stay read-only while an adjacent header changes', (tester) async {
+      const profile = ProviderProfile(
+        route: 'custom-reserved-header',
+        api: 'openai-completions',
+        baseUrl: 'https://gw.example.com/v1',
+        models: [ProviderModelSpec(id: 'm1')],
+        headers: {'UsEr-AgEnT': 'legacy-agent', 'x-opencode-session': 'old-session'},
+      );
+      final backend = FakeProviderBackend(profiles: const [profile]);
+      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await _open(tester, backend, existing: CustomProvider.fromProfile(profile), height: 844);
+      tester.view.physicalSize = const Size(640, 1688);
+      await tester.pump();
+      await _openHeaders(tester);
+      await _tapVisible(tester, _headerField('value', 1));
+      await tester.enterText(_headerField('value', 1), 'new-session');
+      await _tapVisible(tester, find.text('获取模型'));
+      expect(backend.callNames, contains('discover'), reason: 'an untouched reserved row must not reject its neighbor');
+      expect(backend.calls.last.$2['headers'], {'UsEr-AgEnT': 'legacy-agent', 'x-opencode-session': 'new-session'});
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(backend.profiles.single.headers, {'UsEr-AgEnT': 'legacy-agent', 'x-opencode-session': 'new-session'});
+    });
+
+    testWidgets('a stored reserved row exposes neither text editing nor deletion', (tester) async {
+      const profile = ProviderProfile(
+        route: 'custom-reserved-header',
+        api: 'openai-completions',
+        baseUrl: 'https://gw.example.com/v1',
+        models: [ProviderModelSpec(id: 'm1')],
+        headers: {'UsEr-AgEnT': 'legacy-agent', 'x-opencode-session': 'session-1'},
+      );
+      await _open(
+        tester,
+        FakeProviderBackend(profiles: const [profile]),
+        existing: CustomProvider.fromProfile(profile),
+      );
+      await _openHeaders(tester);
+      for (final field in ['name', 'value']) {
+        final input = tester.widget<TextField>(
+          find.descendant(of: _headerField(field), matching: find.byType(TextField)),
+        );
+        expect(input.readOnly, isTrue, reason: field);
+        expect(tester.widget<TextFormField>(_headerField(field)).onChanged, isNull, reason: field);
+      }
+      final delete = tester.widget<TextButton>(
+        find.ancestor(of: find.text('删除').first, matching: find.byType(TextButton)),
+      );
+      expect(delete.onPressed, isNull);
+      final normal = tester.widget<TextField>(
+        find.descendant(of: _headerField('value', 1), matching: find.byType(TextField)),
+      );
+      expect(normal.readOnly, isFalse);
+    });
+
+    testWidgets('renaming an ordinary header to a reserved name is rejected and remains correctable', (tester) async {
+      final backend = FakeProviderBackend(profiles: const [_headerProfile]);
+      await _open(tester, backend, existing: CustomProvider.fromProfile(_headerProfile));
+      await _openHeaders(tester);
+      await tester.enterText(_headerField('name'), 'USER-AGENT');
+      await _tapVisible(tester, find.text('获取模型'));
+      expect(find.text('User-Agent 由引擎设置，请移除此请求头'), findsOneWidget);
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(backend.callNames.where((name) => name != 'read'), isEmpty);
+      await tester.enterText(_headerField('name'), 'X-Trace');
+      await _tapVisible(tester, find.text('获取模型'));
+      expect(backend.calls.last.$2['headers'], {'X-Trace': 'session-1'});
+    });
+
+    testWidgets('draft discovery and save use the entered header map', (tester) async {
+      final backend = FakeProviderBackend(discoverResult: discovered);
+      await _open(tester, backend);
+      await _type(tester, 'Base URL', 'https://gw.example.com/v1');
+      await _type(tester, 'API Key', 'sk-test');
+      await _openHeaders(tester);
+      expect(find.textContaining('不参与日志脱敏'), findsOneWidget);
+      await _addHeader(tester, ' x-opencode-session ', 'session-1');
+      await _tapVisible(tester, find.text('获取模型'));
+      expect(backend.calls.firstWhere((call) => call.$1 == 'discover').$2['headers'], {
+        'x-opencode-session': 'session-1',
+      });
+      await tester.tap(find.text('添加 3 个模型'));
+      await settle(tester);
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(backend.calls.firstWhere((call) => call.$1 == 'create').$2['headers'], {
+        'x-opencode-session': 'session-1',
+      });
+      expect(find.text('result: custom-gw-example'), findsOneWidget);
+    });
+
+    testWidgets('stored headers read back and stay omitted until edited', (tester) async {
+      final backend = FakeProviderBackend(profiles: const [_headerProfile]);
+      await _open(tester, backend, existing: CustomProvider.fromProfile(_headerProfile));
+      await _openHeaders(tester);
+      expect(tester.widget<TextFormField>(_headerField('name')).initialValue, 'x-opencode-session');
+      expect(tester.widget<TextFormField>(_headerField('value')).initialValue, 'session-1');
+      await _tapVisible(tester, find.text('获取模型'));
+      expect(backend.calls.last.$2.containsKey('headers'), isFalse);
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(backend.calls.firstWhere((call) => call.$1 == 'update').$2.containsKey('headers'), isFalse);
+      expect(backend.profiles.single.headers, _headerProfile.headers);
+    });
+
+    testWidgets('editing headers replaces the whole map and preserves other fields', (tester) async {
+      const profile = ProviderProfile(
+        route: 'custom-two-headers',
+        api: 'openai-completions',
+        baseUrl: 'https://gw.example.com/v1',
+        models: [ProviderModelSpec(id: 'm1')],
+        headers: {'x-opencode-session': 'old-session', 'X-Team': 'remove-me'},
+      );
+      final backend = FakeProviderBackend(profiles: const [profile]);
+      await _open(tester, backend, existing: CustomProvider.fromProfile(profile));
+      await _openHeaders(tester);
+      await tester.enterText(_headerField('value'), 'new-session');
+      await _tapVisible(tester, find.text('删除').last);
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(backend.profiles.single.headers, {'x-opencode-session': 'new-session'});
+      expect(backend.profiles.single.models.single.id, 'm1');
+      expect(backend.profiles.single.baseUrl, profile.baseUrl);
+    });
+
+    testWidgets('untouched legacy headers are neither normalized nor rejected', (tester) async {
+      const profile = ProviderProfile(
+        route: 'custom-legacy-headers',
+        api: 'openai-completions',
+        baseUrl: 'https://gw.example.com/v1',
+        models: [ProviderModelSpec(id: 'm1')],
+        headers: {' User-Agent ': 'legacy', 'X-Legacy': '旧配置'},
+      );
+      final backend = FakeProviderBackend(profiles: const [profile]);
+      await _open(tester, backend, existing: CustomProvider.fromProfile(profile));
+      await _openHeaders(tester);
+      expect(tester.widget<TextFormField>(_headerField('name')).initialValue, ' User-Agent ');
+      await _tapVisible(tester, find.text('获取模型'));
+      expect(backend.calls.last.$2.containsKey('headers'), isFalse);
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(backend.calls.firstWhere((call) => call.$1 == 'update').$2.containsKey('headers'), isFalse);
+      expect(backend.profiles.single.headers, profile.headers);
+    });
+
+    testWidgets('removing the last stored header explicitly clears discovery and save', (tester) async {
+      final backend = FakeProviderBackend(profiles: const [_headerProfile]);
+      await _open(tester, backend, existing: CustomProvider.fromProfile(_headerProfile));
+      await _openHeaders(tester);
+      await _tapVisible(tester, find.text('删除'));
+      await _tapVisible(tester, find.text('获取模型'));
+      expect(backend.calls.last.$2['headers'], isEmpty);
+      expect(backend.calls.last.$2.containsKey('headers'), isTrue);
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(backend.calls.firstWhere((call) => call.$1 == 'update').$2['headers'], isEmpty);
+      expect(backend.profiles.single.headers, isEmpty);
+    });
+
+    testWidgets('duplicate names block both discovery and save without hiding values', (tester) async {
+      final backend = FakeProviderBackend(profiles: const [_headerProfile]);
+      await _open(tester, backend, existing: CustomProvider.fromProfile(_headerProfile));
+      await _openHeaders(tester);
+      await _addHeader(tester, 'X-OPENCODE-SESSION', 'other');
+      await _tapVisible(tester, find.text('获取模型'));
+      expect(find.text('请求头名称重复（不区分大小写）'), findsOneWidget);
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(backend.callNames.where((name) => name != 'read'), isEmpty);
+      expect(tester.widget<TextFormField>(_headerField('value', 1)).initialValue, 'other');
+      final input = tester.widget<TextField>(
+        find.descendant(of: _headerField('value', 1), matching: find.byType(TextField)),
+      );
+      expect(input.obscureText, isFalse);
+      expect(input.autocorrect, isFalse);
+      expect(input.enableSuggestions, isTrue);
+    });
+
+    for (final failure in [false, true]) {
+      testWidgets('late discovery ${failure ? 'failure' : 'success'} belongs to the header snapshot', (tester) async {
+        final backend = _DelayedDiscovery();
+        await _open(tester, backend);
+        await _type(tester, 'Base URL', 'https://gw.example.com/v1');
+        await _type(tester, 'API Key', 'sk-test');
+        await _openHeaders(tester);
+        await _addHeader(tester, 'x-opencode-session', 'old-session');
+        await tester.ensureVisible(find.text('获取模型'));
+        await tester.tap(find.text('获取模型'));
+        await tester.pump();
+        expect(backend.callNames, contains('discover'));
+        await tester.enterText(_headerField('value'), 'new-session');
+        if (failure) {
+          backend.response.completeError(listingRefused('https://gw.example.com/v1', 401));
+        } else {
+          backend.response.complete(discovered);
+        }
+        await settle(tester);
+        expect(find.byType(ModelPickerSheet), findsNothing);
+        expect(find.text('API Key 无效或没有权限'), findsNothing);
+        expect(tester.widget<TextFormField>(_headerField('value')).initialValue, 'new-session');
+      });
+    }
+
+    testWidgets('headers survive a partial create and can be cleared on the retry', (tester) async {
+      final backend = FakeProviderBackend()..storeKeyError = const ProviderFailure('Key write refused');
+      await _open(tester, backend);
+      await _type(tester, 'Base URL', 'https://gw.example.com/v1');
+      await _type(tester, 'API Key', 'sk-test');
+      await _openHeaders(tester);
+      await _addHeader(tester, 'x-opencode-session', 'session-1');
+      await _manualModel(tester);
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(backend.profiles.single.headers, {'x-opencode-session': 'session-1'});
+      expect(find.textContaining('渠道已保存，Key 没有存上'), findsOneWidget);
+      backend.storeKeyError = null;
+      await _tapVisible(tester, find.text('删除'));
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(backend.callNames.where((name) => name == 'create'), hasLength(1));
+      expect(backend.calls.firstWhere((call) => call.$1 == 'update').$2['headers'], isEmpty);
+      expect(backend.profiles.single.headers, isEmpty);
+    });
+
+    testWidgets('header-only edits survive collapse and trigger the discard guard', (tester) async {
+      final backend = FakeProviderBackend(profiles: const [_headerProfile]);
+      await _open(tester, backend, existing: CustomProvider.fromProfile(_headerProfile));
+      await _openHeaders(tester);
+      await tester.enterText(_headerField('value'), 'edited-session');
+      await _openHeaders(tester);
+      await _openHeaders(tester);
+      expect(tester.widget<TextFormField>(_headerField('value')).initialValue, 'edited-session');
+      await tester.tap(find.byIcon(AppIcons.back));
+      await settle(tester);
+      expect(find.text('放弃修改？'), findsOneWidget);
+      expect(backend.callNames.where((name) => name != 'read'), isEmpty);
+    });
+  });
+
   group('validation', () {
     testWidgets('an empty save names every missing field and writes nothing', (tester) async {
       final backend = FakeProviderBackend();
@@ -234,6 +517,33 @@ void main() {
   });
 
   group('create', () {
+    for (final (label, endpoint, expected) in [
+      ('OpenAI', 'https://gw.example.com/v1/chat/completions///', 'https://gw.example.com/v1'),
+      ('Responses', 'https://gw.example.com/api/v3/responses', 'https://gw.example.com/api/v3'),
+      ('Anthropic', 'https://gw.example.com/Tenant/v1/messages', 'https://gw.example.com/Tenant'),
+      ('Anthropic', 'https://gw.example.com/Tenant/v1/v1/messages', 'https://gw.example.com/Tenant/v1'),
+      ('Anthropic', 'https://gw.example.com/Proxy/messages', 'https://gw.example.com/Proxy'),
+    ]) {
+      testWidgets('one endpoint after discovery and save: $label $endpoint', (tester) async {
+        final backend = FakeProviderBackend(discoverResult: discovered);
+        await _open(tester, backend);
+        await tester.tap(find.text(label));
+        await _type(tester, 'Base URL', endpoint);
+        await _type(tester, 'API Key', 'sk-fixture');
+        await tester.tap(find.text('获取模型'));
+        await settle(tester);
+        expect(backend.calls.firstWhere((c) => c.$1 == 'discover').$2['baseURL'], expected);
+        await tester.tap(find.text('添加 3 个模型'));
+        await settle(tester);
+        final displayed = tester.widget<TextField>(_field('Base URL')).controller!.text;
+        await tester.tap(find.text('保存'));
+        await settle(tester);
+        expect(backend.calls.firstWhere((c) => c.$1 == 'create').$2['baseURL'], expected);
+        expect(displayed, endpoint, reason: 'ordinary discovery keeps the original input for the next save');
+        expect(backend.callNames.where((c) => c != 'read'), ['discover', 'create', 'storeKey']);
+      });
+    }
+
     testWidgets('fetch → pick two → save: profile, then key; pops with the id', (tester) async {
       final backend = FakeProviderBackend(discoverResult: discovered);
       final vault = MemoryProviderKeyVault();
@@ -371,6 +681,91 @@ void main() {
   });
 
   group('edit', () {
+    for (final (api, base) in [
+      (ProviderApi.openaiCompletions, 'https://gw.example.com/tenant/chat/completions'),
+      (ProviderApi.openaiResponses, 'https://gw.example.com/tenant/responses'),
+      (ProviderApi.anthropicMessages, 'https://gw.example.com/tenant/v1/messages'),
+      (ProviderApi.anthropicMessages, 'https://gw.example.com/tenant/v1'),
+    ]) {
+      for (final discoverFirst in [false, true]) {
+        testWidgets('preserves stored base $base, discovery $discoverFirst', (tester) async {
+          final profile = ProviderProfile(
+            route: 'custom-stored',
+            api: api.wire,
+            baseUrl: base,
+            models: const [ProviderModelSpec(id: 'model')],
+          );
+          final backend = FakeProviderBackend(profiles: [profile]);
+          await _open(tester, backend, existing: CustomProvider.fromProfile(profile));
+          await _type(tester, '名称', 'Renamed');
+          if (discoverFirst) {
+            await tester.tap(find.text('获取模型'));
+            await settle(tester);
+            expect(backend.calls.firstWhere((c) => c.$1 == 'discover').$2['baseURL'], base);
+          }
+          await tester.tap(find.text('保存'));
+          await settle(tester);
+          final update = backend.calls.firstWhere((c) => c.$1 == 'update').$2;
+          expect(update['displayName'], 'Renamed');
+          expect(update['baseURL'], base, reason: 'the unchanged address is already a stored base');
+          expect(update['api'], api.wire);
+          expect(update['expectedRevision'], 3);
+          expect(backend.callNames, isNot(contains('storeKey')));
+        });
+      }
+    }
+
+    testWidgets('a protocol-only edit reinterprets the address for that protocol', (tester) async {
+      const profile = ProviderProfile(
+        route: 'custom-stored',
+        api: 'openai-responses',
+        baseUrl: 'https://gw.example.com/tenant/v1/messages',
+        models: [ProviderModelSpec(id: 'model')],
+      );
+      final backend = FakeProviderBackend(profiles: [profile]);
+      await _open(tester, backend, existing: CustomProvider.fromProfile(profile));
+      await tester.tap(find.text('Anthropic'));
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      final update = backend.calls.firstWhere((c) => c.$1 == 'update').$2;
+      expect(update['api'], 'anthropic-messages');
+      expect(update['baseURL'], 'https://gw.example.com/tenant');
+    });
+
+    for (final (label, endpoint, expected) in [
+      ('OpenAI', 'https://gw.example.com/v1/chat/completions', 'https://gw.example.com/v1'),
+      ('Responses', 'https://gw.example.com/api/v3/responses', 'https://gw.example.com/api/v3'),
+      ('Anthropic', 'https://gw.example.com/Tenant/v1/messages', 'https://gw.example.com/Tenant'),
+    ]) {
+      testWidgets('saves a full $label endpoint without discovery', (tester) async {
+        final backend = sampleBackend();
+        await _open(tester, backend, existing: CustomProvider.fromProfile(gateway));
+        await tester.tap(find.text(label));
+        await _type(tester, 'Base URL', endpoint);
+        await tester.tap(find.text('保存'));
+        await settle(tester);
+        final update = backend.calls.firstWhere((c) => c.$1 == 'update').$2;
+        expect(update['baseURL'], expected);
+        expect(update['expectedRevision'], 3);
+        expect(backend.callNames.where((c) => c != 'read'), ['update']);
+      });
+    }
+
+    for (final suffix in ['?x=1', '#fragment']) {
+      testWidgets('endpoint with $suffix is rejected before discovery and save', (tester) async {
+        final backend = sampleBackend();
+        await _open(tester, backend, existing: CustomProvider.fromProfile(gateway));
+        await _type(tester, 'Base URL', 'https://gw.example.com/v1/chat/completions$suffix');
+        await tester.tap(find.text('获取模型'));
+        await settle(tester);
+        expect(find.text('去掉 ? 或 # 之后的部分'), findsOneWidget);
+        await tester.tap(find.text('保存'));
+        await settle(tester);
+        expect(find.text('去掉 ? 或 # 之后的部分'), findsOneWidget);
+        expect(backend.callNames.where((c) => c != 'read'), isEmpty);
+      });
+    }
+
     testWidgets('prefilled; an empty key keeps the stored one', (tester) async {
       final backend = sampleBackend();
       final gw = CustomProvider.fromProfile(gateway);

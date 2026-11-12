@@ -185,8 +185,7 @@ class RuntimePlugin :
             "requestStorage" -> requestStorage(result)
             "openAllFilesAccess" -> {
                 val intent = PhoneStorage.allFilesAccessIntent(appContext)
-                if (intent != null) runCatching { appContext.startActivity(intent) }
-                result.success(intent != null)
+                result.success(intent != null && runCatching { appContext.startActivity(intent) }.isSuccess)
             }
             else -> result.notImplemented()
         }

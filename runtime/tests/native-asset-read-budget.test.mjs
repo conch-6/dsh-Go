@@ -5,7 +5,7 @@ import {once} from 'node:events';
 import fs from 'node:fs/promises';
 import {syncBuiltinESMExports} from 'node:module';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname,join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {NativeCore} from '../bridge/dsh-go-bridge/lib/native/core.js';
 import {createNativeRoutes} from '../bridge/dsh-go-bridge/lib/native/routes.js';
@@ -62,4 +62,20 @@ test('stable asset ETag still returns bodyless 304 without a read',async t=>{
  const calls=growAtRead(t,f.file,LIMIT+1);
  const r=await f.request('GET','changing.png',{'if-none-match':first.etag});
  assert.equal(r.status,304);assert.equal(r.bytes.length,0);assert.equal(calls(),0);
+});
+for(const method of ['GET','HEAD'])test(`${method} reads the validated canonical asset path`,async t=>{
+ const f=await fixture(t);
+ await fs.symlink('changing.png',join(dirname(f.file),'alias.png'));
+ const canonical=await fs.realpath(f.file),read=fs.readFile,paths=[];
+ const mocked=t.mock.method(fs,'readFile',async function(path,...args){
+  paths.push(path);
+  return Reflect.apply(read,this,[path,...args]);
+ });
+ syncBuiltinESMExports();
+ t.after(()=>{mocked.mock.restore();syncBuiltinESMExports()});
+ const r=await f.request(method,'alias.png');
+ assert.equal(r.status,200);
+ assert.equal(r.bytes.length,method==='GET'?64:0);
+ assert.equal(r.length,'64');
+ assert.deepEqual(paths,[canonical]);
 });

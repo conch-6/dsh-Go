@@ -3,6 +3,7 @@ import 'package:dsh_app/ui/chat/chat_list.dart';
 import 'package:dsh_app/ui/chat/widgets/assistant_message.dart';
 import 'package:dsh_app/ui/chat/widgets/tool_row.dart';
 import 'package:dsh_app/ui/chat/widgets/turn_process.dart';
+import 'package:dsh_app/ui/theme/app_icons.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
@@ -17,17 +18,20 @@ ChatState state({
   List<PendingPrompt> pending = const [],
   int steps = 15,
   bool longHistory = false,
+  bool steering = false,
 }) => ChatState(
   loading: false,
   running: running,
   pending: pending,
   items: [
-    if (longHistory) user(0, List.filled(30, 'Earlier history remains above the current turn.').join('\n\n')),
+    if (longHistory)
+      user(0, List.generate(30, (i) => 'Earlier history paragraph $i remains above the current turn.').join('\n\n')),
     user(2, '问题'),
     for (var i = 0; i < steps; i++) ...[
       tool('t$i', 'bash', {'command': 'echo $i'}, result: '$i'),
       assistant(i + 3, '', reasoning: '思考 $i'),
     ],
+    if (steering) user(50, '补充说明'),
     assistant(100, '最终回答', rowKey: 'm1.20'),
   ],
   turns: [
@@ -72,6 +76,64 @@ ScrollPosition position(WidgetTester tester) => tester
 
 void main() {
   setUpAll(loadTestFonts);
+  for (final fluid in [false, true]) {
+    for (final steering in [false, true]) {
+      for (final loadingFirst in [false, true]) {
+        testWidgets(
+          'opening an active turn preserves visible history on completion (fluid=$fluid, steering=$steering, loading=$loadingFirst)',
+          (tester) async {
+            usePhoneView(tester);
+            final harness = ChatHarness(
+              session: 's1',
+              states: {'s1': loadingFirst ? const ChatState() : state(longHistory: true, steering: steering)},
+            );
+            await tester.pumpWidget(
+              testApp(
+                Scaffold(
+                  body: AppMotionScope(
+                    fluid: fluid,
+                    child: const ChatList(sessionId: 's1', topInset: 24, bottomInset: 6),
+                  ),
+                ),
+                overrides: harness.overrides,
+              ),
+            );
+            if (loadingFirst) {
+              harness.controllers['s1']!.emit(state(longHistory: true, steering: steering));
+              await tester.pump();
+            }
+            final reply = find.byWidgetPredicate((w) => w is AssistantMessage && w.item.text == '最终回答');
+            final viewport = tester.getRect(find.byType(ChatList));
+            // Keeping the running turn after the center must not introduce an initial jump.
+            expect(tester.getBottomRight(reply).dy, closeTo(viewport.bottom - 6 - AppSpace.sm, .5));
+            final history = find.byKey(const ValueKey('u0'));
+            for (var drag = 0; drag < 12; drag++) {
+              await tester.drag(find.byType(CustomScrollView), const Offset(0, 300));
+              await pumpFrames(tester, 35);
+              if (history.evaluate().isNotEmpty && tester.getBottomRight(history).dy > viewport.bottom + 100) break;
+            }
+            final before = tester.getRect(history);
+            expect(before.top, lessThan(viewport.top + 24));
+            expect(
+              before.bottom,
+              greaterThan(viewport.bottom + 100),
+              reason: 'The reader sees history; the changing current turn is below the whole viewport.',
+            );
+            harness.controllers['s1']!.emit(state(running: false, longHistory: true, steering: steering));
+            await pumpFrames(tester, 12);
+            expect(tester.getRect(history).top, closeTo(before.top, .5));
+            expect(tester.takeException(), isNull);
+            // Completion still folds immediately, and explicitly returning to the latest works.
+            await tester.tap(find.byIcon(AppIcons.scrollToBottom));
+            await pumpFrames(tester, 35);
+            expect(position(tester).pixels, closeTo(position(tester).maxScrollExtent, .5));
+            expect(find.byType(TurnProcess), findsOneWidget);
+            expect(find.byType(ToolRow), findsNothing);
+          },
+        );
+      }
+    }
+  }
   testWidgets('pinned completion collapses monotonically and keeps the reply bottom fixed', (tester) async {
     // Keep this original bottom-follow contract in the scrollable regime.
     final harness = await mount(tester, longHistory: true);

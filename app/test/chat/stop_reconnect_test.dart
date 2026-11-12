@@ -153,9 +153,17 @@ class _Harness {
   }
 
   Future<void> running(_Client client, {String sessionId = 'S', List<Map<String, Object?>> inbox = const []}) async {
-    client.running(sessionId, inbox: inbox);
-    await flush();
-    expect(c.read(chatProvider(sessionId)).running, isTrue, reason: 'Probe must start with a live running session');
+    final ready = Completer<void>();
+    final subscription = c.listen(chatProvider(sessionId), (_, next) {
+      if (!ready.isCompleted && next.running) ready.complete();
+    });
+    try {
+      client.running(sessionId, inbox: inbox);
+      await ready.future;
+      expect(c.read(chatProvider(sessionId)).running, isTrue, reason: 'Probe must start with a live running session');
+    } finally {
+      subscription.close();
+    }
   }
 
   Future<void> close() async {
@@ -290,6 +298,66 @@ class _RealHttp extends HttpOverrides {}
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('running fixture waits for a delayed status publication', (tester) async {
+    var publications = 0;
+    await runZoned(
+      () async {
+        final h = _Harness();
+        try {
+          final a = h.client('engine-A');
+          final connecting = h.use(a);
+          await tester.binding.delayed(Duration.zero);
+          await connecting;
+          expect(a.watched, ['S']);
+          expect(a.streams['S']!.hasListener, isTrue);
+
+          var prepared = false;
+          Object? setupError;
+          final preparing = h
+              .running(a, inbox: [_item('queued', 'queued text')])
+              .then<void>((_) => prepared = true, onError: (Object error) => setupError = error);
+          await tester.binding.delayed(Duration.zero);
+          await tester.binding.delayed(const Duration(milliseconds: 60));
+          expect(publications, 1);
+          expect(h.state.controlReady, isTrue);
+          expect(h.state.running, isFalse);
+          expect(h.state.pending.single.inboxId, 'queued');
+          final returnedBeforePublication = prepared;
+          expect(await h.chat.cancel(), isEmpty);
+          expect(a.wire.calls, isEmpty);
+
+          await tester.binding.delayed(const Duration(milliseconds: 60));
+          await preparing;
+          expect(h.state.running, isTrue);
+          final cancel = h.chat.cancel();
+          expect((a.wire.calls.single['args']! as Map)['request'], {'sessionId': 'S'});
+          a.wire.cancels.single.complete(const RpcOk(null));
+          expect(await cancel, isEmpty);
+          expect(a.wire.calls.map((call) => call['endpoint']), [
+            'session/cancel',
+            'session/updateQueue',
+            'session/prompt',
+          ]);
+          expect(setupError, isNull, reason: 'Setup must wait for the public running state.');
+          expect(returnedBeforePublication, isFalse);
+          expect(prepared, isTrue);
+        } finally {
+          await h.close();
+        }
+      },
+      zoneSpecification: ZoneSpecification(
+        createTimer: (self, parent, zone, duration, callback) {
+          // The snapshot arrives normally; only its following running status
+          // is published after the old fixture's fixed 60ms wait.
+          if (duration == const Duration(milliseconds: 32) && ++publications == 1) {
+            duration = const Duration(milliseconds: 120);
+          }
+          return parent.createTimer(zone, duration, callback);
+        },
+      ),
+    );
+  });
 
   test('P12 B1 stale cancel failure must not clear replacement client stop', () async {
     final h = _Harness();

@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/l10n.dart';
@@ -121,7 +122,8 @@ class HttpShareNet implements ShareNet {
   @override
   Future<String> fetchGist(String id) async {
     try {
-      final json = await _getJson(Uri.parse('https://api.github.com/gists/$id'), timeout: const Duration(seconds: 15));
+      final text = await _getText(Uri.parse('https://api.github.com/gists/$id'), timeout: const Duration(seconds: 15));
+      final json = await compute(jsonDecode, text);
       final files = json is Map ? json['files'] : null;
       if (files is! Map) throw GistException(appL10n.pluginsGistNotFound);
       for (final file in files.values) {

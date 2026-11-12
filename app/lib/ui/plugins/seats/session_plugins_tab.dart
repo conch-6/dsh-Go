@@ -17,17 +17,17 @@ import 'plugin_seat_page.dart';
 import 'seat_links.dart';
 
 /// The detail tab and its contents share one plan: the conversation's plugin
-/// tabs, then its plugin views. Global web panels are a fallback when the
-/// host has neither; they keep their root scope even though this entry lives
-/// inside a conversation.
+/// tabs, then its plugin views. Without conversation tabs, global panels
+/// remain alongside those views; they keep their root scope even though
+/// this entry lives inside a conversation.
 final sessionPluginPlanProvider = Provider.autoDispose.family<SeatPlan, String>((ref, sessionId) {
   final tabs = ref.watch(seatPlanProvider(SessionPluginsTab.requestFor(sessionId)));
   final views = ref.watch(seatPlanProvider(SessionPluginsTab.viewsFor(sessionId)));
-  if (views.isEmpty) {
-    if (!tabs.isEmpty) return tabs;
-    return ref.watch(seatPlanProvider(const SeatRequest(slot: Slots.main, placement: SeatPlacement.page)));
+  if (!tabs.isEmpty) {
+    return views.isEmpty ? tabs : SeatPlan(tabs.seat, [...tabs.items, ...views.items]);
   }
-  return SeatPlan(tabs.seat, [...tabs.items, ...views.items]);
+  final panels = ref.watch(seatPlanProvider(const SeatRequest(slot: Slots.main, placement: SeatPlacement.page)));
+  return views.isEmpty ? panels : SeatPlan(views.seat, [...views.items, ...panels.items]);
 });
 
 class SessionPluginsTab extends ConsumerWidget {
@@ -60,7 +60,7 @@ class SessionPluginsTab extends ConsumerWidget {
     SeatRequest pageOf(SlotOccupant o) => SeatRequest(
       slot: o.slot,
       placement: SeatPlacement.page,
-      sessionId: plan.seat.sessionId,
+      sessionId: o.slot == Slots.main ? null : plan.seat.sessionId,
       package: o.package,
       cell: o.cell,
     );
@@ -79,7 +79,7 @@ class SessionPluginsTab extends ConsumerWidget {
           children: [
             for (final item in items)
               Builder(
-                key: ValueKey('${item.occupant.package}|${item.occupant.cell}'),
+                key: ValueKey('${item.occupant.slot}|${item.occupant.package}|${item.occupant.cell}'),
                 builder: (context) {
                   final o = item.occupant;
                   final title = name(o);
@@ -93,7 +93,7 @@ class SessionPluginsTab extends ConsumerWidget {
                       if (web) {
                         final target = seatWebTarget(
                           o,
-                          sessionId: seat.sessionId,
+                          sessionId: o.slot == Slots.main ? null : seat.sessionId,
                           bundle: seatBundleOf(bundles, o.package),
                         );
                         ref.read(seatWebOpenerProvider)(context, ref, target);

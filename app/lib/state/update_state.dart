@@ -16,6 +16,7 @@ import '../update/update_config.dart';
 import '../update/update_http.dart';
 import '../update/version.dart';
 import 'app_info.dart';
+import 'artifacts.dart';
 
 /// In-app updates: daily check of our release copy and GitHub Releases (with
 /// mirror fallback), a delta patch or the whole APK with resume, SHA-256
@@ -96,6 +97,7 @@ class AppUpdateState {
     this.total,
     this.source,
     this.problem,
+    this.apkHere = false,
     this.installedSha256,
     this.patchFailedVersion,
     this.installRoute = UpdateInstallRoute.system,
@@ -128,6 +130,11 @@ class AppUpdateState {
   /// Mirror the download is coming through.
   final String? source;
   final UpdateProblem? problem;
+
+  /// The verified download is still here in this session: 「导出安装包」 can copy
+  /// it out for signing by hand. Cleared with the file, and when the offer it
+  /// was downloaded for is replaced.
+  final bool apkHere;
 
   /// SHA-256 of the installed APK, once hashed (only for offers with patches).
   final String? installedSha256;
@@ -179,6 +186,7 @@ class AppUpdateState {
     int? Function()? total,
     String? Function()? source,
     UpdateProblem? Function()? problem,
+    bool? apkHere,
     String? installedSha256,
     String? Function()? patchFailedVersion,
     UpdateInstallRoute? installRoute,
@@ -201,6 +209,7 @@ class AppUpdateState {
     total: total == null ? this.total : total(),
     source: source == null ? this.source : source(),
     problem: problem == null ? this.problem : problem(),
+    apkHere: apkHere ?? this.apkHere,
     installedSha256: installedSha256 ?? this.installedSha256,
     patchFailedVersion: patchFailedVersion == null ? this.patchFailedVersion : patchFailedVersion(),
     installRoute: installRoute ?? this.installRoute,
@@ -460,7 +469,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
             current: current, selfUpdate: pending, task: UpdateTaskPhase.idle,
             latest: () => keepOffer ? latest : null,
             check: keepOffer ? UpdateCheckPhase.available : UpdateCheckPhase.upToDate,
-            problem: () => null, privilegedErrorCode: () => null,
+            problem: () => null, privilegedErrorCode: () => null, apkHere: false,
           );
           if (!keepOffer) unawaited(_prefs?.remove(_latestKey));
           return;
@@ -582,6 +591,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
           lastCheckedAt: now,
           task: changed ? UpdateTaskPhase.idle : null,
           problem: changed ? () => null : null,
+          apkHere: changed ? false : null,
         );
         if (answer == _Answer.conflict) await _conflicted();
         // Before the offer shows: its size is the patch's when one applies.
@@ -637,7 +647,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
     _apk = null;
     // Busy while the file goes, so 「重试」 can't download to the same path
     // meanwhile and meet the delete.
-    state = state.copyWith(task: UpdateTaskPhase.verifying, problem: () => null);
+    state = state.copyWith(task: UpdateTaskPhase.verifying, problem: () => null, apkHere: false);
     await _deleteQuietly(apk.file);
     if (ref.mounted && run == _run) {
       state = state.copyWith(task: UpdateTaskPhase.failed, problem: () => UpdateProblem.checksum);
@@ -694,6 +704,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
     _apk = null;
     state = state.copyWith(
       task: UpdateTaskPhase.downloading,
+      apkHere: false,
       received: 0,
       total: () => state.downloadSize,
       source: () => null,
@@ -820,7 +831,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
       case DownloadDone(:final file, :final from):
         _apk = _ReadyApk(file: file, version: release.version, asset: asset.name, sha256: sha256);
         if (from?.mirrorId case final id?) unawaited(_prefs?.setString(_mirrorKey, id));
-        state = state.copyWith(task: UpdateTaskPhase.ready);
+        state = state.copyWith(task: UpdateTaskPhase.ready, apkHere: true);
       case DownloadCancelled():
         state = state.copyWith(task: UpdateTaskPhase.idle, received: 0);
       case DownloadFailed(:final failure):
@@ -857,6 +868,32 @@ class AppUpdateController extends Notifier<AppUpdateState> {
     return _installer.openWithSystemInstaller(apk.file.path);
   }
 
+  /// 「导出安装包」: copies the verified download into `Download/DSH-Go`, so it can
+  /// be signed and installed by hand — the way out for a phone whose system
+  /// refuses a first install (a vendor block) and whose owner signs it with
+  /// MT Manager or the like.
+  ///
+  /// Returns where it landed (`Download/DSH-Go/dsh-go-1.2.0-arm64.apk`), null
+  /// when there is nothing to copy or the copy failed. A package signed by hand
+  /// is one no later update can cover: the signature check stays, so that phone
+  /// goes on signing and installing every version itself.
+  Future<String?> exportApk() async {
+    final apk = _apk;
+    if (!ref.mounted || apk == null || state.busy || !apk.isFile(state)) return null;
+    final files = ref.read(filesChannelProvider);
+    try {
+      if (!await apk.file.exists()) return null;
+      return await files.saveToDownloads(
+        apk.file.path,
+        name: apk.asset,
+        mime: 'application/vnd.android.package-archive',
+      );
+    } catch (_) {
+      // FilesChannel: `missing` (gone from the cache) or a refused save.
+      return null;
+    }
+  }
+
   Future<void> install({UpdateInstallRoute route = UpdateInstallRoute.system, int? port}) async {
     final apk = _apk;
     if (!ref.mounted || apk == null || state.busy) return;
@@ -864,7 +901,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
       // Downloaded for an offer that's no longer on screen: never installed in
       // its place. (The same file under another digest fails below.)
       _apk = null;
-      state = state.copyWith(task: UpdateTaskPhase.idle, problem: () => null);
+      state = state.copyWith(task: UpdateTaskPhase.idle, problem: () => null, apkHere: false);
       return;
     }
     // Taken before the first await, so a second tap or a resume finds it busy.
@@ -893,7 +930,7 @@ class AppUpdateController extends Notifier<AppUpdateState> {
         if (!owns()) return;
         if (identical(_apk, apk)) _apk = null;
       }
-      state = state.copyWith(task: UpdateTaskPhase.failed, problem: () => problem);
+      state = state.copyWith(task: UpdateTaskPhase.failed, problem: () => problem, apkHere: discard ? false : null);
     }
 
     // The offer on screen still names this APK's version, file and the digest

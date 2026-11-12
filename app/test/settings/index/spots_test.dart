@@ -5,6 +5,7 @@
 import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/links/page_links.dart';
 import 'package:dsh_app/ui/features/feature_catalog.dart';
+import 'package:dsh_app/ui/phone/android_shell_page.dart';
 import 'package:dsh_app/ui/settings/index/settings_pages.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +13,16 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   final zh = lookupL10n(const Locale('zh'));
   final en = lookupL10n(const Locale('en'));
+
+  test('Android Shell has its real phone-control path and page', () {
+    final entry = SettingsIndex.entry(SettingsPageId.phoneAndroidShell);
+    expect(entry.page, SettingsPageId.phone);
+    expect(entry.isEntry, isTrue);
+    expect(entry.condition, isNull);
+    expect(SettingsIndex.trail(entry, zh), ['设置', '手机操控', 'Android Shell']);
+    expect(SettingsIndex.trail(entry, en), ['Settings', 'Phone control', 'Android Shell']);
+    expect(settingsPage(entry.opens!), isA<AndroidShellPage>());
+  });
 
   test('ids are unique', () {
     final ids = [for (final s in SettingsIndex.spots) s.id];

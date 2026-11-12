@@ -126,6 +126,7 @@
     <!-- pet -->
     <string name="pet_open_chat">Open chat</string>
     <string name="pet_more">More</string>
+    <string name="pet_tap_hint">Tap twice to open the chat</string>
     <string name="pet_snooze">Hide for today</string>
     <string name="pet_settings">Pet settings</string>
     <string name="pet_channel">Floating pet</string>
@@ -141,7 +142,6 @@
     <string name="pet_new_chat">New chat</string>
     <string name="pet_screenshot">Screenshot &amp; ask DSH-Go</string>
     <string name="pet_wheel_screenshot">Screenshot</string>
-    <string name="pet_wheel_hint">Drag to choose\nRelease to act</string>
     <string name="pet_wheel_stop">Stop</string>
     <string name="pet_wheel_hosts">Hosts</string>
     <string name="pet_wheel_snooze">Hide today</string>

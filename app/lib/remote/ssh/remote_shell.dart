@@ -34,7 +34,13 @@ String redactRemoteTokens(String text) => text.replaceAll(RegExp(r'token=[^\s&#]
 String shQuote(String value) => "'${value.replaceAll("'", r"'\''")}'";
 
 /// `sh -lc '<script>'`: works under bash, zsh, fish and busybox accounts alike.
-String loginShell(String script) => 'sh -lc ${shQuote(script)}';
+String loginShell(String script) {
+  // Unlike POSIX sh, fish interprets \\ and \' inside single quotes. Keep
+  // both backslashes and quotes outside quoted spans so the account shell
+  // passes the same script to sh, including its nested trap quoting.
+  final escaped = script.replaceAllMapped(RegExp(r"['\\]"), (match) => "'\\${match[0]}'");
+  return "sh -lc '$escaped'";
+}
 
 /// Runs scripts with the local `/bin/sh` (tests, and a "remote" that is this
 /// machine).

@@ -68,8 +68,8 @@ internal sealed interface PhoneSkillInstallResult {
 
 /**
  * A new user skill, on RuntimeController's rootfs worker. Never updates a managed/user directory.
- * The final directory is exclusively created; the finished SKILL.md is published with a hard
- * link, whose creation fails if that name already exists. ATOMIC_MOVE alone is not no-replace.
+ * The final directory is exclusively created; a same-directory move publishes the staged SKILL.md.
+ * Default move checks for an existing target; ATOMIC_MOVE would allow replacing it.
  * Root swaps share the worker; containment checks do not sandbox a hostile same-UID process
  * concurrently replacing parent directories (the same boundary as ManagedSkillInstaller).
  */
@@ -106,7 +106,7 @@ internal object PhoneSkillInstaller {
             }
             // Runtime generation and the explicit draft permission are checked together here.
             if (!beginCommit()) return PhoneSkillInstallResult.Refused.STALE
-            Files.createLink(directory.resolve("SKILL.md"), stage)
+            Files.move(stage, directory.resolve("SKILL.md"))
             published = true
             return PhoneSkillInstallResult.Saved(document.skillName)
         } catch (_: FileAlreadyExistsException) {

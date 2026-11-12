@@ -12,7 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/l10n.dart';
 import '../runtime/runtime_state.dart';
-import '../ui/features/schedule_editor/time_zones.dart';
+import 'time_zones.dart';
 import 'connection_state.dart';
 import 'sessions_state.dart';
 import 'settings_state.dart';

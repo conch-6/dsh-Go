@@ -112,6 +112,33 @@ void main() {
     expect(harness.controllers['s1']!.sentAttachments.single, [image]);
     expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'newer draft');
   });
+  for (final pending in [false, true]) {
+    testWidgets('context overflow opens the model picker without replaying input: pending=$pending', (tester) async {
+      final harness = await mount(
+        tester,
+        ChatState(
+          loading: false,
+          items: [
+            user(1, 'retained original'),
+            notice(code: 'CONTEXT_WINDOW_EXCEEDED'),
+          ],
+          turns: [turn()],
+          pending: pending
+              ? [PendingPrompt(requestId: 'failed', text: 'retained', time: DateTime(2026), failureSeq: 10)]
+              : const [],
+        ),
+      );
+      expect(find.widgetWithText(TextButton, '重试'), findsNothing);
+      expect(find.widgetWithText(TextButton, '继续'), findsNothing);
+      final container = ProviderScope.containerOf(tester.element(find.byType(ChatScreen)));
+      await tester.tap(find.widgetWithText(TextButton, '换模型'));
+      await pumpFrames(tester, 4);
+      expect(find.text('选择模型'), findsOneWidget);
+      expect(harness.controllers['s1']!.models, isEmpty, reason: 'Opening the picker does not choose a model.');
+      expect(harness.controllers['s1']!.sent, isEmpty, reason: 'The oversized request must not be replayed.');
+      expect(container.read(chatProvider('s1')).pending, hasLength(pending ? 1 : 0));
+    });
+  }
   testWidgets('unsupported effort offers a user-controlled model/effort picker even with failed input', (tester) async {
     final harness = await mount(
       tester,
@@ -364,6 +391,9 @@ class _UpToDate extends AppUpdateController {
 
   @override
   AppUpdateState build() => const AppUpdateState(loaded: true, current: AppVersion(0, 9, 7));
+
+  @override
+  Future<void> get ready async {}
 
   @override
   Future<UpdateCheckPhase> check() async {

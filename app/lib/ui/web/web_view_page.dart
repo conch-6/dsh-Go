@@ -682,15 +682,19 @@ class _WebViewPageState extends State<WebViewPage> {
             // DSH Web keeps to its own origin; other pages open in the browser.
             onNavigationRequest: widget.dshWeb ? _onDshWebNavigation : null,
             onPageStarted: (_) {
-              if (!mounted || controller != _controller) return;
+              if (!mounted || _gone || controller != _controller) return;
               _files.invalidate();
               _set(() {
                 _loading = true;
                 _error = null;
               });
             },
-            onProgress: (p) => _set(() => _progress = p),
+            onProgress: (p) {
+              if (!mounted || _gone || controller != _controller) return;
+              _set(() => _progress = p);
+            },
             onPageFinished: (_) {
+              if (!mounted || _gone || controller != _controller) return;
               _set(() => _loading = false);
               _appliedInsets = null;
               _applyInsets();
@@ -703,6 +707,7 @@ class _WebViewPageState extends State<WebViewPage> {
               }
             },
             onWebResourceError: (error) {
+              if (!mounted || _gone || controller != _controller) return;
               if (kDebugMode) {
                 // URLs and descriptions may contain the Host's token.
                 debugPrint(

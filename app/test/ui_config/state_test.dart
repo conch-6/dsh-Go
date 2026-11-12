@@ -272,6 +272,7 @@ void main() {
     final c = ProviderContainer(
       overrides: [
         activeHostProvider.overrideWith(() => TestActiveHost(HostRef.local)),
+        uiConfigSourceBuilderProvider.overrideWithValue(defaultUiConfigSource),
         uiConfigKicksProvider.overrideWithValue(const Stream.empty()),
         uiRootfsResolverProvider.overrideWithValue(() async => root),
         localRuntimeProvider.overrideWith(() => TestRuntime(RuntimePhase.running)),

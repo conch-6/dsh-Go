@@ -10,7 +10,10 @@ import '../../state/plugins_state.dart';
 import '../common/feature_tile.dart';
 import '../common/list_page_row.dart';
 import '../common/read_list_status.dart';
+import '../common/search_capsule.dart';
 import '../features/feature_kit.dart';
+import '../features/feature_widgets.dart';
+import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'plugin_actions.dart';
 import 'plugin_detail_sheet.dart';
@@ -20,14 +23,27 @@ import 'plugins_screen.dart';
 /// 「已安装」: third-party bundles of the profile, then DSH's own optional
 /// and on-demand bundles. Infrastructure bundles (dsh-base, web-app, ...)
 /// are not listed.
-class InstalledPluginsSliver extends ConsumerWidget {
+class InstalledPluginsSliver extends ConsumerStatefulWidget {
   const InstalledPluginsSliver({super.key, required this.onBrowse});
 
   /// Switches to the market tab.
   final VoidCallback onBrowse;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<InstalledPluginsSliver> createState() => _InstalledPluginsSliverState();
+}
+
+class _InstalledPluginsSliverState extends ConsumerState<InstalledPluginsSliver> {
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(installedPluginsProvider);
     final view = ref.watch(pluginListViewProvider);
@@ -54,34 +70,68 @@ class InstalledPluginsSliver extends ConsumerWidget {
         for (final row in cached.rows) row.bundle.name: row.group,
     };
     BundleGroup group(PluginBundle b) => groups[b.name] ?? bundleGroup(b);
+    final terms = _search.text.trim().toLowerCase().split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+    bool matches(Iterable<String> fields) {
+      final text = fields.join(' ').toLowerCase();
+      return terms.every(text.contains);
+    }
+
+    bool matchesBundle(PluginBundle bundle) =>
+        terms.isEmpty ||
+        matches([
+          bundle.name,
+          ?bundle.description,
+          ...?bundle.meta?.title?.all,
+          ...?bundle.meta?.description?.all,
+          if (cached == null) ref.watch(nativePluginTitleProvider(bundle.name)),
+        ]);
+
     final installed = [
       for (final b in bundles)
-        if (group(b) == BundleGroup.installed) b,
+        if (group(b) == BundleGroup.installed && matchesBundle(b)) b,
     ];
     final official = [
       for (final b in bundles)
-        if (group(b) == BundleGroup.official) b,
+        if (group(b) == BundleGroup.official && matchesBundle(b)) b,
       for (final b in bundles)
-        if (group(b) == BundleGroup.onDemand) b,
+        if (group(b) == BundleGroup.onDemand && matchesBundle(b)) b,
     ];
-    final listed = {for (final b in installed) b.name};
+    final listed = {
+      for (final b in bundles)
+        if (group(b) == BundleGroup.installed) b.name,
+    };
     final pending = [
       for (final job in jobs.values)
-        if (!view.readOnly && job.isActive && !listed.contains(job.request.name)) job,
+        if (!view.readOnly &&
+            job.isActive &&
+            !listed.contains(job.request.name) &&
+            matches([job.request.name, ?job.request.title]))
+          job,
     ];
 
     var index = 0;
     Widget ease(String name, Widget child) => FadeSlideIn(key: ValueKey(name), index: index++, child: child);
     return SliverList.list(
       children: [
-        if (installed.isEmpty && pending.isEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: SearchCapsule(
+            controller: _search,
+            hint: l10n.pluginsSearch,
+            onChanged: (_) => setState(() {}),
+            onClear: () => setState(_search.clear),
+          ),
+        ),
+        if (terms.isNotEmpty && installed.isEmpty && official.isEmpty && pending.isEmpty)
+          FeatureMessage(icon: AppIcons.noResults, title: readListHeading(l10n.pluginsNoMatchingPlugins, view.status)),
+        if (terms.isEmpty && installed.isEmpty && pending.isEmpty)
           Column(
             children: [
               if (view.readOnly) Text(readListStatusText(view.status), style: Theme.of(context).textTheme.bodySmall),
-              _EmptyInstalled(onBrowse: onBrowse),
+              _EmptyInstalled(onBrowse: widget.onBrowse),
             ],
           )
-        else
+        else if (installed.isNotEmpty || pending.isNotEmpty)
           ListPageCard(
             title: readListHeading(l10n.commonInstalled, view.status),
             children: [
@@ -200,6 +250,7 @@ class BundleTile extends ConsumerWidget {
         subtitle: subtitle.isEmpty ? null : subtitle,
         subtitleColor: error.isNotEmpty && !running ? colors.danger : null,
         trailing: trailing,
+        trailingSemanticLabel: trailing is Switch && !readOnly ? title : null,
         chevron: false,
         onTap: readOnly
             ? null

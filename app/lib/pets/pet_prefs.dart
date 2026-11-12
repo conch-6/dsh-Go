@@ -2,6 +2,8 @@
 // other appearance settings: which pet (or none), its size, quiet mode, where
 // it stands, and 「藏起来 1 小时」. The overlay keeps its own switches natively.
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,6 +18,35 @@ const builtInPets = ['deepy-whale', 'whale-girl'];
 /// The default pet.
 const defaultPetId = 'deepy-whale';
 
+/// Explicit choice for the existing Android overlay. Pixel remains the default.
+enum PetOverlayRenderer {
+  pixel,
+  companion;
+
+  static PetOverlayRenderer fromName(String? value) => values.asNameMap()[value] ?? pixel;
+}
+
+/// 「取景」 for the companion in the overlay, as the stage reads `floatZoom`
+/// and `floatY` (app/assets/companion/stage.js): her model stands 2 tall
+/// around 0, the camera looks at `y` and magnifies by `zoom`.
+enum PetOverlayFraming {
+  /// The whole of her, with a little room around ([PetPrefs]' defaults).
+  full(zoom: 0.9, y: 0),
+
+  /// Twice as close and looking half-way up: her upper half fills what the
+  /// whole of her did. A first guess from the numbers above, not tuned on a phone.
+  half(zoom: 1.8, y: 0.5);
+
+  const PetOverlayFraming({required this.zoom, required this.y});
+
+  final double zoom;
+  final double y;
+
+  /// The preset [prefs] holds; anything else (set some other way) reads as [full].
+  static PetOverlayFraming of(PetPrefs prefs) =>
+      prefs.floatZoom == half.zoom && prefs.floatY == half.y ? half : full;
+}
+
 @immutable
 class PetPrefs {
   const PetPrefs({
@@ -25,6 +56,9 @@ class PetPrefs {
     this.quiet = false,
     this.position = defaultPosition,
     this.hiddenUntil,
+    this.overlayRenderer = PetOverlayRenderer.pixel,
+    this.floatZoom = 0.9,
+    this.floatY = 0,
     this.loaded = false,
   });
 
@@ -45,6 +79,9 @@ class PetPrefs {
 
   /// 「藏起来 1 小时」 until then.
   final DateTime? hiddenUntil;
+  final PetOverlayRenderer overlayRenderer;
+  final double floatZoom;
+  final double floatY;
   final bool loaded;
 
   bool get enabled => packId != noPetId;
@@ -59,6 +96,9 @@ class PetPrefs {
     double? position,
     DateTime? hiddenUntil,
     bool clearHidden = false,
+    PetOverlayRenderer? overlayRenderer,
+    double? floatZoom,
+    double? floatY,
     bool? loaded,
   }) => PetPrefs(
     packId: packId ?? this.packId,
@@ -67,6 +107,9 @@ class PetPrefs {
     quiet: quiet ?? this.quiet,
     position: position ?? this.position,
     hiddenUntil: clearHidden ? null : (hiddenUntil ?? this.hiddenUntil),
+    overlayRenderer: overlayRenderer ?? this.overlayRenderer,
+    floatZoom: floatZoom ?? this.floatZoom,
+    floatY: floatY ?? this.floatY,
     loaded: loaded ?? this.loaded,
   );
 
@@ -79,10 +122,14 @@ class PetPrefs {
       other.quiet == quiet &&
       other.position == position &&
       other.hiddenUntil == hiddenUntil &&
+      other.overlayRenderer == overlayRenderer &&
+      other.floatZoom == floatZoom &&
+      other.floatY == floatY &&
       other.loaded == loaded;
 
   @override
-  int get hashCode => Object.hash(packId, packExplicit, size, quiet, position, hiddenUntil, loaded);
+  int get hashCode => Object.hash(packId, packExplicit, size, quiet, position, hiddenUntil,
+      overlayRenderer, floatZoom, floatY, loaded);
 }
 
 class PetPrefsController extends Notifier<PetPrefs> {
@@ -92,6 +139,8 @@ class PetPrefsController extends Notifier<PetPrefs> {
     quiet: 'pet.quiet',
     position: 'pet.position',
     hidden: 'pet.hidden_until',
+    renderer: 'pet.overlay_renderer',
+    framing: 'pet.overlay_framing',
   );
 
   late Future<void> _loaded;
@@ -116,6 +165,17 @@ class PetPrefsController extends Notifier<PetPrefs> {
       // (UserPetsController.remove).
       final explicit = pack == noPetId || builtInPets.contains(pack) || (pack != null && isUserPet(pack));
       final hidden = prefs.getInt(keys.hidden);
+      var zoom = 0.9, y = 0.0;
+      try {
+        final framing = jsonDecode(prefs.getString(keys.framing) ?? '{}');
+        if (framing is Map) {
+          final z = framing['zoom'], offset = framing['y'];
+          if (z is num && z.isFinite && z > 0 && z <= 4) zoom = z.toDouble();
+          if (offset is num && offset.isFinite && offset >= -1 && offset <= 1) y = offset.toDouble();
+        }
+      } on FormatException {
+        // A corrupt framing preference cannot change the renderer default.
+      }
       state = PetPrefs(
         packId: explicit
             ? pack!
@@ -127,6 +187,9 @@ class PetPrefsController extends Notifier<PetPrefs> {
         quiet: prefs.getBool(keys.quiet) ?? false,
         position: (prefs.getDouble(keys.position) ?? PetPrefs.defaultPosition).clamp(0.0, 1.0),
         hiddenUntil: hidden == null ? null : DateTime.fromMillisecondsSinceEpoch(hidden),
+        overlayRenderer: PetOverlayRenderer.fromName(prefs.getString(keys.renderer)),
+        floatZoom: zoom,
+        floatY: y,
         loaded: true,
       );
     } catch (_) {
@@ -170,6 +233,18 @@ class PetPrefsController extends Notifier<PetPrefs> {
 
   Future<void> setSize(PetSize v) => _save((s) => s.copyWith(size: v), (p) => p.setString(keys.size, v.name));
   Future<void> setQuiet(bool v) => _save((s) => s.copyWith(quiet: v), (p) => p.setBool(keys.quiet, v));
+  Future<void> setOverlayRenderer(PetOverlayRenderer value) =>
+      _save((s) => s.copyWith(overlayRenderer: value), (p) => p.setString(keys.renderer, value.name));
+
+  /// Model-relative framing, kept together in one preference. The default is
+  /// full-body; it does not inherit the room's camera or gestures.
+  Future<void> setOverlayFraming({required double zoom, required double y}) {
+    if (!zoom.isFinite || zoom <= 0 || zoom > 4 || !y.isFinite || y < -1 || y > 1) {
+      throw ArgumentError('Invalid companion framing');
+    }
+    return _save((s) => s.copyWith(floatZoom: zoom, floatY: y),
+        (p) => p.setString(keys.framing, jsonEncode({'zoom': zoom, 'y': y})));
+  }
   Future<void> setPosition(double v) {
     final x = v.clamp(0.0, 1.0);
     return _save((s) => s.copyWith(position: x), (p) => p.setDouble(keys.position, x));

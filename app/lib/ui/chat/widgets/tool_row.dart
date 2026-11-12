@@ -8,20 +8,20 @@ import 'package:flutter/material.dart';
 import '../../../l10n/l10n.dart';
 import '../../common/expand_reveal.dart';
 import '../../common/fluid_bits.dart';
-import '../../common/overscroll_forwarder.dart';
 import '../../common/smooth_size.dart';
 import '../../common/tool_glyph.dart';
 import '../../plugins/view/plugin_view.dart' show DshUiParsed, PluginToolCard;
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
-import '../render/ansi_text.dart';
 import '../render/code_block.dart';
 import '../render/diff_view.dart';
+import '../render/long_text.dart';
 import '../media/media_card.dart';
 import '../tool_view.dart';
 import '../turn_summary.dart';
 import 'approval_card.dart';
 import 'change_card.dart' show DiffCounts;
+import 'question_reply_card.dart';
 import 'stream_motion.dart';
 import 'stream_row.dart';
 import 'tool_images.dart';
@@ -107,6 +107,7 @@ class _ToolRowState extends State<ToolRow> {
     final v = view;
     // 一轮折叠后:只露卡片本身,工具行收在过程里。
     if (widget.card == ToolCardPlacement.cardOnly) {
+      if (v.questionReplies.isNotEmpty) return QuestionReplyCard(replies: v.questionReplies);
       if (v.media case final media?) {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
@@ -160,6 +161,8 @@ class _ToolRowState extends State<ToolRow> {
             },
           ),
         ),
+        if (widget.card == ToolCardPlacement.inline && v.questionReplies.isNotEmpty)
+          QuestionReplyCard(replies: v.questionReplies),
         if (pending != null)
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 4),
@@ -425,32 +428,27 @@ class ToolDetail extends StatelessWidget {
       sections.add(body);
     }
 
-    Widget scrollWell(Widget child) => ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: _kDetailMaxHeight),
-      child: OverscrollForwarder(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-          child: SizedBox(width: double.infinity, child: child),
-        ),
-      ),
-    );
+    // 限高滚动的文本井;太长的只排头尾,井底给「查看全部」。
+    Widget textWell(String title, String text, {bool ansi = false, TextStyle? style, InlineSpan? prompt}) =>
+        LongTextWell(
+          title: title,
+          text: text,
+          style: style ?? monoStyle,
+          maxHeight: _kDetailMaxHeight,
+          ansi: ansi,
+          prompt: prompt,
+        );
 
     // —— 参数 ——
     if (view.command case final command?) {
       section(
         l10n.chatCommand,
-        scrollWell(
-          SelectableText.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: r'$ ',
-                  style: monoStyle.copyWith(color: dsh.lineNumberFg),
-                ),
-                TextSpan(text: command),
-              ],
-            ),
-            style: monoStyle,
+        textWell(
+          l10n.chatCommand,
+          command,
+          prompt: TextSpan(
+            text: r'$ ',
+            style: monoStyle.copyWith(color: dsh.lineNumberFg),
           ),
         ),
       );
@@ -482,7 +480,7 @@ class ToolDetail extends StatelessWidget {
         ),
       );
     } else if (item.arguments.trim().isNotEmpty && item.arguments.trim() != '{}') {
-      section(l10n.chatParameters, scrollWell(SelectableText(view.prettyArguments, style: monoStyle)));
+      section(l10n.chatParameters, textWell(l10n.chatParameters, view.prettyArguments));
     }
 
     // —— 结果 ——
@@ -493,12 +491,7 @@ class ToolDetail extends StatelessWidget {
     } else if (view.failureText case final failure?) {
       section(
         l10n.chatError,
-        scrollWell(
-          AnsiText(
-            text: failure,
-            style: monoStyle.copyWith(color: dsh.danger),
-          ),
-        ),
+        textWell(l10n.chatError, failure, ansi: true, style: monoStyle.copyWith(color: dsh.danger)),
       );
     } else if (item.status == ToolStatus.succeeded) {
       if (view.diff case final lines? when lines.isNotEmpty) {
@@ -550,14 +543,11 @@ class ToolDetail extends StatelessWidget {
                       ),
                     )
               : images == null
-              ? scrollWell(AnsiText(text: text, style: monoStyle))
+              ? textWell(resultTitle, text, ansi: true)
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   mainAxisSize: MainAxisSize.min,
-                  children: [
-                    scrollWell(AnsiText(text: text, style: monoStyle)),
-                    images,
-                  ],
+                  children: [textWell(resultTitle, text, ansi: true), images],
                 ),
         );
       }

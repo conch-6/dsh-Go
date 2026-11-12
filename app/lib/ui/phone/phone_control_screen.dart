@@ -488,7 +488,7 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
                 ListPageRow(
                   key: const ValueKey('android-shell-entry'),
                   icon: AppIcons.terminal,
-                  title: l10n.androidShellTitle,
+                  spot: SettingsIndex.entry(SettingsPageId.phoneAndroidShell),
                   subtitle: l10n.androidShellEntryHint,
                   subtitleMaxLines: 2,
                   onTap: () => _push(const AndroidShellPage()),

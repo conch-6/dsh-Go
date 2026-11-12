@@ -7,17 +7,41 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 /// [remote.RemotePeerConnector] over flutter_webrtc (libwebrtc): the
 /// DataChannel that carries DSH Remote's direct path (LAN / P2P / TURN).
-/// Data only — no microphone, camera or audio session is touched.
+/// Data only: no microphone or camera tracks. The native factory still creates
+/// an audio device module, configured below before its first initialization.
 Future<remote.RemotePeerConnection> flutterPeerConnector(
   List<remote.RemoteIceServer> iceServers,
   remote.RemotePeerHandlers handlers,
 ) async {
+  await (_webRtcInitialization ??= _initializeWebRtc());
   final pc = await createPeerConnection({
     'iceServers': [for (final server in iceServers) server.toJson()],
     'sdpSemantics': 'unified-plan',
     'iceTransportPolicy': handlers.iceTransportPolicy.name,
   });
   return _FlutterPeer(pc, handlers);
+}
+
+Future<void>? _webRtcInitialization;
+
+Future<void> _initializeWebRtc() async {
+  try {
+    // The factory keeps the first configuration for the process. Even a data-only
+    // peer can start its playout track; never classify it as a phone call. These
+    // attributes configure the device module, not AudioSwitch or audio focus.
+    await WebRTC.initialize(
+      options: {
+        'androidAudioConfiguration': AndroidAudioConfiguration(
+          androidAudioAttributesUsageType: AndroidAudioAttributesUsageType.media,
+          androidAudioAttributesContentType: AndroidAudioAttributesContentType.music,
+        ).toMap(),
+      },
+    );
+  } catch (_) {
+    // Share in-flight initialization, but let a later connection retry failures.
+    _webRtcInitialization = null;
+    rethrow;
+  }
 }
 
 class _FlutterPeer implements remote.RemotePeerConnection {
@@ -78,7 +102,11 @@ class _FlutterPeer implements remote.RemotePeerConnection {
       ..onMessage = (message) {
         if (!_closed) _handlers.onMessage(message.isBinary ? message.binary : utf8.encode(message.text));
       };
-    final offer = await _pc.createOffer();
+    // flutter_webrtc otherwise offers to receive audio and video by default.
+    final offer = await _pc.createOffer({
+      'mandatory': {'OfferToReceiveAudio': false, 'OfferToReceiveVideo': false},
+      'optional': [],
+    });
     _checkOpen();
     await _pc.setLocalDescription(offer);
     _checkOpen();

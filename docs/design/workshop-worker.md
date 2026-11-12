@@ -1,0 +1,100 @@
+# 创意工坊 Worker：投稿、审核与公开下载
+
+2026-11-12。**未在真机上验证**，也没有部署到 Cloudflare 或连过真实论坛；下面的行为依据源码和本地测试，上线前要做的事在文末。
+
+权威入口是 `/market/workshop.json`，`/market/companions.json` 是它的过滤投影；既有的 `/market/pets.json`、适配表和定时同步保留原发布路径。权威对象与旧宠物市场分开，是因为原 Cron 会从维护者的上游目录同步宠物：把用户投稿直接写到旧对象，会被后一次同步覆盖。
+
+协议的精确请求 / 响应、错误码和分页见 [workshop-api.md](../../services/share-worker/docs/workshop-api.md)，公开目录 schema 见 [workshop.schema.json](../../market/schema/workshop.schema.json)。App 一侧见 [workshop-app.md](workshop-app.md)。App 应按 kind 分派安装器，忽略未知 kind；以后追加 wallpaper、launch、theme、card 的能力与验证器不要求改写旧 pet / companion 行。
+
+## 状态和发布
+
+私有 `BUCKET` 的 `workshop/state-v1.json` 是唯一权威对象。一次 R2 条件 PUT 原子提交投稿状态、公开当前版本、永久版本绑定、作者绑定、撤回记录、举报和审计。更新用读取到的 ETag 做 `If-Match`；首写用 `If-None-Match: *`。CAS 输家返回 409，不覆盖胜者。存储异常返回 503，不能从异常推断远端未写；客户端用同一 `requestId` 重试创建，再 GET 原 submissionId 核实。
+
+ZIP 先完整验证，再以 `workshop/blobs/<sha>.zip` 创建一次；R2 还核对原生 SHA-256。blob 在审核通过后仍留在私有桶，没有公开可访问的裸桶路径。blob 已存在不是审批凭据；对 pending 投稿执行新的批准时，重新读实际字节、核 size / SHA，再执行当前验证器，最后提交权威状态。
+
+投稿状态机是 draft → pending → approved / rejected；作者可从这些状态撤回，withdrawn 记录不能恢复。status 描述单条投稿的审核 / 撤回历史。批准另一版本会替换这个 kind / id 的当前公开行，旧投稿仍可保持 approved；因此 approved 不能直接显示为「当前公开」。页面须根据重新验证后的目录，核对 kind / id / version / SHA / size 判断作品版本是否当前公开，并采用目录中的公开元数据。目录没有 submissionId，不能区分多个相同投稿中哪一个 sid 是内部 current。
+
+新 id 在首次批准时绑定论坛 origin + 数值 userId；draft 不占有 id。版本首次批准后绑定 kind / id / version / SHA / size；升级、撤回、当前行消失均不删历史。未撤回旧版可使用新的 requestId，以原 SHA / size 创建新投稿，上传成为 pending 后再由管理员批准为当前版；相同版本不同字节、另一作者接管、恢复已写入撤回账本的版本都被拒绝。重复对原 approved / rejected 记录发送相同审核决策，只返回已有记录，不重验、不改变当前行、原审核信息或审计；对旧 approved 原 sid 重发 approve 不会重新上架。
+
+撤回未获批准的 draft / pending / rejected 只终止该记录，不新增版本封禁。撤回曾获批准的投稿会撤回整个 release，并更新同 release 的全部已批准记录。撤回旧版本不隐藏当前新版，但其 `blockedVersions` 永久携带旧版本；撤回当前版本不会自动回退到旧版。没有当前条目时，目录仍保留 withdrawn 账本。举报针对曾获批准发布的版本，不会自动下架；管理员先查证再撤回。
+
+公开下载授权来自当前条目。仅知道 SHA，或持有 draft / pending / rejected 投稿记录，不会新增授权。若另一投稿已使同 kind / id / version、同 SHA / size 的资源成为当前条目，后来同资源的待审或拒绝记录不撤销既有授权；共享 blob 也不因此变成另一版本的公开下载凭据。
+
+每次公开的 GET、HEAD、Range、条件请求都先读当前权威状态。下载必须精确匹配当前行和永久绑定；真实 R2 GET / HEAD 的 checksum 也须匹配。Range / 条件语义复用既有的 `serveObject`，并补充 If-Range 检查。客户端下载响应为 `private, no-store`，目录为 `no-cache, must-revalidate`；ETag 覆盖实际目录和开关投影。关闭 companion 后，旧 ETag、HEAD 或 Range 均不能绕过 503。主目录继续返回 pet 及全部撤回记录，companion 投影和对应下载一起关闭。审核用的私有下载仍可用，便于处置存量问题。
+
+If-Range 的日期按 [RFC 9110 §13.1.5](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.5) 与 Last-Modified 精确匹配，R2 的 `uploaded` 按 HTTP 秒精度比较。强验证的前提来自不可变内容对象及实际摘要检查；较早或较晚的日期均忽略 Range 并返回完整 200，不能使用 If-Unmodified-Since 的 ≤ 比较。强 ETag 精确匹配可返回 206，弱 ETag 不能匹配，没有 Range 时忽略 If-Range。
+
+## 身份、开关和滥用限制
+
+`WORKSHOP_UPLOAD_ENABLED=1` 与 `WORKSHOP_COMPANION_ENABLED=1` 在 `wrangler.jsonc` 里默认设为 1，未配置时也视为开启；设为 0（或其他非 1 的显式值）分别返回稳定的 `workshop_upload_disabled` 或 `workshop_companion_disabled`。上传关闭不阻止本人查询、撤回、举报和管理员拒绝 / 撤回。旧宠物市场不受这两个开关影响。
+
+Worker 只向配置的 HTTPS 论坛 origin（`WORKSHOP_FORUM_URL`，默认 `https://forum.dshtui.com`）请求 `/session/current.json`；拒绝带路径 / 凭据的配置，并以 manual 方式接收响应、拒绝所有非 200 状态，禁止跟随重定向。本地 workerd 里 `redirect: 'error'` 不受支持，不能照搬浏览器 / Node 的该选项。只传 User-Api-Key，不转发客户端 Cookie、Authorization、可变的论坛 URL 或 `User-Api-Client-Id`；后者在 Discourse 模型中可能修改 key 所属的 client。只信官方当前用户响应中的正整数 id 和用户名，拒绝错误状态、过大或无有效身份的响应。完整 key 不落 R2 / KV / 日志，也不作持久指纹。用户名是显示快照；稳定身份是 origin + userId。
+
+每个作者身份请求都必须携带 `X-Workshop-Forum-Origin`，声明该账号凭据所属的规范化论坛 origin。Worker 在请求论坛前，将断言与本次请求读取的配置 origin 做严格等值比较；缺失、空值或不等均返回 `409 / workshop_forum_origin`，不提供省略断言的回退。出站地址始终取自配置，断言既不选择上游，也不转发给论坛。公共查询与管理员的独立身份门不要求此头。
+
+capabilities 用于事前核对，不能替代作者请求自己的断言。配置在两次请求之间改变时，旧断言会在论坛请求前被拒绝；页面需要重新核对账号来源与凭据转交，而不是静默替换成新的服务器来源。判断针对本次请求的配置快照，不依赖同一 Worker origin 终身不换绑的部署假设。历史 owner / 版本绑定仍按论坛 origin + userId 区分，不因配置改变自动迁移。
+
+现有的论坛登录 key 有 read / session_info 所需范围，可以验证身份；这不自动授权把凭据发到另一个服务。App 外层必须明确核对官方 `forumOrigin` 并确认凭据转交，数据层按单次调用显式接收，不读取或持久化 `forum_auth`。长远可由论坛插件签发限定 audience / 操作 / 包 SHA / nonce / 短过期时间的投稿票据；这样的验证服务目前不存在，Worker 里也没有伪造。管理员使用既有的 `X-Admin-Key`，审计 actor 为 `admin`，不能据此归因到某一个管理员个人。
+
+沿用现有限流绑定及 KV 计数，论坛校验前做每 IP 读限流，写入增加突发限制；每个论坛用户每小时 5 次新投稿；archive 尝试、举报和撤回分别每小时 20 次。archive 失败的尝试也先计数。KV 跨 colo 是近似计数，既有计数器异常时 fail-open，不能称为强配额或全局 DoS 防护。所有鉴权 / 存储错误在此路由转换为固定码，不输出底层异常或论坛正文。
+
+## 审计和容量
+
+metadata 强制中英文 title、author、固定的 license 列表、HTTPS source、`rightsConfirmed=true`，以及 SHA 和 size。服务器 `createdAt` 记录确认时间；create / submit / approve / reject / withdraw / report 的状态变更及其操作者、原因都与审计一起 CAS 提交。审计至少保留 186 天，覆盖六个日历月；只在后续写入时清理更老的事件。永久版本绑定、作者归属、撤回和投稿元数据不自动清理。`workshop` 前缀不能配置 7d / 30d 的生命周期。
+
+展示字段 `description` 与 `tags` 可省略，分别默认空字符串和空列表。非空简介最多 512 码点；标签最多 8 条，每条最多 32 码点、非空白、按原字符串唯一；非空值沿用同一个文本门，不修剪、不归一化，标签顺序保留。空字段在新投稿的规范 metadata 中省略，保持既有默认形状。它们随投稿及公开目录保存，也属于同 requestId 的元数据一致性比较，但不要求写入 ZIP。现有 16 KiB 投稿 JSON 与 8 MiB 权威状态上限不变。
+
+权威对象上限 8 MiB，当前条目最多 1000、永久绑定最多 10000、撤回 4000、投稿 / 举报各 10000、审计 20000；它们都是硬上限而非容量保证。每个未撤回的投稿另预留 24 KiB、每个未撤回的发布另预留 12 KiB，含最坏 UTF-8 撤回原因 / 审计字节及名额，避免普通投稿或举报填满后无法撤回已有内容。实际容量会较早触顶，返回 `workshop_capacity`；不丢弃六个月内的审计或历史来腾空间。管理员可通过 `admin/submissions/<id>/withdraw` 终止废弃的 draft / pending / rejected，释放预留但保留记录；不会让无人完成的 draft 永久占住预留。规模化前需由维护者设计带校验的历史归档 / 分片迁移，不能手删 binding。当前没有声称能承载万级活跃投稿。
+
+## 包验证与 App 的关系
+
+pet 复用 App 的精确规则 JSON、其 Unicode 15 固定表和既有的 88 项合成共享夹具（另有 6 项专项测试）。构建生成数据（`src/generated/workshop-data.ts`），指纹覆盖验证源码、生成器、锁文件、规则和 Unicode 数据。ZIP 在解压前逐个检查目录、路径、NFC 后全 casefold 冲突、局部头、重叠区间、链接、压缩 / 加密标志；有界 inflate 检查实际 EOF、尾随字节、CRC 与声明长度。JSON 严格 UTF-8，无 BOM、重复的已解码 key、孤立代理项、非有限数或过深嵌套。其中 24 项 manifest 夹具只补入投稿必需的固定授权元数据，几何 / 引用内容不变；缺少市场元数据的本地包不能直接投稿。schema、frame / scale 整数、Float32 几何、所有动画引用、atlas 边界遵守当前 App 本地导入的门槛。
+
+PNG 检查完整 CRC 和 chunk 顺序、合法色型 / 深度、PLTE / tRNS、连续 IDAT、zlib EOF / Adler32、元数据解压预算、Adam7 / 普通 scanline、filter 0..4，并逐像素还原 RGBA 采样，不是只读图片 header。每张 PNG 最多 8 MiB，单边最多 4096，宽 × 高 × 4 最多 16 MiB；后者是 RGBA8 像素预算，不是 16 bit 解压工作区的内存上限。IDAT 采用两遍扫描后定长拼接，不累积每 chunk 的对象；重建时复用当前行和上一行缓冲，但完整解压 scanline 仍在内存中。校验 ZIP / PNG 时不保留完整状态快照，完成后再读最新状态和 CAS。合法输入的接受域没有靠缩弱校验来扩大。
+
+投稿 ZIP 是 App 本地导入的一个更严的子集：
+
+- 压缩后 ≤ 20 MiB（App 宠物本地 ≤ 64 MiB），只收 ZIP32。
+- 目录必须为空且完整 CRC / EOF 有效。
+- pet 仅一个根或单层目录的 `pack.json` 及引用的 PNG，拒绝多余成员，元数据必须与投稿声明一致。
+- 服务端不猜测或修补作品几何。
+
+App 导出应生成这一干净子集。
+
+companion 只收 character / 数据白名单（json、moc3、png、jpg、jpeg、webp、wav、mp3、txt、md），拒 runtime 代码，拒 `index.json`（由安装器重建）。所有成员的 CRC / 实际展开长度受限，JSON 严格解析，所有 model3 的必需 Moc / Textures 及 expression / motion / physics / pose / userdata / display 文件引用必须在角色目录内实际存在。`character.json` 的授权元数据必须一致，`name` / `model` 必需；明确选择的 persona / name 属于 App 导出决策，服务器不读取本地偏好。moc3 要求 MOC3 头、格式枚举 1..6，未来 / 未知枚举拒绝。
+
+companion 的 JSON 逐成员完成严格解析和语义校验。ZIP 目录在循环前已经完整校验，character / model 的引用直接对该目录检查，不依赖被引用文件排在前面。单个 JSON 函数返回后，其完整对象不加入跨成员的 Map；只保留 character 通过标志、model 数量和 moc 版本集合。所有 JSON 仍完整解析，包括未引用的附加数据；所有 model3 仍检查引用，包括未被 character 选中的模型；后续成员仍逐个核 CRC、PNG 和 moc 门。文件、字节、深度及引用的接受规则没有因此收紧或放宽。若一个无效包同时有多个问题，逐成员语义校验可能先报不同的现有 400 验证码；此类包仍拒绝。
+
+这样做移除了随 JSON 成员累计保留的对象图，不是流式 JSON 解析或完整的内存保证。单个 JSON 仍会完整形成对象图；其节点复杂度、解析临时字符串、PNG 完整 scanline、zlib 拼接瞬态和其他请求的缓冲都需要运行时测量。对象离开函数作用域也不保证 GC 立即归还内存。[Workers 内存限制](https://developers.cloudflare.com/workers/platform/limits/#memory) 是每个 isolate 128 MB，一个 isolate 可能同时承载多项请求，不能把 64 MiB 的归档展开门当作堆预算。
+
+moc 上限 6 来自 `tooling/companion/fixtures/live2d-core-sources-v1.json` 里 2026-11-07 的实测：官方 Core 6.0.1、SHA `8741…ef47`、`latestMocVersion` 6。这份历史记录不证明当前安装 runtime 的聚合摘要一致。版本头通过不等于 Core 一致性或所有模型功能可渲染；批准者仍须用获准的固定 Core 做完整的一致性 / 加载检查，并核对模型许可、内容和实际 App 效果。Worker 不附带 Core / runtime / 模型 / 贴图。companion ≤ 1000 成员、单成员 16 MiB、展开 64 MiB；PNG 沿用 pet 的完整上限，其余数据格式不声称已做音视频或 Core 的完整解码。
+
+## 测试覆盖
+
+测试在 `services/share-worker/test/`：
+
+- `workshop.test.ts`：鉴权、每个作者入口的论坛断言、配置变更后的拒绝、规范 IPv6 来源、公共 / 管理入口独立性、投稿幂等、审核 / 拒绝、他人访问、版本重写、所有权、撤回与 `blockedVersions`、举报、开关、Range / If-Range、真实 GET checksum、固定错误码，以及管理密钥过短时拒绝管理接口。
+- `workshop-state.test.ts`：撤回容量预留、审计保留 186 天与后续写入时的清理。
+- `workshop-if-range.test.ts`：强 / 弱 ETag 与 If-Range 日期的各分支。
+- `workshop-validation.test.ts`：与 App 共用的合成夹具（`app/test/pets/fixtures/`）、Unicode 15 casefold、inflate 的 EOF 与上限、RGBA 逐像素还原、runtime / 不安全或缺失引用 / 未来 moc 格式、隐藏的额外文件。
+- `workshop-companion-sequential.test.ts`：小型合规的多 JSON 夹具，覆盖 stored / deflate 下不同的成员顺序、未选中 model3 的全部引用类别，以及晚到的无效 JSON、CRC、PNG 和 moc 的拒绝。它验证逐成员重构的内容合同，不提供最大 JSON 堆、进程峰值或并发的验收结果。
+- `workshop-runtime.test.ts`：本地 workerd 对同一生产 bundle 运行 44 项 App PNG 语料、合法 pet、deflate 的尾随 / 截断 / 输出上限；2048 × 2048、16 bit RGBA 的正常 PNG（33,556,480 字节 scanline，4,194,304 像素）验证成功。没有测量进程峰值，也没有穷举最大压缩包、元数据、并发的叠加。
+- `workshop-r2-runtime.test.ts`：本地 workerd 的原生 R2 绑定与合成论坛响应，走完审核与撤回的全流程（R2 checksum、CAS、Range）。
+
+这些都不是 Cloudflare R2 或 Discourse 的联机验收。
+
+## 还没有做的
+
+- 部署前需要完成正常的 `npm ci` / build / typecheck / test 与 Wrangler dry-run。
+- 需要在付费 Worker 的 CPU 预算和每 isolate 128 MB 的内存限制下，测完整路由的峰值与并发压力；不能从像素 payload 上限推导全进程内存。
+- 需要配置私有 `BUCKET`（无公开域名）与 `workshop` 前缀的保留策略，并设置满足 `ADMIN_KEY.length >= 32` 的管理密钥（不提交到仓库）；缺失或过短返回 `503 / workshop_admin_unavailable`。配置通过后，请求头 `X-Admin-Key` 的值 `provided` 须非空、满足 `provided.length <= 4096` 且匹配配置，否则返回 `401 / workshop_admin_auth_required`。
+- 需要用测试论坛账户确认 read / session_info 与 key 撤销后的行为。
+- 需要人工审批测试样本。
+- 需要在真实 R2 上验证 CAS、checksum、Range / 断网重试，以及关闭 / 撤回后旧请求的表现。
+- 需要由 App 真机验证导入、已有 runtime 保留、导出回导和中文错误。
+
+## 一手依据
+
+- Discourse [User API keys 规范](https://meta.discourse.org/t/user-api-keys-specification/48536) 与 [UserApiKeyScope 实现](https://github.com/discourse/discourse/blob/main/app/models/user_api_key_scope.rb)：身份请求范围和 client header 行为。
+- Cloudflare [Request 重定向语义](https://developers.cloudflare.com/workers/runtime-apis/request/)、[Workers node:zlib](https://developers.cloudflare.com/workers/runtime-apis/nodejs/zlib/) 与 [平台限制](https://developers.cloudflare.com/workers/platform/limits/)：需要 `nodejs_compat` 及相应的兼容日期，内存 / CPU 另受平台限制；配置采用 2026-10-01。
+- Live2D [Cubism 5.3 兼容性](https://docs.live2d.com/en/cubism-sdk-manual/compatibility-with-cubism-5-3/) 与 [moc3 一致性](https://docs.live2d.com/en/cubism-sdk-manual/moc3-consistency/)：文件版本、Core 检查、renderer 功能是不同层次。

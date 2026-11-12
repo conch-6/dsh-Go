@@ -116,7 +116,8 @@ class TerminalKeyboardState extends State<TerminalKeyboard> with TextInputClient
         inputAction: TextInputAction.newline,
         keyboardAppearance: Brightness.dark,
         autocorrect: false,
-        enableSuggestions: false,
+        // Disabling suggestions sets Android's visible-password input type.
+        enableSuggestions: true,
         enableIMEPersonalizedLearning: false,
         smartDashesType: SmartDashesType.disabled,
         smartQuotesType: SmartQuotesType.disabled,

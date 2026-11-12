@@ -14,6 +14,9 @@ import 'package:dsh_app/state/settings_state.dart';
 import 'package:dsh_app/state/workspaces_state.dart';
 import 'package:dsh_app/ui/shell/drawer/folder_header.dart';
 import 'package:dsh_app/ui/shell/home_shell.dart';
+import 'package:dsh_app/ui/chat/composer_toast.dart';
+import 'package:dsh_app/ui/common/brief_notice.dart';
+import 'package:dsh_app/ui/shell/drawer/drawer_actions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -101,6 +104,35 @@ Future<void> _openFolderActions(WidgetTester tester) async {
 }
 
 void main() {
+  for (final composer in [false, true]) {
+    testWidgets('${composer ? 'composer' : 'brief'} replacement lets queued folder deletion finish', (tester) async {
+      final (container, _) = await _start(tester, sameFolderId: false);
+      final element = tester.element(find.byType(HomeShell));
+      final messenger = ScaffoldMessenger.of(element);
+      messenger.showSnackBar(const SnackBar(content: Text('earlier notice')));
+      await tester.pumpAndSettle();
+      var completed = false;
+      final operation = folderActionsFlow(element, element as WidgetRef, _aView.folders.single).then((_) {
+        completed = true;
+      });
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除文件夹'));
+      await tester.idle();
+      expect(container.read(drawerViewProvider).folders, isEmpty);
+      expect(completed, isFalse);
+      if (composer) {
+        showComposerToast(element, 'replacement', composerHeight: 60);
+      } else {
+        messenger.showBriefNotice('replacement');
+      }
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
+      expect(completed, isTrue);
+      await operation;
+    });
+  }
+
   testWidgets('background pet host switch retires the open folder creation', (tester) async {
     final (container, bView) = await _start(tester, sameFolderId: false);
     await _switchB(tester, container, bView);

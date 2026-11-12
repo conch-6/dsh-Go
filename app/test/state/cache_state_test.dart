@@ -284,6 +284,61 @@ void main() {
     expect(container.read(p).requireValue!.failure, 'new');
   });
 
+  test('retired slash refresh cannot replace the new-chat catalog', () async {
+    switchTo(a, 'slash-refresh-owner');
+    final old = Completer<Object?>();
+    var calls = 0;
+    a.fake.handlers['commands/list'] = (_) => ++calls == 1
+        ? old.future
+        : [
+            {'name': 'current', 'description': 'after reconnect'},
+          ];
+    final session = hostCommandsProvider('commands-session');
+    container.listen(session, (_, _) {});
+    await _tick();
+    expect(calls, 1);
+
+    a.hosts.add(const HostReadyEvent('reconnected', '/root'));
+    await _tick();
+    expect((await container.read(session.future)).single.name, 'current');
+    expect(calls, 2);
+    old.complete([
+      {'name': 'retired', 'description': 'before reconnect'},
+    ]);
+    await _tick();
+    expect(container.read(session).requireValue.single.name, 'current');
+
+    final newChat = hostCommandsProvider(null);
+    container.listen(newChat, (_, _) {});
+    expect((await container.read(newChat.future)).single.name, 'current');
+  });
+
+  test('retired slash client cannot replace the same-host new-chat catalog', () async {
+    switchTo(a, 'slash-client-owner');
+    final old = Completer<Object?>();
+    a.fake.handlers['commands/list'] = (_) => old.future;
+    b.fake.handlers['commands/list'] = (_) => [
+      {'name': 'replacement', 'description': 'new connection'},
+    ];
+    final session = hostCommandsProvider('commands-session');
+    container.listen(session, (_, _) {});
+    await _tick();
+    expect(a.fake.argsOf('commands/list'), hasLength(1));
+
+    switchTo(b, 'slash-client-owner');
+    expect((await container.read(session.future)).single.name, 'replacement');
+    expect(b.fake.argsOf('commands/list'), hasLength(1));
+    old.complete([
+      {'name': 'disconnected', 'description': 'old connection'},
+    ]);
+    await _tick();
+    expect(container.read(session).requireValue.single.name, 'replacement');
+
+    final newChat = hostCommandsProvider(null);
+    container.listen(newChat, (_, _) {});
+    expect((await container.read(newChat.future)).single.name, 'replacement');
+  });
+
   test('slash cache stays with its host and is empty while disconnected', () async {
     a.fake.handlers['commands/list'] = (_) => [
       {'name': 'foo', 'description': 'only A'},

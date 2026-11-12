@@ -71,6 +71,12 @@ used with the author's permission.
 - `shell/`：`drawer_drag.dart`、`home_shell.dart`、`sessions_drawer.dart`
 - `theme/`：`accent.dart`、`app_theme.dart`、`backdrop.dart`、`highlight_theme.dart`、`motion.dart`、`palette.dart`、`semantic_colors.dart`、`shapes.dart`、`squircle.dart`、`typography.dart`
 
+### dartssh2（MIT，已修改）
+
+- 来源：dartssh2 4.1.0（https://pub.dev/packages/dartssh2/versions/4.1.0），上游 https://github.com/vicajilau/dartssh2。
+- 本仓库位置：`packages/dartssh2/`；保留包内原始 `LICENSE`，Flutter 按本地依赖收集许可。
+- 本地改动：增加认证后启用的 `zlib@openssh.com` 压缩、关闭选项、重协商时的压缩流切换及对应测试；不修改密码算法。来源归档校验与维护说明见包内说明。
+
 ### DeepSeek Harness（MIT）
 
 | 项 | 内容 |

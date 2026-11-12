@@ -123,19 +123,14 @@ Future<void> folderActionsFlow(
         final view = ref.read(drawerViewProvider.notifier);
         final removed = await view.deleteFolder(folder.id, isCurrent: owned);
         if (removed == null || !owned() || messenger == null || !messenger.mounted) return;
-        messenger.hideCurrentSnackBar();
-        final notice = messenger.showSnackBar(
-          SnackBar(
-            content: Text(appL10n.shellFolderDeleted(folder.name)),
-            persist: false,
-            action: SnackBarAction(
-              label: appL10n.shellUndo,
-              onPressed: () {
-                if (!owned()) return;
-                undo = view.restoreFolder(removed.$1, removed.$2, isCurrent: owned);
-              },
-            ),
-          ),
+        final notice = messenger.showUndoNotice(
+          appL10n.shellFolderDeleted(folder.name),
+          undoLabel: appL10n.shellUndo,
+          window: const Duration(seconds: 4),
+          onUndo: () {
+            if (!owned()) return;
+            undo = view.restoreFolder(removed.$1, removed.$2, isCurrent: owned);
+          },
         );
         await notice.closed;
         // Keep the lease through restore's own await, even if the action closes

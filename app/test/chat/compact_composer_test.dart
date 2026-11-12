@@ -48,6 +48,85 @@ Future<TextEditingController> _open(
 const _draft = 'first\nsecond\nthird\nfourth\nfifth\nsixth';
 
 void main() {
+  for (final (name, beforeSize, afterSize) in [
+    ('height shrinks', const Size(390, 844), const Size(390, 450)),
+    ('height grows', const Size(390, 450), const Size(390, 844)),
+    ('width grows', const Size(390, 844), const Size(900, 844)),
+    ('width shrinks', const Size(900, 844), const Size(390, 844)),
+    ('same layout', const Size(390, 844), const Size(390, 800)),
+  ]) {
+    testWidgets('composer input survives window change: $name', (tester) async {
+      final input = await _open(tester, size: beforeSize, keyboard: 120);
+      await tester.enterText(find.byType(TextField), '未提交草稿');
+      const value = TextEditingValue(
+        text: '未提交草稿',
+        selection: TextSelection.collapsed(offset: 5),
+        composing: TextRange(start: 0, end: 5),
+      );
+      tester.testTextInput.updateEditingValue(value);
+      await tester.pump();
+      final focus = tester.widget<TextField>(find.byType(TextField)).focusNode!;
+      expect(focus.hasFocus, isTrue);
+      expect(tester.testTextInput.hasAnyClients, isTrue);
+      expect(tester.testTextInput.isVisible, isTrue);
+      expect(input.value, value);
+      final firstCall = tester.testTextInput.log.length;
+
+      _view(tester, afterSize, 120);
+      for (var frame = 0; frame < 4; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(input.value, value);
+        expect(focus.hasFocus, isTrue);
+        expect(tester.testTextInput.hasAnyClients, isTrue, reason: 'frame $frame');
+        expect(tester.testTextInput.isVisible, isTrue, reason: 'frame $frame');
+      }
+      final methods = tester.testTextInput.log.skip(firstCall).map((call) => call.method);
+      expect(methods, isNot(contains('TextInput.clearClient')));
+      expect(methods, isNot(contains('TextInput.hide')));
+      const continued = TextEditingValue(
+        text: '未提交草稿继续',
+        selection: TextSelection.collapsed(offset: 7),
+        composing: TextRange(start: 5, end: 7),
+      );
+      tester.testTextInput.updateEditingValue(continued);
+      await tester.pump();
+      expect(input.value, continued);
+      expect(tester.takeException(), isNull);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+  }
+
+  testWidgets('window changes do not focus an idle composer', (tester) async {
+    final input = await _open(tester, size: const Size(390, 844));
+    input.text = '保留的草稿';
+    await tester.pump();
+    final firstCall = tester.testTextInput.log.length;
+    for (final size in [const Size(390, 450), const Size(900, 844), const Size(390, 844)]) {
+      _view(tester, size, 0);
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isFalse);
+      expect(tester.testTextInput.hasAnyClients, isFalse);
+      expect(tester.testTextInput.isVisible, isFalse);
+      expect(input.text, '保留的草稿');
+    }
+    final methods = tester.testTextInput.log.skip(firstCall).map((call) => call.method);
+    expect(methods, isNot(contains('TextInput.show')));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('leaving the chat still disconnects the focused composer', (tester) async {
+    await _open(tester, size: const Size(390, 844), keyboard: 120);
+    await tester.enterText(find.byType(TextField), '未提交草稿');
+    final editor = tester.state<EditableTextState>(find.byType(EditableText));
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+    expect(tester.testTextInput.isVisible, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(editor.mounted, isFalse);
+    expect(tester.testTextInput.hasAnyClients, isFalse);
+    expect(tester.testTextInput.isVisible, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final (size, keyboard, scale) in [(const Size(844, 390), 180.0, 2.0), (const Size(390, 320), 180.0, 1.0)]) {
     testWidgets('a six-line draft stays reachable at $size with keyboard $keyboard and text $scale', (tester) async {
       final input = await _open(tester, size: size, keyboard: keyboard, scale: scale);

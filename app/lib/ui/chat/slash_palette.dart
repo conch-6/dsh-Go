@@ -9,6 +9,23 @@ import '../common/smooth_size.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 
+/// The part kept when completing at [caret]. A known token is replaced as a
+/// whole, while an unknown token leaves the draft to the right untouched.
+({int leading, String suffix}) slashCompletionContext(List<SlashCommand> commands, String text, int caret) {
+  final leading = text.length - text.trimLeft().length;
+  final full = parseSlashInput(text);
+  final end = full != null && resolveSlashCommand(commands, full.token) != null
+      ? leading + 1 + full.token.length
+      : caret;
+  return (leading: leading, suffix: text.substring(end));
+}
+
+/// The row's click hint and ChatScreen use the same decision.
+bool slashPickInsertsText(SlashCommand command, {required bool hasSuffix}) =>
+    hasSuffix ||
+    command.kind == SlashCommandKind.skill ||
+    (command.kind == SlashCommandKind.host && command.takesInput);
+
 /// 指令面板显示什么。
 sealed class PaletteContent {
   const PaletteContent();
@@ -26,7 +43,12 @@ sealed class PaletteContent {
     final input = parseSlashInput(text);
     if (input == null) return null;
     if (!input.hasArgs) {
-      return PaletteMatches(filterSlashCommands(commands, input.token), typed: input.token.isNotEmpty);
+      final completion = slashCompletionContext(commands, draft, caret ?? draft.length);
+      return PaletteMatches(
+        filterSlashCommands(commands, input.token),
+        typed: input.token.isNotEmpty,
+        hasSuffix: completion.suffix.isNotEmpty,
+      );
     }
     // A hint describes an empty argument on this line. Moving back before an
     // existing argument must not reopen it; name completion above still uses
@@ -45,8 +67,11 @@ sealed class PaletteContent {
 
 /// 还在打指令名:候选列表(可能为空)。第一行是"发送"会选中的那一条。
 final class PaletteMatches extends PaletteContent {
-  const PaletteMatches(this.commands, {this.typed = false});
+  const PaletteMatches(this.commands, {this.typed = false, this.hasSuffix = false});
   final List<SlashCommand> commands;
+
+  /// Picking must preserve the text after the completed command name.
+  final bool hasSuffix;
 
   /// Part of a name is typed: sending picks the first row, so it is marked.
   /// A bare `/` marks nothing (sending it does nothing).
@@ -108,14 +133,18 @@ class SlashPalette extends StatelessWidget {
           ],
         ),
       ),
-      PaletteMatches(:final commands, :final typed) => ConstrainedBox(
+      PaletteMatches(:final commands, :final typed, :final hasSuffix) => ConstrainedBox(
         constraints: const BoxConstraints(maxHeight: _rowHeight * _maxRows),
         child: ListView.builder(
           shrinkWrap: true,
           padding: const EdgeInsets.symmetric(vertical: rowInset),
           itemCount: commands.length,
-          itemBuilder: (context, i) =>
-              _CommandTile(command: commands[i], highlighted: typed && i == 0, onTap: () => onPick(commands[i])),
+          itemBuilder: (context, i) => _CommandTile(
+            command: commands[i],
+            highlighted: typed && i == 0,
+            hasSuffix: hasSuffix,
+            onTap: () => onPick(commands[i]),
+          ),
         ),
       ),
       PaletteHint(:final command) => Padding(
@@ -150,10 +179,17 @@ class SlashPalette extends StatelessWidget {
 }
 
 class _CommandTile extends StatelessWidget {
-  const _CommandTile({required this.command, this.highlighted = false, this.showHintOnly = false, this.onTap});
+  const _CommandTile({
+    required this.command,
+    this.highlighted = false,
+    this.showHintOnly = false,
+    this.hasSuffix = false,
+    this.onTap,
+  });
 
   final SlashCommand command;
   final bool highlighted;
+  final bool hasSuffix;
 
   /// 参数提示态:不可点,描述换成"输入参数后发送"。
   final bool showHintOnly;
@@ -170,11 +206,16 @@ class _CommandTile extends StatelessWidget {
     final colors = theme.colorScheme;
     final dsh = DshColors.of(context);
     final hint = command.hint;
+    final intent = command.kind == SlashCommandKind.skill
+        ? l10n.activitySlashSkillIntent
+        : slashPickInsertsText(command, hasSuffix: hasSuffix)
+        ? l10n.activitySlashInsertIntent
+        : l10n.activitySlashRunIntent;
     final description = showHintOnly
         ? (command.description.isEmpty
               ? l10n.activitySlashEnterArgs
               : l10n.activitySlashDescriptionArgs(command.description))
-        : command.description;
+        : [intent, if (command.description.isNotEmpty) command.description].join(' · ');
     final named = command.label != command.name;
 
     return Semantics(

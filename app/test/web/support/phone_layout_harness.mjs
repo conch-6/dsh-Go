@@ -32,9 +32,12 @@ const toggle = {
   },
 };
 const html = { getAttribute: () => 'drawer', style: {} };
+const sheets = [];
 const document = {
   documentElement: html,
   body: {},
+  head: { firstChild: null, insertBefore: (sheet) => sheets.unshift(sheet.textContent) },
+  createElement: () => ({}),
   addEventListener() {},
   querySelector(sel) {
     if (sel === '[data-slot="root"] > [class*="_frame"]') return frame;
@@ -51,9 +54,11 @@ const sandbox = {
   setTimeout: (fn) => (fn(), 0),
   clearTimeout() {},
 };
-vm.runInNewContext(fs.readFileSync(scriptPath, 'utf8'), sandbox);
+const source = fs.readFileSync(scriptPath, 'utf8');
+vm.runInNewContext(source, sandbox);
+vm.runInNewContext(source, sandbox);
 
-const out = { afterLoad: { clicks, attrs: [...attrs].sort() }, steps: [] };
+const out = { afterLoad: { clicks, attrs: [...attrs].sort() }, sheets, steps: [] };
 for (const step of s.steps ?? []) {
   if (step === 'toggle') window.__dshApp.toggleSidebar();
   else window.__dshApp.closeSidebar();

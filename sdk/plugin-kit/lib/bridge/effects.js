@@ -122,11 +122,11 @@ export function normalize(result, opts) {
   }
   let violation = false;
   const effects = [];
-  list.forEach((raw, i) => {
+  for (const [i, raw] of list.entries()) {
     if (effects.length >= LIMITS.effectsPerInvoke) {
-      if (i === LIMITS.effectsPerInvoke) issues.push({ path: `/runtime/effects/${i}`, code: "too-many", severity: "warn", message: `more than ${LIMITS.effectsPerInvoke} effects; the rest were dropped` });
+      issues.push({ path: `/runtime/effects/${i}`, code: "too-many", severity: "warn", message: `more than ${LIMITS.effectsPerInvoke} effects; the rest were dropped` });
       violation = true;
-      return;
+      break;
     }
     const r = validate(raw, opts);
     if (r.issue) {
@@ -134,7 +134,7 @@ export function normalize(result, opts) {
       if (r.issue.violation) violation = true;
     }
     if (r.effect) effects.push(r.effect);
-  });
+  }
   return { effects, issues, violation };
 }
 

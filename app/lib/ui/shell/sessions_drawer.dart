@@ -25,7 +25,6 @@ import '../../state/read_list_identity.dart';
 import '../../state/workspaces_state.dart';
 import '../bots/bots_page.dart' show BotsPage, UnreadBadge;
 import '../chat/media/media_format.dart' show chatTitleShown;
-import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/empty_view.dart';
 import '../common/pressable.dart';
@@ -42,6 +41,7 @@ import '../share/share_entry.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import '../web/mode_home.dart';
+import '../workspace/text_prompt.dart';
 import '../workspace/workspace_switcher.dart';
 import '../workspace/workspaces_page.dart';
 import 'adaptive/adaptive_layout.dart' show WindowClass;
@@ -615,27 +615,13 @@ class _SessionList extends ConsumerWidget {
   }
 
   Future<String?> _askTitle(BuildContext context, String initial) {
-    final controller = TextEditingController(text: initial);
-    return showAppDialog<String>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text(context.l10n.shellRenameChat),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 80,
-          decoration: InputDecoration(hintText: context.l10n.shellChatTitle, counterText: ''),
-          onSubmitted: (v) => Navigator.pop(dialog, v.trim()),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog), child: Text(context.l10n.commonCancel)),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialog, controller.text.trim()),
-            child: Text(context.l10n.commonSave),
-          ),
-        ],
-      ),
-    ).whenComplete(controller.dispose);
+    return showTextPrompt(
+      context,
+      title: context.l10n.shellRenameChat,
+      initial: initial,
+      hint: context.l10n.shellChatTitle,
+      maxLength: 80,
+    );
   }
 }
 

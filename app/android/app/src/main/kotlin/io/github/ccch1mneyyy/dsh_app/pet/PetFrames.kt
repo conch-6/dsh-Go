@@ -49,6 +49,8 @@ class PetFrames(
     bodyBox: PetBox = restBox,
     /** By animation name: its body hit box ([PetPack.hitBoxFor]). */
     hitBoxes: Map<String, PetBox> = emptyMap(),
+    /** A float's fixed viewport around its alpha box; docking reserves it, touch does not. */
+    fullReach: FramePx? = null,
 ) {
     val rest = FramePx(0, 0, (restBox.w * k).roundToInt(), (restBox.h * k).roundToInt())
 
@@ -77,7 +79,7 @@ class PetFrames(
         .filterValues { it != rest }
 
     /** Rest and every grown frame: what a docked pet may need on screen. */
-    val reach: FramePx = grown.values.fold(rest, FramePx::union)
+    val reach: FramePx = fullReach ?: grown.values.fold(rest, FramePx::union)
 
     private val hits: Map<String, FramePx> = hitBoxes.mapValues { (_, box) -> rest.union(place(box)) }
 

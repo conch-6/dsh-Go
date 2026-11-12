@@ -96,3 +96,25 @@ test('patch scope remains exact across locale, pending emits, plugin mutation an
   assert.equal(replacement.pending.value.replacement, true);
   assert.equal(zh.stopped, true);
 });
+
+
+for (const aliases of [
+  ['zh_CN', 'ZH-cn', 'zh-CN'],
+  ['zh_Hant_TW', 'ZH-hAnT-tW', 'zh_Hant-TW', 'zh-Hant_TW'],
+  ['en_Latn_US_posix', 'EN-lAtN-us-POSIX', 'en_Latn-US_posix'],
+]) {
+  test(`feed locale aliases share one data source: ${aliases[0]}`, t => {
+    const { core, emissions } = setup(t);
+    const scope = normalizeScope({ sessionId: 'locale' });
+    const feed = core.feed('scope-fixture', 'p', 'panel', scope, aliases[0]);
+    for (const alias of aliases.slice(1)) {
+      assert.equal(core.feed('scope-fixture', 'p', 'panel', scope, alias) === feed, true,
+        `${alias} must reuse ${aliases[0]}`);
+    }
+    assert.equal(emissions.size, 1, 'aliases start the plugin data function only once');
+    assert.deepEqual([...emissions.keys()], [`locale:${aliases[0]}`], 'the first caller locale stays unchanged');
+    assert.notEqual(core.feed('scope-fixture', 'p', 'panel', scope, 'fr-FR'), feed);
+    assert.notEqual(core.feed('scope-fixture', 'p', 'panel', normalizeScope({ sessionId: 'other' }), aliases[0]), feed);
+    assert.equal(emissions.size, 3, 'a different locale and a different scope stay independent');
+  });
+}

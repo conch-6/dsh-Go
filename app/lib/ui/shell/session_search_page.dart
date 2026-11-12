@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../l10n/l10n.dart';
 import '../../state/connection_state.dart';
 import '../../state/hosts_state.dart';
+import '../../state/session_deletion_state.dart';
 import '../../state/session_search.dart';
 import '../../state/sessions_state.dart';
 import '../common/app_sheet.dart';
@@ -17,6 +18,7 @@ import '../common/side_insets.dart';
 import '../common/status_dot.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import 'drawer/session_deletion.dart';
 import 'page_frame.dart';
 import 'sessions_drawer.dart' show sessionSelectionColor, sessionTitle;
 
@@ -291,6 +293,8 @@ class _SearchField extends StatelessWidget {
   }
 }
 
+enum _ArchivedAction { restore, delete }
+
 class _SearchBody extends ConsumerWidget {
   const _SearchBody({required this.onPick, this.now, this.archivedOnly = false});
 
@@ -388,12 +392,13 @@ class _SearchBody extends ConsumerWidget {
   }
 
   /// Archived conversations can't be opened as they are (the Host stops their
-  /// work); offer to restore first, like DSH Web's search does.
+  /// work); offer to restore before opening, or permanently delete them.
   Future<void> _openArchived(BuildContext context, WidgetRef ref, SessionSummary session) async {
     final container = ProviderScope.containerOf(context, listen: false);
     final owner = container.read(activeHostProvider);
     final connection = container.read(activeConnectionProvider).value;
     final generation = connection?.client.mux.generation;
+    final deletionOwner = captureSessionDeletionOwner(ref);
     var retired = false;
     final hosts = container.listen(activeHostProvider, (_, next) {
       if (next != owner) retired = true;
@@ -404,7 +409,7 @@ class _SearchBody extends ConsumerWidget {
     bool owned() =>
         !retired && !hosts.closed && !connections.closed && identical(connection?.client.mux.generation, generation);
     try {
-      final restore = await showAppSheet<bool>(
+      final action = await showAppSheet<_ArchivedAction>(
         context,
         builder: (sheet) => SafeArea(
           top: false,
@@ -426,7 +431,13 @@ class _SearchBody extends ConsumerWidget {
                   ListTile(
                     leading: const Icon(AppIcons.unarchive),
                     title: Text(context.l10n.shellRestoreAndOpen),
-                    onTap: () => Navigator.pop(sheet, true),
+                    onTap: () => Navigator.pop(sheet, _ArchivedAction.restore),
+                  ),
+                  SessionDeleteTile(
+                    ids: [session.sessionId],
+                    owner: deletionOwner,
+                    archived: true,
+                    onTap: () => Navigator.pop(sheet, _ArchivedAction.delete),
                   ),
                 ],
               ),
@@ -435,7 +446,12 @@ class _SearchBody extends ConsumerWidget {
           ),
         ),
       );
-      if (restore != true || !context.mounted || !owned()) return;
+      if (!context.mounted) return;
+      if (action == _ArchivedAction.delete && deletionOwner != null) {
+        await deleteSessionsFlow(context, ref, [session.sessionId], owner: deletionOwner, archived: true);
+        return;
+      }
+      if (action != _ArchivedAction.restore || !owned()) return;
       final messenger = ScaffoldMessenger.maybeOf(context);
       try {
         await unarchiveSession(ref, session.sessionId);
@@ -444,6 +460,7 @@ class _SearchBody extends ConsumerWidget {
         if (context.mounted && owned()) messenger?.showSnackBar(SnackBar(content: Text(appL10n.shellRestoreFailed)));
       }
     } finally {
+      deletionOwner?.close();
       hosts.close();
       connections.close();
     }

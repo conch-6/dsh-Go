@@ -162,6 +162,38 @@ void main() {
       expect(crash.containsKey('mainProfile'), isFalse);
     });
 
+    for (final (name, input, expected) in [
+      ('short key in parentheses', 'Error: boom (apiKey=x)', 'Error: boom (apiKey=•••)'),
+      (
+        'secret includes an inner closing parenthesis',
+        'Error: boom (password=synthetic)tail)',
+        'Error: boom (password=•••)',
+      ),
+      (
+        'unwrapped secret includes a closing parenthesis',
+        'Error: boom password=synthetic)tail',
+        'Error: boom password=•••',
+      ),
+    ]) {
+      test('crash and logs: $name', () {
+        final snapshot = DiagnosticsSnapshot(
+          at: _at,
+          status: RuntimeStatus(
+            phase: RuntimePhase.error,
+            failure: RuntimeFailure(kind: FailureKind.startupFailed, at: _at, summary: input),
+          ),
+          settings: const AppSettings(loaded: true),
+          engineLog: [input],
+          failureLog: [input],
+        );
+        final exported = _unzip(DiagnosticsBundle.build(snapshot));
+        final crash = jsonDecode(exported['crash.json']!) as Map<String, Object?>;
+        expect((crash['latest']! as Map)['summary'], expected);
+        expect(exported['engine.log'], '$expected\n');
+        expect(exported['failure.log'], '$expected\n');
+      });
+    }
+
     test('logs: masked, colour stripped, ordinary lines intact', () {
       expect(
         files['engine.log'],

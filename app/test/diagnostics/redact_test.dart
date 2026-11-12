@@ -72,7 +72,7 @@ void main() {
 
     test('passwords, cookies and authorization of any length', () {
       expect(redactDiagnostics('password=hunter2'), 'password=•••');
-      expect(redactDiagnostics('Cookie: dsh_session=s%3Aabc.def; Path=/'), 'Cookie: •••; Path=/');
+      expect(redactDiagnostics('Cookie: dsh_session=s%3Aabc.def; Path=/'), 'Cookie: •••');
       expect(redactDiagnostics('Authorization: Bearer abcdef123456'), 'Authorization: Bearer •••');
       expect(redactDiagnostics('authorization: Basic dXNlcjpwYXNz'), 'authorization: Basic •••');
     });

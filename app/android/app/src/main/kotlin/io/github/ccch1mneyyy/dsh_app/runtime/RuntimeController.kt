@@ -208,7 +208,8 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     /** [dropKept]: give up what a reset kept but cannot be put back (see [KeepFailed]). */
     @Synchronized fun install(dropKept: Boolean = false, onDone: (Throwable?) -> Unit) {
         if (phase == Phase.INSTALLING) return onDone(null)
-        if (installer.isCurrent() && phase != Phase.ERROR && !resetting) {
+        val current = runCatching { installer.isCurrent() }.getOrElse { return onDone(it) }
+        if (current && phase != Phase.ERROR && !resetting) {
             if (phase == Phase.NOT_INSTALLED) setPhase(Phase.INSTALLED)
             return onDone(null)
         }
@@ -438,8 +439,13 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     @Synchronized internal fun startProcess() {
         if (process != null || phase == Phase.INSTALLING || phase == Phase.STOPPING) return
         lastLaunch = null
-        if (!installer.isCurrent()) {
-            error = "runtime not installed"
+        val problem = try {
+            if (installer.isCurrent()) null else "runtime not installed"
+        } catch (e: Exception) {
+            "runtime check failed: ${e.message}"
+        }
+        if (problem != null) {
+            error = problem
             setPhase(Phase.ERROR)
             DshService.stopSelfIfRunning(app, runGen)
             return
@@ -501,16 +507,16 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                     else DshProcess(
                         app, manifest, installer.rootfs,
                         object : DshProcess.Listener by this@RuntimeController {
-                            override fun onLog(line: String, stream: String) {
+                            override fun onLog(line: String, stream: String, storageLine: String) {
                                 if (stream != "system") {
                                     synchronized(runTail) {
                                         if (gen == runGen) {
-                                            runTail.addLast(line)
+                                            runTail.addLast(storageLine)
                                             while (runTail.size > CrashClassifier.TAIL_LINES) runTail.removeFirst()
                                         }
                                     }
                                 }
-                                this@RuntimeController.onLog(line, stream)
+                                this@RuntimeController.onLog(line, stream, storageLine)
                             }
                         },
                     ).also {
@@ -583,7 +589,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         val gen = runGen
         val servers = GuestSetup.pickDns(properties.dnsServers)
         worker.execute {
-            if ((phase == Phase.RUNNING || phase == Phase.STARTING) && installer.isCurrent()) {
+            if (phase == Phase.RUNNING || phase == Phase.STARTING) {
                 // Check ownership where this queued write executes, not only in the callback.
                 // If a stop/start follows this check, its startup DNS write is later on this worker.
                 if (gen != runGen || stopGen >= gen || !networkAccess.isCurrent(watch)) return@execute
@@ -870,11 +876,13 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     }
 
     private fun recordFailure(f: RunFailure, tail: List<String>) {
+        // A later kill from outside says nothing about the profile: keep the plugin failure it followed.
+        val main = !f.safeMode && (f.kind != FailureKind.KILLED || mainFailure == null)
+        File(logDir, LATEST_FAILURE_LOG).delete()
+        if (main) File(logDir, MAIN_FAILURE_LOG).delete()
         failure = f
         val json = JSONObject(f.toMap()).toString()
         val edit = prefs.edit().putString(K_FAILURE, json)
-        // A later kill from outside says nothing about the profile: keep the plugin failure it followed.
-        val main = !f.safeMode && (f.kind != FailureKind.KILLED || mainFailure == null)
         if (main) {
             mainFailure = f
             edit.putString(K_MAIN_FAILURE, json)
@@ -882,7 +890,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         edit.apply()
         try {
             logDir.mkdirs()
-            val text = tail.joinToString("\n", postfix = "\n") { CrashClassifier.redact(it) }
+            val text = tail.joinToString("\n", postfix = "\n") { LogRedactor.redact(it) }
             File(logDir, LATEST_FAILURE_LOG).writeText(text)
             if (main) File(logDir, MAIN_FAILURE_LOG).writeText(text)
         } catch (_: Exception) {
@@ -918,8 +926,8 @@ class RuntimeController private constructor(private val app: Context) : DshProce
 
     // DshProcess.Listener
 
-    override fun onLog(line: String, stream: String) {
-        log(line, stream)
+    override fun onLog(line: String, stream: String, storageLine: String) {
+        log(line, stream, storageLine)
     }
 
     override fun onTidying(active: Boolean) {
@@ -980,7 +988,11 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         setPhase(Phase.RUNNING)
         PhoneControl.get(app).onEngineReady()
         val gen = runGen
-        main.postDelayed({ if (gen == runGen && phase == Phase.RUNNING && process != null) onHealthy() }, SafePolicy.HEALTHY_MS)
+        main.postDelayed({
+            synchronized(this) {
+                if (gen == runGen && phase == Phase.RUNNING && process != null) onHealthy()
+            }
+        }, SafePolicy.HEALTHY_MS)
     }
 
     @Synchronized override fun onExit(source: DshProcess, code: Int, expected: Boolean) {
@@ -1079,7 +1091,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         }
     }
 
-    private fun log(line: String, stream: String) = runtimeLogs.accept(line, stream)
+    private fun log(line: String, stream: String, storageLine: String = line) = runtimeLogs.accept(line, stream, storageLine)
 
     private fun setPhase(next: Phase) {
         if (next != Phase.RUNNING) managedSkillGate.retire()

@@ -6,9 +6,11 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dsh_app/ui/common/app_sheet.dart';
 import 'package:dsh_app/ui/chat/widgets/question_card.dart';
+import 'package:dsh_app/ui/chat/widgets/schedule_question_body.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/hosts_state.dart';
@@ -141,6 +143,62 @@ void main() {
   test('schedule authorization uses real mux replay and scoped human responses', runScheduleAuthorizationChecks);
 
   group('authorization', () {
+    testWidgets('complete Host task is readable and can be explicitly authorized from the editor', (tester) async {
+      final result = Completer<Object?>();
+      final payload = jsonDecode(File('test/chat/fixtures/schedule_authorization_request.json').readAsStringSync());
+      carrier.handlers[r'$events/result'] = (_) => null;
+      carrier.handlers['schedule/update'] = (_) {
+        carrier.link!.push({
+          'type': 'waterfall',
+          'event': 'user-questions/request',
+          'eventId': 'complete-question',
+          'agentId': 's1',
+          'request': payload,
+        });
+        return result.future;
+      };
+      await pump(tester, ScheduleEditorPage(task: _task(_daily), now: _now));
+      await tester.enterText(find.widgetWithText(TextField, '日报提醒'), '新名字');
+      await tester.tap(find.text('保存'));
+      await pumpFrames(tester);
+      expect(find.text('合成每日检查'), findsOneWidget);
+      expect(find.textContaining('1. 检查合成项目，保留完整结果与换行。\n2.'), findsOneWidget);
+      final submit = find.widgetWithText(FilledButton, '提交');
+      await tester.ensureVisible(submit);
+      await pumpFrames(tester);
+      expect(submit.hitTestable(), findsOneWidget);
+      expect(find.text('授权 / Authorize').hitTestable(), findsOneWidget);
+      expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+      final scroll = find.descendant(of: find.byType(ScheduleQuestionBody), matching: find.byType(Scrollable));
+      await tester.scrollUntilVisible(find.text('null'), 220, scrollable: scroll, maxScrolls: 40);
+      expect(find.text('null').hitTestable(), findsOneWidget);
+      expect(carrier.argsOf(r'$events/result'), isEmpty);
+      await tester.tap(find.text('授权 / Authorize'));
+      await tester.pump();
+      expect(carrier.argsOf(r'$events/result'), isEmpty);
+      await tester.tap(submit);
+      await pumpFrames(tester);
+      expect(carrier.argsOf(r'$events/result').single, {
+        'clientId': 'client-1',
+        'eventId': 'complete-question',
+        'outcome': {
+          'kind': 'result',
+          'value': {
+            'answers': [
+              {
+                'id': 'dsh-go-schedule-authorization-synthetic',
+                'selected': ['授权 / Authorize'],
+              },
+            ],
+          },
+        },
+      });
+      expect(find.byType(QuestionCard), findsNothing);
+      result.complete({'id': 'sch-1', 'updated': false, 'code': 'schedule_conflict'});
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
     Future<Completer<Object?>> pendingEdit(WidgetTester tester) async {
       final result = Completer<Object?>();
       carrier.handlers[r'$events/result'] = (_) => null;

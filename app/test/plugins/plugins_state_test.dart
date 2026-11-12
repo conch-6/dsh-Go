@@ -20,6 +20,14 @@ void main() {
       expect(describeOperationFailure(result, isLocal: true).kind, PluginFailureKind.pnpmMissing);
     });
 
+    test('an operation the host cancelled midway does not promise that nothing changed', () {
+      final failure = describeOperationFailure(_result(installResult(application: 'cancelled')), isLocal: true);
+      expect(failure.kind, PluginFailureKind.cancelled);
+      expect(failure.title, '已取消安装');
+      expect(failure.message, '操作没有完成');
+      expect(PluginInstallsController.describeCancelled.message, '没有改动任何东西');
+    });
+
     test('network names the registries, or the spec host', () {
       final viaRegistry = describeOperationFailure(
         _result(

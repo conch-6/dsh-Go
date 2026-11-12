@@ -69,6 +69,21 @@ class BackgroundGateStrictReceiptTest {
         assertFalse(state.needsRetest)
     }
 
+    @Test fun aProbeRejectedBeforeAllocationReleasesTheRetestBarrier() {
+        state.requireRetest()
+        val probe = state.begin { true }!!
+        assertTrue(state.needsRetest)
+        assertTrue(state.concludedWithoutAllocation(probe))
+        assertFalse(state.needsRetest)
+        state.requireRetest()
+        val stale = state.begin { true }!!
+        val current = state.begin { true }!!
+        assertFalse(state.concludedWithoutAllocation(stale))
+        assertTrue(state.needsRetest)
+        assertTrue(state.concludedWithoutAllocation(current))
+        assertFalse(state.needsRetest)
+    }
+
     @Test fun acceptedProbeDoesNotClearRetestUntilItsActualCleanupConsumerCompletes() {
         val old = state.begin { true }!!
         state.requireRetest()

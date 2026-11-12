@@ -51,7 +51,7 @@ try {
       '--legal-comments=inline',
       `--alias:@framework=${join(framework, 'src')}`,
       `--outfile=${join(runtime, 'cubism-framework.js')}`,
-    ],
+    ].map((arg) => process.platform === 'win32' ? `"${arg}"` : arg),
     { stdio: 'inherit', shell: process.platform === 'win32' },
   );
 

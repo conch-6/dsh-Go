@@ -224,6 +224,20 @@ class _ActiveCard extends ConsumerWidget {
                     ? (
                         l10n.remoteSignInAgain,
                         () async {
+                          if (ref.read(relayAccountProvider).value?.user?.provider == 'password') {
+                            final backend = ref.read(relayBackendProvider);
+                            final signedIn = await showSelfHostedLogin(
+                              context,
+                              initialServer: ref.read(relayServerProvider) ?? defaultRelayServer,
+                            );
+                            if (signedIn == true &&
+                                context.mounted &&
+                                ref.read(activeHostProvider) == active &&
+                                identical(backend, ref.read(relayBackendProvider))) {
+                              reconnect();
+                            }
+                            return;
+                          }
                           await ref.read(relayAccountProvider.notifier).login();
                           if (context.mounted && (ref.read(relayAccountProvider).value?.signedIn ?? false)) reconnect();
                         },

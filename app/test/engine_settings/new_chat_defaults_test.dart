@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/engine_settings_state.dart';
+import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/model_defaults_state.dart';
 import 'package:dsh_app/state/models_state.dart';
 import 'package:dsh_app/state/read_list_identity.dart';
 import 'package:dsh_app/ui/providers/new_chat_defaults_card.dart';
+import 'package:dsh_app/ui/providers/providers_page.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -65,6 +67,28 @@ Map<String, Object?> thinkingCatalog({bool high = true}) => {
 };
 
 final _host = StateProvider<HostConnection?>((ref) => null);
+
+class _SshHost extends ActiveHostController {
+  @override
+  HostRef build() => const HostRef.ssh('test-host');
+}
+
+Future<void> _pumpRemoteProviders(WidgetTester tester, FakeSettingsHost host) async {
+  final client = DshClient.withCarrier(host);
+  addTearDown(client.close);
+  await tester.runAsync(() => client.mux.ready());
+  await pumpPage(
+    tester,
+    const ProvidersPage(),
+    overrides: [
+      ...engineOverrides(client).skip(1),
+      activeHostProvider.overrideWith(_SshHost.new),
+      activeConnectionProvider.overrideWithValue(
+        AsyncData(HostConnection(client: client, isLocal: false, kind: HostKind.ssh, hostId: 'test-host')),
+      ),
+    ],
+  );
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -250,6 +274,65 @@ void main() {
     expect(host.mutates(), hasLength(1));
     expect(host.namespaces[defaultModelSettingsNs]!.value['model'], 'qwen3-coder');
     expect(host.calls.where((call) => call.$1 == 'session/selectModel'), isEmpty);
+  });
+
+  testWidgets('empty picker closes before managing providers and system back returns to the original page', (
+    tester,
+  ) async {
+    final host = FakeSettingsHost(describe: defaultsDescribe())
+      ..modelCatalog = {
+        'default': {'provider': 'deepseek-official', 'model': 'deepseek-flash'},
+        'routableProviders': <String>[],
+        'groups': <Object?>[],
+        'failures': [
+          {'id': 'test-route', 'name': 'Test route', 'message': 'No models available for the configured route'},
+        ],
+      };
+    await _pumpRemoteProviders(tester, host);
+    final originalPage = tester.element(find.byType(ProvidersPage));
+
+    await tester.tap(find.text('deepseek-official / deepseek-flash'));
+    await settle(tester);
+    expect(find.text(appL10n.viewModelManageProviders), findsOneWidget);
+    await tester.tap(find.text(appL10n.viewModelManageProviders));
+    await flush(tester);
+    expect(find.byType(ProvidersPage), findsOneWidget);
+    expect(find.byType(ProvidersPage, skipOffstage: false), findsNWidgets(2));
+
+    await tester.binding.handlePopRoute();
+    await settle(tester);
+    expect(tester.element(find.byType(ProvidersPage)), same(originalPage));
+    expect(find.byType(BottomSheet, skipOffstage: false), findsNothing);
+    expect(host.mutates(), isEmpty);
+    expect(host.calls.where((call) => call.$1 == 'session/selectModel'), isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('populated picker resumes after model management and saves only on confirmation', (tester) async {
+    final host = FakeSettingsHost(describe: defaultsDescribe());
+    await _pumpRemoteProviders(tester, host);
+    await tester.tap(find.text('DeepSeek-V4.1-Flash'));
+    await settle(tester);
+    await tester.tap(find.text('My Gateway'));
+    await settle(tester);
+    await tester.tap(find.text('Qwen3 Coder'));
+    await settle(tester);
+    await tester.tap(find.text(appL10n.nearbyManageModels));
+    await flush(tester);
+    expect(host.mutates(), isEmpty);
+
+    await tester.binding.handlePopRoute();
+    await settle(tester);
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.text('Qwen3 Coder'), findsOneWidget);
+    expect(host.mutates(), isEmpty);
+    await tester.tap(find.text(appL10n.commonSave));
+    await flush(tester);
+    expect(find.byType(BottomSheet, skipOffstage: false), findsNothing);
+    expect(host.mutates(), hasLength(1));
+    expect(host.namespaces[defaultModelSettingsNs]!.value['model'], 'qwen3-coder');
+    expect(host.calls.where((call) => call.$1 == 'session/selectModel'), isEmpty);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('base effort cannot be silently inherited by a non-thinking model', (tester) async {

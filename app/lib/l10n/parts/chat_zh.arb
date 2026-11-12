@@ -78,6 +78,9 @@
   "chatTurnCompleted": "这一轮已完成",
   "chatTurnError": "这一轮出错了",
   "chatAnswerHint": "输入回答…",
+  "chatAnswerMode": "发送文字将回答待答问题",
+  "chatMessageMode": "发送新消息",
+  "chatQuestionAnswered": "已回答",
   "chatStarting": "正在启动",
   "chatConnecting": "正在连接",
   "chatDisconnected": "连接已断开",
@@ -524,7 +527,7 @@
   "chatEditAndResend": "编辑后重发",
   "chatRegenerateHint": "在新对话中重新生成，原对话不变",
   "chatBranchHint": "在新对话中继续，原对话不变",
-  "chatEditResendHint": "在新对话中改写，原对话不变",
+  "chatEditResendHint": "在新对话中改写，图片和文件需重新添加；原对话不变",
   "chatSaveToPhotos": "保存到相册",
   "chatCopyAll": "全部复制",
   "chatRequestRetrying": "请求失败，正在重试",
@@ -624,11 +627,49 @@
   "chatToolDeclined": "已拒绝这次调用",
   "chatToolRunning": "正在执行…",
   "chatNoDetails": "暂无详情",
+  "chatOutputHiddenLines": "{count, plural, other{中间省略 {shown} 行}}",
+  "@chatOutputHiddenLines": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "shown": {
+        "type": "String"
+      }
+    }
+  },
+  "chatOutputHiddenChars": "中间省略 {count} 字",
+  "@chatOutputHiddenChars": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "chatOutputSummary": "{count, plural, other{共 {lines} 行}} · {chars} 字",
+  "@chatOutputSummary": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "lines": {
+        "type": "String"
+      },
+      "chars": {
+        "type": "String"
+      }
+    }
+  },
+  "chatOutputViewAll": "查看全部",
+  "chatOutputCopyAll": "复制全文",
+  "chatOutputCopied": "已复制全文",
+  "chatOutputToEnd": "跳到末尾",
+  "chatOutputToStart": "回到开头",
   "chatErrApiKey": "API Key 无效或已过期",
   "chatErrBalance": "余额不足",
   "chatErrAccountQuota": "账号额度已用完",
   "chatErrRateLimit": "请求太频繁，稍后再试",
-  "chatErrContextLength": "对话太长，发送 /compact 压缩后再试",
+  "chatErrContextLength": "对话太长。若 /compact 也失败，请新建对话或换模型",
   "chatErrModelUnavailable": "模型服务暂时不可用",
   "chatErrModelTimeout": "模型响应超时",
   "chatErrModelConnection": "没能连上模型服务",

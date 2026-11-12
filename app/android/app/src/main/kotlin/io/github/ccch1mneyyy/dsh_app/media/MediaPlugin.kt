@@ -254,7 +254,9 @@ class MediaPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         val uri: Uri = resolver.insert(collection, values) ?: throw IOException("MediaStore refused the image")
         try {
             resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: throw IOException("cannot write $uri")
-            resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            if (resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) <= 0) {
+                throw IOException("cannot publish image")
+            }
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
             throw e

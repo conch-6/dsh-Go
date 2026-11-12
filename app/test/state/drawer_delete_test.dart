@@ -8,6 +8,7 @@ import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/session_deletion_state.dart';
 import 'package:dsh_app/state/sessions_state.dart';
 import 'package:dsh_app/state/workspaces_state.dart';
+import 'package:dsh_app/ui/chat/composer.dart';
 import 'package:dsh_app/ui/shell/drawer/selection_bars.dart';
 import 'package:dsh_app/ui/shell/drawer/session_deletion.dart';
 import 'package:dsh_app/ui/shell/drawer/session_tile.dart';
@@ -72,6 +73,7 @@ DrawerHost _host(String name) {
 Future<({DrawerHost host, HostConnection connection, ProviderContainer container, _DeletionBackend backend})> _start(
   WidgetTester tester, {
   _DeletionBackend? backend,
+  bool showChat = false,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final host = _host('A');
@@ -83,7 +85,7 @@ Future<({DrawerHost host, HostConnection connection, ProviderContainer container
   await tester.pumpWidget(
     goldenApp(
       brightness: Brightness.light,
-      home: HomeShell(chatBuilder: (_) => const SizedBox.expand(), initiallyOpen: true),
+      home: HomeShell(chatBuilder: showChat ? null : (_) => const SizedBox.expand(), initiallyOpen: true),
       overrides: [
         ...workspaceOverrides(host, current: 's1', prefs: const WorkspacePrefs(loaded: true)).skip(1),
         switchConnectionProvider.overrideWith(() => SwitchConnection(connection)),
@@ -164,6 +166,73 @@ void main() {
     expect(fixture.container.read(currentSessionProvider), isNull);
     expect(fixture.host.argsOf('workspace/archiveSession'), isEmpty);
     expect(find.text('已永久删除 1 个对话'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('deletion receipt leaves the real composer visible and tappable after closing the drawer', (
+    tester,
+  ) async {
+    await _start(tester, showChat: true);
+    await _singleConfirmation(tester);
+    await tester.tap(_confirm);
+    await _settle(tester);
+    expect(find.text('已永久删除 1 个对话'), findsOneWidget);
+
+    // The drawer's scrim closes it while the receipt is still on screen.
+    final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+    await tester.tapAt(Offset(size.width - 20, size.height / 2));
+    await _settle(tester);
+    final input = find.descendant(of: find.byType(Composer), matching: find.byType(EditableText));
+    expect(input, findsOneWidget);
+    final receipt = find.text('已永久删除 1 个对话');
+    final receiptCard = find.ancestor(of: receipt, matching: find.byType(Material)).first;
+    expect(tester.getRect(receiptCard).bottom, lessThan(tester.getRect(input).top));
+    await tester.tap(input);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.widget<EditableText>(input).focusNode.hasFocus, isTrue);
+    await tester.enterText(input, '继续输入');
+    expect(tester.widget<EditableText>(input).controller.text, '继续输入');
+
+    tester.view.viewInsets = FakeViewPadding(bottom: 300 * tester.view.devicePixelRatio);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('已永久删除 1 个对话'), findsOneWidget);
+    expect(tester.getRect(receiptCard).bottom, lessThan(tester.getRect(input).top));
+    expect(tester.widget<EditableText>(input).focusNode.hasFocus, isTrue);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(MaterialBanner), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('deletion receipt can be dismissed without dismissing the conversation', (tester) async {
+    await _start(tester);
+    await _singleConfirmation(tester);
+    await tester.tap(_confirm);
+    await _settle(tester);
+    await tester.tap(find.descendant(of: find.byType(MaterialBanner), matching: find.text('关闭')));
+    await _settle(tester);
+    expect(find.byType(MaterialBanner), findsNothing);
+    expect(find.byType(HomeShell), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a retired deletion receipt cannot dismiss the next banner', (tester) async {
+    await _start(tester);
+    await _singleConfirmation(tester);
+    await tester.tap(_confirm);
+    await _settle(tester);
+    final messenger = ScaffoldMessenger.of(tester.element(find.byType(HomeShell)));
+    messenger.removeCurrentMaterialBanner();
+    messenger.showMaterialBanner(
+      MaterialBanner(
+        content: const Text('Another notice'),
+        actions: [TextButton(onPressed: () {}, child: const Text('OK'))],
+      ),
+    );
+    await _settle(tester);
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.text('Another notice'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

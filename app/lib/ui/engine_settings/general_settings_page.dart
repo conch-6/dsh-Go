@@ -29,6 +29,7 @@ class GeneralSettingsPage extends StatelessWidget {
       builder: (context, settings) => schemaFormGroups([
         SchemaFormSection(
           title: l10n.engineGeneralWebDisplay,
+          footer: l10n.engineGeneralWebOnlyHint,
           fields: [
             _field('ui-settings', 'enabled'),
             _field('ui-chat', 'transcriptView'),
@@ -38,6 +39,7 @@ class GeneralSettingsPage extends StatelessWidget {
         ),
         SchemaFormSection(
           title: l10n.engineGeneralWebSending,
+          footer: l10n.engineGeneralWebOnlyHint,
           fields: [_field('ui-conversation', 'busyEnter'), _field('ui-chat', 'linkOpening')],
         ),
         if (settings.served('session-log-deepseek'))

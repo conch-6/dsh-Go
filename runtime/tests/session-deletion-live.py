@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix="delete-live-") as tmp:
      for _ in range(200):
       if observe("entered",id)[1]["entered"]:break
       time.sleep(.01)
-     else:raise TimeoutError("prepare gate")
+     else:raise TimeoutError("dispose gate")
      assert observe("snapshot",id)[1]["current"]["pending"] is True
      for action in ["open","clone-create"]:
       status,body=observe(action,id)
@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix="delete-live-") as tmp:
      if fail:
       assert state["deleted"] is False and state["writer"] is True
       assert delete(id)[0]==200
-   print("PASS: real Host fresh, durable, tombstone retry, concurrent open/create/prompt refusal, preparation failure and retry",flush=True)
+   print("PASS: real Host fresh, durable, tombstone retry, concurrent open/create/prompt refusal, disposal failure and retry",flush=True)
   finally:
    p.terminate()
    try:p.wait(timeout=10)

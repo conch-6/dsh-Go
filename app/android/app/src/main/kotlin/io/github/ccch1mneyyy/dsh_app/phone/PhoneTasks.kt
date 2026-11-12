@@ -19,6 +19,8 @@ class PhoneTasks(
     val stopHoldMs: Long = 30_000L,
     private val idSource: (() -> Long)? = null,
 ) {
+    enum class StopSource { USER, SCREEN_OFF, ENVIRONMENT }
+
     data class Snapshot(
         val id: Long,
         val active: Boolean,
@@ -32,9 +34,13 @@ class PhoneTasks(
         val waived: Boolean = false,
         /** Native-only lifetime; never inferred from a session id or a Flutter page. */
         internal val lifecycle: Long = 0,
+        /** This stop hold interrupted a task whose public active projection was true. */
+        val interrupted: Boolean = false,
+        val stopSource: StopSource? = null,
     ) {
         fun toMap(): Map<String, Any?> =
-            linkedMapOf("id" to id, "active" to active, "app" to app, "paused" to paused, "stopped" to stopped, "waived" to waived)
+            linkedMapOf("id" to id, "active" to active, "app" to app, "paused" to paused, "stopped" to stopped,
+                "waived" to waived, "interrupted" to interrupted, "stopSource" to stopSource?.name)
     }
 
     sealed interface Begin {
@@ -53,6 +59,8 @@ class PhoneTasks(
     private var lastCallAt = 0L
     private var stoppedUntil = 0L
     private var stopReason: String? = null
+    private var stopSource: StopSource? = null
+    private var interrupted = false
     private val approved = LinkedHashSet<String>()
     private var waived = false
     private var visualLifecycle = -1L
@@ -86,6 +94,7 @@ class PhoneTasks(
                 stoppedUntil = now + stopHoldMs
                 return Begin.Refused(STOPPED_MESSAGE + (stopReason?.let { "（$it）" } ?: ""))
             }
+            interrupted = false
             // This call is in flight already, so only the pause and the clock count here.
             if (active && !paused && now - lastCallAt > idleMs) endLocked()
             if (!active) {
@@ -128,19 +137,24 @@ class PhoneTasks(
 
     internal fun stopForSnapshot(expected: Snapshot, reason: String): Change? = synchronized(lock) {
         // Snapshot.active may be false because of idle projection while internal active is true.
-        // The exact lifetime, rather than that projection, binds cold/idle stopAll calls.
+        // The exact lifetime, rather than that projection, binds an explicit stop.
         if (taskId != expected.id || lifecycle != expected.lifecycle) return null
         stopLocked(reason)
     }
 
-    private fun stopLocked(reason: String): Change {
+    private fun stopLocked(reason: String, now: Long = clock(), source: StopSource = StopSource.USER): Change {
+        // Record the fact before endLocked clears active. Repeated stops in
+        // this hold retain a prior interruption, but an expired hold cannot
+        // donate that fact to a later cold/idle stop.
+        interrupted = (now < stoppedUntil && interrupted) || (active && !idleLocked(now))
         admissionEpoch++
         if (active) endLocked() else lifecycle++
-        stoppedUntil = clock() + stopHoldMs
+        stoppedUntil = now + stopHoldMs
         stopReason = reason
+        stopSource = source
         paused = false
         lock.notifyAll()
-        return Change(snapshot())
+        return Change(snapshotLocked(now))
     }
 
     internal fun resumeForSnapshot(expected: Snapshot): Change? = synchronized(lock) {
@@ -150,6 +164,7 @@ class PhoneTasks(
             stoppedUntil = 0L
             stopReason = null
         }
+        interrupted = false
         if (paused) {
             paused = false
             if (active) lastCallAt = clock()
@@ -161,10 +176,22 @@ class PhoneTasks(
     internal fun publish(change: Change) = fire(change.snapshot)
 
     /** Commit a stop without listeners; callers publish only after their admission lock is released. */
-    internal fun stopDeferred(reason: String): Change = synchronized(lock) { stopLocked(reason) }
+    internal fun stopDeferred(reason: String, source: StopSource = StopSource.USER): Change = synchronized(lock) { stopLocked(reason, source = source) }
 
-    fun stop(reason: String) {
-        publish(stopDeferred(reason))
+    /** Ambient stops fence queued calls/prompts, but only a live task starts a stop hold. */
+    internal fun stopActiveDeferred(reason: String, source: StopSource = StopSource.ENVIRONMENT): Change = synchronized(lock) {
+        val now = clock()
+        if (active && !idleLocked(now)) return stopLocked(reason, now, source)
+        // A later ambient boundary revokes screen-only recovery without extending the hold.
+        if (now < stoppedUntil && source != StopSource.SCREEN_OFF) { stopSource = source }
+        admissionEpoch++
+        if (active) endLocked() else lifecycle++
+        lock.notifyAll()
+        Change(snapshotLocked(now))
+    }
+
+    fun stop(reason: String, source: StopSource = StopSource.USER) {
+        publish(stopDeferred(reason, source))
     }
 
     /** Ends the task without a stop hold (the engine went away). */
@@ -209,6 +236,7 @@ class PhoneTasks(
             if (active) endLocked() else lifecycle++
             stoppedUntil = 0L
             stopReason = null
+            interrupted = false
             owner = Owner(taskId, lifecycle, false)
             lock.notifyAll()
         }
@@ -345,6 +373,7 @@ class PhoneTasks(
             lifecycle++
             stoppedUntil = 0L
             stopReason = null
+            interrupted = false
         }
         fire()
     }
@@ -468,11 +497,14 @@ class PhoneTasks(
         out
     }
 
-    fun snapshot(): Snapshot = synchronized(lock) {
-        val now = clock()
+    fun snapshot(): Snapshot = synchronized(lock) { snapshotLocked(clock()) }
+
+    private fun snapshotLocked(now: Long): Snapshot {
         val idle = idleLocked(now)
-        Snapshot(taskId, active && !idle, if (active && !idle) app else null, paused, now < stoppedUntil, stopReason,
-            active && !idle && waived, lifecycle)
+        val stopped = now < stoppedUntil
+        if (!stopped) interrupted = false
+        return Snapshot(taskId, active && !idle, if (active && !idle) app else null, paused, stopped, stopReason,
+            active && !idle && waived, lifecycle, interrupted, if (stopped) stopSource else null)
     }
 
     /** Idle: no call running, not paused, and nothing for [idleMs]. */
@@ -501,7 +533,7 @@ class PhoneTasks(
 
     companion object {
         // l10n:keep agent stop protocol
-        const val STOPPED_MESSAGE = "用户已停止本次手机操作。不要再调用手机工具，直接告诉用户已经停下"
+        const val STOPPED_MESSAGE = "本轮手机操作已停止。不要重试本轮手机动作；与手机无关的工作可继续"
     }
 }
 

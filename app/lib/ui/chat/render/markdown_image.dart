@@ -17,6 +17,7 @@ import '../../../l10n/l10n.dart';
 import '../../../state/artifact_files.dart';
 import '../../../state/artifacts.dart';
 import '../../../state/chat_state.dart';
+import '../../../state/emoji_state.dart';
 import '../../../state/sessions_state.dart';
 import '../../../media/gallery.dart' show imageProviderBytes;
 import '../../theme/app_icons.dart';
@@ -267,23 +268,30 @@ class CachedImageReader implements WorkspaceImageReader {
     final key = (sessionId, path);
     final done = peek(sessionId, path);
     if (done != null) return SynchronousFuture(done);
-    return _pending[key] ??= inner
-        .read(sessionId, path)
-        .then(
-          (image) {
-            _pending.remove(key);
-            if (keeps?.call(image) == false) return image;
-            _done[key] = image;
-            while (_done.length > capacity) {
-              _done.remove(_done.keys.first);
-            }
-            return image;
-          },
-          onError: (Object error, StackTrace stack) {
-            _pending.remove(key);
-            Error.throwWithStackTrace(error, stack);
-          },
-        );
+    final pending = _pending[key];
+    if (pending != null) return pending;
+    final request = Completer<LoadedImage>();
+    _pending[key] = request.future;
+    request.complete(
+      Future.sync(() => inner.read(sessionId, path)).then(
+        (image) {
+          // Another tile can retry this path before the old read completes.
+          if (!identical(_pending[key], request.future)) return image;
+          _pending.remove(key);
+          if (keeps?.call(image) == false) return image;
+          _done[key] = image;
+          while (_done.length > capacity) {
+            _done.remove(_done.keys.first);
+          }
+          return image;
+        },
+        onError: (Object error, StackTrace stack) {
+          if (identical(_pending[key], request.future)) _pending.remove(key);
+          Error.throwWithStackTrace(error, stack);
+        },
+      ),
+    );
+    return request.future;
   }
 
   /// Forgets [path] so it is read again (a retry after a failure).
@@ -395,6 +403,33 @@ Uint8List? _dataBytes(String url) {
 Widget markdownImageBuilder(BuildContext context, String url, double? width, double? height) =>
     MarkdownImage(url: url, width: width, height: height);
 
+/// The image-builder callback has no text style argument. Carry the body or
+/// heading's unscaled em through the built tree; gpt_markdown's WidgetSpan
+/// applies the text scaler once around the image.
+class MarkdownImageFont extends InheritedWidget {
+  const MarkdownImageFont({super.key, required this.size, required super.child});
+
+  final double size;
+
+  static double of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<MarkdownImageFont>()?.size ?? AppType.chatBody(context).fontSize!;
+
+  @override
+  bool updateShouldNotify(MarkdownImageFont oldWidget) => size != oldWidget.size;
+}
+
+bool _inlineEmoji(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || uri.fragment == 'dsh-emoji-block') return false;
+  final parts = uri.pathSegments;
+  // Current pack/version/file and the plugin's legacy pack/file route.
+  return (parts.length == 5 || parts.length == 6) &&
+      parts[0] == 'api' &&
+      parts[1] == 'dsh-emoji' &&
+      parts[2] == 'assets' &&
+      parts.skip(3).every((part) => part.isNotEmpty);
+}
+
 /// One image in a reply: no wider than the column, its own aspect ratio,
 /// rounded like the code wells beside it. While it loads, a calm box of the
 /// right (or a 4:3) shape; when it cannot be shown, its file name and why.
@@ -422,6 +457,7 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
   Future<LoadedImage>? _future;
   LoadedImage? _loaded;
   Object? _error;
+  double? _emojiSide;
 
   /// Bumped by a retry, so a failed web image is fetched again.
   int _attempt = 0;
@@ -599,10 +635,24 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
       if (_source is! WebImageSource && _source is! WorkspaceImageSource) return;
       setState(() {
         _engineUrl = null;
+        // A workspace path can stay the same across clients. Retire its read
+        // before resolving it, including a completion still in flight.
+        _future = null;
+        _loaded = null;
+        _error = null;
         _resolve();
       });
     });
     final l10n = context.l10n;
+    final client = ref.watch(artifactFilesProvider.select((files) => files.connection?.client));
+    _emojiSide =
+        _engineUrl != null &&
+            client != null &&
+            widget.width == null &&
+            widget.height == null &&
+            _inlineEmoji(_engineUrl!)
+        ? MarkdownImageFont.of(context) * ref.watch(emojiSizeProvider(client))
+        : null;
     _galleryImage = null;
     _workspaceGallery = false;
     // A media card above already shows this file: not a second time. Only
@@ -615,7 +665,12 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
       if (shownInMediaCard(shown, _path!)) return const SizedBox.shrink();
     }
     final name = imageDisplayName(widget.url);
-    Widget placeholder() => _ImagePlaceholder(size: _knownSizes[_sizeKey], hint: _hint);
+    Widget placeholder() => _emojiSide == null
+        ? _ImagePlaceholder(size: _knownSizes[_sizeKey], hint: _hint)
+        : SizedBox.square(
+            dimension: _emojiSide,
+            child: _ImagePlaceholder(hint: _hint),
+          );
     Widget failed(Object? error) {
       final message = error == null ? l10n.chatImageDisplayFailed : imageErrorText(error);
       // Too big to draw inline, but the full-screen preview can still show it.
@@ -681,6 +736,8 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
   }
 
   Size? get _hint {
+    final emojiSide = _emojiSide;
+    if (emojiSide != null) return Size.square(emojiSide);
     final w = widget.width;
     final h = widget.height;
     return w != null && h != null && w > 0 && h > 0 ? Size(w, h) : null;
@@ -692,7 +749,12 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
     required Widget Function(Object? error) failed,
   }) {
     _galleryImage = provider;
-    final resized = inlineImageProvider(provider, MediaQuery.devicePixelRatioOf(context), _hint);
+    // Emoji packs cap both axes at 512px but permit e.g. 512×1. Resizing that
+    // to an em-sized fit box can round the short axis to zero. Keep its source
+    // decode and fit it at paint time; the gallery also retains the original.
+    final resized = _emojiSide != null
+        ? provider
+        : inlineImageProvider(provider, MediaQuery.devicePixelRatioOf(context), _hint);
     _inlineProvider = resized;
     return _SizeProbe(
       provider: resized,
@@ -719,6 +781,14 @@ class _MarkdownImageState extends ConsumerState<MarkdownImage> {
   /// alt text's `WxH`), clipped to the well radius with a hairline edge so a
   /// white image still has a shape on a white page.
   Widget _framed(Widget image, {required VoidCallback? onTap, VoidCallback? onLongPress}) {
+    if (_emojiSide case final side?) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: SizedBox.square(dimension: side, child: image),
+      );
+    }
     final colors = Theme.of(context).colorScheme;
     final hint = _hint;
     Widget framed = ConstrainedBox(

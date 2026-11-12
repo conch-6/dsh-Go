@@ -18,8 +18,29 @@ dsh-app/
   app/                         Flutter 应用（包名 dsh_app）
     lib/
       main.dart / app.dart     入口、主题、路由
+      companion/               伙伴小屋的逻辑：状态与记忆的存取（主机桥或本机）、主动搭话、亲密度
+      dev/                     开发用入口（探针、插件座位端到端），不进发行包
+      diagnostics/             诊断包、错误日志、打码、输入法诊断
+      forum/                   社区论坛（Discourse）的客户端、登录与状态
+      l10n/                    界面文案：ARB 输入（parts/）与生成的本地化类
+      launch/                  启动画面与自定义开屏（图片、视频、动效）
+      links/                   深链、分享接收、桌面快捷入口、插件市场链接
+      media/                   保存到相册、视频处理的原生通道
+      notify/                  通知、实时活动、回合结束提醒
+      performance/             性能档位与屏幕刷新率
+      pets/                    桌宠：宠物包的导入校验、悬浮窗桥、情绪信号
+      phone/                   手机操控：原生通道、审批、自检、技能录放
+      plugins/                 原生插件（native/）与插件座位（seams/）的模型与状态
+      remote/                  远程连接：中继、SSH、网络监测、密钥存储
       runtime/                 原生运行时的 Dart 侧（平台通道 + Riverpod 状态）
+      share_code/              分享码与导出：对话、插件、配置，及其打码
+      share_hosted/            托管分享链接的客户端与加密
       state/                   应用状态：端点、会话、聊天、设置
+      ui_config/               ui.json：每台主机对原生界面的声明式布局
+      update/                  App 更新：检查、增量包、下载与安装
+      usage/                   匿名使用统计
+      voice/                   语音输入模型的下载与校验
+      wallpaper/               自定义壁纸的导入、取色与渲染
       ui/
         theme/  common/        设计系统
         shell/                 外壳：抽屉 + 导航
@@ -38,6 +59,8 @@ dsh-app/
   tooling/                     工具链安装脚本、env.sh
   docs/
 ```
+
+依赖方向：`ui/` 可以 import 其他目录，`ui/` 以外的目录不 import `ui/`（入口 `main.dart`、`app.dart` 除外）。`app/test/arch/import_direction_test.dart` 守着这条，尚未清掉的旧边列在它的白名单里，白名单只减不增；现状用 `cd app && dart run tool/import_graph.dart` 查看。
 
 ## 平台通道约定（Dart ↔ Kotlin）
 

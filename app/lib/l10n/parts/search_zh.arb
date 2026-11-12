@@ -61,6 +61,8 @@
   "searchKwPetQuiet": "安静,宠物安静",
   "searchKwPetOutside": "悬浮窗,桌面宠物,宠物悬浮",
   "searchKwPetDisplayWhen": "宠物显示,显示时机",
+  "searchKwPetOverlayShows": "悬浮伙伴,小屋里的她,像素宠物,Live2D",
+  "searchKwPetOverlayFraming": "取景,全身,半身",
   "searchKwBlur": "模糊,毛玻璃,玻璃",
   "searchKwAnimations": "动画,动效,减少动画",
   "searchKwFluidMotion": "灵动,弹性,回弹,光晕,丝滑",

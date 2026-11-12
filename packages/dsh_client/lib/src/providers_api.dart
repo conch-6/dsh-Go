@@ -515,8 +515,9 @@ extension ProvidersApi on DshClient {
   }
 
   /// Sets only the given fields of an existing profile, in one atomic write,
-  /// so fields this client does not model (`compat`, `headers`, retry policy)
-  /// stay as they are. [models] replaces the whole list.
+  /// so omitted fields (`compat`, retry policy, unedited headers) stay as they
+  /// are. [models] replaces the whole list; [headers] replaces the whole map,
+  /// with an empty map explicitly clearing inherited headers.
   Future<ProviderSettings> updateProvider(
     String route, {
     String? displayName,
@@ -524,6 +525,7 @@ extension ProvidersApi on DshClient {
     String? baseUrl,
     String? apiKeyEnv,
     List<ProviderModelSpec>? models,
+    Map<String, String>? headers,
     int? expectedRevision,
   }) async {
     _checkRoute(route);
@@ -534,6 +536,7 @@ extension ProvidersApi on DshClient {
       if (baseUrl != null) SettingsOp.set(at('baseURL'), baseUrl),
       if (apiKeyEnv != null) SettingsOp.set(at('apiKeyEnv'), apiKeyEnv),
       if (models != null) SettingsOp.set(at('models'), [for (final m in models) m.toJson()]),
+      if (headers != null) SettingsOp.set(at('headers'), headers),
     ];
     if (ops.isEmpty) throw ArgumentError('nothing to update');
     final section = await mutateSettings(piAiSettingsNs, ops, expectedRevision: expectedRevision);
@@ -593,7 +596,11 @@ extension ProvidersApi on DshClient {
   /// For a draft, pass [baseUrl], [api] and the typed [apiKey] (used for this
   /// request only). For a configured route, pass [provider] and leave
   /// [apiKey] out: the Host then uses the stored credential and the profile's
-  /// headers. OpenAI-style protocols read `GET {baseURL}/models`, Anthropic
+  /// headers. [headers], when present, replaces those headers for this request
+  /// only; an empty map clears them. Omit it for an unedited existing profile.
+  /// Draft headers use the header-aware Host method, which older Hosts reject;
+  /// no retry silently drops them. OpenAI-style protocols read
+  /// `GET {baseURL}/models`, Anthropic
   /// `GET /v1/models` (with or without a trailing `/v1`). Fails with a
   /// [DshRemoteException] whose message names the URL and the HTTP status.
   Future<List<DiscoveredModel>> discoverModels({
@@ -602,11 +609,22 @@ extension ProvidersApi on DshClient {
     String? baseUrl,
     ProviderApi? api,
     String? apiKey,
+    Map<String, String>? headers,
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    final value = await rpc.call('llm/discoverModels', {
+    final method = headers == null ? 'llm/discoverModels' : 'llm/discoverModelsWithHeaders';
+    final value = await rpc.call(method, {
       'settingsNs': settingsNs,
-      'request': {'provider': ?provider, 'baseURL': ?baseUrl, 'api': ?api?.wire, 'apiKey': ?apiKey},
+      'request': {
+        'provider': ?provider,
+        'baseURL': ?baseUrl,
+        'api': ?api?.wire,
+        'apiKey': ?apiKey,
+        if (headers != null)
+          'headers': [
+            for (final entry in headers.entries) {'name': entry.key, 'value': entry.value},
+          ],
+      },
     }, timeout);
     return [for (final m in asListOrEmpty(value)) ?DiscoveredModel.fromJson(m)];
   }

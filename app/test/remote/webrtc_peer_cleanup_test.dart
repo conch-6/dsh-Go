@@ -20,6 +20,19 @@ void main() {
 
   tearDown(() => native.uninstall());
 
+  test('the data-only offer does not request audio or video', () async {
+    final peer = await flutterPeerConnector([], handlers);
+    addTearDown(peer.close);
+    await peer.createOffer('dsh');
+
+    final offer = native.calls.singleWhere((call) => call.method == 'createOffer');
+    expect((offer.arguments as Map)['constraints'], {
+      'mandatory': {'OfferToReceiveAudio': false, 'OfferToReceiveVideo': false},
+      'optional': [],
+    });
+    expect(native.calls.map((call) => call.method), isNot(contains('getUserMedia')));
+  });
+
   test('close failure still disposes the peer and its event subscription', () async {
     native.closeThrows = true;
     final peer = await flutterPeerConnector([], handlers);

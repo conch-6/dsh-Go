@@ -515,7 +515,7 @@ test('index.mjs loads the host protocol package and exposes SRC-compatible Remot
     return body === '' ? [] : body.split(',').map((part) => part.trim())
   }
   assert.deepEqual(
-    Object.fromEntries(['list', 'begin', 'poll', 'answer', 'cancel', 'signOut'].map((m) => [m, wireNames(m)])),
-    { list: [], begin: ['provider'], poll: ['attemptId'], answer: ['attemptId', 'value'], cancel: ['attemptId'], signOut: ['provider'] },
+    Object.fromEntries(['list', 'usage', 'begin', 'poll', 'answer', 'cancel', 'signOut'].map((m) => [m, wireNames(m)])),
+    { list: [], usage: ['provider'], begin: ['provider'], poll: ['attemptId'], answer: ['attemptId', 'value'], cancel: ['attemptId'], signOut: ['provider'] },
   )
 })

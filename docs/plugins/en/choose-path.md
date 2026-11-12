@@ -9,7 +9,7 @@ There are three ways into dsh-go. Start from what you have, take the cheapest pa
 | A DSH plugin with commands, skills, settings | [Nothing to change](#1-nothing-to-change) | Nothing | Slash menu, native settings form |
 | A plugin with tools, and you want better results | [Tool cards](#2-tool-cards) | The tool's `presentationMeta` | Tool results as native cards, on every host |
 | Buttons, panels or status on the chat page in mind | [Native plugin](#3-native-plugin) | `dshGo` in `package.json` + `ctx.dshGo` | Capsules, menus, status line, panels and more |
-| An existing DSH web interface | [Web plugin](#4-plugins-with-a-web-interface) | Nothing, or move piece by piece to native | Web island or "Open in web" |
+| An existing DSH web interface | [Web plugin](#4-plugins-with-a-web-interface) | Reuse subject to slot and host support, or move piece by piece to native | Web island, opt-in in-app overlay or "Open in web" |
 
 ## 1. Nothing to change
 
@@ -44,9 +44,11 @@ Your logic runs in the engine as usual, and the app never executes plugin code. 
 
 ## 4. Plugins with a web interface
 
-They work unchanged. The app seats each slot you register in this order: native adapter → web island → "Open in web". Slots the app has no place for are listed honestly in the plugin's details; see [Web panels](web-panels.md).
+The app seats each slot you register in this order: native adapter → web island → "Open in web". Unchanged reuse depends on the slot, component implementation, host bridge and resource budget; not every web plugin is guaranteed to work. Slots the app has no place for are listed in the plugin's details. `shell.overlay` requires explicit per-package opt-in in plugin details; `sidebar.footer.action`, `settings.plugins.tab` and `plugins.detail.section` can also open as single-package page islands from there. See [Web panels](web-panels.md).
 
-**Moving pieces to native is better:** a web island takes 1–3 s to open first, costs about 200 MB and is limited in how many can be on screen. Native places open at once and look like the rest of the app.
+**Moving pieces to native is usually lighter:** about 200 MB for the first island and roughly 1–3 s for its first opening are estimates from an Android 15 x86_64 debug emulator only, not verified on physical devices or guaranteed per island/device. Islands also have an on-screen count limit. Native places need no extra WebView and match the app.
+
+Overlays stay in the chat-content area of `ChatScreen` within `HomeShell.chat`, clipped by `ClipRect` between the native header and composer without covering native chrome, the drawer, right pane or modals. Pending approvals / unanswered questions stop them, and their viewport shrinks with native keyboard layout. They cannot float across apps. Touch pass-through uses rectangles, not pixel transparency; hit regions can lag fast movement. This work reuses web seams: it adds no native `pets` / `bubbles` / `actions` protocol and does not enable gesture-free audio playback.
 
 `dshGo` and `ctx.dshGo` only affect the app, so DSH Web keeps your web interface and the two don't interfere. A rough map:
 

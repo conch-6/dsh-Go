@@ -5,7 +5,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../ui/session/session_tab.dart';
+import 'session_tab.dart';
 
 /// The person's choices for wide windows. Both start unfolded.
 class LayoutPrefs {

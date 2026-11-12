@@ -469,8 +469,15 @@ class MarkdownBody extends StatefulWidget {
   }
 
   /// 标题是读屏里能逐个跳转的 header 节点。
-  static Widget _headingBuilder(BuildContext context, int level, Widget content, HeadingStyle style) =>
-      Semantics(header: true, container: true, child: content);
+  static Widget _headingBuilder(BuildContext context, int level, Widget content, HeadingStyle style) {
+    final theme = GptMarkdownTheme.of(context);
+    final heading = [theme.h1, theme.h2, theme.h3, theme.h4, theme.h5, theme.h6][level - 1];
+    final size = (heading ?? const TextStyle()).merge(style.textStyle).fontSize ?? MarkdownImageFont.of(context);
+    return MarkdownImageFont(
+      size: size,
+      child: Semantics(header: true, container: true, child: content),
+    );
+  }
 
   /// 任务清单 `- [ ]` / `- [x]`:只读的方框图标。包里默认用 Material 的
   /// [Checkbox],它要求祖先里有 Material,聊天列表里没有,会报错并溢出。
@@ -665,7 +672,10 @@ class _MarkdownBodyState extends State<MarkdownBody> {
     markdown = ScrollConfiguration(behavior: const EdgeFadeScrollBehavior(), child: markdown);
     if (widget.reveal) markdown = _RevealStreaming(streaming: widget.streaming, blocks: _blocks, child: markdown);
     if (widget.selectable) markdown = SelectionArea(child: markdown);
-    return MarkdownGalleryScope(child: markdown);
+    return MarkdownImageFont(
+      size: body.fontSize!,
+      child: MarkdownGalleryScope(child: markdown),
+    );
   }
 }
 

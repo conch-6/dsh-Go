@@ -206,12 +206,20 @@ class _NoticeKey extends StatelessWidget {
 /// `ChatState.error` 的行内横幅:浮在输入条上方,可关闭。
 /// [info] 用于 `ChatState.notice`:提示而非失败,换成信息色和图标。
 class ErrorBanner extends StatelessWidget {
-  const ErrorBanner({super.key, required this.message, this.onDismiss, this.info = false, this.action});
+  const ErrorBanner({
+    super.key,
+    required this.message,
+    this.onDismiss,
+    this.info = false,
+    this.action,
+    this.maxLines = 3,
+  });
 
   final String message;
   final VoidCallback? onDismiss;
   final bool info;
   final NoticeAction? action;
+  final int? maxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -244,8 +252,8 @@ class ErrorBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   message,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
+                  maxLines: maxLines,
+                  overflow: maxLines == null ? TextOverflow.visible : TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(color: onContainer),
                 ),
               ),

@@ -323,10 +323,13 @@ class RelayHostLink implements HostLink, NetworkInspectableHostLink {
     _client = null;
     if (previous != null) unawaited(previous.close().catchError((_) {}));
     // States from an earlier attempt's client (closing now) are stale.
+    (RelayConnectionState, HostLinkError?)? latestState;
     final client = await backend.connectHost(
       host,
       onState: (state, error) {
-        if (attempt == _attempt) _onRelayState(state, error);
+        if (attempt != _attempt) return;
+        latestState = (state, error);
+        _onRelayState(state, error);
       },
     );
     if (_closed) {
@@ -334,7 +337,15 @@ class RelayHostLink implements HostLink, NetworkInspectableHostLink {
       throw StateError('link closed');
     }
     _client = client;
-    _emit(_connected(client));
+    // Ready may have been followed by a loss before this continuation ran.
+    if (latestState case (final state, final error)
+        when state == RelayConnectionState.reconnecting ||
+            state == RelayConnectionState.failed ||
+            state == RelayConnectionState.disconnected) {
+      _onRelayState(state, error);
+    } else {
+      _emit(_connected(client));
+    }
     if (_published) _clients.add(client);
     _published = true;
     return client;

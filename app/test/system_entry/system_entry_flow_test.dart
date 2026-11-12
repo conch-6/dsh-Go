@@ -205,6 +205,36 @@ void main() {
     await _unmount(tester);
   });
 
+  testWidgets('consecutive shares keep all draft text but only the latest warning', (tester) async {
+    natives(tester);
+    final harness = ChatHarness();
+    await _pump(tester, harness);
+    Future<void> share(String name) => _shares.push({
+      'text': name,
+      'skipped': [
+        {'name': '$name.bin', 'reason': 'too_large'},
+      ],
+    });
+    await share('first');
+    await _settle(tester, () => _composerText(tester) == 'first');
+    expect(find.text('「first.bin」太大，未添加'), findsOneWidget);
+
+    // Native arrivals can finish while the first warning is still exiting.
+    await share('middle');
+    await share('latest');
+    await tester.idle();
+    await pumpFrames(tester);
+    expect(_composerText(tester), 'first\n\nmiddle\n\nlatest');
+    expect(find.text('「latest.bin」太大，未添加'), findsOneWidget);
+    expect(find.text('「middle.bin」太大，未添加'), findsNothing);
+    expect(harness.controllers.values.every((c) => c.sent.isEmpty), isTrue);
+    await _settle(tester, () => tester.widget<SnackBar>(find.byType(SnackBar)).animation!.isCompleted);
+    await tester.pump(const Duration(seconds: 2));
+    await pumpFrames(tester);
+    expect(find.byType(SnackBar), findsNothing);
+    await _unmount(tester);
+  });
+
   testWidgets('a lone share-code file goes to the importer, not to a chat', (tester) async {
     natives(tester);
     final code = cached('读书笔记.dshgo', utf8.encode('{"dshgo":1}'));

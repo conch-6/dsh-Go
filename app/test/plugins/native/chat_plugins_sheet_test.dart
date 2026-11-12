@@ -316,12 +316,12 @@ void main() {
   group('the side panel\'s pane', () {
     Finder otherPages() => find.widgetWithText(ListPageRow, '插件');
 
-    Future<void> pane(WidgetTester tester, Map<String, List<SlotOccupant>> web) async {
+    Future<void> pane(WidgetTester tester, Map<String, List<SlotOccupant>> web, {VoidCallback? onOtherPages}) async {
       usePhoneView(tester);
       await tester.pumpWidget(
         testApp(
           Scaffold(
-            body: ChatWebPluginsPane(sessionId: 's1', onOtherPages: () {}),
+            body: ChatWebPluginsPane(sessionId: 's1', onOtherPages: onOtherPages ?? () {}),
           ),
           overrides: _overrides(_bridge(panels: false), web: web),
         ),
@@ -340,6 +340,20 @@ void main() {
         Slots.main: [seats.occupant(Slots.main, seats.probe, 'k4-panel')],
       });
       expect(otherPages(), findsOneWidget);
+    });
+
+    testWidgets('global pages keep a way on beside a conversation view from the same web plugin', (tester) async {
+      var opened = false;
+      await pane(tester, {
+        ..._web,
+        Slots.main: [seats.occupant(Slots.main, seats.probe, 'k4-panel')],
+        Slots.conversationView: [seats.occupant(Slots.conversationView, seats.probe, 'memory', label: '记忆')],
+      }, onOtherPages: () => opened = true);
+      expect(find.text('记忆'), findsOneWidget);
+      expect(otherPages(), findsOneWidget);
+      await tester.tap(otherPages());
+      expect(opened, isTrue);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('a conversation page of a plugin with parts is its own row, not the way on', (tester) async {

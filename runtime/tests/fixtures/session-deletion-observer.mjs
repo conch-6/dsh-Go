@@ -27,13 +27,14 @@ export function apply(ctx) {
     const writer = storage.tracker.writers.get(id);
     const agent = ctx.agents.get(id);
     try {
-      return await original.call(seam, id, {...hooks, prepare: async () => {
+      return await original.call(seam, id, {...hooks, dispose: async (sessionId, options) => {
+        // Gate the real disposal point: the fence is already held and no agent is torn down yet.
         if (gate) {
           gate.entered = true;
           await gate.promise;
-          if (gate.fail) throw new Error('synthetic prepare failure');
+          if (gate.fail) throw new Error('synthetic dispose failure');
         }
-        await hooks.prepare();
+        await hooks.dispose(sessionId, options);
       }});
     } finally {
       attempts.set(id, {before, after: snapshot(id), capturedWriter: writer && {

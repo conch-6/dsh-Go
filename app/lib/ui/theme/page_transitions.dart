@@ -444,9 +444,12 @@ class _BackGestureState extends State<_BackGesture> with WidgetsBindingObserver,
   /// Route progress while the in-app swipe owns the route (1 = fully shown).
   double? _progress;
 
+  /// The start we must balance until commit/cancel hands it back to the route.
+  NavigatorState? _gestureNavigator;
+
   PageRoute<dynamic> get _route => widget.route;
 
-  bool get _canGesture => _route.isCurrent && _route.popGestureEnabled;
+  bool get _canGesture => _gestureNavigator == null && _route.isCurrent && _route.popGestureEnabled;
 
   @override
   void initState() {
@@ -464,8 +467,18 @@ class _BackGestureState extends State<_BackGesture> with WidgetsBindingObserver,
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    final navigator = _gestureNavigator;
+    _gestureNavigator = null;
+    _progress = null;
     _drag?.dispose();
     _settle.dispose();
+    if (navigator != null) {
+      // The route can leave before the swipe or its spring finishes. Updating
+      // the surviving routes' IgnorePointer must wait until unmounting ends.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (navigator.mounted) navigator.didStopUserGesture();
+      });
+    }
     super.dispose();
   }
 
@@ -476,6 +489,7 @@ class _BackGestureState extends State<_BackGesture> with WidgetsBindingObserver,
     if (backEvent.isButtonEvent || !_canGesture || _progress != null) {
       return false;
     }
+    _gestureNavigator = _route.navigator;
     _route.handleStartBackGesture(progress: 1 - backEvent.progress);
     return true;
   }
@@ -486,10 +500,18 @@ class _BackGestureState extends State<_BackGesture> with WidgetsBindingObserver,
   }
 
   @override
-  void handleCancelBackGesture() => _route.handleCancelBackGesture();
+  void handleCancelBackGesture() {
+    if (_gestureNavigator == null) return;
+    _gestureNavigator = null;
+    _route.handleCancelBackGesture();
+  }
 
   @override
-  void handleCommitBackGesture() => _route.handleCommitBackGesture();
+  void handleCommitBackGesture() {
+    if (_gestureNavigator == null) return;
+    _gestureNavigator = null;
+    _route.handleCommitBackGesture();
+  }
 
   // ── In-app edge swipe ──────────────────────────────────────────────────────
 
@@ -510,6 +532,7 @@ class _BackGestureState extends State<_BackGesture> with WidgetsBindingObserver,
   void _onStart(DragStartDetails details) {
     if (!_canGesture) return;
     _progress = 1;
+    _gestureNavigator = _route.navigator;
     _route.handleStartBackGesture(progress: 1);
   }
 
@@ -542,9 +565,9 @@ class _BackGestureState extends State<_BackGesture> with WidgetsBindingObserver,
       _progress = null;
       if (!mounted) return;
       if (leave) {
-        _route.handleCommitBackGesture();
+        handleCommitBackGesture();
       } else {
-        _route.handleCancelBackGesture();
+        handleCancelBackGesture();
       }
     }
 

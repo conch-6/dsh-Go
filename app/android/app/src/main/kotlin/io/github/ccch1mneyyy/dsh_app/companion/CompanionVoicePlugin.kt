@@ -95,8 +95,7 @@ class CompanionVoicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         return runCatching {
             val locale = Locale.forLanguageTag(language)
             val ok = engine.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
-            if (ok) engine.language = locale
-            ok
+            ok && engine.setLanguage(locale) >= TextToSpeech.LANG_AVAILABLE
         }.getOrDefault(false)
     }
 

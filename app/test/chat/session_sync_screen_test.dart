@@ -1,11 +1,21 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:dsh_app/l10n/l10n.dart';
+import 'package:dsh_app/plugins/native/native_state.dart';
+import 'package:dsh_app/plugins/seams/seat_state.dart';
 import 'package:dsh_app/state/chat_state.dart';
+import 'package:dsh_app/state/engine_settings_state.dart';
+import 'package:dsh_app/state/features_state.dart';
+import 'package:dsh_app/state/header_schedule_state.dart';
+import 'package:dsh_app/state/plugins_state.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:dsh_app/ui/chat/composer.dart';
 import 'package:dsh_app/ui/theme/app_icons.dart';
+import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +23,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/harness.dart';
 import 'support/session_sync_host.dart';
+
+// Peripheral catalogs are unrelated to the first history snapshot.
+class _NoFormatSettings extends EngineSettingsController {
+  @override
+  Future<EngineSettings?> build() async => null;
+}
+
+class _NoFormatPlugins extends InstalledPluginsController {
+  @override
+  Future<List<PluginBundle>?> build() async => const [];
+}
 
 class _RuntimeSpy extends StaticRuntime {
   var stops = 0;
@@ -40,6 +61,7 @@ Future<SyncHarness> _start(
   required _RuntimeSpy runtime,
   String? phase,
   bool newSession = false,
+  bool initialSnapshot = true,
 }) async {
   usePhoneView(tester);
   mockClipboard(tester);
@@ -48,10 +70,17 @@ Future<SyncHarness> _start(
   await tester.runAsync(
     () => HttpOverrides.runWithHttpOverrides(() async {
       h = await SyncHarness.start(
-        initialSnapshot: !newSession,
+        initialSnapshot: initialSnapshot && !newSession,
         overrides: [
           for (final override in ui.overrides)
             if (override.origin != activeConnectionProvider && override.origin != chatProvider) override,
+          skillsProvider.overrideWith((ref, id) async => const []),
+          sessionSchedulesProvider.overrideWith((ref, id) async => const []),
+          engineSettingsProvider.overrideWith(_NoFormatSettings.new),
+          installedPluginsProvider.overrideWith(_NoFormatPlugins.new),
+          nativeBridgeProvider.overrideWithValue(null),
+          webBootProvider.overrideWith((ref) async => null),
+          bridgeInventoryProvider.overrideWith((ref) async => null),
         ],
       );
       if (phase != null) await h.enter(phase);
@@ -105,6 +134,143 @@ void main() {
       }
     });
   }
+
+  for (final (locale, reason) in const [
+    (AppLocale.zhCN, '对话同步中断：当前引擎无法读取此对话的日志格式，请导出诊断包排查'),
+    (
+      AppLocale.en,
+      "Chat sync interrupted: This engine cannot read this chat's log format. Export diagnostics to investigate.",
+    ),
+  ]) {
+    testWidgets('unsupported history shows its reason before the first snapshot: $locale', (tester) async {
+      AppLocale.use(locale);
+      addTearDown(() => AppLocale.use(AppLocale.zhCN));
+      final h = await _start(tester, runtime: _RuntimeSpy(), initialSnapshot: false);
+      tester.view.physicalSize = const Size(640, 1688);
+      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      try {
+        await tester.runAsync(() async {
+          final follow = h.follows.single;
+          follow.socket.send({
+            'type': 'error',
+            'streamId': follow.id,
+            'error': {'code': 'session/format-unsupported', 'message': 'synthetic unsupported retained history'},
+          });
+        });
+        await _pumpUntil(tester, () => h.state.streamLost);
+        await pumpFrames(tester);
+        expect(h.state.error, reason);
+        expect(find.text(reason), findsOneWidget);
+        final paragraph = tester.renderObject<RenderParagraph>(find.text(reason));
+        expect(paragraph.didExceedMaxLines, isFalse, reason: 'the entire format reason must be readable');
+        expect(tester.getRect(find.text(reason)).top, greaterThanOrEqualTo(0));
+        expect(tester.getRect(find.text(reason)).bottom, lessThan(tester.getRect(find.byType(Composer)).top));
+        h.chat.reportError('synthetic late action error');
+        await pumpFrames(tester);
+        expect(h.state.error, 'synthetic late action error');
+        expect(find.text(reason), findsOneWidget, reason: 'an unrelated action cannot replace the follow cause');
+        expect(find.text('synthetic late action error'), findsNothing);
+        expect(tester.widget<Composer>(find.byType(Composer)).sessionReady, isFalse);
+        expect(h.follows, hasLength(1), reason: 'a format refusal does not repeatedly reopen the same history');
+        expect(_writes(h), isEmpty);
+        expect(tester.takeException(), isNull, reason: 'the narrow refusal is laid out before retry');
+        final retryButton = find.widgetWithText(TextButton, appL10n.stateChatSyncRetry);
+        final buttonSize = tester.getSize(retryButton);
+        expect(buttonSize.width, greaterThanOrEqualTo(48));
+        expect(buttonSize.height, greaterThanOrEqualTo(48));
+        await tester.tap(retryButton);
+        await _pumpUntil(tester, () => h.follows.length == 2);
+        await pumpFrames(tester);
+        expect(find.text(appL10n.stateChatSyncInterrupted), findsOneWidget);
+        expect(find.text(reason), findsNothing, reason: 'a new follow no longer claims the old failure');
+        expect(tester.takeException(), isNull, reason: 'waiting for the replacement snapshot remains laid out');
+        await tester.runAsync(() async {
+          h.follows.last.socket.item(h.follows.last.id, {
+            ...syncSnapshot(1),
+            'cursor': -1,
+            'records': <Object?>[],
+            'projections': {
+              'asOfSeq': -1,
+              'values': {
+                'inbox': {'next-turn': <Object?>[], 'next-step': <Object?>[]},
+              },
+            },
+          });
+        });
+        await _pumpUntil(tester, () => h.state.controlReady && !h.state.resyncing);
+        await pumpFrames(tester);
+        expect(find.text(reason), findsNothing);
+        expect(tester.takeException(), isNull);
+      } finally {
+        await _close(tester, h);
+      }
+    });
+  }
+
+  testWidgets('late action error does not masquerade as a synchronization failure', (tester) async {
+    final h = await _start(tester, runtime: _RuntimeSpy(), phase: 'terminal-follow-error');
+    try {
+      h.chat.reportError('synthetic late action error');
+      await pumpFrames(tester);
+      expect(h.state.error, 'synthetic late action error');
+      expect(find.text('对话同步中断'), findsOneWidget);
+      expect(find.text('synthetic late action error'), findsNothing);
+      expect(tester.widget<Composer>(find.byType(Composer)).sessionReady, isFalse);
+      expect(_writes(h), isEmpty);
+      expect(tester.takeException(), isNull);
+    } finally {
+      await _close(tester, h);
+    }
+  });
+
+  testWidgets('late model failure cannot replace the current history refusal', (tester) async {
+    final h = await _start(tester, runtime: _RuntimeSpy(), initialSnapshot: false);
+    final received = Completer<void>(), release = Completer<void>();
+    bool? accepted;
+    h.host.handlers['session/selectModel'] = (_) => {
+      'ok': false,
+      'error': {'code': 'gateway/internal', 'message': 'synthetic late model failure'},
+    };
+    h.host.beforeRpc = (endpoint, _) async {
+      if (endpoint == 'session/selectModel') {
+        received.complete();
+        await release.future;
+      }
+    };
+    unawaited(
+      h.chat.setModel(const ModelSelection(provider: 'synthetic', model: 'model')).then((value) {
+        accepted = value;
+      }),
+    );
+    try {
+      await _pumpUntil(tester, () => received.isCompleted);
+      await tester.runAsync(() async {
+        final follow = h.follows.single;
+        follow.socket.send({
+          'type': 'error',
+          'streamId': follow.id,
+          'error': {'code': 'session/format-unsupported', 'message': 'synthetic unsupported retained history'},
+        });
+      });
+      await _pumpUntil(tester, () => h.state.streamLost);
+      await pumpFrames(tester);
+      const reason = '对话同步中断：当前引擎无法读取此对话的日志格式，请导出诊断包排查';
+      expect(find.text(reason), findsOneWidget);
+      release.complete();
+      await _pumpUntil(tester, () => accepted != null);
+      await pumpFrames(tester);
+      expect(accepted, isFalse);
+      expect(h.state.error, appL10n.stateChatModelSwitchFailed);
+      expect(find.text(reason), findsOneWidget);
+      expect(find.text(appL10n.stateChatModelSwitchFailed), findsNothing);
+      expect(tester.takeException(), isNull);
+    } finally {
+      if (!release.isCompleted) release.complete();
+      await _pumpUntil(tester, () => accepted != null);
+      await _close(tester, h);
+    }
+  });
 
   testWidgets('sync button reopens follow; only applied new snapshot enables ordinary stop', (tester) async {
     final runtime = _RuntimeSpy();

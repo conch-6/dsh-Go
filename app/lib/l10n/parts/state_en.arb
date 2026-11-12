@@ -168,6 +168,7 @@
   "stateDrawerEarlier": "Earlier",
   "stateEngineAuthFailed": "Engine authentication failed",
   "stateChatMissing": "This chat is gone",
+  "stateChatFormatUnsupported": "This engine cannot read this chat's log format. Export diagnostics to investigate.",
   "stateEngineUnsupported": "Not supported by this engine version",
   "stateEngineServiceUnavailable": "The required engine service is not ready. Check the engine logs or export diagnostics.",
   "stateEngineOperationUnavailable": "The engine cannot run this operation right now. Check the engine logs.",

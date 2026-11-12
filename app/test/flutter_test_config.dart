@@ -10,6 +10,7 @@ import 'package:dsh_app/performance/performance_state.dart';
 import 'package:dsh_app/pets/pet_sheets.dart';
 import 'package:dsh_app/state/locale_state.dart';
 import 'package:dsh_app/ui/chat/empty_actions.dart' show tipStart;
+import 'package:dsh_app/ui_config/ui_config_state.dart';
 
 import 'support/english_preview.dart';
 import 'support/quiet_performance.dart';
@@ -26,6 +27,7 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   tipStart = (_) => 0;
   // No device facts in tests: the app reads "unavailable" at once.
   PerformanceChannel.create = QuietPerformanceChannel.new;
+  defaultUiConfigSourceBuilder = (_, _) => null;
   // Tests run in Chinese (goldens and finders were made in it); English
   // tests opt in with AppLocale.use(AppLocale.en) + an English MaterialApp.
   AppLanguageController.initial = AppLanguage.zh;

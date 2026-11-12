@@ -13,6 +13,8 @@ class FakeRemote {
   int? pid;
   int port = 40100;
   String token = 'tok-0';
+  bool sameCommand = true;
+  bool hasLaunchLine = true;
 
   /// What `dsh` does when started.
   bool dshInstalled = true;
@@ -41,8 +43,9 @@ class FakeRemote {
         0,
         alive == null
             ? 'DSHAPP home /home/me\n'
-            : 'DSHAPP home /home/me\nDSHAPP alive $alive\nDSHAPP samecmd\n'
-                  'DSHAPP url dsh web: http://127.0.0.1:$port/?token=$token\n',
+            : 'DSHAPP home /home/me\nDSHAPP alive $alive\n'
+                  '${sameCommand ? 'DSHAPP samecmd\n' : ''}'
+                  '${hasLaunchLine ? 'DSHAPP url dsh web: http://127.0.0.1:$port/?token=$token\n' : ''}',
         '',
       );
     }

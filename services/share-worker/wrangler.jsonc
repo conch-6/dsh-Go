@@ -14,6 +14,7 @@
   "account_id": "00000000000000000000000000000000",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
   // Only the custom domain: *.workers.dev is unreliable from mainland China.
   "workers_dev": false,
   "preview_urls": false,
@@ -31,7 +32,7 @@
     // to the Worker too (its 404).
     "run_worker_first": [
       "/api/*", "/c/*", "/market", "/market/*", "/p", "/p/*", "/beta", "/beta/*",
-      "/download", "/download/*", "/share", "/c.html", "/index.html"
+      "/download", "/download/*", "/share", "/workshop/admin", "/c.html", "/index.html"
     ],
     "html_handling": "none",
     "not_found_handling": "none"
@@ -75,6 +76,9 @@
   ],
   "vars": {
     "PET_MARKET_ENABLED": "1",
+    "WORKSHOP_UPLOAD_ENABLED": "1",
+    "WORKSHOP_COMPANION_ENABLED": "1",
+    "WORKSHOP_FORUM_URL": "https://forum.dshtui.com",
     "UPLOADS_PER_HOUR": "20",
     "MAX_BYTES": "20971520",
     // "key": /beta asks for an access key (the private beta). "public": anyone

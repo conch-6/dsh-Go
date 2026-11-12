@@ -36,6 +36,12 @@ final _views = <String, List<SlotOccupant>>{
   ],
 };
 
+final _viewsAndPanels = <String, List<SlotOccupant>>{
+  ..._views,
+  Slots.main: fullOccupancy[Slots.main]!,
+  Slots.panelList: fullOccupancy[Slots.panelList]!,
+};
+
 SeatPlan _plan(List<Override> overrides) {
   final container = ProviderContainer(overrides: overrides);
   addTearDown(container.dispose);
@@ -98,12 +104,23 @@ void main() {
       expect(_plan(seatOverrides(inventory: inventory)).visible.single.mode, SeatMode.webLink);
     });
 
-    test('alongside the conversation\'s plugin tabs: tabs first, then views', () {
+    test('views coexist with global panels without a conversation-specific tab', () {
+      final plan = _plan(seatOverrides(inventory: seatInventory(occupancy: _viewsAndPanels)));
+      expect(plan.visible.map((i) => (i.occupant.slot, i.occupant.cell)), [
+        (Slots.conversationView, 'memory'),
+        (Slots.main, 'k4-panel'),
+        (Slots.main, 'pet-panel'),
+      ]);
+      expect(plan.visible.where((i) => i.mode == SeatMode.island).map((i) => i.island!.sessionId), ['s1', null]);
+      expect(plan.visible.last.mode, SeatMode.webLink);
+    });
+
+    test('conversation-specific tabs retain priority over global panels beside views', () {
       final plan = _plan(
         seatOverrides(
           inventory: seatInventory(
             occupancy: {
-              ..._views,
+              ..._viewsAndPanels,
               Slots.rightPaneTab: [occupant(Slots.rightPaneTab, probe, 'k4-tab')],
               Slots.rightPaneTabTitle: [occupant(Slots.rightPaneTabTitle, probe, 'k4-tab', label: '探针页签')],
             },
@@ -154,6 +171,63 @@ void main() {
   });
 
   group('对话详情', () {
+    testWidgets('view and global panels open their own slot and scope, even with the same cell', (tester) async {
+      await _pumpDetail(
+        tester,
+        seats: seatOverrides(
+          inventory: seatInventory(
+            occupancy: {
+              ..._viewsAndPanels,
+              Slots.conversationView: [_view('k4-panel', label: '记忆')],
+            },
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.text('记忆'), findsOneWidget);
+      expect(find.text('探针面板'), findsOneWidget);
+      expect(find.text('桌宠面板'), findsOneWidget);
+      expect(find.byType(FakeIsland), findsNothing, reason: 'the list waits for the user to choose a page');
+
+      await tester.tap(find.text('桌宠面板'));
+      expect(openedWeb.single, const DshWebTarget(sidebar: true));
+      await tester.tap(find.text('探针面板'));
+      await chat.pumpFrames(tester, 8);
+      var page = tester.widget<PluginSeatPage>(find.byType(PluginSeatPage));
+      expect(page.request.slot, Slots.main);
+      expect(page.request.package, probe);
+      expect(page.request.cell, 'k4-panel');
+      expect(page.request.sessionId, isNull);
+      expect(tester.widget<FakeIsland>(find.byType(FakeIsland)).spec.sessionId, isNull);
+
+      await tester.tap(find.byTooltip('返回'));
+      await chat.pumpFrames(tester, 8);
+      await tester.tap(find.text('记忆'));
+      await chat.pumpFrames(tester, 8);
+      page = tester.widget<PluginSeatPage>(find.byType(PluginSeatPage));
+      expect(page.request.slot, Slots.conversationView);
+      expect(page.request.package, probe);
+      expect(page.request.cell, 'k4-panel');
+      expect(page.request.sessionId, 's1');
+      expect(tester.widget<FakeIsland>(find.byType(FakeIsland)).spec.sessionId, 's1');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('views and panels keep web fallbacks when the route gate closes', (tester) async {
+      await _pumpDetail(
+        tester,
+        seats: seatOverrides(inventory: seatInventory(occupancy: _viewsAndPanels, routeGuard: false)),
+      );
+      expect(find.byType(FakeIsland), findsNothing);
+      expect(find.text('记忆'), findsOneWidget);
+      expect(find.text('探针面板'), findsOneWidget);
+      expect(find.text('桌宠面板'), findsOneWidget);
+      await tester.tap(find.text('记忆'));
+      await tester.tap(find.text('探针面板'));
+      expect(openedWeb, [const DshWebTarget(sessionId: 's1'), const DshWebTarget(sidebar: true)]);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('one view fills 插件 under its name, as its island', (tester) async {
       await _pumpDetail(
         tester,

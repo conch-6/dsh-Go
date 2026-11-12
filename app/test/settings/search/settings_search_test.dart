@@ -62,6 +62,14 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('matching', () {
+    test('Android system commands find the phone page, not the engine shell', () {
+      final androidShell = SettingsIndex.entry(SettingsPageId.phoneAndroidShell);
+      for (final query in ['Android Shell', '系统命令', 'system-command']) {
+        expect(_search(query).first.spot, androidShell, reason: query);
+      }
+      expect(_search('bash').first.spot, SettingsIndex.entry(SettingsPageId.shell));
+    });
+
     test('lower case, full width folded, spaces dropped', () {
       expect(normalizeQuery('ＡＰＩ　Key'), 'apikey');
       expect(normalizeQuery(' Dark  Mode '), 'darkmode');

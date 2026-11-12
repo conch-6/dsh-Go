@@ -42,7 +42,7 @@ extension BriefNotice on ScaffoldMessengerState {
   /// Shows [text] as a brief confirmation, taking the place of whatever is
   /// up: tapping 复制 twice doesn't queue two.
   void showBriefNotice(String text) {
-    hideCurrentSnackBar();
+    removeCurrentSnackBar();
     showSnackBar(briefNoticeBar(text));
   }
 

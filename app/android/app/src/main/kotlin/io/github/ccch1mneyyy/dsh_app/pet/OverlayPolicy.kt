@@ -1,5 +1,7 @@
 package io.github.ccch1mneyyy.dsh_app.pet
 
+import kotlin.math.hypot
+
 /** A short line over the pet; tapping it opens [sessionId] on [host]. */
 data class PetBubble(
     val id: String,
@@ -275,6 +277,28 @@ data class Decision(
     val wakeAt: Long?,
     val why: String,
 )
+
+/** A tap plays with the pet; a second one soon after, close by, opens the conversation instead. */
+internal class PetTaps(private val timeoutMs: Long, private val slop: Float) {
+    private var waiting = false
+    private var at = 0L
+    private var x = 0f
+    private var y = 0f
+
+    /**
+     * Whether the tap pressed at [downMs] and released at [upMs] on ([tapX], [tapY]) is the second
+     * of a pair. As the platform's double tap: the wait runs from one release to the next press.
+     */
+    fun second(downMs: Long, upMs: Long, tapX: Float, tapY: Float): Boolean {
+        val paired = waiting && downMs - at in 0..timeoutMs && hypot(tapX - x, tapY - y) <= slop
+        waiting = !paired
+        at = upMs; x = tapX; y = tapY
+        return paired
+    }
+
+    /** A drag, a long press or a cancelled touch came in between: the next tap starts over. */
+    fun clear() { waiting = false }
+}
 
 /**
  * The out-of-app pet's visibility and power rules:

@@ -464,6 +464,8 @@ Future<void> openImageViewer(BuildContext context, ImageProvider image, {require
 /// Pictures of one draft/message, including stored pictures not loaded yet.
 Future<void> openAttachmentGallery(BuildContext context, List<ViewerImage> images, {int initialPage = 0}) {
   if (images.isEmpty) return Future.value();
+  // Returning from a picture must not restore the composer's hidden keyboard.
+  FocusManager.instance.primaryFocus?.unfocus();
   return Navigator.of(context).push(
     PageRouteBuilder<void>(
       opaque: false,

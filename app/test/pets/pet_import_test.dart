@@ -12,6 +12,7 @@ import 'package:dsh_app/pets/pet_state.dart' show noPetId;
 import 'package:dsh_app/ui/pets/pet_menu.dart';
 import 'package:dsh_app/ui/pets/pet_picker.dart';
 import 'package:dsh_app/ui/pets/pet_settings_page.dart';
+import 'package:dsh_app/workshop/workshop_receipt.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,7 +33,7 @@ class _StuckLibrary extends PetLibrary {
   _StuckLibrary(super.root);
 
   @override
-  Future<void> remove(String id) async => throw const FileSystemException('busy');
+  Future<void> remove(String id, {WorkshopReceipt? expectedWorkshop}) async => throw const FileSystemException('busy');
 }
 
 /// A library whose removals wait until the test lets them go.
@@ -42,9 +43,9 @@ class _GatedRemoval extends PetLibrary {
   final gate = Completer<void>();
 
   @override
-  Future<void> remove(String id) async {
+  Future<void> remove(String id, {WorkshopReceipt? expectedWorkshop}) async {
     await gate.future;
-    return super.remove(id);
+    return super.remove(id, expectedWorkshop: expectedWorkshop);
   }
 }
 

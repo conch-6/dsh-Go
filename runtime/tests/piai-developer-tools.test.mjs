@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 const prefix = path.resolve(process.env.DSH_PREFIX);
 const require = createRequire(path.join(prefix, 'package.json'));
-const { PiAiAdapter } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm-pi-ai')));
+const pi = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm-pi-ai')));
+const { PiAiAdapter } = pi;
 // These two paths are the public import-only exports; require.resolve cannot resolve their import condition.
 const { createProvider } = await import(pathToFileURL(path.join(prefix, 'node_modules/@earendil-works/pi-ai/dist/models.js')));
 const { AssistantMessageEventStream } = await import(pathToFileURL(path.join(prefix, 'node_modules/@earendil-works/pi-ai/dist/utils/event-stream.js')));
@@ -116,4 +119,44 @@ test('a partially indexed prefix can extend later and revisit its cached names',
   const f = fixture(), names = ['d', 'b', 'a', 'c', 'd', 'b'];
   const result = await f.run(tools, [developer(names.map(addition))]);
   assert.deepEqual(result.messages[1].toolsAdded, names.map(name => tools.find(tool => tool.name === name)));
+});
+
+
+test('model discovery closes a rejected HTTP body before the next probe', { timeout: 5000 }, async t => {
+  const { Context } = await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')));
+  const { LlmRuntime } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm')));
+  const ctx = new Context();
+  const caller = new AbortController();
+  let refused;
+  const paths = [];
+  const server = http.createServer((req, res) => {
+    paths.push(req.url);
+    if (req.url === '/models') {
+      refused = res;
+      res.writeHead(404, { 'content-type': 'text/html' });
+      // A gateway can send the rejection headers before its body stalls.
+      res.write('partial error body');
+    } else {
+      res.end(JSON.stringify({ data: [{ id: 'available-model' }] }));
+    }
+  });
+  t.after(async () => {
+    caller.abort();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    await ctx.fiber.dispose();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await ctx.plugin(LlmRuntime).await();
+  await ctx.plugin(pi, { providers: {} }).await();
+  const baseURL = `http://127.0.0.1:${server.address().port}`;
+  await assert.rejects(ctx.llm.remoteDiscoverModels('llm-pi-ai', { baseURL }, caller.signal),
+    error => error.code === 'llm/model-discovery-rejected' && error.message === `${baseURL}/models answered 404`);
+  // The App retries a bare endpoint's 404 at /v1; failure did not abort its owner.
+  assert.deepEqual(await ctx.llm.remoteDiscoverModels('llm-pi-ai', { baseURL: `${baseURL}/v1` }, caller.signal),
+    [{ id: 'available-model', name: 'available-model' }]);
+  assert.equal(caller.signal.aborted, false);
+  assert.deepEqual(paths, ['/models', '/v1/models']);
+  if (!refused.destroyed) await once(refused, 'close', { signal: AbortSignal.timeout(1000) });
+  assert.equal(refused.destroyed, true);
 });

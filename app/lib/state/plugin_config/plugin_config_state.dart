@@ -526,7 +526,7 @@ class PluginConfigController extends AsyncNotifier<PluginConfigState?> {
       if (!_accepts(origin) || latest == null) return;
       _set(latest.copyWith(loadErrors: {...latest.loadErrors, ns: pluginConfigFailureOf(error).message}));
     } finally {
-      _loading.remove(ns);
+      if (_accepts(origin)) _loading.remove(ns);
     }
   }
 

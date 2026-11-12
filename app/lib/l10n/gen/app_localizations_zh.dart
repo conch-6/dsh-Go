@@ -1096,6 +1096,15 @@ class L10nZh extends L10n {
   String get activitySlashEnterArgs => '输入参数后发送';
 
   @override
+  String get activitySlashRunIntent => '命令 · 执行';
+
+  @override
+  String get activitySlashInsertIntent => '命令 · 填入';
+
+  @override
+  String get activitySlashSkillIntent => '技能 · 填入';
+
+  @override
   String get activityStepTitle => '步骤详情';
 
   @override
@@ -1549,6 +1558,64 @@ class L10nZh extends L10n {
   @override
   String activitySlashCommandSemantics(String label, String name) {
     return '$label，/$name';
+  }
+
+  @override
+  String get activityQuotaTitle => '订阅额度';
+
+  @override
+  String get activityQuotaRefresh => '刷新额度';
+
+  @override
+  String get activityQuotaPermissionDenied => '订阅没有权限查询额度';
+
+  @override
+  String get activityQuotaAuthError => '登录已过期或无权查询，请检查订阅登录';
+
+  @override
+  String get activityQuotaNetworkError => '网络连接失败，请稍后重试';
+
+  @override
+  String get activityQuotaRateLimited => '查询过于频繁，请稍后重试';
+
+  @override
+  String get activityQuotaLoading => '正在查询订阅额度…';
+
+  @override
+  String get activityQuotaUnavailable => '暂时无法查询订阅额度，请稍后重试';
+
+  @override
+  String get activityQuotaUnsupported => '此主机暂不支持查询订阅额度';
+
+  @override
+  String get activityQuotaSignedOut => '订阅未登录';
+
+  @override
+  String get activityQuotaPrimary => '主要额度';
+
+  @override
+  String get activityQuotaSecondary => '次要额度';
+
+  @override
+  String get activityQuotaFiveHour => '5 小时';
+
+  @override
+  String get activityQuotaSevenDay => '7 天';
+
+  @override
+  String get activityQuotaSevenDaySonnet => '7 天 · Sonnet';
+
+  @override
+  String get activityQuotaSevenDayOpus => '7 天 · Opus';
+
+  @override
+  String activityQuotaUsed(String value) {
+    return '已使用 $value';
+  }
+
+  @override
+  String activityQuotaReset(String time) {
+    return '重置时间：$time';
   }
 
   @override
@@ -2728,6 +2795,50 @@ class L10nZh extends L10n {
   String get botsPetAlways => '一直显示';
 
   @override
+  String get botsPetOverlayShows => '悬浮窗里显示';
+
+  @override
+  String get botsPetOverlayPixel => '像素宠物';
+
+  @override
+  String get botsPetOverlayCompanion => '小屋里的她';
+
+  @override
+  String botsPetOverlayCompanionNamed(String name) {
+    return '小屋里的$name';
+  }
+
+  @override
+  String get botsPetOverlayNoPack => '先去伙伴小屋里请一位角色';
+
+  @override
+  String get botsPetOverlayPackBroken => '角色包不完整，去伙伴小屋里重新导入';
+
+  @override
+  String get botsPetOverlayUnavailable => '这台手机暂时请不出她';
+
+  @override
+  String get botsPetOverlayCompanionHint => '点一下和她互动，连点两下打开对话。比像素宠物更耗电，熄屏和隐藏时会停下来';
+
+  @override
+  String get botsPetOverlayLoading => '正在请她出来…';
+
+  @override
+  String get botsPetOverlayFallback => '她没能出来，先由像素宠物顶班';
+
+  @override
+  String get botsPetOverlayFraming => '取景';
+
+  @override
+  String get botsPetOverlayFramingFull => '全身';
+
+  @override
+  String get botsPetOverlayFramingHalf => '半身';
+
+  @override
+  String get botsPetOverlayFramingHint => '换取景会重新加载她';
+
+  @override
   String get botsPetSwitchDisabled => '开关点不动';
 
   @override
@@ -3675,6 +3786,15 @@ class L10nZh extends L10n {
   String get chatAnswerHint => '输入回答…';
 
   @override
+  String get chatAnswerMode => '发送文字将回答待答问题';
+
+  @override
+  String get chatMessageMode => '发送新消息';
+
+  @override
+  String get chatQuestionAnswered => '已回答';
+
+  @override
   String get chatStarting => '正在启动';
 
   @override
@@ -4306,7 +4426,7 @@ class L10nZh extends L10n {
   String get chatBranchHint => '在新对话中继续，原对话不变';
 
   @override
-  String get chatEditResendHint => '在新对话中改写，原对话不变';
+  String get chatEditResendHint => '在新对话中改写，图片和文件需重新添加；原对话不变';
 
   @override
   String get chatSaveToPhotos => '保存到相册';
@@ -4446,6 +4566,38 @@ class L10nZh extends L10n {
   String get chatNoDetails => '暂无详情';
 
   @override
+  String chatOutputHiddenLines(int count, String shown) {
+    String _temp0 = intl.Intl.pluralLogic(count, locale: localeName, other: '中间省略 $shown 行');
+    return '$_temp0';
+  }
+
+  @override
+  String chatOutputHiddenChars(String count) {
+    return '中间省略 $count 字';
+  }
+
+  @override
+  String chatOutputSummary(int count, String lines, String chars) {
+    String _temp0 = intl.Intl.pluralLogic(count, locale: localeName, other: '共 $lines 行');
+    return '$_temp0 · $chars 字';
+  }
+
+  @override
+  String get chatOutputViewAll => '查看全部';
+
+  @override
+  String get chatOutputCopyAll => '复制全文';
+
+  @override
+  String get chatOutputCopied => '已复制全文';
+
+  @override
+  String get chatOutputToEnd => '跳到末尾';
+
+  @override
+  String get chatOutputToStart => '回到开头';
+
+  @override
   String get chatErrApiKey => 'API Key 无效或已过期';
 
   @override
@@ -4458,7 +4610,7 @@ class L10nZh extends L10n {
   String get chatErrRateLimit => '请求太频繁，稍后再试';
 
   @override
-  String get chatErrContextLength => '对话太长，发送 /compact 压缩后再试';
+  String get chatErrContextLength => '对话太长。若 /compact 也失败，请新建对话或换模型';
 
   @override
   String get chatErrModelUnavailable => '模型服务暂时不可用';
@@ -4860,6 +5012,9 @@ class L10nZh extends L10n {
   }
 
   @override
+  String get companionFailedBodyPlain => '她刚才没加载出来。先重试，还不行再重新导入素材包。';
+
+  @override
   String get companionPackBroken => '这个文件打不开，可能不是素材包或已经损坏。';
 
   @override
@@ -4965,6 +5120,15 @@ class L10nZh extends L10n {
 
   @override
   String get companionTease3 => '你是不是很闲？';
+
+  @override
+  String get companionShake1 => '哇啊，别摇啦！';
+
+  @override
+  String get companionShake2 => '头好晕……水都晃起来了。';
+
+  @override
+  String get companionShake3 => '再摇我要吐泡泡了！';
 
   @override
   String get companionStatusIdle => '在发呆';
@@ -5942,6 +6106,9 @@ class L10nZh extends L10n {
   String get engineGeneralWebSending => '网页版发送';
 
   @override
+  String get engineGeneralWebOnlyHint => '这组设置仅影响当前主机的网页版，不改变原生聊天。';
+
+  @override
   String get engineGeneralData => '数据';
 
   @override
@@ -6348,6 +6515,36 @@ class L10nZh extends L10n {
 
   @override
   String get engineProviderConnection => '连接';
+
+  @override
+  String get engineProviderHeaders => '请求头（可选）';
+
+  @override
+  String get engineProviderHeadersWarning => '请求头以明文保存，不参与日志脱敏。敏感凭据请使用 API Key 或凭据引用。';
+
+  @override
+  String get engineProviderHeaderName => '名称';
+
+  @override
+  String get engineProviderHeaderValue => '值';
+
+  @override
+  String get engineProviderHeaderAdd => '添加请求头';
+
+  @override
+  String get engineProviderHeaderInvalidName => '请求头名称只能包含英文字母、数字或 HTTP 标记符号，不能包含空格或冒号';
+
+  @override
+  String get engineProviderHeaderReserved => 'User-Agent 由引擎设置，请移除此请求头';
+
+  @override
+  String get engineProviderHeaderLocked => '由引擎管理，保留现有配置';
+
+  @override
+  String get engineProviderHeaderDuplicate => '请求头名称重复（不区分大小写）';
+
+  @override
+  String get engineProviderHeaderInvalidValue => '请求头值只能包含单行 Latin-1 文本，不支持换行或控制字符（制表符除外）';
 
   @override
   String get engineProviderDefaultUrl => '默认地址';
@@ -12228,6 +12425,24 @@ class L10nZh extends L10n {
   String get plugInputGestureRequired => '该效果需要用户点按';
 
   @override
+  String get seamsTitle => 'App 内界面';
+
+  @override
+  String get seamsOverlay => '聊天页浮层';
+
+  @override
+  String get seamsOverlayNote => '常驻聊天区域，内存紧张时自动让位';
+
+  @override
+  String get seamsSidebarPage => '侧栏入口';
+
+  @override
+  String get seamsSettingsPage => '插件设置页';
+
+  @override
+  String get seamsDetailPage => '插件详情扩展';
+
+  @override
   String get pluginsOperationHostChanged => '主机已切换，未执行';
 
   @override
@@ -13895,6 +14110,55 @@ class L10nZh extends L10n {
   String get readListFailed => '未更新 · 上次结果';
 
   @override
+  String get remoteDshMode => '实例管理';
+
+  @override
+  String get remoteManaged => '托管启动';
+
+  @override
+  String get remoteAttachOnly => '只连接';
+
+  @override
+  String get remoteManagedHelp => '自动启动或复用 App 托管的 DSH；不会自动替换存活但无法复用的实例。';
+
+  @override
+  String get remoteAttachOnlyHelp => '只转发到远端 127.0.0.1 的固定端口；不启动、停止或重启 DSH。';
+
+  @override
+  String get remoteDshPort => '远端 DSH 端口';
+
+  @override
+  String get remoteDshToken => 'DSH 登录令牌';
+
+  @override
+  String get remoteDshTokenHelp => '填写既有实例启动链接中的 token，仅保存在这台手机的安全存储中。';
+
+  @override
+  String get remoteAttachWorkingDirectoryHelp => '既有实例不执行目录探测；请填写远端绝对路径，留空使用 DSH 默认目录。';
+
+  @override
+  String get remoteSshCompression => 'SSH 压缩';
+
+  @override
+  String get remoteSshCompressionHelp => '默认开启；与服务器协商认证后压缩，不支持时使用未压缩传输。';
+
+  @override
+  String get remoteRestartManaged => '重启托管 DSH';
+
+  @override
+  String get remoteRestartManagedWarning => '这会停止 App 记录的远端 DSH 并重新启动，可能中断其他客户端和进行中的对话。确认没有其他人在使用后再继续。普通测试连接不会执行此操作。';
+
+  @override
+  String get remoteErrSharedInstance =>
+      '远端托管 DSH 仍在运行，但启动命令不同或缺少有效启动日志。为保护共享实例，未自动重启；请检查配置，改用“只连接”，或在编辑主机中明确选择“重启托管 DSH”。';
+
+  @override
+  String get remoteErrAttachSettings => '请填写有效的远端 DSH 端口和登录令牌';
+
+  @override
+  String get remoteDshAttached => '已连接既有 DSH';
+
+  @override
   String get remoteStartupSection => '启动';
 
   @override
@@ -14064,7 +14328,7 @@ class L10nZh extends L10n {
   String get remoteDshStarted => '已在远端启动 DSH';
 
   @override
-  String get remoteErrDshTokenRejected => '远端 DSH 拒绝了登录令牌';
+  String get remoteErrDshTokenRejected => '远端 DSH 拒绝了登录令牌，未自动重启；请检查令牌，或在编辑主机中明确重启托管实例';
 
   @override
   String get remoteErrDshSignIn => '没能登录远端 DSH';
@@ -14665,7 +14929,10 @@ class L10nZh extends L10n {
   String get remoteSelfHostedServer => '自建服务器';
 
   @override
-  String get remoteSelfHostedSignInHelp => '用邮箱和密码登录自己部署的 liguobao/ds-harness-remote';
+  String get remoteSelfHostedSignInHelp => '填写服务器地址，可用邮箱密码登录，也可先使用此服务器再选择其他登录方式。';
+
+  @override
+  String get remoteUseServer => '使用此服务器';
 
   @override
   String get remoteServerAddress => '服务器地址';
@@ -15840,6 +16107,12 @@ class L10nZh extends L10n {
   String get searchKwPetDisplayWhen => '宠物显示,显示时机';
 
   @override
+  String get searchKwPetOverlayShows => '悬浮伙伴,小屋里的她,像素宠物,Live2D';
+
+  @override
+  String get searchKwPetOverlayFraming => '取景,全身,半身';
+
+  @override
   String get searchKwBlur => '模糊,毛玻璃,玻璃';
 
   @override
@@ -16109,7 +16382,7 @@ class L10nZh extends L10n {
 
   @override
   String get shellDeleteWarning =>
-      '将从此主机永久删除所选对话记录，无法撤销，与归档不同。\n\n工作目录、生成的文件、分叉对话、共享附件和已发布的云端分享都会保留。云端分享需另行删除。主机会拒绝删除仍有任务或关联工作的对话。';
+      '将从此主机永久删除所选对话记录，无法撤销，与归档不同。\n\n工作目录、生成的文件、分叉对话、共享附件和已发布的云端分享都会保留。云端分享需另行删除。子代理对话会随所选对话一起删除。运行中或有定时任务的对话会被主机拒绝。';
 
   @override
   String get shellDeleteOwnerChanged => '主机或连接已变化。请取消后重新发起删除，原确认不再有效。';
@@ -16131,7 +16404,7 @@ class L10nZh extends L10n {
   String get shellDeleteRunning => '请先停止运行中的工作；主机还会检查活动任务和定时任务。';
 
   @override
-  String get shellDeleteRelated => '此对话有关联的子代理工作，主机为保护它们拒绝删除。';
+  String get shellDeleteRelated => '此对话仍有关联的定时任务，主机为保护它们拒绝删除。';
 
   @override
   String get shellDeleteWriterHeld => '其他进程正在使用此对话，请先在该进程中关闭后重试。';
@@ -17117,6 +17390,18 @@ class L10nZh extends L10n {
   String get starSettingsTitle => '给 DSH Go 点个 star';
 
   @override
+  String get hubStartPage => '起始页';
+
+  @override
+  String get hubChatSuggestions => '聊天建议';
+
+  @override
+  String get hubChatSuggestionsHint => '显示起始页的聊天建议';
+
+  @override
+  String get searchKwChatSuggestions => '起始页,空白页,新对话,聊天建议,建议卡片';
+
+  @override
   String get phoneStartupFailureStopping => '启动失败，正在停止';
 
   @override
@@ -17636,6 +17921,9 @@ class L10nZh extends L10n {
 
   @override
   String get stateChatMissing => '这个对话已经不在了';
+
+  @override
+  String get stateChatFormatUnsupported => '当前引擎无法读取此对话的日志格式，请导出诊断包排查';
 
   @override
   String get stateEngineUnsupported => '当前引擎版本不支持';
@@ -18499,7 +18787,7 @@ class L10nZh extends L10n {
   String get updateInstallBlocked => '安装被拦截了';
 
   @override
-  String get updateInstallBlockedMessage => '在系统的安装确认里允许，或去发布页手动下载。';
+  String get updateInstallBlockedMessage => '在系统的安装确认里允许；如果系统直接拦下（小米等机型），试试下面的「安装路线」：Shizuku 或本机 ADB，不用重新签名。';
 
   @override
   String get updateInstallIncomplete => '安装没有完成';
@@ -18586,6 +18874,24 @@ class L10nZh extends L10n {
 
   @override
   String get updateSystemInstallerFailed => '没能打开系统安装器';
+
+  @override
+  String get updateExportApk => '导出安装包';
+
+  @override
+  String get updateExportApkTitle => '导出安装包？';
+
+  @override
+  String get updateExportApkMessage =>
+      '会把这次下载并校验过的安装包复制到「下载/DSH-Go」，可以用 MT 管理器之类的工具重新签名后再装。\n\n重新签名后，手机上的签名和官方包不同，App 内更新会一直提示「签名不一致」，以后每次更新都要这样手动重签安装。\n\n如果只是系统拦着装不上（小米等机型），先试「安装路线」里的 Shizuku 或本机 ADB，那条路不用重新签名。';
+
+  @override
+  String updateExportApkDone(String path) {
+    return '已存到 下载/$path';
+  }
+
+  @override
+  String get updateExportApkFailed => '没能导出安装包';
 
   @override
   String get updateStarProject => '去 Star';

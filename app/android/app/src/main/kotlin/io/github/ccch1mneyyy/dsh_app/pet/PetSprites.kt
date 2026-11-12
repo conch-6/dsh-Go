@@ -43,7 +43,10 @@ internal class PetSprites(
         private val worker: Executor,
     ) {
         /** The window at rest, while held and around each animation, in physical pixels. */
-        val frames = PetFrames.of(pack, window, screenScale)
+        private val spriteFrames = PetFrames.of(pack, window, screenScale)
+        // Main-thread overlay geometry only; portraits keep using the sprite pack.
+        var overlayFrames: PetFrames? = null
+        val frames: PetFrames get() = overlayFrames ?: spriteFrames
 
         private val main = Handler(Looper.getMainLooper())
         private val cache = object : LruCache<String, PetSheet>(CACHE_BYTES) {
@@ -85,6 +88,7 @@ internal class PetSprites(
         }
 
         fun release() {
+            overlayFrames = null
             cache.evictAll()
         }
 

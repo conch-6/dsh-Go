@@ -43,7 +43,7 @@ void showComposerToast(
   final content = composerHeight - math.max(bottom, safeMinimum);
   final margin = EdgeInsets.fromLTRB(16, 0, 16, math.max(0.0, content) + safeMinimum + gap);
   ScaffoldMessenger.maybeOf(context)
-    ?..hideCurrentSnackBar()
+    ?..removeCurrentSnackBar()
     ..showSnackBar(
       actionLabel == null
           ? briefNoticeBar(message, margin: margin)

@@ -536,6 +536,63 @@ void main() {
       expect(tester.getRect(find.byKey(const Key('body'))).width, 800);
     });
 
+    for (final action in ['release', 'cancel', 'scroll']) {
+      for (final afterFirstFrame in [false, true]) {
+        testWidgets('HoldLift $action settles when the sink has ${afterFirstFrame ? 'moved' : 'just started'}', (
+          tester,
+        ) async {
+          var fired = 0;
+          await tester.pumpWidget(
+            shell(
+              ListView(
+                children: [
+                  Center(
+                    child: HoldLift(
+                      onLongPress: () => fired++,
+                      child: const ColoredBox(
+                        key: Key('body'),
+                        color: Colors.red,
+                        child: SizedBox(width: 200, height: 100),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 2000),
+                ],
+              ),
+              fluid: true,
+            ),
+          );
+          double scale() => tester.getRect(find.byKey(const Key('body'))).width / 200;
+          final gesture = await tester.startGesture(tester.getCenter(find.byKey(const Key('body'))));
+          // The timer starts the animation, but its first frame still paints
+          // the original size. Pointer events may cancel it before the next one.
+          await tester.pump(const Duration(milliseconds: 110));
+          expect(scale(), 1);
+          expect(tester.hasRunningAnimations, isTrue);
+          if (afterFirstFrame) {
+            await tester.pump(const Duration(milliseconds: 16));
+            expect(scale(), lessThan(1));
+          }
+          if (action == 'cancel') {
+            await gesture.cancel();
+          } else {
+            if (action == 'scroll') {
+              await gesture.moveBy(const Offset(0, -40));
+              await gesture.moveBy(const Offset(0, -40));
+            }
+            await gesture.up();
+          }
+          await tester.pumpAndSettle();
+          if (action == 'scroll') {
+            expect(tester.state<ScrollableState>(find.byType(Scrollable)).position.pixels, greaterThan(0));
+          }
+          expect(fired, 0);
+          expect(scale(), 1);
+          expect(tester.hasRunningAnimations, isFalse);
+        });
+      }
+    }
+
     testWidgets('HoldLift on the standard tier is only the long press', (tester) async {
       var fired = 0;
       await tester.pumpWidget(

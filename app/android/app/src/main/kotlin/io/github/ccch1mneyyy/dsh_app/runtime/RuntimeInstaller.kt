@@ -61,45 +61,53 @@ class RuntimeInstaller(
         // cleanup, including when a different APK resumes this install.
         engineUpgrade.recover()
         staging.deleteRecursivelySafely()
-        checkFreeSpace()
+        val archives = manifest.archivesForInstall(Files.exists(rootfs.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS))
+        checkFreeSpace(archives)
         staging.mkdirs()
 
-        val assetPath = "${RuntimeManifest.ASSET_DIR}/${manifest.rootfsAsset}"
-        val assetBytes = assetLength(assetPath)
-        val total = assetBytes.takeIf { it > 0 } ?: manifest.rootfsBytes
+        val assetLengths = archives.map { assetLength("${RuntimeManifest.ASSET_DIR}/${it.asset}") }
+        val totals = archives.mapIndexed { i, archive -> assetLengths[i].takeIf { it > 0 } ?: archive.bytes }
+        val total = totals.sum()
+        onLog("[dsh-app] install assets: ${archives.joinToString { it.asset }} ($total compressed bytes)")
+        var completed = 0L
         var lastReported = 0L
-        val progress: (Long) -> Unit = { read ->
-            if (read - lastReported >= 512 * 1024 || read == total) {
-                lastReported = read
-                onProgress(read, total)
-            }
-        }
-        timed("verify") {
-            // Parallel readers revisit compressed bytes; hash the asset once, in order.
-            val digest = MessageDigest.getInstance("SHA-256")
-            DigestInputStream(context.assets.open(assetPath, AssetManager.ACCESS_STREAMING), digest).use { input ->
-                val buffer = ByteArray(1 shl 16)
-                while (input.read(buffer) >= 0) {}
-            }
-            val actual = digest.digest().joinToString("") { "%02x".format(it) }
-            val expected = manifest.rootfsSha256
-            if (expected != null && !expected.equals(actual, ignoreCase = true)) {
-                staging.deleteRecursivelySafely()
-                throw IllegalStateException(AppStrings.get(context, R.string.service_package_checksum_failed))
-            }
-        }
-        timed("extract") {
-            val extractor = TarExtractor(staging, progress)
-            if (manifest.rootfsAsset.endsWith(".xz") && assetBytes > 0) {
-                val decoded = ParallelXZInputStream.open(
-                    { AssetSeekableInputStream(context.assets.openFd(assetPath)) }, progress,
-                )
-                extractor.extractDecoded(decoded)
-            } else {
-                context.assets.open(assetPath, AssetManager.ACCESS_STREAMING).use { raw ->
-                    extractor.extract(raw, manifest.rootfsAsset)
+        for ((index, archive) in archives.withIndex()) {
+            val assetPath = "${RuntimeManifest.ASSET_DIR}/${archive.asset}"
+            val progress: (Long) -> Unit = { read ->
+                val aggregate = completed + read
+                if (aggregate - lastReported >= 512 * 1024 || aggregate == total) {
+                    lastReported = aggregate
+                    onProgress(aggregate, total)
                 }
             }
+            timed("verify") {
+                // Parallel readers revisit compressed bytes; hash each selected asset once, in order.
+                val digest = MessageDigest.getInstance("SHA-256")
+                DigestInputStream(context.assets.open(assetPath, AssetManager.ACCESS_STREAMING), digest).use { input ->
+                    val buffer = ByteArray(1 shl 16)
+                    while (input.read(buffer) >= 0) {}
+                }
+                val actual = digest.digest().joinToString("") { "%02x".format(it) }
+                val expected = archive.sha256
+                if (expected != null && !expected.equals(actual, ignoreCase = true)) {
+                    staging.deleteRecursivelySafely()
+                    throw IllegalStateException(AppStrings.get(context, R.string.service_package_checksum_failed))
+                }
+            }
+            timed("extract") {
+                val extractor = TarExtractor(staging, progress)
+                if (archive.asset.endsWith(".xz") && assetLengths[index] > 0) {
+                    val decoded = ParallelXZInputStream.open(
+                        { AssetSeekableInputStream(context.assets.openFd(assetPath)) }, progress,
+                    )
+                    extractor.extractDecoded(decoded)
+                } else {
+                    context.assets.open(assetPath, AssetManager.ACCESS_STREAMING).use { raw ->
+                        extractor.extract(raw, archive.asset)
+                    }
+                }
+            }
+            completed += totals[index]
         }
         onProgress(total, total)
 
@@ -123,8 +131,8 @@ class RuntimeInstaller(
         }
     }
 
-    private fun checkFreeSpace() {
-        val need = (manifest.uncompressedBytes.takeIf { it > 0 } ?: 600L * 1024 * 1024) * 115 / 100
+    private fun checkFreeSpace(archives: List<RuntimeArchive>) {
+        val need = requiredRuntimeInstallSpace(archives)
         val free = context.filesDir.usableSpace
         if (free < need) {
             val mb = { b: Long -> b / (1024 * 1024) }
@@ -144,6 +152,11 @@ class RuntimeInstaller(
     }
 }
 
+internal fun requiredRuntimeInstallSpace(archives: List<RuntimeArchive>): Long {
+    val bytes = archives.sumOf { it.uncompressedBytes }
+    return (bytes.takeIf { it > 0 } ?: 600L * 1024 * 1024) * 115 / 100
+}
+
 /** The production activation route, also exercised without an Android Context in JVM tests. */
 internal fun activateRuntimeUpdate(
     base: File,
@@ -156,17 +169,22 @@ internal fun activateRuntimeUpdate(
     onLog: (String) -> Unit = {},
 ) {
     val rootfs = File(base, "rootfs")
-    if (File(base, "home.carry").exists() || File(base, "rootfs.old").exists()) {
-        throw RuntimeUpgradeBlocked("legacy_interrupted")
-    }
     if (Files.exists(rootfs.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
         val spec = checkEngineCompatibility(base, raw, version, abi)
+        // Finish an interrupted first install before the engine journal can mark it ready.
+        if (keep != null && !File(base, "rootfs.version").present()) restoreKept(keep, rootfs, dropKept)
         onLog("[dsh-app] upgrading engine; preserving installed Linux system and user tools")
         EngineUpgrade(base, sync).activate(version, spec)
         File(base, "staging").deleteRecursivelySafely()
     } else {
+        if (File(base, "home.carry").exists() || File(base, "rootfs.old").exists()) {
+            throw RuntimeUpgradeBlocked("legacy_interrupted")
+        }
         // Only first install (or an explicit user-confirmed reset) may activate
         // an entire rootfs. Never use this as an incompatible-upgrade fallback.
+        if (raw.optInt("schema", 1) == 2) {
+            checkLayeredFirstInstall(File(base, "staging"), raw, version, abi)
+        }
         activateRootfs(base, version, keep, dropKept, sync = sync)
     }
 }

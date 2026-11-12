@@ -127,6 +127,7 @@ class FakeNavigationDelegate extends PlatformNavigationDelegate {
 
   PageEventCallback? onPageStarted;
   PageEventCallback? onPageFinished;
+  ProgressCallback? onProgress;
   WebResourceErrorCallback? onWebResourceError;
 
   @override
@@ -139,7 +140,7 @@ class FakeNavigationDelegate extends PlatformNavigationDelegate {
   Future<void> setOnPageFinished(PageEventCallback onPageFinished) async => this.onPageFinished = onPageFinished;
 
   @override
-  Future<void> setOnProgress(ProgressCallback onProgress) async {}
+  Future<void> setOnProgress(ProgressCallback onProgress) async => this.onProgress = onProgress;
 
   @override
   Future<void> setOnWebResourceError(WebResourceErrorCallback onWebResourceError) async =>

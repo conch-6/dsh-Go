@@ -10,9 +10,11 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 /// The platform returns temporary content URIs, without copying file contents
 /// into Dart or granting the page access to app-private filesystem paths.
 class WebFileChooser {
-  WebFileChooser({MethodChannel? channel}) : _channel = channel ?? const MethodChannel('dsh/web-files');
+  WebFileChooser({MethodChannel? channel, this._canChoose})
+    : _channel = channel ?? const MethodChannel('dsh/web-files');
 
   final MethodChannel _channel;
+  final bool Function()? _canChoose;
   int _generation = 0;
   bool _disposed = false;
   bool _busy = false;
@@ -34,14 +36,15 @@ class WebFileChooser {
   }) async {
     // A file upload never creates/overwrites a local file. Capture is a hint:
     // use the system document UI without silently acquiring camera/mic access.
-    if (_disposed || _busy || params.mode == FileSelectorMode.save) return const [];
+    if (_disposed || _busy || _canChoose?.call() == false || params.mode == FileSelectorMode.save) return const [];
     _busy = true;
     final generation = _generation;
     final owner = '$webViewId:$generation';
+    bool current() => !_disposed && generation == _generation && _canChoose?.call() != false;
     try {
       final url = await currentUrl();
       final uri = Uri.tryParse(url ?? '');
-      if (_disposed || generation != _generation || uri == null || !['http', 'https'].contains(uri.scheme)) {
+      if (!current() || uri == null || !['http', 'https'].contains(uri.scheme)) {
         return const [];
       }
       _owner = owner;
@@ -52,8 +55,9 @@ class WebFileChooser {
         'acceptTypes': params.acceptTypes,
         'multiple': params.mode == FileSelectorMode.openMultiple,
       });
+      if (!current()) return const [];
       final after = await currentUrl();
-      if (_disposed || generation != _generation || after != url) return const [];
+      if (!current() || after != url) return const [];
       if (files == null || files.isEmpty) return const [];
       // Native also validates grants/providers. Never hand a file:// path or
       // a malformed plugin response to the WebView.

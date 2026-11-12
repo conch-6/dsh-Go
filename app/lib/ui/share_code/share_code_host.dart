@@ -4,8 +4,10 @@
 // replay instead (lib/ui/replay/).
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -38,9 +40,11 @@ Future<bool> openShareLink(BuildContext context, ShareLink link) async {
   try {
     final text = await fetchShareLinkText(link, container.read(shareNetProvider));
     if (!context.mounted) return true;
-    await _open(context, text, origin: link.isGist ? ShareOrigin.gist : ShareOrigin.link);
+    final decoded = await compute(_decodeText, (text, context.l10n.pluginsChat));
+    if (!context.mounted) return true;
+    await _open(context, decoded, origin: link.isGist ? ShareOrigin.gist : ShareOrigin.link);
   } catch (e) {
-    messenger?.showSnackBar(SnackBar(content: Text(shareOpenError(e))));
+    if (context.mounted) messenger?.showSnackBar(SnackBar(content: Text(shareOpenError(e))));
   }
   return true;
 }
@@ -50,31 +54,47 @@ Future<bool> openShareFile(BuildContext context, File file) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   try {
     if (await file.length() > maxConversationFileBytes * 2) throw const ShareDecodeException('file too large');
-    final text = await file.readAsString();
+    final bytes = await file.readAsBytes();
     if (!context.mounted) return true;
-    await _open(context, text, origin: ShareOrigin.file);
+    final decoded = await compute(_decodeBytes, (bytes, context.l10n.pluginsChat));
+    if (!context.mounted) return true;
+    await _open(context, decoded, origin: ShareOrigin.file);
   } catch (e) {
-    messenger?.showSnackBar(SnackBar(content: Text(shareOpenError(e))));
+    if (context.mounted) messenger?.showSnackBar(SnackBar(content: Text(shareOpenError(e))));
   }
   return true;
 }
 
-/// A conversation opens its replay; anything else its confirm sheet.
-Future<void> _open(BuildContext context, String fileText, {required ShareOrigin origin}) async {
+// Only data crosses the isolate boundary. The fallback title follows the UI
+// language, rather than the worker's initial AppLocale.
+Object _decodeBytes((Uint8List, String) input) {
+  final String text;
+  try {
+    text = utf8.decode(input.$1);
+  } on FormatException {
+    // Keep File.readAsString's error category after moving UTF-8 to the worker.
+    throw const FileSystemException('Failed to decode share file as UTF-8');
+  }
+  return _decodeText((text, input.$2));
+}
+
+/// Returns a [DecodedConversation] or a validated [SharePayload].
+Object _decodeText((String, String) input) {
+  final (fileText, fallbackTitle) = input;
   final envelope = readShareEnvelope(fileText);
   final json = decodeShareJson(envelope.code, large: true);
   if (ShareKind.parse(json['kind']) == ShareKind.conversation) {
-    final share = ConversationShare.fromJson(json);
-    final conversation = DecodedConversation(
-      share,
-      readConversationAssets(envelope.assets, share),
-      code: envelope.code,
-    );
-    await openConversationReplay(context, conversation);
-    return;
+    final share = ConversationShare.fromJson(json, fallbackTitle: fallbackTitle);
+    return DecodedConversation(share, readConversationAssets(envelope.assets, share), code: envelope.code);
   }
-  await showShareImportSheet(context, SharePayload.fromJson(json), origin: origin);
+  return SharePayload.fromJson(json);
 }
+
+/// A conversation opens its replay; anything else its confirm sheet.
+Future<void> _open(BuildContext context, Object decoded, {required ShareOrigin origin}) =>
+    decoded is DecodedConversation
+    ? openConversationReplay(context, decoded)
+    : showShareImportSheet(context, decoded as SharePayload, origin: origin);
 
 /// Put it once inside the home route, next to [LinkHost]. It draws nothing:
 /// it registers the `share` host, the landing page and `.dshgo` files with

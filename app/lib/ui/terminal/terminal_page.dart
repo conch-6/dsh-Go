@@ -23,6 +23,7 @@ import '../common/side_insets.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import '../workspace/text_prompt.dart';
 import 'terminal_keys.dart';
 import 'terminal_screen.dart';
 
@@ -101,24 +102,13 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
   }
 
   Future<void> _rename(TerminalTab tab) async {
-    final controller = TextEditingController(text: tab.title);
-    final next = await showAppDialog<String>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text(appL10n.botsTerminalRename),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 120,
-          decoration: InputDecoration(hintText: appL10n.botsTerminalName, counterText: ''),
-          onSubmitted: (v) => Navigator.pop(dialog, v.trim()),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog), child: Text(appL10n.commonCancel)),
-          FilledButton(onPressed: () => Navigator.pop(dialog, controller.text.trim()), child: Text(appL10n.commonSave)),
-        ],
-      ),
-    ).whenComplete(controller.dispose);
+    final next = await showTextPrompt(
+      context,
+      title: appL10n.botsTerminalRename,
+      initial: tab.title,
+      hint: appL10n.botsTerminalName,
+      maxLength: 120,
+    );
     if (next == null || next.isEmpty || next == tab.title || !mounted) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     final ok = await ref.read(_provider.notifier).rename(tab.id, next);

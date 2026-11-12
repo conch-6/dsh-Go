@@ -12,6 +12,7 @@ import 'dart:math';
 
 import 'package:flutter/services.dart';
 
+import 'companion_file_stream.dart';
 import 'companion_pack.dart';
 
 const _contentTypes = {
@@ -30,7 +31,7 @@ const _contentTypes = {
 };
 
 /// The page's own files, under `assets/companion/`.
-const _appFiles = {'index.html', 'scene.js', 'stage.js', 'stage.css'};
+const _appFiles = {'index.html', 'scene.js', 'stage.js', 'stage.css', 'float.js'};
 
 class CompanionServer {
   CompanionServer._(this._server, this._token, this._assets, this._pack);
@@ -46,6 +47,9 @@ class CompanionServer {
   final String _token;
   final AssetBundle _assets;
   final Directory _pack;
+  final _requests = <Future<void>>{};
+  bool _closed = false;
+  Future<void>? _closing;
 
   /// The page, with [query] for the stage's start-up options.
   Uri pageUrl({Map<String, String> query = const {}}) => Uri(
@@ -65,20 +69,29 @@ class CompanionServer {
         uri.pathSegments.firstOrNull == _token;
   }
 
-  Future<void> close() => _server.close(force: true);
+  /// Wait for asynchronous handlers too: a late asset/file lookup must not
+  /// reopen a replacement pack after the socket has already been closed.
+  Future<void> close() => _closing ??= _close();
+
+  Future<void> _close() async {
+    _closed = true;
+    await _server.close(force: true);
+    await Future.wait(List.of(_requests));
+  }
 
   void _listen() {
-    _server.listen(
-      (request) => unawaited(
-        _handle(request).catchError((Object _) {
+    _server.listen((request) {
+      late final Future<void> pending;
+      pending = _handle(request).catchError((Object _) {
           // The page went away mid-response.
-        }),
-      ),
-    );
+        }).whenComplete(() => _requests.remove(pending));
+      _requests.add(pending);
+    });
   }
 
   Future<void> _handle(HttpRequest request) async {
     final response = request.response;
+    if (_closed) return response.close();
     final List<String> segments;
     try {
       segments = request.uri.pathSegments;
@@ -95,6 +108,7 @@ class CompanionServer {
     switch (segments[1]) {
       case 'app' when _appFiles.contains(path):
         final data = await _assets.load('assets/companion/$path');
+        if (_closed) return response.close();
         _headers(response, type, data.lengthInBytes);
         if (request.method == 'GET') response.add(Uint8List.sublistView(data));
         await response.close();
@@ -103,8 +117,15 @@ class CompanionServer {
         if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.file) {
           return _refuse(response);
         }
-        _headers(response, type, await file.length());
-        if (request.method == 'GET') await response.addStream(file.openRead());
+        if (_closed) return response.close();
+        final length = await file.length();
+        if (_closed) return response.close();
+        _headers(response, type, length);
+        if (request.method == 'GET') {
+          await consumeCompanionFileStream(file.openRead(), (stream) async {
+            await response.addStream(stream);
+          });
+        }
         await response.close();
       default:
         return _refuse(response);

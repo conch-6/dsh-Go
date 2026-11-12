@@ -206,7 +206,14 @@ class IslandSpec {
   final bool maskOfficial;
 
   /// Identity for reuse and failure bookkeeping.
-  String get key => [host.kind.name, host.id, form.name, slot, cell ?? '', sessionId ?? ''].join('|');
+  String get key => [
+    host.kind.name,
+    host.id,
+    form.name,
+    slot,
+    package != null && package != cell ? '$package:${cell ?? ''}' : (cell ?? ''),
+    sessionId ?? '',
+  ].join('|');
 
   @override
   bool operator ==(Object other) =>

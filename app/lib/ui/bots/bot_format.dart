@@ -31,10 +31,13 @@ String toolVerb(String tool) => switch (tool) {
   _ => appL10n.botsToolWork,
 };
 
+/// The wall clock Bot timestamps read (tests freeze it).
+DateTime Function() botClock = DateTime.now;
+
 /// 「刚刚」「14:05」「昨天」「10月3日」.
 String shortTime(DateTime? time, {DateTime? now}) {
   if (time == null) return '';
-  final at = now ?? DateTime.now();
+  final at = now ?? botClock();
   final diff = at.difference(time);
   if (diff.inSeconds.abs() < 60) return appL10n.botsJustNow;
   final today = DateTime(at.year, at.month, at.day);

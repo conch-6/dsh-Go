@@ -4,10 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProotLaunchFailureTest {
-    private val reported = listOf(
+    private val execErrors = listOf(
         "proot error: execve(\"/usr/bin/env\"): Permission denied",
         "proot error: execve(\"/usr/bin/env\"): Too many symbolic links encountered",
     )
+
+    private val prootAssertion =
+        "./tracee/event.c:704: int handle_tracee_event(Tracee *, int): assertion \"IS_IN_SYSENTER(tracee)\" failed"
+    private val reported = execErrors + prootAssertion
 
     private fun classify(
         tail: List<String>,
@@ -17,7 +21,7 @@ class ProotLaunchFailureTest {
         direct: Boolean = false,
     ) = CrashClassifier.classify(exitCode, readyAt, 180_000L, 123L, tail, safe, direct)
 
-    @Test fun preservesReportedProotExecErrorsInsteadOfCallingThemAndroidKills() {
+    @Test fun preservesReportedProotFailuresInsteadOfCallingThemAndroidKills() {
         for (error in reported) {
             val failure = classify(listOf(
                 error,
@@ -32,15 +36,19 @@ class ProotLaunchFailureTest {
         }
     }
 
-    @Test fun onlyAcceptsTheInitialProotCommandBeforeReadyOnAFailedProotRun() {
+    @Test fun onlyAcceptsKnownProotFailuresBeforeReadyOnAFailedProotRun() {
         for (error in reported) {
             assertEquals(FailureKind.KILLED, classify(listOf(error), readyAt = 0L).kind)
             assertEquals(FailureKind.KILLED, classify(listOf(error), exitCode = 0).kind)
             assertEquals(FailureKind.KILLED, classify(listOf(error), direct = true).kind)
             assertEquals(FailureKind.KILLED, classify(listOf("plugin says: $error")).kind)
+        }
+        for (error in execErrors) {
             assertEquals(FailureKind.KILLED, classify(listOf(error.replace("/usr/bin/env", "/tmp/plugin-helper"))).kind)
         }
         for (line in listOf(
+            prootAssertion.replace("./tracee/event.c", "./plugin.c"),
+            prootAssertion.replace("IS_IN_SYSENTER(tracee)", "plugin_state"),
             "Permission denied",
             "Too many symbolic links encountered",
             "proot error: can't chmod '/tmp/proot-file': No such file or directory",

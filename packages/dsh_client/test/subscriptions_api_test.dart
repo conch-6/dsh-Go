@@ -48,6 +48,71 @@ List<List<Object?>> _sent(_ScriptedCarrier carrier) => [
 ];
 
 void main() {
+  group('appAuth/usage', () {
+    test('sends the provider and preserves zero usage and reset time', () async {
+      final carrier = _ScriptedCarrier({
+        'appAuth/usage': (_) => ok({
+          'provider': 'openai-codex',
+          'status': 'ok',
+          'windows': [
+            {'id': 'primary', 'usedPercent': 0, 'resetAt': '2026-11-11T00:00:00Z', 'windowSeconds': 18000},
+          ],
+        }),
+      });
+      final usage = await DshClient.withCarrier(carrier).subscriptionUsage(Subscription.chatgpt);
+      expect(_sent(carrier), [
+        [
+          'appAuth/usage',
+          {'provider': 'openai-codex'},
+        ],
+      ]);
+      expect(usage.status, SubscriptionUsageStatus.ok);
+      expect(usage.windows.single.usedPercent, 0);
+      expect(usage.windows.single.windowSeconds, 18000);
+      expect(usage.windows.single.resetAt, DateTime.utc(2026, 11, 11));
+    });
+
+    test('rejects missing data and mismatched provider instead of fabricating zero', () {
+      for (final value in [
+        {'provider': 'anthropic', 'status': 'ok', 'windows': []},
+        {
+          'provider': 'openai-codex',
+          'status': 'ok',
+          'windows': [
+            {'id': 'primary'},
+          ],
+        },
+        {
+          'provider': 'openai-codex',
+          'status': 'ok',
+          'windows': [
+            {'id': 'primary', 'usedPercent': 101},
+          ],
+        },
+      ]) {
+        expect(() => SubscriptionUsage.fromJson(Subscription.chatgpt, value), throwsFormatException);
+      }
+    });
+
+    test('preserves unsupported and unavailable states', () {
+      for (final entry in {
+        'unsupported': SubscriptionUsageStatus.unsupported,
+        'not_signed_in': SubscriptionUsageStatus.notSignedIn,
+        'unavailable': SubscriptionUsageStatus.unavailable,
+      }.entries) {
+        final usage = SubscriptionUsage.fromJson(Subscription.claude, {'provider': 'anthropic', 'status': entry.key});
+        expect(usage.status, entry.value);
+        expect(usage.windows, isEmpty);
+      }
+      final failed = SubscriptionUsage.fromJson(Subscription.claude, {
+        'provider': 'anthropic',
+        'status': 'unavailable',
+        'reason': 'network',
+      });
+      expect(failed.reason, 'network');
+    });
+  });
+
   group('Subscription', () {
     test('wire ids are the pi-ai provider ids', () {
       expect(Subscription.chatgpt.wire, 'openai-codex');

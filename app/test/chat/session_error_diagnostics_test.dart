@@ -117,6 +117,26 @@ void main() {
     expect(_sessionErrors(), before);
   });
 
+  testWidgets('unsupported history is readable in the UI and retains its diagnostic', (tester) async {
+    final client = _Client();
+    final container = _start(client);
+    client.watches.single.addError(
+      const DshRemoteException(
+        'session/format-unsupported',
+        'synthetic unknown event permissionRules/decision; token=fixture-format-secret',
+      ),
+      StackTrace.fromString('synthetic-format.dart:12'),
+    );
+    await tester.pump();
+    final state = container.read(chatProvider('S'));
+    expect(state.error, '对话同步中断：当前引擎无法读取此对话的日志格式，请导出诊断包排查');
+    expect(state.streamLost, isTrue);
+    expect(state.loading, isFalse);
+    expect(_sessionErrors().last.message, contains('session/format-unsupported'));
+    expect(_sessionErrors().last.message, contains('permissionRules/decision'));
+    expect(_sessionErrors().last.message, isNot(contains('fixture-format-secret')));
+  });
+
   testWidgets('a retired follow cannot add errors after the controller was invalidated', (tester) async {
     final client = _Client();
     final container = _start(client);

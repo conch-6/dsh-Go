@@ -223,7 +223,13 @@ class LauncherIconPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
         /** On [ShortcutsPlugin.worker]. Returns the icon now on the launcher. */
         private fun switchTo(context: Context, id: String): String {
-            prefs(context).edit().putString(KEY_CHOSEN, id).commit()
+            val preferences = prefs(context)
+            val previous = preferences.getString(KEY_CHOSEN, null)
+            if (!preferences.edit().putString(KEY_CHOSEN, id).commit()) {
+                // commit changes memory even when the disk write fails.
+                preferences.edit().putString(KEY_CHOSEN, previous).apply()
+                throw IllegalStateException("could not save launcher icon")
+            }
             val stateOf = stateReader(context)
             applyPlan(context, LauncherIcons.plan(id, stateOf, originalInUse(context)))
             return LauncherIcons.current(stateOf, id)

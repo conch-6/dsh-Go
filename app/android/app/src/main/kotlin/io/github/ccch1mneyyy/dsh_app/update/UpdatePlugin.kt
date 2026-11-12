@@ -122,7 +122,7 @@ class UpdatePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandl
     }
 
     private fun privilegedFailure(code: String, unknown: Boolean = false) = mapOf(
-        "status" to if (unknown) "unknown" else "failure",
+        "status" to if (unknown) "unknown" else if (code == "storage") "storage" else "failure",
         "errorCode" to code,
         "submitted" to unknown,
         "outcomeUnknown" to unknown,

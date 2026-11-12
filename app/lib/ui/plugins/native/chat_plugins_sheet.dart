@@ -220,10 +220,10 @@ class ChatWebPluginsPane extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final web = ref.watch(chatWebPluginsProvider(sessionId));
     // What 对话详情's tab holds. A conversation's own pages of these plugins are rows under
-    // their parts; global pages (the tab's fallback, no session) are listed nowhere here.
+    // their parts; global pages, even beside those views, are listed nowhere here.
     final plan = ref.watch(sessionPluginPlanProvider(sessionId));
     final others = plan.visible.where(
-      (item) => plan.seat.sessionId == null || !web.packages.contains(item.occupant.package),
+      (item) => item.occupant.slot == Slots.main || !web.packages.contains(item.occupant.package),
     );
     return ListView(
       key: const ValueKey('chat-plugins-pane'),

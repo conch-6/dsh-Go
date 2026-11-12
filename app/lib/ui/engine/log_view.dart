@@ -2,16 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../diagnostics/ansi.dart';
 import '../../l10n/l10n.dart';
 import '../terminal/terminal_palette.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import '../common/brief_notice.dart';
 
-final _ansi = RegExp(r'\x1B\[[0-9;?]*[ -/]*[@-~]');
-
-/// Strips ANSI escape sequences (DSH and node colour their output).
-String stripAnsi(String line) => line.replaceAll(_ansi, '');
+export '../../diagnostics/ansi.dart';
 
 /// Live log well: monospace 12/1.5 in the code-well material, pinned to the newest
 /// line. Built as a reversed list, so it stays at the bottom without jump logic

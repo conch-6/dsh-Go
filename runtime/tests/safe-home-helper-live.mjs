@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -126,4 +126,81 @@ test('real missing tar failure removes the incomplete new archive and preserves 
   assert.doesNotMatch(result.stdout, /已导出/);
   assert.equal(existsSync(target), false);
   assert.equal(readFileSync(original, 'utf8'), 'original-bytes');
+});
+
+
+test('helper atomic write preserves unrelated temp files on success', t => {
+  const f = fixture(t);
+  const profile = join(f.original, 'profiles/web');
+  const file = join(profile, 'package.json');
+  const unrelated = join(profile, 'package.json.0.0.tmp');
+  writeFileSync(unrelated, 'keep this earlier file');
+  const result = f.run('disable', 'original-plugin');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /已停用/);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).dsh.profile.bundles, []);
+  assert.equal(existsSync(file + '.lock'), false);
+  assert.deepEqual(readdirSync(profile).filter(name => name.endsWith('.tmp')), ['package.json.0.0.tmp']);
+  assert.equal(readFileSync(unrelated, 'utf8'), 'keep this earlier file');
+});
+
+test('helper lock record write failure leaves no lock and permits a later repair', { skip: process.platform !== 'linux' }, t => {
+  const f = fixture(t);
+  const file = join(f.original, 'profiles/web/package.json');
+  const before = readFileSync(file, 'utf8');
+  // A zero kernel file-size limit allows exclusive creation but rejects the PID write.
+  // The error and syscall field come from Node itself, without replacing fs methods.
+  const limit = [
+    'import os, resource, signal, sys',
+    'signal.signal(signal.SIGXFSZ, signal.SIG_IGN)',
+    '_, hard = resource.getrlimit(resource.RLIMIT_FSIZE)',
+    'resource.setrlimit(resource.RLIMIT_FSIZE, (0, hard))',
+    'os.execv(sys.argv[1], sys.argv[1:])',
+  ].join('\n');
+  const failed = spawnSync('python3', ['-I', '-c', limit, process.execPath, f.helper, 'disable', 'original-plugin'], {
+    cwd: f.dir, encoding: 'utf8', timeout: 10000,
+    env: { ...process.env, DSH_HOME: f.rescue, DSH_APP_ORIGINAL_HOME: f.original, DSH_APP_SAFE_DIR: f.dir },
+  });
+  assert.ifError(failed.error);
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /EFBIG.*write/);
+  assert.equal(readFileSync(file, 'utf8'), before);
+  assert.equal(existsSync(file + '.lock'), false);
+  const retried = f.run('disable', 'original-plugin');
+  assert.equal(retried.status, 0, retried.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).dsh.profile.bundles, []);
+  assert.equal(existsSync(file + '.lock'), false);
+});
+
+test('helper atomic write failure cleans its temp and preserves the profile', { skip: process.platform !== 'linux' }, t => {
+  const f = fixture(t);
+  const profile = join(f.original, 'profiles/web');
+  const file = join(profile, 'package.json');
+  const manifest = JSON.parse(readFileSync(file, 'utf8'));
+  manifest.description = 'x'.repeat(8192);
+  const before = JSON.stringify(manifest) + '\n';
+  writeFileSync(file, before);
+  const unrelated = join(profile, 'package.json.0.0.tmp');
+  writeFileSync(unrelated, 'keep this earlier file');
+  // Set only this child process's kernel write limit before the real helper.
+  // No fs replacement: partial write and EFBIG come from the filesystem.
+  const limit = [
+    'import os, resource, signal, sys',
+    'signal.signal(signal.SIGXFSZ, signal.SIG_IGN)',
+    '_, hard = resource.getrlimit(resource.RLIMIT_FSIZE)',
+    'resource.setrlimit(resource.RLIMIT_FSIZE, (4096, hard))',
+    'os.execv(sys.argv[1], sys.argv[1:])',
+  ].join('\n');
+  const result = spawnSync('python3', ['-I', '-c', limit, process.execPath, f.helper, 'disable', 'original-plugin'], {
+    cwd: f.dir, encoding: 'utf8', timeout: 10000,
+    env: { ...process.env, DSH_HOME: f.rescue, DSH_APP_ORIGINAL_HOME: f.original, DSH_APP_SAFE_DIR: f.dir },
+  });
+  assert.ifError(result.error);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /EFBIG/);
+  assert.doesNotMatch(result.stdout, /已停用/);
+  assert.equal(readFileSync(file, 'utf8'), before);
+  assert.equal(existsSync(file + '.lock'), false);
+  assert.deepEqual(readdirSync(profile).filter(name => name.endsWith('.tmp')), ['package.json.0.0.tmp']);
+  assert.equal(readFileSync(unrelated, 'utf8'), 'keep this earlier file');
 });

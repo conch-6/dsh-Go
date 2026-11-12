@@ -1177,6 +1177,8 @@ class BackgroundControl private constructor(context: Context) {
         }
         notifyChanged()
         var accepted: BackgroundGateState.Update.Accepted? = null
+        // A rejected capability handshake happens before any allocation or cleanup mandate.
+        var preAllocationReject = false
         var reason: String? = null
         var released = false
         var published = false
@@ -1187,11 +1189,16 @@ class BackgroundControl private constructor(context: Context) {
                 if ((cap.get(Proto.OK) as? Boolean) != true ||
                     !OwnerScopeProtocol.supported(cap) || (cap.get(Proto.SELF_CHECK_PROBE_VERSION) as? Int) != 1 ||
                     (cap.get(Proto.RELEASE_RECEIPT) as? Int) != 1) {
+                    preAllocationReject = true
                     reason = failed(R.string.background_gate_peer_unsupported, peer)
                     return@call
                 }
                 val birth = BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey)
-                if (birth == null) { reason = failed(R.string.background_gate_peer_unsupported, peer); return@call }
+                if (birth == null) {
+                    preAllocationReject = true
+                    reason = failed(R.string.background_gate_peer_unsupported, peer)
+                    return@call
+                }
                 if (!call.resource.begin(birth)) { reason = AppStrings.get(app, R.string.background_resource_recovery_pending); return@call }
                 val allocation = OwnerScopeProtocol.first(call.io, peer,
                     BackgroundRecoveryProtocol.allocate(call.io.owner, "probe", null)) { commit -> gate.admit(probe, commit) }
@@ -1233,6 +1240,10 @@ class BackgroundControl private constructor(context: Context) {
                 if (receipt != null && !Thread.currentThread().isInterrupted) {
                     published = if (receipt.trustedDisplayOk && receipt.injectOk == true)
                         gate.completedWithCleanup(probe) else gate.current(probe)
+                } else if (preAllocationReject && !Thread.currentThread().isInterrupted) {
+                    // Nothing was allocated here: refusing an unusable channel is a definitive
+                    // outcome, so the retest barrier must not deadlock every later task.
+                    gate.concludedWithoutAllocation(probe)
                 }
             }
         }

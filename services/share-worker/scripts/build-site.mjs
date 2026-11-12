@@ -19,6 +19,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, write
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writePetMarketProfile } from './build-pet-market-profile.mjs';
+import { writeWorkshopData } from './build-workshop-data.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const worker = resolve(here, '..');
@@ -119,5 +120,6 @@ writeFileSync(
     `export const VIEWER_HEADERS: Record<string, string> = ${JSON.stringify(page(viewerCsp), null, 2)};\n`,
 );
 
+writeWorkshopData(worker);
 writePetMarketProfile(worker);
 console.log(`build-site: ${Object.keys(served).length} paths from ${source} and ${home} → public/`);

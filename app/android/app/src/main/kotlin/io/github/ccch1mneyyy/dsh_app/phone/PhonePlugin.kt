@@ -279,9 +279,12 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                     controlIo.execute { control.background.saveKeep(cleared) }
                     control.background.cancelRootSelection()
                 }
-                async(result) {
-                    val ok = (!enabled || control.background.preparePhoneEnable()) && control.setEnabled(enabled)
-                    if (ok && !enabled) control.background.setBackgroundMode("off")["ok"] == true else ok
+                if (enabled) {
+                    async(result) { control.background.preparePhoneEnable() && control.setEnabled(true) }
+                } else {
+                    dispatchPhoneDisable(controlIo, io, { control.setEnabled(false) }, {
+                        control.background.setBackgroundMode("off")["ok"] == true
+                    }) { complete(result, it) }
                 }
             }
             "openAccessibilitySettings" -> result.success(startActivity(control.accessibilitySettingsIntent()))

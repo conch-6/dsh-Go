@@ -15,6 +15,7 @@ import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.FrameLayout
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -26,23 +27,33 @@ import kotlin.math.roundToInt
  * packs. Software drawn (the window asks for no hardware acceleration): a small view redrawn only
  * when the frame changes.
  *
- * Touch, on the body ([PetFrames.hit]): drag moves the window, a tap opens the conversation, a
- * long press opens the menu. A touch that starts elsewhere in a grown window does nothing.
+ * Touch, on the body ([PetFrames.hit]): drag moves the window, one tap plays with the pet, two in a
+ * row open the conversation, a long press opens the menu. A touch that starts elsewhere in a grown
+ * window does nothing.
  */
 @SuppressLint("ViewConstructor")
-internal class PetView(context: Context, private val listener: Listener) : View(context) {
+internal class PetView(context: Context, private val listener: Listener) : FrameLayout(context) {
+
+    init {
+        setWillNotDraw(false)
+        descendantFocusability = FOCUS_BLOCK_DESCENDANTS
+    }
 
     interface Listener {
         fun onDragStart()
         fun onDrag(dx: Int, dy: Int)
         fun onDragEnd(velocityX: Float)
         fun onDragCancel()
+        /** One tap: play. ([x], [y]) is where, in 0–1 of the companion's viewport when she is shown. */
+        fun onPoke(leftHalf: Boolean, x: Float, y: Float)
+
+        /** The second tap of a quick pair, or the accessibility click: open the conversation. */
         fun onTap(leftHalf: Boolean)
         fun onLongPress(rawX: Float?, rawY: Float?)
         fun onMenuMove(rawX: Float, rawY: Float)
         fun onMenuEnd(rawX: Float, rawY: Float, cancelled: Boolean)
 
-        /** The system hid or showed the window (e.g. another app's setHideOverlayWindows). */
+        /** A visibility notification actually delivered by the window system; not an occlusion guarantee. */
         fun onShownChanged(shown: Boolean)
     }
 
@@ -52,13 +63,45 @@ internal class PetView(context: Context, private val listener: Listener) : View(
     private var sprites: PetSprites.Loaded? = null
     private var anim: PetAnimation? = null
     private var cell = -1
+    var companionGeometry: CompanionFloatGeometry? = null
+        private set
+    var companionBounds = FramePx(0, 0, 0, 0)
+        private set
+
+    fun setCompanion(view: View, geometry: CompanionFloatGeometry) {
+        companionGeometry = geometry
+        companionBounds = geometry.whole
+        sprites?.overlayFrames = geometry.frames(companionBounds)
+        anim = null
+        cell = -1
+        frame = sprites?.frames?.rest ?: geometry.whole
+        addView(view, LayoutParams(geometry.width, geometry.height))
+        requestLayout()
+        invalidate()
+    }
+
+    fun setCompanionBounds(box: FramePx) {
+        companionBounds = box
+        sprites?.overlayFrames = companionGeometry?.frames(box)
+        setFrame(FramePx(0, 0, box.width, box.height))
+        // Equal-sized boxes can still move within the fixed viewport.
+        requestLayout()
+    }
+
+    fun clearCompanion() {
+        if (companionGeometry == null) return
+        removeAllViews()
+        companionGeometry = null
+        sprites?.overlayFrames = null
+        setSprites(sprites)
+    }
 
     /** The window's frame now, around the rest frame's origin (see [PetFrames]). */
     var frame = FramePx(0, 0, 0, 0)
         private set
 
     /** The animation on screen (null before the first sheet arrives). */
-    val shown: PetAnimation? get() = anim
+    val shown: PetAnimation? get() = if (companionGeometry == null) anim else null
 
     fun setSprites(loaded: PetSprites.Loaded?) {
         sprites = loaded
@@ -87,6 +130,7 @@ internal class PetView(context: Context, private val listener: Listener) : View(
      * returns false). Redraws only when the cell actually changes.
      */
     fun show(animation: PetAnimation, frameIndex: Int): Boolean {
+        if (companionGeometry != null) return false
         val s = sprites ?: return false
         if (s.sheet(animation) == null) return false
         val c = animation.frames.getOrNull(frameIndex)?.cell ?: return false
@@ -106,9 +150,25 @@ internal class PetView(context: Context, private val listener: Listener) : View(
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         setMeasuredDimension(frame.width, frame.height)
+        companionGeometry?.let { size ->
+            getChildAt(0)?.measure(
+                MeasureSpec.makeMeasureSpec(size.width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(size.height, MeasureSpec.EXACTLY),
+            )
+        }
     }
 
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        val size = companionGeometry ?: return
+        val box = companionBounds
+        getChildAt(0)?.layout(-box.left, -box.top, size.width - box.left, size.height - box.top)
+    }
+
+    // Every gesture, including the initial DOWN, belongs to the existing native listener.
+    override fun onInterceptTouchEvent(event: MotionEvent) = true
+
     override fun onDraw(canvas: Canvas) {
+        if (companionGeometry != null) return
         val s = sprites ?: return
         val a = anim ?: return
         if (cell < 0) return
@@ -147,9 +207,14 @@ internal class PetView(context: Context, private val listener: Listener) : View(
     private var lastX = 0f
     private var lastY = 0f
     private var tracker: VelocityTracker? = null
+    private val taps = PetTaps(
+        ViewConfiguration.getDoubleTapTimeout().toLong(),
+        ViewConfiguration.get(context).scaledDoubleTapSlop.toFloat(),
+    )
     private val longPress = Runnable {
         if (touching && !dragging) {
             longPressed = true
+            taps.clear()
             performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             listener.onLongPress(lastX, lastY)
         }
@@ -182,6 +247,7 @@ internal class PetView(context: Context, private val listener: Listener) : View(
                 val dy = event.rawY - downY
                 if (!dragging && !longPressed && (abs(dx) > slop || abs(dy) > slop)) {
                     dragging = true
+                    taps.clear()
                     removeCallbacks(longPress)
                     listener.onDragStart()
                 }
@@ -195,10 +261,19 @@ internal class PetView(context: Context, private val listener: Listener) : View(
                 when {
                     longPressed -> listener.onMenuEnd(event.rawX, event.rawY, false)
                     dragging -> listener.onDragEnd(velocity())
-                    // Left and right halves split at the body's centre line (anchor.x), not the window's.
-                    !longPressed -> listener.onTap(
-                        event.x + frame.left < (sprites?.let { (it.pack.anchorX - it.window.x) * it.screenScale } ?: (width / 2f)),
-                    )
+                    else -> {
+                        val size = companionGeometry
+                        // Left and right halves split at the body's centre line (anchor.x), not the window's.
+                        val left = event.x + frame.left < if (size != null) width / 2f else
+                            (sprites?.let { (it.pack.anchorX - it.window.x) * it.screenScale } ?: (width / 2f))
+                        if (taps.second(event.downTime, event.eventTime, event.rawX, event.rawY)) listener.onTap(left)
+                        else if (size == null) listener.onPoke(left, 0.5f, 0.5f)
+                        else listener.onPoke(
+                            left,
+                            (event.x + companionBounds.left) / size.width,
+                            (event.y + companionBounds.top) / size.height,
+                        )
+                    }
                 }
                 reset()
             }
@@ -222,6 +297,7 @@ internal class PetView(context: Context, private val listener: Listener) : View(
     fun cancelInteraction() = cancelGesture()
 
     private fun cancelGesture() {
+        taps.clear()
         val held = touching && longPressed
         val dragged = touching && dragging
         reset()
@@ -239,6 +315,7 @@ internal class PetView(context: Context, private val listener: Listener) : View(
     }
 
     override fun onDetachedFromWindow() {
+        if (companionGeometry != null) listener.onShownChanged(false)
         cancelGesture()
         super.onDetachedFromWindow()
     }

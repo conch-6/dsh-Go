@@ -31,6 +31,7 @@ class PhoneTaskSessions(
     private val createBackgroundWorker: () -> SerialWorker = { SerialWorker("dsh-phone-background") },
     // Pure in-memory capability/setting snapshot. Never probe a peer or read preferences here.
     private val backgroundCapacity: () -> Int = { 1 },
+    private val screenRecoveryReady: () -> Boolean = { false },
     // Connection preparation precedes any new screen lease and runs outside registry/Tasks locks.
     private val prepareBackground: (Task, PhoneTasks.Owner) -> String? = { _, _ -> null },
 ) {
@@ -121,6 +122,8 @@ class PhoneTaskSessions(
     private var legacy = Task(null, null, legacyTasks, legacyCore)
     private val entries = linkedMapOf(Key(null, null) to legacy)
     private val stoppedSessions = HashSet<String?>()
+    // Set only by the first screen-only fence; non-screen stops/resume/retire revoke it.
+    private val screenStoppedSessions = HashSet<String>()
     private val endedRuns = HashMap<Key, String>()
     private val retainedRuns = HashSet<Key>()
     private val lastAdmitted = mutableMapOf<String?, Task>()
@@ -183,6 +186,9 @@ class PhoneTaskSessions(
     /** Called while PhoneBridge still holds its launch lock, before dispatch enters its pool. */
     fun admit(attribution: PhoneCaller?): Admission {
         val startedAt = clock()
+        // Platform state reads may use Binder; bind their result to the current stop epoch.
+        val readinessEpoch = synchronized(lock) { epoch }
+        val screenReady = attribution?.runLifecycle == 1 && screenRecoveryReady()
         return synchronized(lock) {
             if (attribution?.runLifecycle == 1) modernCallerSeen = true
             // l10n:keep agent resource admission
@@ -192,7 +198,9 @@ class PhoneTaskSessions(
             val caller = attribution?.takeIf { it.runLifecycle == 1 }
             val key = Key(caller?.sessionId, caller?.runId)
             if (caller != null) {
-                if (key in endedRuns || caller.sessionId in stoppedSessions) return Admission(null, epoch, PhoneTasks.STOPPED_MESSAGE, startedAt = startedAt)
+                if (key in endedRuns || entries[key]?.stopped == true) return Admission(null, epoch, PhoneTasks.STOPPED_MESSAGE, startedAt = startedAt)
+                if (caller.sessionId in stoppedSessions && !recoverScreenStop(key, screenReady && readinessEpoch == epoch))
+                    return Admission(null, epoch, PhoneTasks.STOPPED_MESSAGE, startedAt = startedAt)
                 if (!reserve(key)) return Admission(null, epoch, CAPACITY_MESSAGE, startedAt = startedAt)
             }
             val task = entries.getOrPut(key) {
@@ -203,6 +211,21 @@ class PhoneTaskSessions(
             task.pending++
             Admission(task, epoch, startedAt = startedAt)
         }
+    }
+
+    // Registry lock held. Never clear a stopped Task or its old admission/owner fence.
+    private fun recoverScreenStop(key: Key, screenReady: Boolean): Boolean {
+        val sessionId = key.sessionId ?: return false
+        if (key in entries || sessionId !in screenStoppedSessions || !screenReady) return false
+        val records = (entries.values + retiring).filter { it.sessionId == sessionId }
+        if (records.any { it.pending > 0 || it.running || it.closing || it.cancelling || it.cleanupFailed ||
+                it.journalFailed || !it.resourcesReleased || it.skillScope?.settled == false ||
+                it.journalRecord != null || it.ending || it.endRequested && !it.endSettled || it.tasks.isActive }) return false
+        // Cold/queued records from before the stop are old runs too.
+        records.forEach { it.stopped = true }
+        stoppedSessions -= sessionId
+        screenStoppedSessions -= sessionId
+        return true
     }
 
     internal fun runReplay(admission: Admission, selection: PhoneSkillReplaySelections.Selection,
@@ -274,7 +297,7 @@ class PhoneTaskSessions(
                                 synchronized(lock) { settleSkill(task, null) }
                             } catch (_: Exception) {
                                 synchronized(lock) { task.cleanupFailed = true }
-                                task.tasks.stop("旧任务清理尚未确认") // l10n:keep agent lifecycle result
+                                task.tasks.stop("旧任务清理尚未确认", PhoneTasks.StopSource.ENVIRONMENT) // l10n:keep agent lifecycle result
                                 return stopped()
                             }
                         }
@@ -740,7 +763,12 @@ class PhoneTaskSessions(
         task.cancelledLifecycle = state.lifecycle
         if (state.stopped) {
             task.skillScope?.cancelled = true
-            if (task.sessionId != null) { task.stopped = true; stoppedSessions += task.sessionId }
+            if (task.sessionId != null) {
+                if (state.stopSource != PhoneTasks.StopSource.SCREEN_OFF) screenStoppedSessions -= task.sessionId
+                else if (task.sessionId !in stoppedSessions) screenStoppedSessions += task.sessionId
+                task.stopped = true
+                stoppedSessions += task.sessionId
+            }
         }
         lock.notifyAll()
     }
@@ -764,6 +792,7 @@ class PhoneTaskSessions(
                 val change = record.tasks.resumeForSnapshot(expected) ?: return false
                 record to change
             }
+            task.sessionId?.let { screenStoppedSessions -= it }
             stoppedSessions -= task.sessionId
             records.forEach { it.stopped = false }
             committed
@@ -830,20 +859,23 @@ class PhoneTaskSessions(
         return synchronized(lock) { lastAdmitted[task.sessionId] === task } && task.tasks.isCurrent(owner)
     }
 
-    fun stopAll(reason: String) {
+    fun stopAll(reason: String, source: PhoneTasks.StopSource = PhoneTasks.StopSource.ENVIRONMENT) {
         data class PendingStop(val task: Task, val change: PhoneTasks.Change, val ownsCancellation: Boolean)
         val pending = synchronized(lock) {
+            epoch++
             selfCheck?.sealed = true
+            if (source != PhoneTasks.StopSource.SCREEN_OFF) screenStoppedSessions.clear()
             entries.values.map { task ->
                 // A prior cancellation keeps responsibility for its external work. Still
-                // commit this stop now so its epoch/hold and sticky session fence cannot be lost.
+                // invalidate this lifetime now. An idle record must not gain a stop hold or
+                // a session fence merely because the screen/service disappeared.
                 val ownsCancellation = !task.cancelling
-                val change = task.tasks.stopDeferred(reason)
+                val change = task.tasks.stopActiveDeferred(reason, source)
                 claimCancellation(task, change.snapshot)
                 PendingStop(task, change, ownsCancellation)
             }
         }
-        // Every pre-existing record is already stopped before the first external callback.
+        // Every pre-existing owner/admission is invalid before the first external callback.
         // A new record admitted after the batch unlocks is a separate, later admission.
         var failure: Throwable? = null
         for ((task, change, ownsCancellation) in pending) {
@@ -881,6 +913,7 @@ class PhoneTaskSessions(
                 endedRuns.clear()
                 retainedRuns.clear()
                 stoppedSessions.clear()
+                screenStoppedSessions.clear()
                 lastAdmitted.clear()
                 lock.notifyAll()
             }

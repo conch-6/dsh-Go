@@ -480,9 +480,10 @@ bool _wide(int rune) =>
 /// `⏵` 必须在行首(句中的 `⏵` 是模型在*提*这个格式,不是在用它);只取到
 /// 第一个句末标点,按显示宽度截到 80 列(约 40 个汉字),去掉控制字符。
 String? extractNarration(String text) {
-  final matches = RegExp(r'(?:^|\n)⏵[ \t]*([^\n⏵]*)').allMatches(text);
-  if (matches.isEmpty) return null;
-  var line = matches.last.group(1)!.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
+  // allMatches is lazy: checking isEmpty before last scans the first match twice.
+  final match = RegExp(r'(?:^|\n)⏵[ \t]*([^\n⏵]*)').allMatches(text).lastOrNull;
+  if (match == null) return null;
+  var line = match.group(1)!.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
   if (line.isEmpty) return null;
   // l10n:keep narration punctuation parser
   final end = RegExp(r'[。．!?！？;；]|\.(?=\s|$|[A-Z][a-z])').firstMatch(line);

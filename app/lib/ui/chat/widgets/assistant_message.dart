@@ -207,7 +207,7 @@ class _AssistantMessageState extends State<AssistantMessage> {
                 ? ReplyActionRow(
                     // Copy / share carry a one-line summary of each visual
                     // reply, never its raw JSON.
-                    text: dshUiPlainText(text),
+                    text: () => dshUiPlainText(text),
                     onBranch: widget.onBranch,
                     branching: widget.branching,
                     onShare: () => shareReply(context, widget.item),

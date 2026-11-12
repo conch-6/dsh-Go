@@ -438,6 +438,61 @@ void main() {
     );
   }
 
+  final accountShells = {
+    'sh': '/bin/sh',
+    'bash': '/bin/bash',
+    'zsh': '/bin/zsh',
+    'fish': Platform.environment['DSH_TEST_FISH'] ?? '/usr/bin/fish',
+  };
+  for (final shell in accountShells.entries) {
+    for (final exitCode in [0, 70]) {
+      test(
+        'the complete bootstrap command preserves exit $exitCode through ${shell.key}',
+        skip: !File(shell.value).existsSync()
+            ? 'needs ${shell.value} (set DSH_TEST_FISH for another fish path)'
+            : false,
+        () async {
+          final home = Directory.systemTemp.createTempSync('dsh-login-shell-');
+          final h = _Harness();
+          try {
+            final badHome = File('${home.path}/not-a-directory')..writeAsStringSync('synthetic');
+            final bootstrap = RemoteDshBootstrap(
+              h.transport,
+              launchCommand:
+                  "printf '%s\\n' ${shQuote('dsh web: http://127.0.0.1:43123/?token=synthetic-shell-token')} "
+                  r'> "$D/web.log"; :',
+              environment: {'HOME': exitCode == 0 ? home.path : badHome.path},
+              startTimeout: const Duration(seconds: 5),
+            );
+            final result = _Outcome(bootstrap.start());
+            // SSH passes the complete command to the account's shell first.
+            // Do not remove its outer quoting before executing it here.
+            final ran = await Process.run(shell.value, [
+              if (shell.key == 'fish') '--no-config',
+              '-c',
+              h.execution.command,
+            ]);
+            expect(ran.exitCode, exitCode, reason: '${ran.stderr}');
+            expect(ran.stdout, endsWith(h.execution.frame(status: exitCode)));
+            expect(ran.stderr, endsWith(h.execution.frame(stderr: true, status: exitCode)));
+            expect(
+              ran.stdout,
+              contains(
+                exitCode == 0
+                    ? 'DSHAPP url dsh web: http://127.0.0.1:43123/?token=synthetic-shell-token\n'
+                    : 'DSHAPP nodir\n',
+              ),
+            );
+            expect(result.settled, isFalse);
+          } finally {
+            await h.dispose();
+            home.deleteSync(recursive: true);
+          }
+        },
+      );
+    }
+  }
+
   testWidgets('ordinary run keeps waiting for EOF and retains exact output', (tester) async {
     await _using(tester, (h) async {
       final result = _Outcome<RemoteExecResult>(h.transport.run('printf ordinary'));

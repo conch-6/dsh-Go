@@ -68,20 +68,22 @@ class RuntimeLogs(
     private var flushThrough = 0L
     private val flushes = mutableListOf<Pair<Long, CompletableFuture<Unit>>>()
 
-    fun accept(line: String, stream: String) {
-        val redacted = CrashClassifier.redact(line)
+    /** Live entries retain the token-only mask; only the disk copy uses full diagnostics rules. */
+    fun accept(line: String, stream: String, storageLine: String = line) {
+        val liveLine = CrashClassifier.redact(line)
+        val diskLine = LogRedactor.redact(storageLine)
         synchronized(guard) {
-            add(redacted, stream)
+            add(liveLine, stream, diskLine = diskLine)
             schedule(BATCH_MS)
         }
     }
 
-    private fun add(line: String, stream: String, warning: Boolean = false) {
-        val stamped = if (stream == "system") "[mono=${monotonicMillis()}ms] $line" else line
-        val entry = Entry(++sequence, stamped, stream, warning)
+    private fun add(line: String, stream: String, warning: Boolean = false, diskLine: String = line) {
+        val stamp = if (stream == "system") "[mono=${monotonicMillis()}ms] " else ""
+        val entry = Entry(++sequence, stamp + line, stream, warning)
         ring.addLast(entry)
         while (ring.size > RING_LINES) ring.removeFirst()
-        disk.add(entry)
+        disk.add(if (diskLine == line) entry else Entry(entry.seq, stamp + diskLine, stream, warning))
         delivery.add(entry)
     }
 

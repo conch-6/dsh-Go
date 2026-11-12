@@ -80,7 +80,11 @@ DshWebTarget seatWebTarget(SlotOccupant o, {String? sessionId, PluginBundle? bun
       );
     case Slots.generalItem:
       return const DshWebTarget(settings: DshWebSettings.general);
-    case Slots.bundleConfig || Slots.rowConfig:
+    case Slots.settingsPluginsTab:
+      return const DshWebTarget(settings: DshWebSettings.plugins);
+    case Slots.sidebarFooter:
+      return const DshWebTarget(sidebar: true);
+    case Slots.bundleConfig || Slots.rowConfig || Slots.pluginDetailSection:
       // The plugin's card on the Plugins page, by any of its names.
       return DshWebTarget(pluginItem: [...?bundle?.meta?.title?.all, o.package]);
     case Slots.main || Slots.panelList:

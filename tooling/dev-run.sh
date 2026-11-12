@@ -29,7 +29,7 @@
 # D:/Tools/flutter-3.47.7/flutter), Python in DSH_PYTHON. Elsewhere, what's on PATH.
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+ROOT=$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 APP="$ROOT/app"
 PKG=io.github.ccch1mneyyy.dsh_app
 APK="$APP/build/app/outputs/flutter-apk/app-arm64-debug.apk"
@@ -76,7 +76,7 @@ fi
 command -v adb >/dev/null || die "adb not found"
 
 # --- the device
-devices() { adb devices | awk 'NR > 1 && $2 == "device" { print $1 }'; }
+devices() { adb devices | tr -d '\r' | awk 'NR > 1 && $2 == "device" { print $1 }'; }
 if [[ -z $serial ]]; then
   found=$(devices)
   [[ -n $found ]] || die "no device: connect the phone, or pair it with adb pair"
@@ -127,7 +127,10 @@ grep -Eq 'flags=\[.*DEBUGGABLE' <<<"$package" ||
 # Attach finds the app by the address it logs when it starts, and only hears that once it
 # is listening: the app restarts a moment after attach is up, not before.
 (
-  sleep "${DSH_ATTACH_WAIT:-10}"
+  # Cancel and reap the waiting child before leaving this phase.
+  trap 'kill $(jobs -pr) 2>/dev/null || true; wait; exit 0' TERM
+  sleep "${DSH_ATTACH_WAIT:-10}" &
+  wait "$!"
   # Too late to call off: a stop with no launch after it would leave the app closed.
   trap '' TERM
   phone shell am force-stop "$PKG"

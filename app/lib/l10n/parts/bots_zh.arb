@@ -709,6 +709,27 @@
   "botsPetDisplayWhen": "显示时机",
   "botsPetWhenActive": "有事时显示",
   "botsPetAlways": "一直显示",
+  "botsPetOverlayShows": "悬浮窗里显示",
+  "botsPetOverlayPixel": "像素宠物",
+  "botsPetOverlayCompanion": "小屋里的她",
+  "botsPetOverlayCompanionNamed": "小屋里的{name}",
+  "@botsPetOverlayCompanionNamed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "botsPetOverlayNoPack": "先去伙伴小屋里请一位角色",
+  "botsPetOverlayPackBroken": "角色包不完整，去伙伴小屋里重新导入",
+  "botsPetOverlayUnavailable": "这台手机暂时请不出她",
+  "botsPetOverlayCompanionHint": "点一下和她互动，连点两下打开对话。比像素宠物更耗电，熄屏和隐藏时会停下来",
+  "botsPetOverlayLoading": "正在请她出来…",
+  "botsPetOverlayFallback": "她没能出来，先由像素宠物顶班",
+  "botsPetOverlayFraming": "取景",
+  "botsPetOverlayFramingFull": "全身",
+  "botsPetOverlayFramingHalf": "半身",
+  "botsPetOverlayFramingHint": "换取景会重新加载她",
   "botsPetSwitchDisabled": "开关点不动",
   "botsPetRestrictedSettings": "允许受限制的设置",
   "botsPetHiddenToday": "今天不再显示",

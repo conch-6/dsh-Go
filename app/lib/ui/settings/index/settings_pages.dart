@@ -14,6 +14,7 @@ import '../../features/agent_presets_page.dart';
 import '../../features/all_features_page.dart';
 import '../../features/permission_page.dart';
 import '../../pets/pet_settings_page.dart';
+import '../../phone/android_shell_page.dart';
 import '../../phone/app_rules_page.dart';
 import '../../phone/dnd_mode_page.dart';
 import '../../phone/phone_control_screen.dart';
@@ -55,6 +56,7 @@ Widget settingsPage(SettingsPageId id, {String? sessionId}) => switch (id) {
   SettingsPageId.sharedLinks => const HostedLinksPage(),
   SettingsPageId.phone => const PhoneControlScreen(),
   SettingsPageId.phoneAppRules => const PhoneAppRulesPage(),
+  SettingsPageId.phoneAndroidShell => const AndroidShellPage(),
   SettingsPageId.phoneDnd => const PhoneDndPage(),
   SettingsPageId.phoneUnlocks => const PhoneUnlockPage(),
   SettingsPageId.engine => const EngineScreen(),

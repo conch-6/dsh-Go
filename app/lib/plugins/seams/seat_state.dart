@@ -14,10 +14,13 @@ import '../../state/plugins_state.dart';
 import '../../ui/plugins/islands/island_host.dart' show liveIslandBudgetProvider;
 import '../../ui/plugins/seats/seat_island.dart';
 import '../../ui/plugins/seats/seat_links.dart';
+import '../../ui_config/ui_config_state.dart' show uiConfigProvider, uiSeatOverridesProvider;
 import '../native/native_state.dart' show nativePanelsProvider;
 import 'seat_inventory.dart';
 import 'seat_models.dart';
 import 'seat_planner.dart';
+import 'seat_preferences.dart';
+import 'slot_catalog.dart' show Slots;
 
 // ── Inventory ────────────────────────────────────────────────────────────────
 
@@ -84,9 +87,22 @@ final seatRouteGuardReportProvider = Provider.family<bool?, HostRef>((ref, host)
   return ref.watch(bridgeInventoryProvider.select((s) => s.value?.routeGuard));
 });
 
-/// ui.json `plugins.seats`. Not wired yet: always [SeatOverrides.none] until
-/// it reads `uiSeatOverridesProvider`.
-final seatOverridesProvider = Provider<SeatOverrides>((ref) => SeatOverrides.none);
+/// Explicit ui.json values win over the active host's local overlay choices.
+final seatOverridesProvider = Provider<SeatOverrides>((ref) {
+  final host = ref.watch(activeHostProvider);
+  final preferences = ref.watch(seatPreferencesProvider)[seatPreferenceHostKey(host)] ?? const <String, bool>{};
+  final configured = ref.watch(uiSeatOverridesProvider);
+  // Do not flash a locally enabled overlay before a cached ui.json hide loads.
+  final restored = ref.watch(uiConfigProvider(host).select((s) => s.restored));
+  return SeatOverrides({
+    ...configured.bySlot,
+    Slots.shellOverlay: {
+      for (final entry in preferences.entries)
+        if (!entry.value) entry.key: SeatOverride.hidden else if (restored) entry.key: SeatOverride.island,
+      ...?configured.bySlot[Slots.shellOverlay],
+    },
+  });
+});
 
 /// Draws the island for [items] (one or more items sharing [spec]);
 /// [fallback] is what to show when the island cannot come up.
@@ -176,11 +192,21 @@ final seatPlanProvider = Provider.autoDispose.family<SeatPlan, SeatRequest>((ref
     webAvailable: inventory?.webReachable ?? false,
   );
   if (inventory == null) return SeatPlan(seat, const []);
+  final isolatedPage = const {
+    Slots.sidebarFooter,
+    Slots.settingsPluginsTab,
+    Slots.pluginDetailSection,
+  }.contains(request.slot);
+  if (isolatedPage && inventory.occupancyStale) return SeatPlan(seat, const []);
+  final occupants = inventory
+      .occupantsFor(request.slot, package: request.package, cell: request.cell)
+      .where((o) => !isolatedPage || (inventory.packages.containsKey(o.package) && inventory.infoOf(o.package).enabled))
+      .toList();
   final items = ref
       .watch(slotAdapterRegistryProvider)
       .plan(
         request.slot,
-        inventory.occupantsFor(request.slot, package: request.package, cell: request.cell),
+        occupants,
         seat,
         budget: ref.watch(islandBudgetProvider),
         overrides: ref.watch(seatOverridesProvider),

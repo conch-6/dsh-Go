@@ -49,8 +49,8 @@ class PetWheelTest {
             for (i in 0 until count - 1) {
                 val a = g.centers[i]
                 val b = g.centers[i + 1]
-                assertTrue(kotlin.math.abs(a.first - b.first) > g.buttonWidth * 1.1f ||
-                    kotlin.math.abs(a.second - b.second) > g.buttonHeight * 1.1f)
+                // Round buttons: the chosen one grows to 1.24 and its neighbour to about 1.03.
+                assertTrue(kotlin.math.hypot(a.first - b.first, a.second - b.second) > g.buttonWidth * 1.15f)
             }
         }
     }
@@ -120,30 +120,30 @@ class PetWheelTest {
         assertNull(PetWheelGesture(0f, 0f, 10f).finish(false))
     }
 
-    @Test fun onlyStationaryUncancelledFallbackReleaseCanContinueForNativeScrolling() {
+    @Test fun onlyAStationaryUncancelledReleaseLeavesTheMenuOpenForATap() {
         val stationary = PetWheelGesture(10f, 20f, 10f)
         stationary.move(12f, 21f) { 1 }
-        assertTrue(stationary.keepListOpen(false))
+        assertTrue(stationary.staysOpen(false))
         assertNull(stationary.finish(false))
-        assertFalse(stationary.keepListOpen(false))
+        assertFalse(stationary.staysOpen(false))
         val returning = PetWheelGesture(10f, 20f, 10f)
         returning.move(100f, 20f) { 2 }
         returning.move(10f, 20f) { null }
-        assertFalse(returning.keepListOpen(false))
+        assertFalse(returning.staysOpen(false))
         assertNull(returning.finish(false))
         val cancelled = PetWheelGesture(10f, 20f, 10f)
-        assertFalse(cancelled.keepListOpen(true))
+        assertFalse(cancelled.staysOpen(true))
         assertNull(cancelled.finish(true))
     }
 
-    @Test fun captionIsCancelForBothSidesAndEveryMenuSize() {
+    @Test fun backNearThePetIsCancelForBothSidesAndEveryMenuSize() {
         for (count in 5..7) for (side in Side.entries) {
             val g = fit(count, side)
             val pointer = PetWheelGesture(g.centerX, g.centerY, 10f)
             val p = g.centers[1]
             assertEquals(1, pointer.move(p.first, p.second) { g.hit(p.first, p.second) })
-            val captionX = g.centerX + g.direction * g.radius * 0.43f
-            assertNull(pointer.move(captionX, g.centerY) { g.hit(captionX, g.centerY, 1) })
+            val nearX = g.centerX + g.direction * g.dead * 0.9f
+            assertNull(pointer.move(nearX, g.centerY) { g.hit(nearX, g.centerY, 1) })
             assertNull(pointer.finish(false))
         }
     }
@@ -157,6 +157,103 @@ class PetWheelTest {
         assertFalse(g.hitsVisibleRow(g.bounds.left + 30f, g.bounds.top + 65f, 6, 10, 100, 60))
         assertFalse(g.hitsVisibleRow(g.bounds.left + 2f, g.bounds.top + 40f, 6, 10, 100, 60))
         assertFalse(g.hitsVisibleRow(g.bounds.left + 30f, g.bounds.top + 5f, 6, 10, 100, 60))
+    }
+
+    @Test fun theWindowHoldsEveryLabelAndTheFanIsWithinThumbReach() {
+        for (count in 5..7) for (side in Side.entries) {
+            val g = fit(count, side)
+            assertTrue(g.radius <= 140f) // was 172–220: a stretch for a thumb resting on the pet
+            for (i in 0 until count) {
+                // The label's far end along the button's own ray, for a 64px label and the chosen button's growth.
+                val reach = g.radius + g.orb * 1.24f + 9f + 16f + 64f
+                val x = g.centerX + g.direction * reach * cos(g.angle(i)).toFloat()
+                val y = g.centerY + reach * sin(g.angle(i)).toFloat()
+                assertTrue(x >= g.bounds.left && x <= g.bounds.right && y >= g.bounds.top && y <= g.bounds.bottom)
+                assertEquals(i, g.hit(x, y))
+            }
+        }
+    }
+
+    @Test fun aTapOnTheOpenFanOnlyCountsOnAButtonOrItsLabel() {
+        for (count in 5..7) for (side in Side.entries) {
+            val g = fit(count, side)
+            for (i in 0 until count) {
+                val ux = g.direction * cos(g.angle(i)).toFloat()
+                val uy = sin(g.angle(i)).toFloat()
+                fun at(distance: Float) = g.tap(g.centerX + distance * ux, g.centerY + distance * uy, 9f) { 40f }
+                assertEquals(i, at(g.radius))                      // the button
+                assertEquals(i, at(g.radius + g.orb + 30f))         // its label
+                // The mist between the pet and the button, and past the label: a slide still
+                // picks the sector there, a tap does not.
+                val inner = (g.dead + g.radius - 31f) / 2
+                assertEquals(i, g.hit(g.centerX + inner * ux, g.centerY + inner * uy))
+                assertNull(at(inner))
+                val beyond = g.radius + g.orb + 94f
+                assertEquals(i, g.hit(g.centerX + beyond * ux, g.centerY + beyond * uy))
+                assertNull(at(beyond))
+                // The label is a horizontal box, not a strip along the ray: its far ends count
+                // even where the ray is steep, a little past them does not.
+                val lead = g.radius + g.orb + 9f + kotlin.math.abs(ux) * 50f + kotlin.math.abs(uy) * 9f * 0.75f
+                val lx = g.centerX + lead * ux
+                val ly = g.centerY + lead * uy
+                for (dx in listOf(-45f, 45f)) assertEquals(i, g.tap(lx + dx, ly, 9f) { 100f })
+                assertNull(g.tap(lx, ly + 19f * (if (uy < 0) -1 else 1), 9f) { 100f })
+            }
+            // Inside the ring between two neighbours, off both buttons.
+            val mid = (g.angle(0) + g.angle(1)) / 2
+            assertNull(g.tap(g.centerX + g.direction * (g.radius - 40f) * cos(mid).toFloat(), g.centerY + (g.radius - 40f) * sin(mid).toFloat(), 9f) { 40f })
+        }
+    }
+
+    @Test fun aTapOnALabelRunsThatButtonEvenWhereTheLabelReachesIntoTheNextSector() {
+        val g = fit(7, Side.LEFT)
+        // The first button's label is a wide horizontal box above it; its right end lies in
+        // the second button's sector.
+        val lead = g.radius + g.orb + 9f + kotlin.math.abs(cos(g.angle(0)).toFloat()) * 70f + kotlin.math.abs(sin(g.angle(0)).toFloat()) * 11f * 0.75f
+        val x = g.centerX + lead * cos(g.angle(0)).toFloat() + 60f
+        val y = g.centerY + lead * sin(g.angle(0)).toFloat()
+        assertEquals(0, g.tap(x, y, 11f) { 140f })
+        assertEquals(1, g.hit(x, y))
+        val tap = PetWheelGesture(g.centerX, g.centerY, 10f).apply { pin(0, x, y) }
+        assertEquals(0, tap.move(x, y) { g.hit(x, y) })
+        assertEquals(0, tap.move(x + 6f, y - 4f) { g.hit(x + 6f, y - 4f) }) // a finger's wobble
+        assertEquals(0, tap.finish(false))
+        // Sliding off the spot goes back to picking by sector, for good.
+        val slide = PetWheelGesture(g.centerX, g.centerY, 10f).apply { pin(0, x, y) }
+        val p = g.centers[3]
+        assertEquals(3, slide.move(p.first, p.second) { g.hit(p.first, p.second) })
+        assertEquals(1, slide.move(x, y) { g.hit(x, y) })
+        assertNull(PetWheelGesture(g.centerX, g.centerY, 10f).apply { pin(0, x, y) }.finish(true))
+    }
+
+    @Test fun aLongerLabelMovesTheFanInwardOrFallsBackToTheList() {
+        val wide = PetWheelGeometry.fit(7, Side.RIGHT, 412f - 30f, 460f, area, 1f, 1f, labelWidth = 140f)
+        assertFalse(wide.list)
+        val labelEnd = wide.centerX - (wide.radius + wide.orb * 1.24f + 9f + 24f + 140f)
+        assertTrue(labelEnd >= area.left)
+        // The window and the mist behind it reach past the long label too, so it is not clipped.
+        assertTrue(wide.bounds.left <= labelEnd)
+        assertTrue(wide.mist >= wide.centerX - labelEnd + 32f)
+        // Sliding out to the far end of that label still picks its button.
+        assertEquals(3, wide.hit(labelEnd + 4f, wide.centerY))
+        assertNull(wide.hit(wide.centerX - wide.limit - 4f, wide.centerY))
+        assertTrue(PetWheelGeometry.fit(7, Side.LEFT, 30f, 460f, area, 1f, 1f, labelWidth = 400f).list)
+    }
+
+    @Test fun springSettlesOnItsTargetAtAnyFrameLength() {
+        for (frame in listOf(0.004f, 0.016f, 0.04f)) {
+            val spring = PetSpring(0f, 420f, 30f).apply { target = 1f }
+            var peak = 0f
+            var steps = 0
+            while (spring.step(frame) && steps++ < 400) peak = maxOf(peak, spring.x)
+            assertEquals(1f, spring.x, 0f)
+            assertEquals(0f, spring.velocity, 0f)
+            assertTrue(steps * frame < 0.8f)   // done well inside a second
+            assertTrue(peak in 1f..1.12f)       // a small overshoot, never a bounce
+        }
+        val snapped = PetSpring(0.3f, 420f, 30f).apply { target = 1f }
+        assertFalse(snapped.snap())
+        assertEquals(1f, snapped.x, 0f)
     }
 
     @Test fun producerRotationOrLockInvalidationDoesNotReleaseCaptureVisibilityEarly() {

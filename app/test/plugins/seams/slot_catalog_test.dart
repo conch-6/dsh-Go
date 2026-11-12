@@ -88,7 +88,12 @@ void main() {
     ]) {
       expect(slotInfo(key)!.seatable, isFalse, reason: key);
     }
-    expect(seatPolicyOf('sidebar.footer.action').priority, SeatPriority.other);
+    for (final key in [Slots.sidebarFooter, Slots.settingsPluginsTab, Slots.pluginDetailSection]) {
+      expect(seatPolicyOf(key).priority, SeatPriority.p1);
+      expect(seatPolicyOf(key).needsOccupancy, isTrue);
+      expect(seatPolicyOf(key).islands, {IslandForm.page});
+      expect(Slots.seated, contains(key));
+    }
     expect(seatPolicyOf('not.a.slot'), SeatPolicy.other);
   });
 

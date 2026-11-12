@@ -238,6 +238,136 @@ void main() {
       await host.close();
     });
 
+    test('bridge capabilities distinguish legacy unknown, an empty list, and future names', () async {
+      expect(await client.readDshGoBridgeCapabilities(), isNull);
+      host.capabilities = {'v': 1, 'bridge': '0.4.0', 'capabilities': <String>[]};
+      final empty = await client.readDshGoBridgeCapabilities();
+      expect(empty?.v, 1);
+      expect(empty?.capabilities, isEmpty);
+      host.capabilities = {
+        'v': 1,
+        'bridge': '999.0.0',
+        'capabilities': ['native-ui', 'future-capability'],
+      };
+      final next = await client.readDshGoBridgeCapabilities();
+      expect(next?.bridge, '999.0.0', reason: 'bridge version is diagnostic, v determines support');
+      expect(next?.capabilities, {'native-ui', 'future-capability'});
+      expect(host.requests.last.rawPath, dshGoCapabilitiesPath);
+      expect(host.requests.last.cookie, contains(_FakeHost.cookieName));
+    });
+
+    test('negotiation rejects unsupported majors and malformed capability declarations', () async {
+      host.capabilities = {'v': 2};
+      await expectLater(
+        client.readDshGoBridgeCapabilities(),
+        throwsA(isA<DshRemoteException>().having((e) => e.code, 'code', 'dsh-go/unsupported-version')),
+      );
+      for (final body in [
+        {'bridge': '0.4.0', 'capabilities': []},
+        {'v': '1', 'bridge': '0.4.0', 'capabilities': []},
+        {'v': 1, 'bridge': '0.4.0'},
+        {'v': 1, 'capabilities': []},
+        {
+          'v': 1,
+          'bridge': '0.4.0',
+          'capabilities': ['native-ui', 7],
+        },
+      ]) {
+        host.capabilities = body;
+        await expectLater(client.readDshGoBridgeCapabilities(), throwsA(isA<DshProtocolException>()));
+      }
+    });
+
+    test('structured contributions resource errors propagate without a negotiation request', () async {
+      host.status = 404;
+      for (final body in [
+        {
+          'error': {'code': 'not-found', 'message': 'resource missing'},
+        },
+        {'code': 'not-found', 'message': 'resource missing'},
+      ]) {
+        host.body = jsonEncode(body);
+        host.requests.clear();
+        await expectLater(
+          client.readDshGoContributions(),
+          throwsA(isA<DshRemoteException>().having((e) => e.code, 'code', 'dsh-go/not-found')),
+        );
+        expect(host.requests.map((r) => r.rawPath), [dshGoContributionsPath]);
+      }
+      host.body = jsonEncode({
+        'error': {'code': 'route-not-found', 'message': 'route missing'},
+      });
+      host.requests.clear();
+      expect(await client.readDshGoContributions(), isNull);
+      expect(host.requests.map((r) => r.rawPath), [dshGoContributionsPath]);
+    });
+
+    test('ambiguous contributions 404 is checked against a fresh capability declaration', () async {
+      host.status = 404;
+      host.body = 'not found';
+      host.capabilities = {'v': 1, 'bridge': '0.4.0', 'capabilities': <String>[]};
+      host.requests.clear();
+      expect(await client.readDshGoContributions(), isNull);
+      expect(host.requests.map((r) => r.rawPath), [dshGoContributionsPath, dshGoCapabilitiesPath]);
+      host.capabilities = {
+        'v': 1,
+        'bridge': '0.4.0',
+        'capabilities': ['native-ui'],
+      };
+      await expectLater(
+        client.readDshGoContributions(),
+        throwsA(isA<DshRemoteException>().having((e) => e.code, 'code', 'dsh-go/http-404')),
+      );
+      host.capabilities = null;
+      expect(await client.readDshGoContributions(), isNull, reason: 'legacy unknown is not cached as absence');
+    });
+
+    test('negotiation failures never become unsupported-bridge null', () async {
+      host.status = 404;
+      for (final status in [401, 403, 503]) {
+        host.capabilitiesStatus = status;
+        await expectLater(
+          client.readDshGoContributions(),
+          throwsA(isA<DshRemoteException>().having((e) => e.code, 'code', 'dsh-go/http-$status')),
+        );
+      }
+      host.capabilitiesStatus = 404;
+      host.capabilitiesBody = jsonEncode({
+        'error': {'code': 'not-found', 'message': 'resource missing'},
+      });
+      await expectLater(
+        client.readDshGoContributions(),
+        throwsA(isA<DshRemoteException>().having((e) => e.code, 'code', 'dsh-go/not-found')),
+      );
+      host.capabilitiesBody = jsonEncode({
+        'error': {'code': 'route-not-found', 'message': 'route missing'},
+      });
+      expect(await client.readDshGoContributions(), isNull);
+      host.capabilitiesBody = null;
+      host.capabilitiesStatus = null;
+      host.capabilities = {'v': 2};
+      await expectLater(
+        client.readDshGoContributions(),
+        throwsA(isA<DshRemoteException>().having((e) => e.code, 'code', 'dsh-go/unsupported-version')),
+      );
+    });
+
+    test('successful contributions and 304 need no negotiation and reject unknown protocol majors', () async {
+      host.contributions = {..._contributions, 'bridge': '999.0.0'};
+      host.requests.clear();
+      final first = await client.readDshGoContributions();
+      expect(first?.bridge, '999.0.0');
+      expect(identical(await client.readDshGoContributions(previous: first), first), isTrue);
+      expect(host.requests.map((r) => r.rawPath), [dshGoContributionsPath, dshGoContributionsPath]);
+      host.contributions = {..._contributions, 'v': 2};
+      await expectLater(
+        client.readDshGoContributions(),
+        throwsA(isA<DshRemoteException>().having((e) => e.code, 'code', 'dsh-go/unsupported-version')),
+      );
+      host.contributions = {'plugins': []};
+      await expectLater(client.readDshGoContributions(), throwsA(isA<DshProtocolException>()));
+    });
+
     test('contributions: no bridge, caps, ETag round trip, refusal, bad body', () async {
       expect(client.canReachDshGo, isTrue);
       expect(await client.readDshGoContributions(), isNull);
@@ -332,6 +462,40 @@ void main() {
         client.invokeDshGo(const DshGoInvocation(pkg: 'p', id: 'x', surface: 'composer.actions')),
         throwsA(isA<DshRemoteException>().having((e) => e.code, 'code', 'dsh-go/timeout')),
       );
+    });
+
+    test('HTTP errors accept nested and legacy flat codes, with nested taking precedence', () async {
+      host.status = 422;
+      for (final body in [
+        {
+          'error': {'code': 'invalid-config', 'message': 'check field'},
+          'code': 'obsolete-code',
+          'message': 'obsolete message',
+        },
+        {'v': 1, 'code': 'invalid-config', 'message': 'check field'},
+      ]) {
+        host.body = jsonEncode(body);
+        await expectLater(
+          client.readDshGoView('p', 'view'),
+          throwsA(
+            isA<DshRemoteException>()
+                .having((e) => e.code, 'code', 'dsh-go/invalid-config')
+                .having((e) => e.message, 'message', 'check field'),
+          ),
+        );
+      }
+      host.status = 503;
+      for (final body in ['Service Unavailable', '<html>upstream failure</html>']) {
+        host.body = body;
+        await expectLater(
+          client.readDshGoView('p', 'view'),
+          throwsA(
+            isA<DshRemoteException>()
+                .having((e) => e.code, 'code', 'dsh-go/http-503')
+                .having((e) => e.message, 'message', '${dshGoViewPath('p', 'view')}: HTTP 503'),
+          ),
+        );
+      }
     });
 
     test('stream over a real socket: hello, sub, data, patch, changed, unsub', () async {
@@ -798,6 +962,9 @@ class _FakeHost {
   final requests = <_Request>[];
 
   Map<String, Object?>? contributions;
+  Map<String, Object?>? capabilities;
+  int? capabilitiesStatus;
+  String? capabilitiesBody;
   Map<String, Object?>? view;
   Map<String, Object?>? invoke;
   String? body;
@@ -847,11 +1014,15 @@ class _FakeHost {
       );
       return;
     }
+    final replyStatus = path == dshGoCapabilitiesPath ? capabilitiesStatus : status;
+    final replyBody = path == dshGoCapabilitiesPath ? capabilitiesBody : body;
     Object? payload;
-    if (path == dshGoContributionsPath) {
+    if (path == dshGoCapabilitiesPath) {
+      payload = capabilities;
+    } else if (path == dshGoContributionsPath) {
       payload = contributions;
       final rev = contributions?['rev'];
-      if (rev != null && etag == '"$rev"' && status == null) {
+      if (rev != null && etag == '"$rev"' && replyStatus == null) {
         response.statusCode = lastStatus = 304;
         await response.close();
         return;
@@ -862,10 +1033,10 @@ class _FakeHost {
       lastBody = jsonDecode(await utf8.decodeStream(request));
       payload = invoke;
     }
-    if (status case final s?) {
+    if (replyStatus case final s?) {
       response.statusCode = s;
-      if (body case final b?) response.write(b);
-    } else if (body case final b?) {
+      if (replyBody case final b?) response.write(b);
+    } else if (replyBody case final b?) {
       response.write(b);
     } else if (payload != null) {
       response.headers.contentType = ContentType.json;

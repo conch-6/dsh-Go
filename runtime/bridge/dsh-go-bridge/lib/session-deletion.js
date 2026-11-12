@@ -20,13 +20,31 @@ export function createSessionDeletion(ctx, { readBody, send }) {
     const query = ctx.get("sessionQuery");
     const schedule = ctx.get("schedule");
     const workspace = ctx.get("workspaceRegistry");
-    if (persistence?.dshGoDeletion?.version !== 1 || lifecycle?.dshGoDeletionVersion !== 1
+    if (persistence?.dshGoDeletion?.version !== 2 || lifecycle?.dshGoDeletionVersion !== 2
       || cache?.dshGoDeletionVersion !== 1 || query?.dshGoDeletionVersion !== 1
       || schedule?.dshGoDeletionVersion !== 1 || workspace?.dshGoDeletionVersion !== 1) return;
     if (process.platform === "win32") return;
     try { if (!await schedule.dshGoCanDelete()) return; } catch { return; }
     return { persistence, lifecycle, cache, query, schedule, workspace };
   };
+  // The seam walks the chat's whole subagent tree and calls these once per session.
+  // Every session is validated before any agent is disposed; disposal and deletion
+  // then go leaves first, so a refusal never leaves a partly torn-down chat.
+  const hooks = (services) => ({
+    validate: async (sessionId) => {
+      const activity = await ctx.waterfall("workspace/session-activity", { sessionId }, () => Promise.resolve([]));
+      if (activity.length) throw Object.assign(new Error("Session has active work."), { code: "session-active" });
+    },
+    dispose: async (sessionId, { cascade = false } = {}) => {
+      await services.lifecycle.dshGoDisposeForDeletion(sessionId, { cascade });
+    },
+    inspectTasks: (sessionId) => services.schedule.dshGoInspectDeletion(sessionId),
+    cleanup: async (sessionId) => {
+      await services.cache.dshGoForget(sessionId);
+      await services.query.dshGoForget(sessionId);
+      await services.workspace.dshGoForget(sessionId);
+    },
+  });
   return {
     async handle(req, res, path) {
       if (path !== `${ROOT}/deletion` && path !== `${ROOT}/delete`) return false;
@@ -64,25 +82,13 @@ export function createSessionDeletion(ctx, { readBody, send }) {
         return true;
       }
       try {
-        await services.persistence.dshGoDeletion.delete(id, {
-          prepare: async () => {
-            const activity = await ctx.waterfall("workspace/session-activity", { sessionId: id }, () => Promise.resolve([]));
-            if (activity.length) throw Object.assign(new Error("Session has active work."), { code: "session-active" });
-            await services.lifecycle.dshGoDisposeForDeletion(id);
-          },
-          inspectTasks: () => services.schedule.dshGoInspectDeletion(id),
-          cleanup: async () => {
-            await services.cache.dshGoForget(id);
-            await services.query.dshGoForget(id);
-            await services.workspace.dshGoForget(id);
-          },
-        });
+        await services.persistence.dshGoDeletion.delete(id, hooks(services));
         send(res, 200, { deleted: true, sessionId: id });
       } catch (error) {
         const code = Object.hasOwn(STATUS, error?.code) ? error.code
           : error?.name === "SessionAlreadyOwnedError" ? "writer-held" : "failed";
         // Never send filesystem paths, transcript fragments, or engine stacks to clients.
-        const messages = { "session-active": "Session has active work.", "session-related": "Session has related agents or reminders.",
+        const messages = { "session-active": "Session has active work.", "session-related": "Session has related scheduled tasks.",
           "writer-held": "Session is owned by another writer. Try again after it closes.", "not-found": "Session was not found.",
           unavailable: "Safe session deletion is unavailable.", failed: "Session deletion failed. Retry to finish cleanup." };
         ctx.logger?.warn?.(`session deletion: ${code}`);

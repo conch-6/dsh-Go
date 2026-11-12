@@ -59,7 +59,9 @@ dependencies:
     path: ../packages/dsh_remote
   scrollable_positioned_list: ^0.3.8
   share_plus: ^13.3.1
-  dartssh2: ^4.1.0
+  # dartssh2 4.1.0 with post-auth SSH compression; provenance is in the package.
+  dartssh2:
+    path: ../packages/dartssh2
   connectivity_plus: ^7.3.2
   image_picker: ^1.2.4
   file_picker: ^13.1.0

@@ -422,6 +422,9 @@
   "activitySlashNoMatch": "没有匹配的指令，按普通消息发送",
   "activitySlashCommands": "指令",
   "activitySlashEnterArgs": "输入参数后发送",
+  "activitySlashRunIntent": "命令 · 执行",
+  "activitySlashInsertIntent": "命令 · 填入",
+  "activitySlashSkillIntent": "技能 · 填入",
   "activityStepTitle": "步骤详情",
   "activityStepMissing": "这一步不在已加载的记录里",
   "activityStepQuestion": "提问",
@@ -938,6 +941,38 @@
         "type": "String"
       },
       "name": {
+        "type": "String"
+      }
+    }
+  },
+  "activityQuotaTitle": "订阅额度",
+  "activityQuotaRefresh": "刷新额度",
+  "activityQuotaPermissionDenied": "订阅没有权限查询额度",
+  "activityQuotaAuthError": "登录已过期或无权查询，请检查订阅登录",
+  "activityQuotaNetworkError": "网络连接失败，请稍后重试",
+  "activityQuotaRateLimited": "查询过于频繁，请稍后重试",
+  "activityQuotaLoading": "正在查询订阅额度…",
+  "activityQuotaUnavailable": "暂时无法查询订阅额度，请稍后重试",
+  "activityQuotaUnsupported": "此主机暂不支持查询订阅额度",
+  "activityQuotaSignedOut": "订阅未登录",
+  "activityQuotaPrimary": "主要额度",
+  "activityQuotaSecondary": "次要额度",
+  "activityQuotaFiveHour": "5 小时",
+  "activityQuotaSevenDay": "7 天",
+  "activityQuotaSevenDaySonnet": "7 天 · Sonnet",
+  "activityQuotaSevenDayOpus": "7 天 · Opus",
+  "activityQuotaUsed": "已使用 {value}",
+  "@activityQuotaUsed": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "activityQuotaReset": "重置时间：{time}",
+  "@activityQuotaReset": {
+    "placeholders": {
+      "time": {
         "type": "String"
       }
     }
@@ -1732,6 +1767,27 @@
   "botsPetDisplayWhen": "显示时机",
   "botsPetWhenActive": "有事时显示",
   "botsPetAlways": "一直显示",
+  "botsPetOverlayShows": "悬浮窗里显示",
+  "botsPetOverlayPixel": "像素宠物",
+  "botsPetOverlayCompanion": "小屋里的她",
+  "botsPetOverlayCompanionNamed": "小屋里的{name}",
+  "@botsPetOverlayCompanionNamed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "botsPetOverlayNoPack": "先去伙伴小屋里请一位角色",
+  "botsPetOverlayPackBroken": "角色包不完整，去伙伴小屋里重新导入",
+  "botsPetOverlayUnavailable": "这台手机暂时请不出她",
+  "botsPetOverlayCompanionHint": "点一下和她互动，连点两下打开对话。比像素宠物更耗电，熄屏和隐藏时会停下来",
+  "botsPetOverlayLoading": "正在请她出来…",
+  "botsPetOverlayFallback": "她没能出来，先由像素宠物顶班",
+  "botsPetOverlayFraming": "取景",
+  "botsPetOverlayFramingFull": "全身",
+  "botsPetOverlayFramingHalf": "半身",
+  "botsPetOverlayFramingHint": "换取景会重新加载她",
   "botsPetSwitchDisabled": "开关点不动",
   "botsPetRestrictedSettings": "允许受限制的设置",
   "botsPetHiddenToday": "今天不再显示",
@@ -2275,6 +2331,9 @@
   "chatTurnCompleted": "这一轮已完成",
   "chatTurnError": "这一轮出错了",
   "chatAnswerHint": "输入回答…",
+  "chatAnswerMode": "发送文字将回答待答问题",
+  "chatMessageMode": "发送新消息",
+  "chatQuestionAnswered": "已回答",
   "chatStarting": "正在启动",
   "chatConnecting": "正在连接",
   "chatDisconnected": "连接已断开",
@@ -2721,7 +2780,7 @@
   "chatEditAndResend": "编辑后重发",
   "chatRegenerateHint": "在新对话中重新生成，原对话不变",
   "chatBranchHint": "在新对话中继续，原对话不变",
-  "chatEditResendHint": "在新对话中改写，原对话不变",
+  "chatEditResendHint": "在新对话中改写，图片和文件需重新添加；原对话不变",
   "chatSaveToPhotos": "保存到相册",
   "chatCopyAll": "全部复制",
   "chatRequestRetrying": "请求失败，正在重试",
@@ -2821,11 +2880,49 @@
   "chatToolDeclined": "已拒绝这次调用",
   "chatToolRunning": "正在执行…",
   "chatNoDetails": "暂无详情",
+  "chatOutputHiddenLines": "{count, plural, other{中间省略 {shown} 行}}",
+  "@chatOutputHiddenLines": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "shown": {
+        "type": "String"
+      }
+    }
+  },
+  "chatOutputHiddenChars": "中间省略 {count} 字",
+  "@chatOutputHiddenChars": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "chatOutputSummary": "{count, plural, other{共 {lines} 行}} · {chars} 字",
+  "@chatOutputSummary": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "lines": {
+        "type": "String"
+      },
+      "chars": {
+        "type": "String"
+      }
+    }
+  },
+  "chatOutputViewAll": "查看全部",
+  "chatOutputCopyAll": "复制全文",
+  "chatOutputCopied": "已复制全文",
+  "chatOutputToEnd": "跳到末尾",
+  "chatOutputToStart": "回到开头",
   "chatErrApiKey": "API Key 无效或已过期",
   "chatErrBalance": "余额不足",
   "chatErrAccountQuota": "账号额度已用完",
   "chatErrRateLimit": "请求太频繁，稍后再试",
-  "chatErrContextLength": "对话太长，发送 /compact 压缩后再试",
+  "chatErrContextLength": "对话太长。若 /compact 也失败，请新建对话或换模型",
   "chatErrModelUnavailable": "模型服务暂时不可用",
   "chatErrModelTimeout": "模型响应超时",
   "chatErrModelConnection": "没能连上模型服务",
@@ -3070,6 +3167,7 @@
       }
     }
   },
+  "companionFailedBodyPlain": "她刚才没加载出来。先重试，还不行再重新导入素材包。",
   "companionPackBroken": "这个文件打不开，可能不是素材包或已经损坏。",
   "companionPackRuntimeMismatch": "素材包里的运行库和这个版本的 App 对不上。",
   "companionPackNoRuntime": "这个包只有角色，手机上还没有运行库。先导入完整的素材包。",
@@ -3112,6 +3210,9 @@
   "companionTease1": "别闹了，头都晕了。",
   "companionTease2": "再戳就不理你了！",
   "companionTease3": "你是不是很闲？",
+  "companionShake1": "哇啊，别摇啦！",
+  "companionShake2": "头好晕……水都晃起来了。",
+  "companionShake3": "再摇我要吐泡泡了！",
   "companionStatusIdle": "在发呆",
   "companionStatusListening": "在听你说",
   "companionStatusThinking": "在想",
@@ -3496,6 +3597,7 @@
   "engineSettingsVersionRequired": "需要 DSH 0.2.1 或更新版本",
   "engineGeneralWebDisplay": "网页版显示",
   "engineGeneralWebSending": "网页版发送",
+  "engineGeneralWebOnlyHint": "这组设置仅影响当前主机的网页版，不改变原生聊天。",
   "engineGeneralData": "数据",
   "engineSubagentModelsTitle": "子代理模型",
   "engineChatLogTitle": "对话日志",
@@ -3632,6 +3734,16 @@
   "engineProviderIssues": "问题",
   "engineProviderRejectedConfig": "引擎拒绝了部分配置",
   "engineProviderConnection": "连接",
+  "engineProviderHeaders": "请求头（可选）",
+  "engineProviderHeadersWarning": "请求头以明文保存，不参与日志脱敏。敏感凭据请使用 API Key 或凭据引用。",
+  "engineProviderHeaderName": "名称",
+  "engineProviderHeaderValue": "值",
+  "engineProviderHeaderAdd": "添加请求头",
+  "engineProviderHeaderInvalidName": "请求头名称只能包含英文字母、数字或 HTTP 标记符号，不能包含空格或冒号",
+  "engineProviderHeaderReserved": "User-Agent 由引擎设置，请移除此请求头",
+  "engineProviderHeaderLocked": "由引擎管理，保留现有配置",
+  "engineProviderHeaderDuplicate": "请求头名称重复（不区分大小写）",
+  "engineProviderHeaderInvalidValue": "请求头值只能包含单行 Latin-1 文本，不支持换行或控制字符（制表符除外）",
   "engineProviderDefaultUrl": "默认地址",
   "engineProviderKeyNotRequired": "不需要",
   "engineProviderNoModels": "还没有模型",
@@ -7196,6 +7308,12 @@
   "plugInputTimePicker": "插件时间",
   "plugInputChoices": "插件选项",
   "plugInputGestureRequired": "该效果需要用户点按",
+  "seamsTitle": "App 内界面",
+  "seamsOverlay": "聊天页浮层",
+  "seamsOverlayNote": "常驻聊天区域，内存紧张时自动让位",
+  "seamsSidebarPage": "侧栏入口",
+  "seamsSettingsPage": "插件设置页",
+  "seamsDetailPage": "插件详情扩展",
   "pluginsOperationHostChanged": "主机已切换，未执行",
   "pluginsReloadLocal": "重启内核以重载",
   "pluginsReloadInterrupts": "会中断正在运行的任务",
@@ -8449,6 +8567,22 @@
   "readListUpdating": "更新中 · 上次结果",
   "readListOffline": "离线 · 上次结果",
   "readListFailed": "未更新 · 上次结果",
+  "remoteDshMode": "实例管理",
+  "remoteManaged": "托管启动",
+  "remoteAttachOnly": "只连接",
+  "remoteManagedHelp": "自动启动或复用 App 托管的 DSH；不会自动替换存活但无法复用的实例。",
+  "remoteAttachOnlyHelp": "只转发到远端 127.0.0.1 的固定端口；不启动、停止或重启 DSH。",
+  "remoteDshPort": "远端 DSH 端口",
+  "remoteDshToken": "DSH 登录令牌",
+  "remoteDshTokenHelp": "填写既有实例启动链接中的 token，仅保存在这台手机的安全存储中。",
+  "remoteAttachWorkingDirectoryHelp": "既有实例不执行目录探测；请填写远端绝对路径，留空使用 DSH 默认目录。",
+  "remoteSshCompression": "SSH 压缩",
+  "remoteSshCompressionHelp": "默认开启；与服务器协商认证后压缩，不支持时使用未压缩传输。",
+  "remoteRestartManaged": "重启托管 DSH",
+  "remoteRestartManagedWarning": "这会停止 App 记录的远端 DSH 并重新启动，可能中断其他客户端和进行中的对话。确认没有其他人在使用后再继续。普通测试连接不会执行此操作。",
+  "remoteErrSharedInstance": "远端托管 DSH 仍在运行，但启动命令不同或缺少有效启动日志。为保护共享实例，未自动重启；请检查配置，改用“只连接”，或在编辑主机中明确选择“重启托管 DSH”。",
+  "remoteErrAttachSettings": "请填写有效的远端 DSH 端口和登录令牌",
+  "remoteDshAttached": "已连接既有 DSH",
   "remoteStartupSection": "启动",
   "remoteAutoConnectOnStartup": "连接上次使用的主机",
   "remoteAutoConnectOnStartupHint": "关闭后从本机开始",
@@ -8537,7 +8671,7 @@
   "remoteErrDshPort": "远端 DSH 端口连不上",
   "remoteDshReused": "复用了远端已在运行的 DSH",
   "remoteDshStarted": "已在远端启动 DSH",
-  "remoteErrDshTokenRejected": "远端 DSH 拒绝了登录令牌",
+  "remoteErrDshTokenRejected": "远端 DSH 拒绝了登录令牌，未自动重启；请检查令牌，或在编辑主机中明确重启托管实例",
   "remoteErrDshSignIn": "没能登录远端 DSH",
   "remoteErrDshTunnel": "没能通过隧道连接 DSH",
   "remoteErrDshSignInExpired": "远端 DSH 登录已失效",
@@ -9018,7 +9152,8 @@
   "remoteRelayLoginRequired": "填写服务器地址、邮箱和密码",
   "remoteErrSignIn": "没能登录",
   "remoteSelfHostedServer": "自建服务器",
-  "remoteSelfHostedSignInHelp": "用邮箱和密码登录自己部署的 liguobao/ds-harness-remote",
+  "remoteSelfHostedSignInHelp": "填写服务器地址，可用邮箱密码登录，也可先使用此服务器再选择其他登录方式。",
+  "remoteUseServer": "使用此服务器",
   "remoteServerAddress": "服务器地址",
   "remoteEmail": "邮箱",
   "remotePassword": "密码",
@@ -9712,6 +9847,8 @@
   "searchKwPetQuiet": "安静,宠物安静",
   "searchKwPetOutside": "悬浮窗,桌面宠物,宠物悬浮",
   "searchKwPetDisplayWhen": "宠物显示,显示时机",
+  "searchKwPetOverlayShows": "悬浮伙伴,小屋里的她,像素宠物,Live2D",
+  "searchKwPetOverlayFraming": "取景,全身,半身",
   "searchKwBlur": "模糊,毛玻璃,玻璃",
   "searchKwAnimations": "动画,动效,减少动画",
   "searchKwFluidMotion": "灵动,弹性,回弹,光晕,丝滑",
@@ -9842,7 +9979,7 @@
       }
     }
   },
-  "shellDeleteWarning": "将从此主机永久删除所选对话记录，无法撤销，与归档不同。\n\n工作目录、生成的文件、分叉对话、共享附件和已发布的云端分享都会保留。云端分享需另行删除。主机会拒绝删除仍有任务或关联工作的对话。",
+  "shellDeleteWarning": "将从此主机永久删除所选对话记录，无法撤销，与归档不同。\n\n工作目录、生成的文件、分叉对话、共享附件和已发布的云端分享都会保留。云端分享需另行删除。子代理对话会随所选对话一起删除。运行中或有定时任务的对话会被主机拒绝。",
   "shellDeleteOwnerChanged": "主机或连接已变化。请取消后重新发起删除，原确认不再有效。",
   "shellDeletingChats": "正在删除对话…",
   "shellChatsDeleted": "已永久删除 {count} 个对话",
@@ -9865,7 +10002,7 @@
     }
   },
   "shellDeleteRunning": "请先停止运行中的工作；主机还会检查活动任务和定时任务。",
-  "shellDeleteRelated": "此对话有关联的子代理工作，主机为保护它们拒绝删除。",
+  "shellDeleteRelated": "此对话仍有关联的定时任务，主机为保护它们拒绝删除。",
   "shellDeleteWriterHeld": "其他进程正在使用此对话，请先在该进程中关闭后重试。",
   "shellDeleteNotFound": "此主机上已没有这个对话，请刷新列表。",
   "shellDeleteConnectionLost": "连接已断开，删除结果未确认，请刷新对话列表后再操作。",
@@ -10517,6 +10654,10 @@
   "starPromptDone": "已经点过啦",
   "starPromptLater": "下次再说",
   "starSettingsTitle": "给 DSH Go 点个 star",
+  "hubStartPage": "起始页",
+  "hubChatSuggestions": "聊天建议",
+  "hubChatSuggestionsHint": "显示起始页的聊天建议",
+  "searchKwChatSuggestions": "起始页,空白页,新对话,聊天建议,建议卡片",
   "phoneStartupFailureStopping": "启动失败，正在停止",
   "phoneStartupFailureStoppingDetail": "启动失败，正在停止。{reason}",
   "@phoneStartupFailureStoppingDetail": {
@@ -10697,6 +10838,7 @@
   "stateDrawerEarlier": "更早",
   "stateEngineAuthFailed": "没能通过引擎的验证",
   "stateChatMissing": "这个对话已经不在了",
+  "stateChatFormatUnsupported": "当前引擎无法读取此对话的日志格式，请导出诊断包排查",
   "stateEngineUnsupported": "当前引擎版本不支持",
   "stateEngineServiceUnavailable": "所需的引擎服务未就绪，请查看引擎日志或导出诊断包",
   "stateEngineOperationUnavailable": "引擎当前无法执行此操作，请查看引擎日志",
@@ -11384,7 +11526,7 @@
   "updatePackageCorrupt": "安装包已损坏",
   "updatePackageCorruptMessage": "已删除，请重新下载。",
   "updateInstallBlocked": "安装被拦截了",
-  "updateInstallBlockedMessage": "在系统的安装确认里允许，或去发布页手动下载。",
+  "updateInstallBlockedMessage": "在系统的安装确认里允许；如果系统直接拦下（小米等机型），试试下面的「安装路线」：Shizuku 或本机 ADB，不用重新签名。",
   "updateInstallIncomplete": "安装没有完成",
   "updateInstallIncompleteMessage": "可以重试，或去发布页手动下载。",
   "updateBrowserOpenFailed": "没能打开浏览器，请手动访问 {host}{path}",
@@ -11442,6 +11584,18 @@
   "updateSkipVersion": "跳过这个版本",
   "updateInstallWithSystem": "用系统安装器安装",
   "updateSystemInstallerFailed": "没能打开系统安装器",
+  "updateExportApk": "导出安装包",
+  "updateExportApkTitle": "导出安装包？",
+  "updateExportApkMessage": "会把这次下载并校验过的安装包复制到「下载/DSH-Go」，可以用 MT 管理器之类的工具重新签名后再装。\n\n重新签名后，手机上的签名和官方包不同，App 内更新会一直提示「签名不一致」，以后每次更新都要这样手动重签安装。\n\n如果只是系统拦着装不上（小米等机型），先试「安装路线」里的 Shizuku 或本机 ADB，那条路不用重新签名。",
+  "updateExportApkDone": "已存到 下载/{path}",
+  "@updateExportApkDone": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "updateExportApkFailed": "没能导出安装包",
   "updateStarProject": "去 Star",
   "updateCancelDownload": "取消下载",
   "updateDownloadInBackground": "后台下载",

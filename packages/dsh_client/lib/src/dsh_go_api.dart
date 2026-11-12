@@ -4,6 +4,8 @@
 /// * `GET  /dsh-go/v1/contributions`: every enabled plugin's native
 ///   contributions ([DshGoContributions]), asked with the app's capabilities
 ///   ([DshGoCaps]); `ETag` / `If-None-Match` make a re-read cheap.
+/// * `GET  /dsh-go/v1/capabilities`: protocol major and implemented route
+///   families ([DshGoBridgeCapabilities]), independent of resource availability.
 /// * `GET  /dsh-go/v1/views/<pkg>/<id>`: one panel's view, initial data and
 ///   data revision ([DshGoView]).
 /// * `WS   /dsh-go/v1/stream`: one socket per Host, subscriptions by
@@ -20,9 +22,9 @@
 /// channel on the stream and `cap.event` upward. Nothing of it is sent unless
 /// the app lists features.
 ///
-/// Everything is read leniently (unknown fields ignored, malformed entries
-/// dropped). The routes are HTTP pages, so over the relay tunnel none of this
-/// exists ([DshGoApi.canReachDshGo]).
+/// Within a supported protocol major, unknown fields are ignored and malformed
+/// contribution entries dropped. The routes are HTTP pages, so over the relay
+/// tunnel none of this exists ([DshGoApi.canReachDshGo]).
 library;
 
 import 'dart:async';
@@ -39,6 +41,7 @@ import 'session_api.dart';
 /// Protocol major version the app speaks.
 const dshGoProtocol = 1;
 
+const dshGoCapabilitiesPath = '/dsh-go/v1/capabilities';
 const dshGoContributionsPath = '/dsh-go/v1/contributions';
 const dshGoViewsPath = '/dsh-go/v1/views';
 const dshGoStreamPath = '/dsh-go/v1/stream';
@@ -75,6 +78,18 @@ abstract final class DshGoSurfaces {
 // -----------------------------------------------------------------------------
 // Capabilities and scope
 // -----------------------------------------------------------------------------
+
+/// Implemented route families, not permission to act on a resource. Session
+/// deletion, recall and signals still require their own fresh capability checks.
+class DshGoBridgeCapabilities {
+  const DshGoBridgeCapabilities({required this.v, required this.bridge, required this.capabilities});
+
+  final int v;
+
+  /// Implementation version for diagnostics; [v] determines protocol support.
+  final String bridge;
+  final Set<String> capabilities;
+}
 
 /// What the app can draw (§3.1 能力参数): sent as query parameters with every
 /// read so a plugin can leave out what this app would only draw as a
@@ -480,7 +495,7 @@ class DshGoContributions {
 
   final int v;
 
-  /// The bridge's version.
+  /// The bridge implementation version, for diagnostics rather than protocol comparison.
   final String? bridge;
 
   /// Content hash: the `ETag`. Unchanged for the same answer.
@@ -672,8 +687,34 @@ extension DshGoApi on DshClient {
   /// The bridge's routes are reachable over this carrier (HTTP, SSH tunnel).
   bool get canReachDshGo => carrier is DshHttpCarrier;
 
-  /// `GET /dsh-go/v1/contributions`. Null when the Host has no `dshGo`
-  /// service (no bridge, or an older one: 404). With [previous], asks
+  /// Null means the Host has no negotiation endpoint (legacy/unknown), not
+  /// that every bridge route is absent. An empty capabilities set is an
+  /// explicit declaration. No result is cached across bridge reloads.
+  Future<DshGoBridgeCapabilities?> readDshGoBridgeCapabilities({Duration timeout = const Duration(seconds: 8)}) async {
+    final response = await _dshGoConnection(dshGoCapabilitiesPath).get(dshGoCapabilitiesPath, timeout: timeout);
+    if (response.statusCode == 404) {
+      final code = asString(_dshGoErrorBody(response)?['code']);
+      if (code == null || code == 'route-not-found') return null;
+    }
+    if (response.statusCode != 200) throw _dshGoHttpError(dshGoCapabilitiesPath, response);
+    final body = asMap(tryDecodeJson(response.text));
+    final version = _dshGoVersion(dshGoCapabilitiesPath, body?['v']);
+    final bridge = asString(body?['bridge']);
+    final capabilities = asList(body?['capabilities']);
+    if (bridge == null || capabilities == null || capabilities.any((value) => value is! String)) {
+      throw const DshProtocolException('$dshGoCapabilitiesPath: not a capabilities object');
+    }
+    return DshGoBridgeCapabilities(
+      v: version,
+      bridge: bridge,
+      capabilities: Set<String>.unmodifiable(capabilities.cast<String>()),
+    );
+  }
+
+  /// `GET /dsh-go/v1/contributions`. Null for an explicitly missing route or
+  /// a legacy 404 with no advertised native-ui capability. Resource errors
+  /// propagate. Only an ambiguous 404 triggers negotiation; a successful read
+  /// does not add a round trip. With [previous] from an earlier successful read, asks
   /// `If-None-Match` and returns [previous] itself when nothing changed (304).
   Future<DshGoContributions?> readDshGoContributions({
     DshGoCaps caps = const DshGoCaps(),
@@ -688,9 +729,18 @@ extension DshGoApi on DshClient {
       timeout: timeout,
     );
     if (response.statusCode == 304 && previous != null) return previous;
-    if (response.statusCode == 404) return null;
+    if (response.statusCode == 404) {
+      final code = asString(_dshGoErrorBody(response)?['code']);
+      if (code == 'route-not-found') return null;
+      if (code == null) {
+        final bridge = await readDshGoBridgeCapabilities(timeout: timeout);
+        if (bridge == null || !bridge.capabilities.contains('native-ui')) return null;
+      }
+    }
     if (response.statusCode != 200) throw _dshGoHttpError(dshGoContributionsPath, response);
-    final contributions = DshGoContributions.fromJson(tryDecodeJson(response.text));
+    final body = tryDecodeJson(response.text);
+    _dshGoVersion(dshGoContributionsPath, asMap(body)?['v']);
+    final contributions = DshGoContributions.fromJson(body);
     if (contributions == null) {
       throw const DshProtocolException('$dshGoContributionsPath: not a contributions object');
     }
@@ -841,8 +891,25 @@ String dshGoViewPath(String pkg, String id) {
   return '$dshGoViewsPath/${pkg.split('/').map(segment).join('/')}/${segment(id)}';
 }
 
+int _dshGoVersion(String path, Object? value) {
+  final version = asInt(value);
+  if (version == null) throw DshProtocolException('$path: missing or invalid protocol version');
+  if (version != dshGoProtocol) {
+    throw DshRemoteException('dsh-go/unsupported-version', '$path: unsupported protocol version $version', {
+      'path': path,
+      'v': version,
+    });
+  }
+  return version;
+}
+
+Map<String, Object?>? _dshGoErrorBody(DshHttpResponse response) {
+  final body = asMap(tryDecodeJson(response.text));
+  return asMap(body?['error']) ?? body;
+}
+
 DshRemoteException _dshGoHttpError(String path, DshHttpResponse response) {
-  final error = asMap(asMap(tryDecodeJson(response.text))?['error']);
+  final error = _dshGoErrorBody(response);
   final code = asString(error?['code']);
   return DshRemoteException(
     code == null ? 'dsh-go/http-${response.statusCode}' : 'dsh-go/$code',

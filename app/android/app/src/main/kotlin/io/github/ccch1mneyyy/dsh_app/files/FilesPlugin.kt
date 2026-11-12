@@ -252,7 +252,9 @@ class FilesPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         try {
             resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
                 ?: throw IOException("cannot write $uri")
-            resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            if (resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) <= 0) {
+                throw IOException("cannot publish file")
+            }
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
             throw e

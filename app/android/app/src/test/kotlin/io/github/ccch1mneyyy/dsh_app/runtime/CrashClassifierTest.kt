@@ -4,6 +4,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CrashClassifierTest {
+    @Test fun launchTokensDoNotHideCountsOrPaginationCursors() {
+        val readable = "max_token=1024 prompt_token=5 next_token=page-cursor-123 maxOutputToken=1024 nextPageToken=page-cursor-123"
+        assertEquals(readable, CrashClassifier.redact(readable))
+        assertEquals("$readable token=••• access_token=••• GITHUB_TOKEN=•••",
+            CrashClassifier.redact("$readable token=7 access_token=42 GITHUB_TOKEN=synthetic"))
+    }
+
+    @Test fun unknownCredentialNamesStayMaskedInLiveLogs() {
+        for (name in listOf("VERCEL_TOKEN", "DISCORD_TOKEN", "TELEGRAM_TOKEN", "PYPI_TOKEN",
+            "CODECOV_TOKEN", "CSRF_TOKEN", "client_token", "clientToken", "oauth_token",
+            "x_auth_token", "gh_token", "bot_token", "ADMIN_TOKEN", "max_access_token")) {
+            for (value in listOf("synthetic-value", "x", "7", "123:synthetic+value/x==")) {
+                assertEquals(name, "$name=•••", CrashClassifier.redact("$name=$value"))
+            }
+        }
+    }
+
     private val fatal = listOf("dsh: startup failed: required row missing")
 
     @Test fun classifiesAllFiveFailureKinds() {

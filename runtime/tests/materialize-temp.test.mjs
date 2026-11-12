@@ -122,3 +122,81 @@ test('failure to acquire the exclusive temp does not run cleanup for an unowned 
   await f.handle.flush();
   await f.handle.close();
 });
+
+for (const code of ['EACCES', 'EPERM']) test(code + ': first publish falls back under ownership and preserves competing logs', async t => {
+  const f = await fixture(t);
+  const other = new Context();
+  t.after(() => other.fiber.dispose());
+  await apply(other, { root: f.root, compression: 'none', listConcurrency: 1 });
+  const contender = await other.sessionPersistence.create(f.handle.header);
+  const originalLink = fs.link;
+  fs.link = async () => { throw Object.assign(Error('controlled app-domain link denial'), { code }); };
+  syncBuiltinESMExports();
+  t.after(() => { fs.link = originalLink; syncBuiltinESMExports(); });
+  await f.handle.append(f.events);
+  const path = join(f.directory, 'session.v4.jsonl');
+  const committed = await fs.readFile(path);
+  await assert.rejects(contender.flush(), { name: 'SessionAlreadyOwnedError' });
+  await f.handle.close();
+  await assert.rejects(contender.flush(), /a log already exists on disk/);
+  await contender.close();
+  assert.deepEqual(await fs.readFile(path), committed);
+  const reader = await other.sessionPersistence.open(f.id, 'read');
+  assert.deepEqual((await reader.read()).events, f.events);
+  await reader.close();
+  assert.deepEqual(await fs.readFile(f.foreign), f.sentinel);
+  assert.deepEqual((await fs.readdir(f.directory)).filter(name => name.endsWith('.tmp')), ['session.v4.jsonl.000000000000.tmp']);
+});
+
+test('ordinary first publish keeps link and never calls rename', async t => {
+  const f = await fixture(t);
+  const originalLink = fs.link, originalRename = fs.rename;
+  let links = 0, renames = 0;
+  fs.link = async (...args) => { links++; return originalLink(...args); };
+  fs.rename = async (...args) => { renames++; return originalRename(...args); };
+  syncBuiltinESMExports();
+  t.after(() => { fs.link = originalLink; fs.rename = originalRename; syncBuiltinESMExports(); });
+  await f.handle.append(f.events);
+  assert.equal(links, 1);
+  assert.equal(renames, 0);
+  await f.handle.close();
+});
+
+for (const collision of ['EEXIST', 'EACCES']) test(collision + ': publication cannot replace an already present target', async t => {
+  const f = await fixture(t);
+  const path = join(f.directory, 'session.v4.jsonl'), foreign = Buffer.from('another publication');
+  const originalLink = fs.link, originalRename = fs.rename;
+  let renames = 0;
+  fs.link = async (...args) => {
+    // Place a real competing entry after the backend's initial absence check.
+    await fs.writeFile(path, foreign, { flag: 'wx' });
+    if (collision === 'EACCES') throw Object.assign(Error('controlled link denial'), { code: collision });
+    return originalLink(...args);
+  };
+  fs.rename = async (...args) => { renames++; return originalRename(...args); };
+  syncBuiltinESMExports();
+  t.after(() => { fs.link = originalLink; fs.rename = originalRename; syncBuiltinESMExports(); });
+  await assert.rejects(f.handle.flush(), { code: collision });
+  assert.equal(renames, 0);
+  assert.deepEqual(await fs.readFile(path), foreign);
+  assert.deepEqual((await fs.readdir(f.directory)).filter(name => name.endsWith('.tmp')), ['session.v4.jsonl.000000000000.tmp']);
+  await f.handle.close();
+});
+
+test('an ENOSPC publication error is not converted into a rename attempt', async t => {
+  const f = await fixture(t);
+  const originalLink = fs.link, originalRename = fs.rename;
+  const failure = Object.assign(Error('controlled link ENOSPC'), { code: 'ENOSPC' });
+  let renames = 0;
+  fs.link = async () => { throw failure; };
+  fs.rename = async (...args) => { renames++; return originalRename(...args); };
+  syncBuiltinESMExports();
+  const restore = () => { fs.link = originalLink; fs.rename = originalRename; syncBuiltinESMExports(); };
+  t.after(restore);
+  await assert.rejects(f.handle.flush(), error => error === failure);
+  assert.equal(renames, 0);
+  assert(!(await fs.readdir(f.directory)).includes('session.v4.jsonl'));
+  restore();
+  await f.handle.flush();
+  await f.handle.close();
+});

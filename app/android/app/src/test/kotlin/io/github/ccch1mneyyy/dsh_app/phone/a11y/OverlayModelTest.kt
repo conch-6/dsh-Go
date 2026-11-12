@@ -239,4 +239,17 @@ class OverlayModelTest {
         assertEquals(1, CapsuleMetrics.steps(411f))
         assertEquals(3, CapsuleMetrics.steps(914f))
     }
+
+    // ---- 确认卡 / 交还卡的窗口宽度 ---------------------------------------------------------------------
+
+    @Test fun theCardsFitTheScreenAndStopAtTheCap() {
+        val density = 2.525f
+        // 472 dp would be 1192 px here: the 1080 px display decides (the cold-start bug took 1192).
+        assertEquals(1050, CardMetrics.windowWidthPx(1080, density, CardMetrics.CONFIRM_DP))
+        // A wide screen leaves the cap in charge; the handoff card at the top has its own.
+        assertEquals(1192, CardMetrics.windowWidthPx(2207, density, CardMetrics.CONFIRM_DP))
+        assertEquals(1242, CardMetrics.windowWidthPx(2207, density, CardMetrics.HANDOFF_DP))
+        // A tablet at 2x density: still the cap.
+        assertEquals(944, CardMetrics.windowWidthPx(2560, 2f, CardMetrics.CONFIRM_DP))
+    }
 }

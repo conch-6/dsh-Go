@@ -81,7 +81,7 @@ class CustomProvider {
   final String baseUrl;
   final List<ProviderModelSpec> models;
 
-  /// Extra request headers; kept as they are, not edited here.
+  /// Extra request headers read back from the engine.
   final Map<String, String> headers;
 
   /// Credential reference the key lives under; null for a keyless route.
@@ -205,6 +205,7 @@ class ProviderDraft {
     required this.baseUrl,
     this.apiKey = '',
     this.models = const [],
+    this.headers,
   });
 
   /// Empty: the Base URL's host is used.
@@ -218,6 +219,9 @@ class ProviderDraft {
   final String apiKey;
   final List<ProviderModelSpec> models;
 
+  /// Null keeps the stored map; an empty map explicitly clears it.
+  final Map<String, String>? headers;
+
   String get effectiveName {
     final trimmed = name.trim();
     if (trimmed.isNotEmpty) return trimmed;
@@ -227,13 +231,48 @@ class ProviderDraft {
 
 // ── Validation ───────────────────────────────────────────────────────────────
 
-/// Trims, drops trailing slashes and, for Anthropic, a trailing `/v1`: the
-/// Anthropic protocol appends `/v1/messages` itself, so `…/v1` would ask for
-/// `/v1/v1/messages`. OpenAI-style endpoints keep their path (most need
-/// `/v1`).
+/// The engine supplies request attribution; the form does not edit it.
+bool isReservedProviderHeader(String name) => name.toLowerCase() == 'user-agent';
+
+/// HTTP field names and values accepted by the engine's Fetch client.
+/// Empty rows are ignored; empty values are valid. Names are case-insensitive.
+String? providerHeadersError(Iterable<MapEntry<String, String>> rows) {
+  final names = <String>{};
+  for (final row in rows) {
+    final name = row.key.trim();
+    if (name.isEmpty && row.value.isEmpty) continue;
+    if (!RegExp(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$").hasMatch(name)) {
+      return appL10n.engineProviderHeaderInvalidName;
+    }
+    if (isReservedProviderHeader(name)) return appL10n.engineProviderHeaderReserved;
+    if (!names.add(name.toLowerCase())) return appL10n.engineProviderHeaderDuplicate;
+    if (row.value.codeUnits.any((unit) => unit != 9 && (unit < 32 || unit == 127 || unit > 255))) {
+      return appL10n.engineProviderHeaderInvalidValue;
+    }
+  }
+  return null;
+}
+
+/// After [baseUrlError] succeeds, trims and removes one matching protocol endpoint.
+/// Trailing slashes are dropped first.
+/// Otherwise Anthropic drops a trailing `/v1`, as its SDK appends `/v1/messages`.
+/// Other base paths are kept; OpenAI-style endpoints are not given a `/v1`.
 String normalizeBaseUrl(String raw, ProviderApi api) {
-  var url = raw.trim().replaceFirst(RegExp(r'/+$'), '');
-  if (api == ProviderApi.anthropicMessages) url = url.replaceFirst(RegExp(r'/v1$'), '');
+  final url = raw.trim().replaceFirst(RegExp(r'/+$'), '');
+  final uri = Uri.parse(url);
+  final pattern = switch (api) {
+    ProviderApi.openaiCompletions => r'/chat/completions$',
+    ProviderApi.openaiResponses => r'/responses$',
+    ProviderApi.anthropicMessages => r'/(?:v1/)?messages$',
+  };
+  final endpoint = RegExp(pattern, caseSensitive: false).firstMatch(uri.path)?.group(0);
+  // Match the path, never the authority; retain the original escaped prefix.
+  if (endpoint != null && url.toLowerCase().endsWith(endpoint.toLowerCase())) {
+    return url.substring(0, url.length - endpoint.length);
+  }
+  if (api == ProviderApi.anthropicMessages && uri.path.endsWith('/v1') && url.endsWith('/v1')) {
+    return url.substring(0, url.length - 3);
+  }
   return url;
 }
 
@@ -517,10 +556,16 @@ class ProviderActions {
     required String baseUrl,
     String apiKey = '',
     String? existingId,
+    Map<String, String>? headers,
   }) async {
     final backend = _backend;
-    Future<List<DiscoveredModel>> ask(String url) =>
-        backend.discover(provider: existingId, baseUrl: url, api: api, apiKey: apiKey.isEmpty ? null : apiKey);
+    Future<List<DiscoveredModel>> ask(String url) => backend.discover(
+      provider: existingId,
+      baseUrl: url,
+      api: api,
+      apiKey: apiKey.isEmpty ? null : apiKey,
+      headers: headers,
+    );
     try {
       return (models: await ask(baseUrl), baseUrl: baseUrl);
     } on DshRemoteException catch (error) {
@@ -565,6 +610,7 @@ class ProviderActions {
           baseUrl: draft.baseUrl,
           apiKeyEnv: draft.apiKey.isEmpty ? null : keyRef,
           models: draft.models,
+          headers: draft.headers ?? const {},
         ),
       );
     } else {
@@ -578,6 +624,7 @@ class ProviderActions {
         // A keyless route gets its reference once a key is typed.
         apiKeyEnv: existing.apiKeyEnv == null && draft.apiKey.isNotEmpty ? keyRef : null,
         models: draft.models,
+        headers: draft.headers,
         expectedRevision: before?.revision,
       );
     }

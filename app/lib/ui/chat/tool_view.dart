@@ -35,8 +35,57 @@ MediaMeta? toolMedia(ToolChatItem item) {
 
 final _media = Expando<(MediaMeta?,)>('media');
 
-/// 这次调用带了一张画得出来的原生卡片(插件卡片,或生成的媒体卡)。
-bool hasToolCard(ToolChatItem item) => toolCardParse(item) is DshUiParsed || toolMedia(item) != null;
+typedef QuestionReply = ({String id, String question, String answer});
+
+final _questionReplies = Expando<List<QuestionReply>>('question replies');
+
+/// A durable receipt, only from a successful question tool's saved answer.
+/// Unknown/malformed results retain the ordinary raw tool detail.
+List<QuestionReply> toolQuestionReplies(ToolChatItem item) {
+  if (item.name != 'ask_user_question' || item.status != ToolStatus.succeeded) return const [];
+  return _questionReplies[item] ??= _parseQuestionReplies(item);
+}
+
+List<QuestionReply> _parseQuestionReplies(ToolChatItem item) {
+  final questions = ToolView._decode(item.arguments)?['questions'];
+  final answers = ToolView._decode(item.resultText)?['answers'];
+  if (questions is! List || answers is! List || answers.isEmpty) return const [];
+  final labels = <String, String>{};
+  for (final question in questions) {
+    if (question is! Map) return const [];
+    final id = question['id'];
+    final text = question['question'];
+    if (id is! String || id.isEmpty || text is! String || text.trim().isEmpty || labels.containsKey(id)) {
+      return const [];
+    }
+    final header = question['header'];
+    labels[id] = header is String && header.trim().isNotEmpty ? header : text;
+  }
+  final replies = <QuestionReply>[];
+  final seen = <String>{};
+  for (final answer in answers) {
+    if (answer is! Map) return const [];
+    final id = answer['id'];
+    final selected = answer['selected'];
+    final custom = answer['custom'];
+    if (id is! String ||
+        !labels.containsKey(id) ||
+        !seen.add(id) ||
+        selected is! List ||
+        selected.any((value) => value is! String || value.trim().isEmpty) ||
+        (custom != null && custom is! String)) {
+      return const [];
+    }
+    final text = [...selected.cast<String>(), if (custom is String && custom.trim().isNotEmpty) custom].join('\n');
+    if (text.isEmpty) return const [];
+    replies.add((id: id, question: labels[id]!, answer: text));
+  }
+  return List.unmodifiable(replies);
+}
+
+/// 这次调用带了一张画得出来的原生卡片(插件卡片、媒体卡或提问回执)。
+bool hasToolCard(ToolChatItem item) =>
+    toolCardParse(item) is DshUiParsed || toolMedia(item) != null || toolQuestionReplies(item).isNotEmpty;
 
 /// 带原生卡片的工具调用,卡片画在哪(`ToolCallRow.card`)。
 enum ToolCardPlacement {
@@ -87,7 +136,9 @@ class ToolView {
       other.pendingApproval?.eventId == item.pendingApproval?.eventId;
 
   static Map<String, Object?>? _decode(String raw) {
-    if (raw.trim().isEmpty) return null;
+    // An object's JSON ends in `}`. Arguments still streaming mostly don't:
+    // skip the parse that would throw on every delta.
+    if (!raw.trimRight().endsWith('}')) return null;
     try {
       final value = jsonDecode(raw);
       return value is Map<String, Object?> ? value : null;
@@ -178,6 +229,8 @@ class ToolView {
 
   /// 生成的媒体,见 [toolMedia]。
   late final MediaMeta? media = toolMedia(item);
+
+  late final List<QuestionReply> questionReplies = toolQuestionReplies(item);
 
   /// 原生卡片的标题:折叠行的摘要用它(卡片画不了或没写标题时为 null)。
   String? get pluginTitle => switch (pluginView) {

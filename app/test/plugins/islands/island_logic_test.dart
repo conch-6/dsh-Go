@@ -96,6 +96,27 @@ void main() {
       expect(book.targetFor(_spec('plugins.row.config', cell: 'no-row')), isNull);
     });
 
+    test('long-tail pages require package and cell and navigate their real owner', () {
+      const slots = ['sidebar.footer.action', 'settings.plugins.tab', 'plugins.detail.section'];
+      for (final slot in slots) {
+        expect(book.recipeFor(slot)!.forms, {IslandForm.page});
+        expect(book.targetFor(_spec(slot, cell: 'entry')), isNull);
+        expect(book.targetFor(_spec(slot, package: 'one')), isNull);
+      }
+      expect(book.targetFor(_spec(slots[0], cell: 'entry', package: 'one')), {
+        'web': {'sidebar': true},
+        'then': {'sidebar': true},
+      });
+      expect(book.targetFor(_spec(slots[1], cell: 'entry', package: 'one')), {
+        'web': {'settings': 'plugins'},
+        'then': {'settingsPlugin': 'entry'},
+      });
+      expect(book.targetFor(_spec(slots[2], cell: 'entry', package: 'one')), {
+        'web': {'panel': 'plugins'},
+        'then': {'plugin': 'one'},
+      });
+    });
+
     test('conversation slots need a conversation', () {
       expect(book.targetFor(_spec('sidebar.right.pane.tab', cell: 'files')), isNull);
       expect(book.targetFor(_spec('sidebar.right.pane.tab', cell: 'files', session: 's1')), {

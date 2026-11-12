@@ -48,6 +48,35 @@ class RuntimeLogsTest {
         assertFalse(lines.joinToString().contains("SYNTHETIC_SECRET"))
     }
 
+    @Test fun fullRulesMaskDiskWhileLiveUsesTheSameCredentialTokenNames() = Fixture().use { f ->
+        val raw = listOf(
+            "\u001B[32mBasic setup\u001B[0m",
+            "API_KEY=SYNTHETIC_VALUE password='synthetic phrase, tail' token=SYNTHETIC_TOKEN",
+            "oauth_token=sampleXY x_auth_token=sampleXY gh_token=sampleXY bot_token=sampleXY next_token=page-cursor-123",
+        )
+        raw.forEach { f.logs.accept(it, "stderr") }
+        f.flush(); f.drainMain()
+        val live = listOf(raw[0], "API_KEY=SYNTHETIC_VALUE password='synthetic phrase, tail' token=•••",
+            "oauth_token=••• x_auth_token=••• gh_token=••• bot_token=••• next_token=page-cursor-123")
+        assertEquals(live, f.logs.recent(10))
+        assertEquals(live, f.logs.snapshot(10).entries.map { it.line })
+        assertEquals(live, f.delivered.map { it.line })
+        assertEquals(listOf("Basic •••", "API_KEY=••• password='•••' token=•••", live[2]), f.saved())
+        assertEquals(listOf(1L, 2L, 3L), f.delivered.map { it.seq })
+    }
+
+    @Test fun streamPrivateKeyStateOnlyChangesTheDiskCopy() = Fixture().use { f ->
+        val redactor = LogRedactor()
+        val begin = "-----BEGIN " + "PRIVATE KEY-----"
+        val end = "-----END " + "PRIVATE KEY-----"
+        val raw = listOf(begin, "SYNTHETIC-PRIVATE-MATERIAL", end, "done")
+        raw.forEach { f.logs.accept(it, "stdout", redactor.line(it)) }
+        f.flush(); f.drainMain()
+        assertEquals(raw, f.logs.recent(10))
+        assertEquals(raw, f.delivered.map { it.line })
+        assertEquals(listOf(begin, "•••", end, "done"), f.saved())
+    }
+
     @Test fun concurrentAdmissionHasOneOrderAndSnapshotCutoff() = Fixture().use { f ->
         val hold = f.hold()
         val threads = List(4) { p -> thread { repeat(400) { f.logs.accept("$p:$it", "stdout") } } }
@@ -91,22 +120,25 @@ class RuntimeLogsTest {
         f.flush(); assertEquals(10L to 10L, f.logs.dropped())
     }
 
-    @Test fun byteLimitAndOversizeLineCountWithoutPersistingRaw() = Fixture().use { f ->
+    @Test fun fullDiskLimitDoesNotChangeTheLiveQueueByteLimit() = Fixture().use { f ->
         val hold = f.hold()
         f.logs.accept("x".repeat(8 * 1024 * 1024), "stdout")
         f.logs.accept("tail", "stdout")
         hold.countDown(); f.flush(); f.drainMain()
-        assertEquals(1L to 1L, f.logs.dropped())
-        assertEquals("tail", f.saved()[0]); assertEquals(2, f.saved().size)
-        assertTrue(f.saved()[1].contains("disk=1 delivery=1")); assertEquals(f.saved(), f.delivered.map { it.line })
+        assertEquals(0L to 1L, f.logs.dropped())
+        assertEquals("x".repeat(2000) + "…", f.saved()[0])
+        assertEquals("tail", f.saved()[1]); assertEquals(3, f.saved().size)
+        assertTrue(f.saved()[2].contains("disk=0 delivery=1"))
+        assertEquals(f.saved().drop(1), f.delivered.map { it.line })
     }
 
     @Test fun utf8ByteBudgetEvictsOldestEvenBelowLineLimit() = Fixture().use { f ->
         val hold = f.hold(); val body = "界".repeat(500_000)
         repeat(9) { f.logs.accept("$it:$body", "stdout") }
-        assertEquals(4L to 4L, f.logs.dropped()); hold.countDown(); f.flush(); f.drainMain()
+        assertEquals(0L to 4L, f.logs.dropped()); hold.countDown(); f.flush(); f.drainMain()
         assertEquals((5L..9L).toList(), f.delivered.filter { it.stream == "stdout" }.map { it.seq })
-        assertTrue(f.delivered.last().line.contains("disk=4 delivery=4"))
+        assertTrue(f.delivered.last().line.contains("disk=0 delivery=4"))
+        assertEquals((0..8).map { "$it:" + "界".repeat(1998) + "…" }, f.saved().dropLast(1))
     }
 
     @Test fun deliveryOverflowIndependentOfDiskAndWarningIsOrdered() = Fixture().use { f ->

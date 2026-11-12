@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dsh_app/ui/chat/render/ansi_text.dart';
 import 'package:dsh_app/ui/chat/render/diff_view.dart';
 import 'package:dsh_app/ui/chat/tool_view.dart';
@@ -29,6 +31,26 @@ void main() {
     final view = ToolView.of(partial);
     expect(view.args, isNull);
     expect(view.command, 'echo "hi" && ls -');
+  });
+
+  test('arguments are parsed once they can be a whole object, and only then', () {
+    ToolView view(String arguments) =>
+        ToolView.of(ToolChatItem(callId: 'c', name: 'bash', arguments: arguments, status: ToolStatus.streaming));
+    // Every prefix of a streamed object: parsed exactly when jsonDecode would give a map.
+    const whole = '{"command": "ls", "options": {"all": true, "depth": 2}, "tags": ["a"]} \n';
+    for (var end = 0; end <= whole.length; end++) {
+      final prefix = whole.substring(0, end);
+      Object? decoded;
+      try {
+        decoded = jsonDecode(prefix);
+      } on FormatException {
+        decoded = null;
+      }
+      expect(view(prefix).args, decoded is Map<String, Object?> ? decoded : isNull, reason: prefix);
+    }
+    expect(view('[1, 2]').args, isNull);
+    expect(view('{"a": 1} ').args, isNull, reason: 'not JSON whitespace');
+    expect(view(' {"a": 1}\t').args, {'a': 1});
   });
 
   test('the Android sandbox refusal is recognised', () {

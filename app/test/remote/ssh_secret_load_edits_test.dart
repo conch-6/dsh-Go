@@ -19,6 +19,7 @@ class _SlowSecrets extends MemorySecretStore {
         SshSecrets.passwordKey(_host.id): 'stored-password',
         SshSecrets.privateKeyKey(_host.id): 'stored-private-key',
         SshSecrets.passphraseKey(_host.id): 'stored-passphrase',
+        SshSecrets.attachTokenKey(_host.id): 'stored-token',
       });
 
   final gate = Completer<void>();
@@ -36,7 +37,7 @@ class _Rig {
   final secrets = _SlowSecrets();
   final visible = ValueNotifier(true);
 
-  Future<void> pump(WidgetTester tester, {bool privateKey = false}) async {
+  Future<void> pump(WidgetTester tester, {bool privateKey = false, bool attach = false}) async {
     usePhoneSurface(tester);
     SharedPreferences.setMockInitialValues({});
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
@@ -54,7 +55,10 @@ class _Rig {
         home: ValueListenableBuilder<bool>(
           valueListenable: visible,
           builder: (context, show, _) => show
-              ? SshHostFormPage(existing: privateKey ? _host.copyWith(auth: SshAuthMethod.privateKey) : _host)
+              ? SshHostFormPage(existing: _host.copyWith(
+                  auth: privateKey ? SshAuthMethod.privateKey : SshAuthMethod.password,
+                  dshMode: attach ? SshDshMode.attachOnly : SshDshMode.managed,
+                ))
               : const Scaffold(body: Text('next page')),
         ),
       ),
@@ -76,7 +80,7 @@ class _Rig {
   Future<void> loaded(WidgetTester tester) async {
     secrets.gate.complete();
     await tester.pumpAndSettle();
-    expect(secrets.reads, 3);
+    expect(secrets.reads, 4);
   }
 }
 
@@ -161,6 +165,19 @@ void main() {
     controller.text = _host.name;
     await rig.loaded(tester);
     expect(rig.dirty(tester), isFalse);
+  });
+
+  testWidgets('an attach token edited during loading is preserved', (tester) async {
+    final rig = _Rig();
+    await rig.pump(tester, attach: true);
+    final token = find.byWidgetPredicate(
+      (widget) => widget is TextField && widget.obscureText && widget.keyboardType != TextInputType.visiblePassword,
+    );
+    await tester.ensureVisible(token);
+    await tester.enterText(token, 'edited-token');
+    await rig.loaded(tester);
+    expect(rig.text(tester, token), 'edited-token');
+    expect(rig.dirty(tester), isTrue);
   });
 
   testWidgets('closing the form before storage returns is harmless', (tester) async {

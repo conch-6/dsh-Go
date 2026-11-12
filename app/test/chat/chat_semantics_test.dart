@@ -1,4 +1,7 @@
+import 'dart:typed_data';
 
+import 'package:dsh_app/l10n/l10n.dart';
+import 'package:dsh_app/state/attachments.dart';
 import 'package:dsh_app/ui/chat/chat_rows.dart';
 import 'package:dsh_app/ui/chat/diff_page.dart';
 import 'package:dsh_app/ui/chat/render/code_block.dart';
@@ -7,6 +10,7 @@ import 'package:dsh_app/ui/chat/trajectory_sheet.dart';
 import 'package:dsh_app/ui/chat/turn_summary.dart';
 import 'package:dsh_app/ui/chat/usage_sheet.dart';
 import 'package:dsh_app/ui/chat/widgets/assistant_message.dart';
+import 'package:dsh_app/ui/chat/widgets/attachments.dart';
 import 'package:dsh_app/ui/chat/widgets/change_card.dart';
 import 'package:dsh_app/ui/chat/widgets/chat_card.dart';
 import 'package:dsh_app/ui/chat/widgets/tool_row.dart';
@@ -48,6 +52,64 @@ const _other = FileChange(path: 'b.dart', created: false, added: 2, removed: 0, 
 
 void main() {
   setUpAll(loadTestFonts);
+  tearDown(() => AppLocale.use(AppLocale.zhCN));
+
+  for (final (locale, text) in [
+    (AppLocale.zhCN, '早上好\n请帮我看看'),
+    (AppLocale.en, 'Good morning\nPlease help me'),
+  ]) {
+    testWidgets('$locale: user message semantics have no speaker prefix', (tester) async {
+      AppLocale.use(locale);
+      final handle = tester.ensureSemantics();
+      try {
+        await tester.pumpWidget(testApp(Scaffold(body: UserBubble(text: text))));
+
+        final message = find.bySemanticsLabel(text);
+        expect(message, findsOneWidget);
+        final data = tester.getSemantics(message).getSemanticsData();
+        expect(data.label, text);
+        expect(data.flagsCollection.isHeader, isTrue);
+        expect(data.hasAction(SemanticsAction.longPress), isTrue);
+      } finally {
+        handle.dispose();
+      }
+    });
+  }
+
+  testWidgets('user message text stays separate from its image and file semantics', (tester) async {
+    final handle = tester.ensureSemantics();
+    try {
+      await tester.pumpWidget(
+        testApp(
+          Scaffold(
+            body: UserBubble(
+              text: '早上好',
+              attachments: SentAttachments.pending([
+                DraftAttachment.sniff('photo.png', tinyPng),
+                DraftAttachment(name: 'notes.txt', bytes: Uint8List.fromList([65])),
+              ]),
+            ),
+          ),
+        ),
+      );
+      await pumpFrames(tester);
+
+      final message = tester.getSemantics(find.bySemanticsLabel('早上好'));
+      expect(message.getSemanticsData().label, '早上好');
+      expect(message.getSemanticsData().hasAction(SemanticsAction.longPress), isTrue);
+      final image = tester.getSemantics(find.bySemanticsLabel('图片'));
+      expect(image.id, isNot(message.id));
+      expect(image.flagsCollection.isImage, isTrue);
+      expect(image.flagsCollection.isButton, isTrue);
+      expect(image.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+      final file = tester.getSemantics(find.text('notes.txt'));
+      expect(file.id, isNot(message.id));
+      expect(file.getSemanticsData().label, contains('notes.txt'));
+    } finally {
+      handle.dispose();
+    }
+  });
+
   testWidgets('excluded child semantics retain the matching tap actions', (tester) async {
     final handle = tester.ensureSemantics();
     final tools = [
@@ -99,7 +161,7 @@ void main() {
     }
     handle.dispose();
   });
-  testWidgets('speaker and Markdown headings are navigable, reply root is not a heading', (tester) async {
+  testWidgets('user messages and Markdown headings are navigable, reply root is not a heading', (tester) async {
     final handle = tester.ensureSemantics();
     await tester.pumpWidget(
       testApp(
@@ -113,7 +175,8 @@ void main() {
         ),
       ),
     );
-    final user = tester.getSemantics(find.bySemanticsLabel(RegExp(r'^我')));
+    final user = tester.getSemantics(find.bySemanticsLabel('我的问题'));
+    expect(user.getSemanticsData().label, '我的问题');
     expect(user.flagsCollection.isHeader, isTrue);
     final heading = tester.getSemantics(find.bySemanticsLabel('步骤'));
     expect(heading.flagsCollection.isHeader, isTrue);

@@ -2228,6 +2228,24 @@ abstract class L10n {
   /// **'输入参数后发送'**
   String get activitySlashEnterArgs;
 
+  /// No description provided for @activitySlashRunIntent.
+  ///
+  /// In zh, this message translates to:
+  /// **'命令 · 执行'**
+  String get activitySlashRunIntent;
+
+  /// No description provided for @activitySlashInsertIntent.
+  ///
+  /// In zh, this message translates to:
+  /// **'命令 · 填入'**
+  String get activitySlashInsertIntent;
+
+  /// No description provided for @activitySlashSkillIntent.
+  ///
+  /// In zh, this message translates to:
+  /// **'技能 · 填入'**
+  String get activitySlashSkillIntent;
+
   /// No description provided for @activityStepTitle.
   ///
   /// In zh, this message translates to:
@@ -2935,6 +2953,114 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'{label}，/{name}'**
   String activitySlashCommandSemantics(String label, String name);
+
+  /// No description provided for @activityQuotaTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'订阅额度'**
+  String get activityQuotaTitle;
+
+  /// No description provided for @activityQuotaRefresh.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新额度'**
+  String get activityQuotaRefresh;
+
+  /// No description provided for @activityQuotaPermissionDenied.
+  ///
+  /// In zh, this message translates to:
+  /// **'订阅没有权限查询额度'**
+  String get activityQuotaPermissionDenied;
+
+  /// No description provided for @activityQuotaAuthError.
+  ///
+  /// In zh, this message translates to:
+  /// **'登录已过期或无权查询，请检查订阅登录'**
+  String get activityQuotaAuthError;
+
+  /// No description provided for @activityQuotaNetworkError.
+  ///
+  /// In zh, this message translates to:
+  /// **'网络连接失败，请稍后重试'**
+  String get activityQuotaNetworkError;
+
+  /// No description provided for @activityQuotaRateLimited.
+  ///
+  /// In zh, this message translates to:
+  /// **'查询过于频繁，请稍后重试'**
+  String get activityQuotaRateLimited;
+
+  /// No description provided for @activityQuotaLoading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在查询订阅额度…'**
+  String get activityQuotaLoading;
+
+  /// No description provided for @activityQuotaUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法查询订阅额度，请稍后重试'**
+  String get activityQuotaUnavailable;
+
+  /// No description provided for @activityQuotaUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'此主机暂不支持查询订阅额度'**
+  String get activityQuotaUnsupported;
+
+  /// No description provided for @activityQuotaSignedOut.
+  ///
+  /// In zh, this message translates to:
+  /// **'订阅未登录'**
+  String get activityQuotaSignedOut;
+
+  /// No description provided for @activityQuotaPrimary.
+  ///
+  /// In zh, this message translates to:
+  /// **'主要额度'**
+  String get activityQuotaPrimary;
+
+  /// No description provided for @activityQuotaSecondary.
+  ///
+  /// In zh, this message translates to:
+  /// **'次要额度'**
+  String get activityQuotaSecondary;
+
+  /// No description provided for @activityQuotaFiveHour.
+  ///
+  /// In zh, this message translates to:
+  /// **'5 小时'**
+  String get activityQuotaFiveHour;
+
+  /// No description provided for @activityQuotaSevenDay.
+  ///
+  /// In zh, this message translates to:
+  /// **'7 天'**
+  String get activityQuotaSevenDay;
+
+  /// No description provided for @activityQuotaSevenDaySonnet.
+  ///
+  /// In zh, this message translates to:
+  /// **'7 天 · Sonnet'**
+  String get activityQuotaSevenDaySonnet;
+
+  /// No description provided for @activityQuotaSevenDayOpus.
+  ///
+  /// In zh, this message translates to:
+  /// **'7 天 · Opus'**
+  String get activityQuotaSevenDayOpus;
+
+  /// No description provided for @activityQuotaUsed.
+  ///
+  /// In zh, this message translates to:
+  /// **'已使用 {value}'**
+  String activityQuotaUsed(String value);
+
+  /// No description provided for @activityQuotaReset.
+  ///
+  /// In zh, this message translates to:
+  /// **'重置时间：{time}'**
+  String activityQuotaReset(String time);
 
   /// No description provided for @activityToolListSeparator.
   ///
@@ -5048,6 +5174,90 @@ abstract class L10n {
   /// **'一直显示'**
   String get botsPetAlways;
 
+  /// No description provided for @botsPetOverlayShows.
+  ///
+  /// In zh, this message translates to:
+  /// **'悬浮窗里显示'**
+  String get botsPetOverlayShows;
+
+  /// No description provided for @botsPetOverlayPixel.
+  ///
+  /// In zh, this message translates to:
+  /// **'像素宠物'**
+  String get botsPetOverlayPixel;
+
+  /// No description provided for @botsPetOverlayCompanion.
+  ///
+  /// In zh, this message translates to:
+  /// **'小屋里的她'**
+  String get botsPetOverlayCompanion;
+
+  /// No description provided for @botsPetOverlayCompanionNamed.
+  ///
+  /// In zh, this message translates to:
+  /// **'小屋里的{name}'**
+  String botsPetOverlayCompanionNamed(String name);
+
+  /// No description provided for @botsPetOverlayNoPack.
+  ///
+  /// In zh, this message translates to:
+  /// **'先去伙伴小屋里请一位角色'**
+  String get botsPetOverlayNoPack;
+
+  /// No description provided for @botsPetOverlayPackBroken.
+  ///
+  /// In zh, this message translates to:
+  /// **'角色包不完整，去伙伴小屋里重新导入'**
+  String get botsPetOverlayPackBroken;
+
+  /// No description provided for @botsPetOverlayUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台手机暂时请不出她'**
+  String get botsPetOverlayUnavailable;
+
+  /// No description provided for @botsPetOverlayCompanionHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'点一下和她互动，连点两下打开对话。比像素宠物更耗电，熄屏和隐藏时会停下来'**
+  String get botsPetOverlayCompanionHint;
+
+  /// No description provided for @botsPetOverlayLoading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在请她出来…'**
+  String get botsPetOverlayLoading;
+
+  /// No description provided for @botsPetOverlayFallback.
+  ///
+  /// In zh, this message translates to:
+  /// **'她没能出来，先由像素宠物顶班'**
+  String get botsPetOverlayFallback;
+
+  /// No description provided for @botsPetOverlayFraming.
+  ///
+  /// In zh, this message translates to:
+  /// **'取景'**
+  String get botsPetOverlayFraming;
+
+  /// No description provided for @botsPetOverlayFramingFull.
+  ///
+  /// In zh, this message translates to:
+  /// **'全身'**
+  String get botsPetOverlayFramingFull;
+
+  /// No description provided for @botsPetOverlayFramingHalf.
+  ///
+  /// In zh, this message translates to:
+  /// **'半身'**
+  String get botsPetOverlayFramingHalf;
+
+  /// No description provided for @botsPetOverlayFramingHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'换取景会重新加载她'**
+  String get botsPetOverlayFramingHint;
+
   /// No description provided for @botsPetSwitchDisabled.
   ///
   /// In zh, this message translates to:
@@ -6806,6 +7016,24 @@ abstract class L10n {
   /// **'输入回答…'**
   String get chatAnswerHint;
 
+  /// No description provided for @chatAnswerMode.
+  ///
+  /// In zh, this message translates to:
+  /// **'发送文字将回答待答问题'**
+  String get chatAnswerMode;
+
+  /// No description provided for @chatMessageMode.
+  ///
+  /// In zh, this message translates to:
+  /// **'发送新消息'**
+  String get chatMessageMode;
+
+  /// No description provided for @chatQuestionAnswered.
+  ///
+  /// In zh, this message translates to:
+  /// **'已回答'**
+  String get chatQuestionAnswered;
+
   /// No description provided for @chatStarting.
   ///
   /// In zh, this message translates to:
@@ -7943,7 +8171,7 @@ abstract class L10n {
   /// No description provided for @chatEditResendHint.
   ///
   /// In zh, this message translates to:
-  /// **'在新对话中改写，原对话不变'**
+  /// **'在新对话中改写，图片和文件需重新添加；原对话不变'**
   String get chatEditResendHint;
 
   /// No description provided for @chatSaveToPhotos.
@@ -8192,6 +8420,54 @@ abstract class L10n {
   /// **'暂无详情'**
   String get chatNoDetails;
 
+  /// No description provided for @chatOutputHiddenLines.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count, plural, other{中间省略 {shown} 行}}'**
+  String chatOutputHiddenLines(int count, String shown);
+
+  /// No description provided for @chatOutputHiddenChars.
+  ///
+  /// In zh, this message translates to:
+  /// **'中间省略 {count} 字'**
+  String chatOutputHiddenChars(String count);
+
+  /// No description provided for @chatOutputSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count, plural, other{共 {lines} 行}} · {chars} 字'**
+  String chatOutputSummary(int count, String lines, String chars);
+
+  /// No description provided for @chatOutputViewAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'查看全部'**
+  String get chatOutputViewAll;
+
+  /// No description provided for @chatOutputCopyAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'复制全文'**
+  String get chatOutputCopyAll;
+
+  /// No description provided for @chatOutputCopied.
+  ///
+  /// In zh, this message translates to:
+  /// **'已复制全文'**
+  String get chatOutputCopied;
+
+  /// No description provided for @chatOutputToEnd.
+  ///
+  /// In zh, this message translates to:
+  /// **'跳到末尾'**
+  String get chatOutputToEnd;
+
+  /// No description provided for @chatOutputToStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'回到开头'**
+  String get chatOutputToStart;
+
   /// No description provided for @chatErrApiKey.
   ///
   /// In zh, this message translates to:
@@ -8219,7 +8495,7 @@ abstract class L10n {
   /// No description provided for @chatErrContextLength.
   ///
   /// In zh, this message translates to:
-  /// **'对话太长，发送 /compact 压缩后再试'**
+  /// **'对话太长。若 /compact 也失败，请新建对话或换模型'**
   String get chatErrContextLength;
 
   /// No description provided for @chatErrModelUnavailable.
@@ -8960,6 +9236,12 @@ abstract class L10n {
   /// **'这台手机上加载失败了（{reason}）。可以重新导入素材包再试一次。'**
   String companionFailedBody(String reason);
 
+  /// No description provided for @companionFailedBodyPlain.
+  ///
+  /// In zh, this message translates to:
+  /// **'她刚才没加载出来。先重试，还不行再重新导入素材包。'**
+  String get companionFailedBodyPlain;
+
   /// No description provided for @companionPackBroken.
   ///
   /// In zh, this message translates to:
@@ -9169,6 +9451,24 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'你是不是很闲？'**
   String get companionTease3;
+
+  /// No description provided for @companionShake1.
+  ///
+  /// In zh, this message translates to:
+  /// **'哇啊，别摇啦！'**
+  String get companionShake1;
+
+  /// No description provided for @companionShake2.
+  ///
+  /// In zh, this message translates to:
+  /// **'头好晕……水都晃起来了。'**
+  String get companionShake2;
+
+  /// No description provided for @companionShake3.
+  ///
+  /// In zh, this message translates to:
+  /// **'再摇我要吐泡泡了！'**
+  String get companionShake3;
 
   /// No description provided for @companionStatusIdle.
   ///
@@ -11078,6 +11378,12 @@ abstract class L10n {
   /// **'网页版发送'**
   String get engineGeneralWebSending;
 
+  /// No description provided for @engineGeneralWebOnlyHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'这组设置仅影响当前主机的网页版，不改变原生聊天。'**
+  String get engineGeneralWebOnlyHint;
+
   /// No description provided for @engineGeneralData.
   ///
   /// In zh, this message translates to:
@@ -11893,6 +12199,66 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'连接'**
   String get engineProviderConnection;
+
+  /// No description provided for @engineProviderHeaders.
+  ///
+  /// In zh, this message translates to:
+  /// **'请求头（可选）'**
+  String get engineProviderHeaders;
+
+  /// No description provided for @engineProviderHeadersWarning.
+  ///
+  /// In zh, this message translates to:
+  /// **'请求头以明文保存，不参与日志脱敏。敏感凭据请使用 API Key 或凭据引用。'**
+  String get engineProviderHeadersWarning;
+
+  /// No description provided for @engineProviderHeaderName.
+  ///
+  /// In zh, this message translates to:
+  /// **'名称'**
+  String get engineProviderHeaderName;
+
+  /// No description provided for @engineProviderHeaderValue.
+  ///
+  /// In zh, this message translates to:
+  /// **'值'**
+  String get engineProviderHeaderValue;
+
+  /// No description provided for @engineProviderHeaderAdd.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加请求头'**
+  String get engineProviderHeaderAdd;
+
+  /// No description provided for @engineProviderHeaderInvalidName.
+  ///
+  /// In zh, this message translates to:
+  /// **'请求头名称只能包含英文字母、数字或 HTTP 标记符号，不能包含空格或冒号'**
+  String get engineProviderHeaderInvalidName;
+
+  /// No description provided for @engineProviderHeaderReserved.
+  ///
+  /// In zh, this message translates to:
+  /// **'User-Agent 由引擎设置，请移除此请求头'**
+  String get engineProviderHeaderReserved;
+
+  /// No description provided for @engineProviderHeaderLocked.
+  ///
+  /// In zh, this message translates to:
+  /// **'由引擎管理，保留现有配置'**
+  String get engineProviderHeaderLocked;
+
+  /// No description provided for @engineProviderHeaderDuplicate.
+  ///
+  /// In zh, this message translates to:
+  /// **'请求头名称重复（不区分大小写）'**
+  String get engineProviderHeaderDuplicate;
+
+  /// No description provided for @engineProviderHeaderInvalidValue.
+  ///
+  /// In zh, this message translates to:
+  /// **'请求头值只能包含单行 Latin-1 文本，不支持换行或控制字符（制表符除外）'**
+  String get engineProviderHeaderInvalidValue;
 
   /// No description provided for @engineProviderDefaultUrl.
   ///
@@ -22502,6 +22868,42 @@ abstract class L10n {
   /// **'该效果需要用户点按'**
   String get plugInputGestureRequired;
 
+  /// No description provided for @seamsTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'App 内界面'**
+  String get seamsTitle;
+
+  /// No description provided for @seamsOverlay.
+  ///
+  /// In zh, this message translates to:
+  /// **'聊天页浮层'**
+  String get seamsOverlay;
+
+  /// No description provided for @seamsOverlayNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'常驻聊天区域，内存紧张时自动让位'**
+  String get seamsOverlayNote;
+
+  /// No description provided for @seamsSidebarPage.
+  ///
+  /// In zh, this message translates to:
+  /// **'侧栏入口'**
+  String get seamsSidebarPage;
+
+  /// No description provided for @seamsSettingsPage.
+  ///
+  /// In zh, this message translates to:
+  /// **'插件设置页'**
+  String get seamsSettingsPage;
+
+  /// No description provided for @seamsDetailPage.
+  ///
+  /// In zh, this message translates to:
+  /// **'插件详情扩展'**
+  String get seamsDetailPage;
+
   /// No description provided for @pluginsOperationHostChanged.
   ///
   /// In zh, this message translates to:
@@ -25418,6 +25820,102 @@ abstract class L10n {
   /// **'未更新 · 上次结果'**
   String get readListFailed;
 
+  /// No description provided for @remoteDshMode.
+  ///
+  /// In zh, this message translates to:
+  /// **'实例管理'**
+  String get remoteDshMode;
+
+  /// No description provided for @remoteManaged.
+  ///
+  /// In zh, this message translates to:
+  /// **'托管启动'**
+  String get remoteManaged;
+
+  /// No description provided for @remoteAttachOnly.
+  ///
+  /// In zh, this message translates to:
+  /// **'只连接'**
+  String get remoteAttachOnly;
+
+  /// No description provided for @remoteManagedHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动启动或复用 App 托管的 DSH；不会自动替换存活但无法复用的实例。'**
+  String get remoteManagedHelp;
+
+  /// No description provided for @remoteAttachOnlyHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'只转发到远端 127.0.0.1 的固定端口；不启动、停止或重启 DSH。'**
+  String get remoteAttachOnlyHelp;
+
+  /// No description provided for @remoteDshPort.
+  ///
+  /// In zh, this message translates to:
+  /// **'远端 DSH 端口'**
+  String get remoteDshPort;
+
+  /// No description provided for @remoteDshToken.
+  ///
+  /// In zh, this message translates to:
+  /// **'DSH 登录令牌'**
+  String get remoteDshToken;
+
+  /// No description provided for @remoteDshTokenHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'填写既有实例启动链接中的 token，仅保存在这台手机的安全存储中。'**
+  String get remoteDshTokenHelp;
+
+  /// No description provided for @remoteAttachWorkingDirectoryHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'既有实例不执行目录探测；请填写远端绝对路径，留空使用 DSH 默认目录。'**
+  String get remoteAttachWorkingDirectoryHelp;
+
+  /// No description provided for @remoteSshCompression.
+  ///
+  /// In zh, this message translates to:
+  /// **'SSH 压缩'**
+  String get remoteSshCompression;
+
+  /// No description provided for @remoteSshCompressionHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认开启；与服务器协商认证后压缩，不支持时使用未压缩传输。'**
+  String get remoteSshCompressionHelp;
+
+  /// No description provided for @remoteRestartManaged.
+  ///
+  /// In zh, this message translates to:
+  /// **'重启托管 DSH'**
+  String get remoteRestartManaged;
+
+  /// No description provided for @remoteRestartManagedWarning.
+  ///
+  /// In zh, this message translates to:
+  /// **'这会停止 App 记录的远端 DSH 并重新启动，可能中断其他客户端和进行中的对话。确认没有其他人在使用后再继续。普通测试连接不会执行此操作。'**
+  String get remoteRestartManagedWarning;
+
+  /// No description provided for @remoteErrSharedInstance.
+  ///
+  /// In zh, this message translates to:
+  /// **'远端托管 DSH 仍在运行，但启动命令不同或缺少有效启动日志。为保护共享实例，未自动重启；请检查配置，改用“只连接”，或在编辑主机中明确选择“重启托管 DSH”。'**
+  String get remoteErrSharedInstance;
+
+  /// No description provided for @remoteErrAttachSettings.
+  ///
+  /// In zh, this message translates to:
+  /// **'请填写有效的远端 DSH 端口和登录令牌'**
+  String get remoteErrAttachSettings;
+
+  /// No description provided for @remoteDshAttached.
+  ///
+  /// In zh, this message translates to:
+  /// **'已连接既有 DSH'**
+  String get remoteDshAttached;
+
   /// No description provided for @remoteStartupSection.
   ///
   /// In zh, this message translates to:
@@ -25739,7 +26237,7 @@ abstract class L10n {
   /// No description provided for @remoteErrDshTokenRejected.
   ///
   /// In zh, this message translates to:
-  /// **'远端 DSH 拒绝了登录令牌'**
+  /// **'远端 DSH 拒绝了登录令牌，未自动重启；请检查令牌，或在编辑主机中明确重启托管实例'**
   String get remoteErrDshTokenRejected;
 
   /// No description provided for @remoteErrDshSignIn.
@@ -26777,8 +27275,14 @@ abstract class L10n {
   /// No description provided for @remoteSelfHostedSignInHelp.
   ///
   /// In zh, this message translates to:
-  /// **'用邮箱和密码登录自己部署的 liguobao/ds-harness-remote'**
+  /// **'填写服务器地址，可用邮箱密码登录，也可先使用此服务器再选择其他登录方式。'**
   String get remoteSelfHostedSignInHelp;
+
+  /// No description provided for @remoteUseServer.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用此服务器'**
+  String get remoteUseServer;
 
   /// No description provided for @remoteServerAddress.
   ///
@@ -28952,6 +29456,18 @@ abstract class L10n {
   /// **'宠物显示,显示时机'**
   String get searchKwPetDisplayWhen;
 
+  /// No description provided for @searchKwPetOverlayShows.
+  ///
+  /// In zh, this message translates to:
+  /// **'悬浮伙伴,小屋里的她,像素宠物,Live2D'**
+  String get searchKwPetOverlayShows;
+
+  /// No description provided for @searchKwPetOverlayFraming.
+  ///
+  /// In zh, this message translates to:
+  /// **'取景,全身,半身'**
+  String get searchKwPetOverlayFraming;
+
   /// No description provided for @searchKwBlur.
   ///
   /// In zh, this message translates to:
@@ -29465,7 +29981,7 @@ abstract class L10n {
   /// No description provided for @shellDeleteWarning.
   ///
   /// In zh, this message translates to:
-  /// **'将从此主机永久删除所选对话记录，无法撤销，与归档不同。\n\n工作目录、生成的文件、分叉对话、共享附件和已发布的云端分享都会保留。云端分享需另行删除。主机会拒绝删除仍有任务或关联工作的对话。'**
+  /// **'将从此主机永久删除所选对话记录，无法撤销，与归档不同。\n\n工作目录、生成的文件、分叉对话、共享附件和已发布的云端分享都会保留。云端分享需另行删除。子代理对话会随所选对话一起删除。运行中或有定时任务的对话会被主机拒绝。'**
   String get shellDeleteWarning;
 
   /// No description provided for @shellDeleteOwnerChanged.
@@ -29501,7 +30017,7 @@ abstract class L10n {
   /// No description provided for @shellDeleteRelated.
   ///
   /// In zh, this message translates to:
-  /// **'此对话有关联的子代理工作，主机为保护它们拒绝删除。'**
+  /// **'此对话仍有关联的定时任务，主机为保护它们拒绝删除。'**
   String get shellDeleteRelated;
 
   /// No description provided for @shellDeleteWriterHeld.
@@ -31268,6 +31784,30 @@ abstract class L10n {
   /// **'给 DSH Go 点个 star'**
   String get starSettingsTitle;
 
+  /// No description provided for @hubStartPage.
+  ///
+  /// In zh, this message translates to:
+  /// **'起始页'**
+  String get hubStartPage;
+
+  /// No description provided for @hubChatSuggestions.
+  ///
+  /// In zh, this message translates to:
+  /// **'聊天建议'**
+  String get hubChatSuggestions;
+
+  /// No description provided for @hubChatSuggestionsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示起始页的聊天建议'**
+  String get hubChatSuggestionsHint;
+
+  /// No description provided for @searchKwChatSuggestions.
+  ///
+  /// In zh, this message translates to:
+  /// **'起始页,空白页,新对话,聊天建议,建议卡片'**
+  String get searchKwChatSuggestions;
+
   /// No description provided for @phoneStartupFailureStopping.
   ///
   /// In zh, this message translates to:
@@ -32305,6 +32845,12 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'这个对话已经不在了'**
   String get stateChatMissing;
+
+  /// No description provided for @stateChatFormatUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前引擎无法读取此对话的日志格式，请导出诊断包排查'**
+  String get stateChatFormatUnsupported;
 
   /// No description provided for @stateEngineUnsupported.
   ///
@@ -33803,7 +34349,7 @@ abstract class L10n {
   /// No description provided for @updateInstallBlockedMessage.
   ///
   /// In zh, this message translates to:
-  /// **'在系统的安装确认里允许，或去发布页手动下载。'**
+  /// **'在系统的安装确认里允许；如果系统直接拦下（小米等机型），试试下面的「安装路线」：Shizuku 或本机 ADB，不用重新签名。'**
   String get updateInstallBlockedMessage;
 
   /// No description provided for @updateInstallIncomplete.
@@ -33961,6 +34507,36 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'没能打开系统安装器'**
   String get updateSystemInstallerFailed;
+
+  /// No description provided for @updateExportApk.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出安装包'**
+  String get updateExportApk;
+
+  /// No description provided for @updateExportApkTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出安装包？'**
+  String get updateExportApkTitle;
+
+  /// No description provided for @updateExportApkMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'会把这次下载并校验过的安装包复制到「下载/DSH-Go」，可以用 MT 管理器之类的工具重新签名后再装。\n\n重新签名后，手机上的签名和官方包不同，App 内更新会一直提示「签名不一致」，以后每次更新都要这样手动重签安装。\n\n如果只是系统拦着装不上（小米等机型），先试「安装路线」里的 Shizuku 或本机 ADB，那条路不用重新签名。'**
+  String get updateExportApkMessage;
+
+  /// No description provided for @updateExportApkDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'已存到 下载/{path}'**
+  String updateExportApkDone(String path);
+
+  /// No description provided for @updateExportApkFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没能导出安装包'**
+  String get updateExportApkFailed;
 
   /// No description provided for @updateStarProject.
   ///

@@ -14,7 +14,7 @@
 #   -f, --flavor arm64|x64|all       default arm64
 #   --release | --debug | --profile  default --release
 #   -t, --target FILE                Dart entry point, relative to app/
-#   -n, --build-number N             use N instead of the build minute (never lower than what's installed)
+#   -n, --build-number N             use 2..2100000000 instead of the build minute (never lower than installed)
 #   --build-name X.Y.Z               version name instead of app/pubspec.yaml's
 #   --keep-daemon                    leave the Gradle daemon running afterwards
 #   --beta                           embed the beta channel token (internal builds only)
@@ -28,7 +28,7 @@
 # This script takes no machine locks; callers add their own.
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+ROOT=$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 APP="$ROOT/app"
 OUT="$APP/build/app/outputs/flutter-apk"
 
@@ -64,7 +64,10 @@ case "$flavor" in
 esac
 for arg in "${extra[@]}"; do
   case "$arg" in
-    --build-number* | --build-name* | --flavor* | --target-platform*)
+    # The selected mode also controls the runtime preflight below.
+    --build-number* | --build-name* | --flavor* | --target-platform* | \
+    --release | --debug | --profile | --release=* | --debug=* | --profile=* | \
+    --no-release | --no-debug | --no-profile)
       die "$arg is set by this script; use its own options" ;;
     --split-per-abi) die "--split-per-abi adds an ABI offset to versionCode; flavors already split by ABI" ;;
   esac
@@ -82,6 +85,9 @@ if [[ -z $code ]]; then
 else
   [[ $code =~ ^[0-9]+$ ]] || die "build number is a positive integer: $code"
   python3 "$ROOT/tooling/build_number.py" --check "$code" || exit 1
+  code=$((10#$code))
+  # Gradle treats 1 as pubspec's placeholder and replaces it with the build minute.
+  ((code != 1)) || die "build number 1 is reserved for the pubspec placeholder; omit --build-number for automatic numbering"
 fi
 when=$(python3 "$ROOT/tooling/build_number.py" --decode "$code" 2>/dev/null || echo "custom")
 
@@ -120,6 +126,12 @@ if ((dry)); then
   exit 0
 fi
 
+# Check every selected flavor before starting any build or writing build config.
+# Debug/profile may intentionally exercise UI without a bundled runtime.
+if [[ $mode == release ]]; then
+  python3 -I "$ROOT/tooling/check_runtime_bundle.py" "${flavors[@]}"
+fi
+
 # Toolchain: use what's on PATH; the gitignored tooling/env.sh is the fallback.
 if ! command -v flutter >/dev/null 2>&1; then
   [[ -f $ROOT/tooling/env.sh ]] && source "$ROOT/tooling/env.sh"
@@ -146,7 +158,7 @@ aapt2=$(command -v aapt2 || true)
 if [[ -z $aapt2 ]]; then
   sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
   [[ -n $sdk ]] || sdk=$(sed -n 's/^sdk\.dir=//p' "$APP/android/local.properties" 2>/dev/null || true)
-  aapt2=$(ls -1d "$sdk"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -n 1 || true)
+  aapt2=$(ls -1d "$sdk"/build-tools/*/aapt2{,.exe} 2>/dev/null | sort -V | tail -n 1 || true)
 fi
 [[ -n $aapt2 ]] || echo "build-apk: aapt2 not found; the APKs' versionCode won't be read back" >&2
 

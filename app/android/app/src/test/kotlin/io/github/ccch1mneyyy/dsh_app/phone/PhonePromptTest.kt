@@ -57,6 +57,23 @@ class PhonePromptTest {
         assertEquals(PromptOutcome.ALLOW_TASK, t.await().outcome)
     }
 
+    @Test fun passiveRevocationKeepsAReasonButAnActualUserStopDoesNot() {
+        val active = begin("active", PromptKind.HANDOFF)
+        assertTrue(shown(active).choose(PromptChoice.STOP))
+        assertEquals(PromptOutcome.STOPPED, active.await().outcome)
+        assertNull(active.await().reason)
+        var unlocked = true
+        val locked = begin("locked", PromptKind.HANDOFF) { unlocked }
+        shown(locked)
+        unlocked = false
+        locked.check()
+        assertEquals(PromptOutcome.STOPPED, locked.await().outcome)
+        assertEquals("stale", locked.await().reason)
+        val cancelled = begin("cancelled", PromptKind.NATIVE_CONFIRM)
+        cancelled.stop()
+        assertEquals("stale", cancelled.await().reason)
+    }
+
     @Test fun sharedSlotNeverOverwritesANativeQuestion() {
         val native = arbiter.begin(null, Any(), content(PromptKind.NATIVE_CONFIRM), 30_000) { true }!!
         assertNull(arbiter.begin("engine", source, content(), 30_000) { true })

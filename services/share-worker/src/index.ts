@@ -36,6 +36,7 @@ import { githubStars } from './github';
 import { isMarketPath, market, publishMarket } from './market';
 import { isPetMarketPath, petMarket, publishPetMarket } from './pet-market';
 import type { Ctx } from './files';
+import { isWorkshopPath, workshop } from './workshop';
 import { notFound, redirect, viewer } from './site';
 
 const VIEWER_PATH = /^\/c\/([0-9A-Za-z]{6,32})\/?$/;
@@ -49,6 +50,7 @@ async function route(request: Request, env: Env, ctx: Ctx): Promise<Response> {
   const path = url.pathname;
   const method = request.method;
 
+  if (isWorkshopPath(path)) return workshop(request, env, ctx);
   if (path.startsWith('/api/')) {
     if (path === '/api/usage/v1') return usage(request, env);
     if (path === '/api/github/stars') return githubStars(request, env, ctx);

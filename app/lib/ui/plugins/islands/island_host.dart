@@ -62,7 +62,7 @@ class IslandHost extends ChangeNotifier {
   Future<void> _loadDevice() async {
     _device = await platform.device();
     if (kDebugMode) debugPrint('[island] device: webView=${_device.webView ?? 'unknown'}');
-    notifyListeners();
+    notifyListenersIfLive();
   }
 
   List<LiveIsland> get _liveView => [
@@ -182,7 +182,11 @@ class IslandHost extends ChangeNotifier {
     handle.lastSeen = DateTime.now();
     if (handle.views == 0) {
       handle.visible = false;
-      final grace = handle.spec.form == IslandForm.probe ? Duration.zero : IslandBudgetRules.hiddenGrace;
+      // Turning off an overlay must stop its scripts and sound, not keep a
+      // hidden live page around for the normal page-island grace period.
+      final grace = handle.spec.form == IslandForm.probe || handle.spec.form == IslandForm.overlay
+          ? Duration.zero
+          : IslandBudgetRules.hiddenGrace;
       _hiddenTimers.remove(handle.spec.key)?.cancel();
       _hiddenTimers[handle.spec.key] = Timer(grace, () {
         _hiddenTimers.remove(handle.spec.key);

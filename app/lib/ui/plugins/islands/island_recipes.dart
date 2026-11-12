@@ -53,8 +53,9 @@ class IslandRecipe {
 
   final Set<IslandForm> forms;
 
-  /// `settings`, `settings-general`, `plugin`, `plugin-row`, `panel`,
-  /// `rightbar`, `session-view`, `session` or `none`.
+  /// `settings`, `settings-general`, `settings-plugins`, `sidebar`,
+  /// `plugin`, `plugin-row`, `plugin-detail`, `panel`, `rightbar`,
+  /// `session-view`, `session` or `none`.
   final String open;
   final IslandStretch stretch;
   final double padX;
@@ -203,6 +204,16 @@ class IslandRecipeBook {
         if (officialSettings.contains(cell)) return at(web: {'settings': cell});
         if (names.isEmpty) return null;
         return at(web: {'settings': 'general'}, then: {'settings': names});
+      case 'sidebar':
+        if (spec.package == null || spec.package!.isEmpty || cell.isEmpty) return null;
+        return at(web: {'sidebar': true}, then: {'sidebar': true});
+      case 'settings-plugins':
+        if (spec.package == null || spec.package!.isEmpty || cell.isEmpty) return null;
+        return at(web: {'settings': 'plugins'}, then: {'settingsPlugin': cell});
+      case 'plugin-detail':
+        final package = spec.package;
+        if (package == null || package.isEmpty || cell.isEmpty) return null;
+        return at(web: {'panel': 'plugins'}, then: {'plugin': package});
       case 'settings-general':
         return at(web: {'settings': 'general'});
       case 'plugin':

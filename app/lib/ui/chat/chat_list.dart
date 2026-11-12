@@ -39,6 +39,7 @@ import 'composer_toast.dart';
 import 'dsh_ui/dsh_ui.dart';
 import 'render/markdown_image.dart';
 import 'trajectory_sheet.dart';
+import 'turn_summary.dart' show forgetToolSummaries;
 import 'widgets/approval_card.dart';
 import 'widgets/artifact_card.dart';
 import 'widgets/assistant_message.dart';
@@ -147,8 +148,8 @@ class ChatList extends ConsumerStatefulWidget {
 }
 
 class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderStateMixin {
-  late final _scroll = _TopBoundedScrollController(_leadingBoundary);
-  final _centerKey = UniqueKey();
+  late final _scroll = _TopBoundedScrollController(_leadingBoundary, _prependCorrection);
+  final _centerKey = GlobalKey();
   final _beforeKey = GlobalKey();
   final _historyKey = GlobalKey();
   double _anchorPixels = 0;
@@ -166,6 +167,40 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     final history = header.geometry?.scrollExtent;
     if (rows == null || history == null) return null;
     return _anchorPixels - rows - history - widget.topInset - AppSpace.sm;
+  }
+
+  /// EditableText's reveal request includes its caret padding. The centered
+  /// viewport's getOffsetToReveal omits the anchor, so use the actual rectangle
+  /// in this viewport instead. Other reveal requests keep Flutter's behavior.
+  bool _revealInlineEditor(RenderObject target, Rect? rect, Duration duration, Curve curve) {
+    final focus = FocusManager.instance.primaryFocus?.context;
+    if (focus == null || !focus.mounted || focus.findAncestorStateOfType<_ChatListState>() != this) return false;
+    final editor = focus.findAncestorStateOfType<EditableTextState>();
+    if (editor == null || editor.widget.readOnly) return false;
+    RenderObject? ancestor = editor.renderEditable;
+    while (ancestor != null && ancestor != target) {
+      ancestor = ancestor.parent;
+    }
+    if (ancestor == null || !_scroll.hasClients) return false;
+    final viewport = _centerKey.currentContext?.findRenderObject()?.parent;
+    if (viewport is! RenderViewport || !viewport.hasSize) return false;
+    final position = _scroll.position;
+    // Do not interrupt a finger or the fling it started. A previous implicit
+    // caret animation has an idle user direction and may be superseded.
+    if (_fingers > 0 || position.userScrollDirection != ScrollDirection.idle || !position.allowImplicitScrolling) {
+      return true;
+    }
+    final revealed = MatrixUtils.transformRect(target.getTransformTo(viewport), rect ?? target.paintBounds);
+    final leading = revealed.top - widget.topInset;
+    final trailing = revealed.bottom - _anchorPixels;
+    // When the requested area is taller than the viewport and already spans
+    // it, neither edge is preferable (the same rule as showInViewport).
+    if (leading < 0 && trailing > 0) return true;
+    final shift = trailing > 0 ? trailing : math.min(0.0, leading);
+    if (shift.abs() > precisionErrorTolerance) {
+      unawaited(position.moveTo(position.pixels + shift, duration: duration, curve: curve));
+    }
+    return true;
   }
 
   /// 视口贴在底部(决定流式时是否跟随)。
@@ -251,6 +286,9 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
   /// before 段最后一行的主键;null = before 段为空。首次加载完成时确定。
   String? _splitKey;
   bool _splitChosen = false;
+  int? _oldestRowSeq;
+  ({String key, double offset})? _prependAnchor;
+  String? _snapPaddingKey;
 
   // 行派生缓存:输入不变就不重算。
   List<ChatRow> _rows = const [];
@@ -258,6 +296,29 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
   Map<String, int> _index = const {};
   Object? _rowsInputs;
   Set<String> _autoAnswered = const {};
+
+  /// Row widgets as last built, by row key. A row whose [ChatRow] object, gap
+  /// and motion are unchanged gets the same widget back, so Flutter skips it:
+  /// a text delta rebuilds only the reply it grows. Cleared whenever rows are
+  /// derived afresh, and when anything else a row reads changes (see
+  /// [_clearBuiltRows]).
+  ///
+  /// The rule this rests on: whatever the row-building layer ([_rowFrame] and
+  /// the methods it calls) reads that does not come with the row object (the
+  /// chat state, the list's context, the language, the list's own fields,
+  /// other providers) must either clear this map when it changes, or be read
+  /// in the row widget's own build instead. Today that is: the chat state
+  /// ([_deriveRows]), the motion duration and the language ([build]), the
+  /// fork / regenerate marks ([_clearBuiltRows]) and which callbacks are given
+  /// ([didUpdateWidget]).
+  final Map<String, ({ChatRow row, double gap, Widget widget})> _built = {};
+  Duration? _builtMotion;
+  Locale? _builtLocale;
+  ChatState? _builtState;
+
+  /// A streaming draft has words, not only thinking: earlier rows read that
+  /// (whether a visual block was answered by a later reply).
+  bool _draftSays = false;
 
   double? _lastViewport;
   int _lastPendingCount = 0;
@@ -299,6 +360,11 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
 
   @override
   void dispose() {
+    // This conversation's calls leave the tool summary caches with it.
+    forgetToolSummaries({
+      for (final item in _builtState?.items ?? const <ChatItem>[])
+        if (item is ToolChatItem) item.callId,
+    });
     _glide.dispose();
     _scroll.dispose();
     _showJump.dispose();
@@ -310,7 +376,28 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
   void didUpdateWidget(ChatList oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.bottomInset != widget.bottomInset && _pinned) _follow();
+    // Rows call the callbacks through `widget` when tapped; only whether
+    // each is there shapes what they show.
+    bool same(Object? a, Object? b) => (a == null) == (b == null);
+    if (oldWidget.sessionId != widget.sessionId ||
+        !same(oldWidget.onWithdraw, widget.onWithdraw) ||
+        !same(oldWidget.onSendNow, widget.onSendNow) ||
+        !same(oldWidget.onEditPrompt, widget.onEditPrompt) ||
+        !same(oldWidget.onResend, widget.onResend) ||
+        !same(oldWidget.onQuote, widget.onQuote) ||
+        !same(oldWidget.onSwitchModel, widget.onSwitchModel)) {
+      _built.clear();
+    }
   }
+
+  void _clearBuiltRows(VoidCallback change) => setState(() {
+    change();
+    _built.clear();
+  });
+
+  void _quote(String passage) => widget.onQuote?.call(passage);
+
+  void _switchModel() => widget.onSwitchModel?.call();
 
   // ---------------------------------------------------------------------------
   // 跟随与贴底
@@ -443,6 +530,12 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
 
   bool _onScroll(ScrollNotification n) {
     if (n.depth != 0) return false;
+    // Only this list's drag dismisses the keyboard. A code well's inner
+    // horizontal drag must keep its SelectionArea focused.
+    if (n is ScrollUpdateNotification && n.dragDetails != null) {
+      final scope = FocusScope.of(context);
+      if (scope.hasFocus && !scope.hasPrimaryFocus) FocusManager.instance.primaryFocus?.unfocus();
+    }
     _consumeScrollMetrics(n.metrics, (metrics) => _applyScroll(n, metrics));
     return false;
   }
@@ -507,6 +600,8 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
         for (final turn in s.turns)
           if (turn.running) turn.startSeq,
     };
+    final changed = !identical(s, _builtState);
+    _builtState = s;
     final inputs = (
       foldTurns,
       artifacts,
@@ -519,14 +614,46 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
       s.commands,
       s.turns,
     );
-    if (_rowsInputs == inputs) return;
+    if (_rowsInputs == inputs) {
+      // Nothing the rows are made of changed, but what they read from the
+      // controller (branch points, reply ids) may have.
+      if (changed) _built.clear();
+      return;
+    }
     _rowsInputs = inputs;
     _held = false;
     final previousLength = _rows.length;
+    final previousRows = _rows;
     final previousKeys = _index;
+    final previousSplit = _split;
+    final previousOldest = _oldestRowSeq;
+    _oldestRowSeq = s.items
+        .map(
+          (item) => switch (item) {
+            UserChatItem(:final seq) => seq,
+            AssistantChatItem(:final seq) => seq,
+            ToolChatItem(:final seq) => seq,
+            NoticeChatItem(:final seq) => seq,
+          },
+        )
+        .whereType<int>()
+        .firstOrNull;
+    final oldestCommand = s.commands.map((command) => command.seq).whereType<int>().firstOrNull;
+    if (oldestCommand != null) _oldestRowSeq = math.min(_oldestRowSeq ?? oldestCommand, oldestCommand);
+    // A page can restore an older turn boundary and fold existing items
+    // without adding a message or command of its own.
+    final oldestTurn = s.turns.firstOrNull?.startSeq;
+    if (oldestTurn != null) _oldestRowSeq = math.min(_oldestRowSeq ?? oldestTurn, oldestTurn);
+    final prepended = previousOldest != null && _oldestRowSeq != null && _oldestRowSeq! < previousOldest;
     final hadPending = _rows.any((r) => r is PendingRow);
     _rows = _rowCache.update(s, foldTurns: foldTurns, artifacts: artifacts);
     _index = _rowCache.index;
+    // Only a draft streaming on keeps the other rows' widgets: anything else
+    // may change what a row shows beyond its own item (running, pending,
+    // later items, controller lookups).
+    final draftSays = _draftHasWords(s.items);
+    if (!_rowCache.onlyDraftChanged || draftSays != _draftSays) _built.clear();
+    _draftSays = draftSays;
     // 被插话切开的轮:前几片的摘要行(`tp<轮起点>@<插话>`)跟最后一片一起收。
     // 这一帧没建出来的(在屏幕外)不留到以后:翻回去时不该再播一遍。
     for (final row in _rows) {
@@ -551,17 +678,45 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     }
     _lastPendingCount = s.pending.length;
 
+    if (!s.loading && _splitChosen && prepended) {
+      // Restoring turn metadata can also change rows after a valid center.
+      // Capture them using the previous split; keep that center if it survives.
+      if (!_pinned) _rememberPrependAnchor(previousRows, previousSplit);
+      for (final row in _rows.whereType<TurnFootnoteRow>()) {
+        // This restored footnote is history, not a new row that should grow in.
+        if (row.trace.startSeq < previousOldest) _fresh.remove(row.key);
+      }
+      final first = previousRows.skip(previousSplit).where((row) => _index.containsKey(row.key)).firstOrNull;
+      if (first case AssistantRow(:final key)) {
+        // Prepending can change the gap before the first surviving forward
+        // row. Lay out that history change with the prepend correction.
+        _snapPaddingKey = key;
+        _afterFrame(() {
+          if (_snapPaddingKey == key) _snapPaddingKey = null;
+        });
+      }
+    }
+
     if (s.loading) {
       // (重新)加载中:等首个快照到了再定分界,别把整段历史放进 after 段。
       _splitChosen = false;
       _splitKey = null;
     } else if (!_splitChosen) {
       _splitChosen = true;
-      _splitKey = _lastStableKey();
+      _splitKey = _lastStableKey(beforeSeq: s.runningTurn?.startSeq);
+      _snapNext = true;
+    } else if (_splitKey == null && prepended) {
+      // A partial window can have no stable row before its running turn.
+      // Reselect only from newly loaded history, never from the old forward
+      // segment when completion removes the running-turn cutoff.
+      _splitKey = _lastStableKey(beforeSeq: math.min(previousOldest, s.runningTurn?.startSeq ?? previousOldest));
+      for (var i = 0; i < _split; i++) {
+        _fresh.remove(_rows[i].key);
+      }
     } else if (_splitKey != null && !_index.containsKey(_splitKey)) {
       // 锚点行被替换(重新同步后结构变了):重新分界,贴底时跟上。
       final folded = _rows.whereType<TurnProcessRow>().where((row) => row.rows.any((child) => child.key == _splitKey));
-      _splitKey = folded.isEmpty ? _lastStableKey() : folded.first.key;
+      _splitKey = folded.isEmpty ? _lastStableKey(beforeSeq: s.runningTurn?.startSeq) : folded.first.key;
     }
 
     if (uiTraceEnabled) {
@@ -585,6 +740,21 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     } else if (_rows.length != previousLength || s.running) {
       _afterFrame(() => _hasNew.value = true);
     }
+  }
+
+  /// Drafts trail the list (no seq yet).
+  static bool _draftHasWords(List<ChatItem> items) {
+    for (var i = items.length - 1; i >= 0; i--) {
+      switch (items[i]) {
+        case AssistantChatItem(seq: null, :final text) when text.trim().isNotEmpty:
+          return true;
+        case AssistantChatItem(seq: null) || ToolChatItem(seq: null):
+          continue;
+        default:
+          return false;
+      }
+    }
+    return false;
   }
 
   /// 这次派生里新出现的行,哪些要淡入上移。
@@ -625,9 +795,26 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     });
   }
 
-  String? _lastStableKey() {
+  String? _lastStableKey({int? beforeSeq}) {
     for (var i = _rows.length - 1; i >= 0; i--) {
-      if (_rows[i].stable) return _rows[i].key;
+      final row = _rows[i];
+      if (!row.stable) continue;
+      // A durable message in the running turn can still be folded away.
+      // Keep the whole turn after the center, including steering pieces,
+      // so its completion cannot move the history the person is reading.
+      if (beforeSeq != null) {
+        final seq = switch (row) {
+          UserRow(:final item) => item.seq,
+          AssistantRow(:final item) => item.seq,
+          NoticeRowData(:final item) => item.seq,
+          TurnProcessRow(:final trace) => trace.endSeq,
+          TurnFootnoteRow(:final trace) => trace.endSeq,
+          CommandNoticeRow(:final notice) => notice.seq,
+          _ => null,
+        };
+        if (seq == null || seq >= beforeSeq) continue;
+      }
+      return row.key;
     }
     return null;
   }
@@ -637,6 +824,57 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     if (key == null) return 0;
     final i = _index[key];
     return i == null ? 0 : i + 1;
+  }
+
+  Iterable<({String key, RenderBox body, double offset})> _laidOutForwardRows(List<ChatRow> rows, int split) sync* {
+    final sliver = _centerKey.currentContext?.findRenderObject();
+    if (sliver is! RenderSliverMultiBoxAdaptor) return;
+    for (RenderBox? child = sliver.firstChild; child != null; child = sliver.childAfter(child)) {
+      final data = child.parentData! as SliverMultiBoxAdaptorParentData;
+      final index = data.index;
+      if (index == null || data.layoutOffset == null) continue;
+      final at = split + index;
+      if (at < 0 || at >= rows.length) continue;
+      // _buildRow's outer Padding owns the inter-message gap. Anchor its
+      // child so a newly inserted leading gap cannot move the read text.
+      RenderBox? box = child;
+      while (box != null && box is! RenderPadding) {
+        box = switch (box) {
+          RenderProxyBox(:final child) || RenderShiftedBox(:final child) => child,
+          _ => null,
+        };
+      }
+      if (box case RenderPadding(child: final body?) when body.hasSize) {
+        // A sliver coordinate excludes scroll motion and viewport resizing.
+        // It remains valid when a prepend arrives during a drag or fling.
+        yield (
+          key: rows[at].key,
+          body: body,
+          offset: data.layoutOffset! + body.localToGlobal(Offset.zero, ancestor: child).dy,
+        );
+      }
+    }
+  }
+
+  void _rememberPrependAnchor(List<ChatRow> previousRows, int previousSplit) {
+    for (final row in _laidOutForwardRows(previousRows, previousSplit)) {
+      if (!_index.containsKey(row.key)) continue;
+      final viewport = RenderAbstractViewport.of(row.body);
+      final top = row.body.localToGlobal(Offset.zero, ancestor: viewport).dy;
+      if (top + row.body.size.height <= widget.topInset || top >= (_lastViewport ?? 0) - widget.bottomInset) continue;
+      _prependAnchor = (key: row.key, offset: row.offset);
+      return;
+    }
+  }
+
+  double _prependCorrection() {
+    final anchor = _prependAnchor;
+    _prependAnchor = null;
+    if (anchor == null) return 0;
+    for (final row in _laidOutForwardRows(_rows, _split)) {
+      if (row.key == anchor.key) return row.offset - anchor.offset;
+    }
+    return 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -653,6 +891,15 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     final rows = _rows;
     final split = _split;
     _fluid = AppMotion.fluid(context);
+    final motion = AppMotion.of(context, AppMotion.quick);
+    // A language switch rebuilds every element (app.dart) without an
+    // inherited change; rows hold [appL10n] strings in their arguments.
+    final locale = AppLocale.current;
+    if (motion != _builtMotion || locale != _builtLocale) {
+      _builtMotion = motion;
+      _builtLocale = locale;
+      _built.clear();
+    }
 
     // Images in replies read this conversation's workspace.
     final headroom = ref.watch(petHeadroomProvider);
@@ -671,12 +918,20 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
           if (_lastViewport != null && _lastViewport != viewport && _pinned) {
             _follow();
           }
-          _lastViewport = viewport;
           // The chat page's pet stands over the composer: the last line
           // stops clear of it (0 without a pet).
           final bottomPad = widget.bottomInset + AppSpace.sm + headroom;
           final anchor = viewport <= 0 ? 1.0 : ((viewport - bottomPad) / viewport).clamp(0.0, 1.0);
-          _anchorPixels = viewport * anchor;
+          final anchorPixels = viewport * anchor;
+          if (_lastViewport != null && !_pinned && _scroll.hasClients) {
+            // The composer can shrink when a turn ends. Preserve the same
+            // visible history as its bottom-anchored viewport grows, without
+            // ending a drag or fling with jumpTo.
+            final shift = anchorPixels - _anchorPixels;
+            if (shift != 0) _scroll.position.correctBy(shift);
+          }
+          _lastViewport = viewport;
+          _anchorPixels = anchorPixels;
 
           return Stack(
             children: [
@@ -704,7 +959,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
                       scrollBehavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
                       center: _centerKey,
                       anchor: anchor,
-                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
                       slivers: [
                         SliverToBoxAdapter(child: SizedBox(height: widget.topInset + AppSpace.sm)),
                         SliverToBoxAdapter(
@@ -769,8 +1024,23 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
   Widget _buildRow(int index) {
     final row = _rows[index];
     final previous = index > 0 ? _rows[index - 1] : null;
+    final gap = _gapBefore(row, previous);
     final fresh = _fresh.remove(row.key);
-    final padding = EdgeInsets.fromLTRB(AppSpace.gutter, _gapBefore(row, previous), AppSpace.gutter, 0);
+    // A row's first appearance (fade in, settle) plays once: that build is
+    // not kept, or scrolling back to the row would play it again.
+    if (fresh != null || _settling.contains(row.key)) {
+      _built.remove(row.key);
+      return _rowFrame(row, gap, fresh);
+    }
+    final built = _built[row.key];
+    if (built != null && identical(built.row, row) && built.gap == gap) return built.widget;
+    final frame = _rowFrame(row, gap, null);
+    _built[row.key] = (row: row, gap: gap, widget: frame);
+    return frame;
+  }
+
+  Widget _rowFrame(ChatRow row, double gap, int? fresh) {
+    final padding = EdgeInsets.fromLTRB(AppSpace.gutter, gap, AppSpace.gutter, 0);
     final body = StreamFadeIn(
       enabled: fresh != null,
       index: fresh ?? 0,
@@ -786,7 +1056,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
           child: row is AssistantRow
               // 等待和思考算过程行,正文不算:接上正文时间距缓缓让开,回复不跳。
               ? AnimatedPadding(
-                  duration: AppMotion.of(context, AppMotion.quick),
+                  duration: row.key == _snapPaddingKey ? Duration.zero : AppMotion.of(context, AppMotion.quick),
                   curve: AppMotion.std,
                   padding: padding,
                   child: SizedBox(width: double.infinity, child: body),
@@ -933,7 +1203,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
       branching: _forkingId == item.id,
       onRegenerate: prompt == null ? null : () => _regenerate(item, prompt),
       regenerating: _regeneratingId == item.id,
-      onQuote: widget.onQuote,
+      onQuote: widget.onQuote == null ? null : _quote,
       footnote: footnote == null ? null : _footnote(footnote),
     );
     // Always in a scope, so a reply that grows a visual block keeps its
@@ -967,14 +1237,14 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
 
   Future<void> _branch(AssistantChatItem item) async {
     if (_forkingId != null || _regeneratingId != null) return;
-    setState(() => _forkingId = item.id);
+    _clearBuiltRows(() => _forkingId = item.id);
     try {
       final messenger = ScaffoldMessenger.maybeOf(context);
       final outcome = await ref.read(chatProvider(widget.sessionId).notifier).branchAfter(item);
       if (outcome == null || !mounted) return;
       _openFork(outcome, messenger, appL10n.chatContinuedInNewChat);
     } finally {
-      if (mounted) setState(() => _forkingId = null);
+      if (mounted) _clearBuiltRows(() => _forkingId = null);
     }
   }
 
@@ -1003,7 +1273,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
         identical(ref.read(activeConnectionProvider).value?.client, client) &&
         identical(client?.mux.generation, generation) &&
         client?.mux.lastReadyGenerationNumber == readyGeneration;
-    setState(() => _regeneratingId = item.id);
+    _clearBuiltRows(() => _regeneratingId = item.id);
     try {
       final messenger = ScaffoldMessenger.maybeOf(context);
       final chat = ref.read(chatProvider(sessionId).notifier);
@@ -1022,7 +1292,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
       unawaited(resend(outcome.sessionId, prompt.text, images));
     } finally {
       connection.close();
-      if (mounted) setState(() => _regeneratingId = null);
+      if (mounted) _clearBuiltRows(() => _regeneratingId = null);
     }
   }
 
@@ -1068,12 +1338,12 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
   /// 对话停在出错、被打断或输出到上限的一轮上:提示行尾给一个「重试」
   /// (这一轮什么都还没做、问的是纯文字,原样再发)或「继续」。
   /// 引擎拒绝这个模型时给去处:本机引擎太旧就「检查更新」(引擎随 App
-  /// 更新),其余「换模型」。
+  /// 更新),其余「换模型」。上下文超限也先换模型,不原样重发。
   NoticeAction? _noticeAction(NoticeChatItem notice) {
     final s = ref.read(chatProvider(widget.sessionId));
     if (s.running) return null;
     final code = notice.failure?.code ?? '';
-    final refused = notice.kind == 'error' && modelRefusalCodes.contains(code);
+    final refused = notice.kind == 'error' && (modelRefusalCodes.contains(code) || code == 'CONTEXT_WINDOW_EXCEEDED');
     final repeatable = switch (notice.kind) {
       // 换个说法、再发一次都没用的:Key、余额、账号额度、模型本身用不了。
       'error' =>
@@ -1090,8 +1360,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
       if (code == 'CLIENT_UPGRADE_REQUIRED' && ref.read(activeHostProvider).kind == HostKind.local) {
         return (label: appL10n.updateCheck, onPressed: () => checkForUpdates(context, ref));
       }
-      final switchModel = widget.onSwitchModel;
-      return switchModel == null ? null : (label: appL10n.chatSwitchModel, onPressed: switchModel);
+      return widget.onSwitchModel == null ? null : (label: appL10n.chatSwitchModel, onPressed: _switchModel);
     }
     if (s.pending.isNotEmpty) return null;
     final turn = s.turns.where((turn) => turn.endSeq == notice.seq).firstOrNull;
@@ -1169,8 +1438,44 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
       ArtifactCardRow(:final group) => ArtifactCard(sessionId: widget.sessionId, group: group),
       CommandNoticeRow(:final notice) => CommandRow(notice: notice),
       ApprovalRow(:final request) => ApprovalCard(request: request, onRespond: _respond, onAllowAll: _allowAll),
-      QuestionRow(:final request) => QuestionCard(request: request, onAnswer: _answer, onReject: _rejectQuestion),
+      QuestionRow(:final request) => _InlineEditorReveal(
+        onShow: _revealInlineEditor,
+        child: QuestionCard(request: request, onAnswer: _answer, onReject: _rejectQuestion),
+      ),
     };
+  }
+}
+
+/// Intercept only the focused question editor's original reveal request,
+/// before the centered scroll view can misclassify it as already visible.
+class _InlineEditorReveal extends SingleChildRenderObjectWidget {
+  const _InlineEditorReveal({required this.onShow, required super.child});
+
+  final bool Function(RenderObject, Rect?, Duration, Curve) onShow;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderInlineEditorReveal(onShow);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderInlineEditorReveal renderObject) {
+    renderObject.onShow = onShow;
+  }
+}
+
+class _RenderInlineEditorReveal extends RenderProxyBox {
+  _RenderInlineEditorReveal(this.onShow);
+
+  bool Function(RenderObject, Rect?, Duration, Curve) onShow;
+
+  @override
+  void showOnScreen({
+    RenderObject? descendant,
+    Rect? rect,
+    Duration duration = Duration.zero,
+    Curve curve = Curves.ease,
+  }) {
+    if (descendant != null && onShow(descendant, rect, duration, curve)) return;
+    super.showOnScreen(descendant: descendant, rect: rect, duration: duration, curve: curve);
   }
 }
 
@@ -1364,14 +1669,16 @@ class _FollowPhysics extends ScrollPhysics {
 /// If all content fits, the bounds coincide and dragging cannot move it away
 /// from the top.
 class _TopBoundedScrollController extends ScrollController {
-  _TopBoundedScrollController(this.leadingBoundary);
+  _TopBoundedScrollController(this.leadingBoundary, this.prependCorrection);
 
   final double? Function() leadingBoundary;
+  final double Function() prependCorrection;
 
   @override
   ScrollPosition createScrollPosition(ScrollPhysics physics, ScrollContext context, ScrollPosition? oldPosition) =>
       _TopBoundedScrollPosition(
         leadingBoundary: leadingBoundary,
+        prependCorrection: prependCorrection,
         physics: physics,
         context: context,
         initialPixels: initialScrollOffset,
@@ -1384,6 +1691,7 @@ class _TopBoundedScrollController extends ScrollController {
 class _TopBoundedScrollPosition extends ScrollPositionWithSingleContext {
   _TopBoundedScrollPosition({
     required this.leadingBoundary,
+    required this.prependCorrection,
     required super.physics,
     required super.context,
     super.initialPixels,
@@ -1393,9 +1701,17 @@ class _TopBoundedScrollPosition extends ScrollPositionWithSingleContext {
   });
 
   final double? Function() leadingBoundary;
+  final double Function() prependCorrection;
 
   @override
   bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
+    // The slivers now have actual geometry. Retry this layout at the same
+    // readable row, without estimating heights or ending a drag/fling.
+    final correction = prependCorrection();
+    if (correction.abs() > precisionErrorTolerance) {
+      correctBy(correction);
+      return false;
+    }
     if (minScrollExtent == 0) {
       final leading = leadingBoundary();
       if (leading != null && leading.isFinite && leading > 0) {
@@ -1410,7 +1726,9 @@ class _TopBoundedScrollPosition extends ScrollPositionWithSingleContext {
     // RangeMaintainingScrollPhysics otherwise retains an out-of-range offset
     // at nonzero velocity and springs a now-short chat back over later frames.
     if (!hasContentDimensions || minScrollExtent == maxScrollExtent) {
-      final initial = pixels.clamp(minScrollExtent, maxScrollExtent);
+      // The initial running turn can fill the forward segment: land at its
+      // end in this layout, without painting the center for one frame first.
+      final initial = hasContentDimensions ? pixels.clamp(minScrollExtent, maxScrollExtent) : maxScrollExtent;
       if (initial != pixels) {
         correctPixels(initial);
         return false;

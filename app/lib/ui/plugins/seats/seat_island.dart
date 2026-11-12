@@ -30,9 +30,16 @@ class SeatIslandView extends ConsumerWidget {
       labels: seatIslandLabels(items, bridge),
       // A page island runs down to the screen's bottom edge: its last line
       // stays above the gesture bar.
-      insets: spec.form == IslandForm.page
-          ? EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)
-          : EdgeInsets.zero,
+      insets: switch (spec.form) {
+        IslandForm.page => EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+        IslandForm.overlay => EdgeInsets.only(
+          top: MediaQuery.paddingOf(context).top,
+          bottom: MediaQuery.viewInsetsOf(context).bottom > MediaQuery.paddingOf(context).bottom
+              ? MediaQuery.viewInsetsOf(context).bottom
+              : MediaQuery.paddingOf(context).bottom,
+        ),
+        _ => EdgeInsets.zero,
+      },
       onOpenSession: (id) async {
         final known = ref.read(sessionsProvider).value?.any((s) => s.sessionId == id) ?? false;
         if (!known || !context.mounted) return false;

@@ -8,13 +8,25 @@
 //  - `character/` is data only: an extension allow-list, no scripts or HTML.
 //  - every path stays inside its folder; size and count are capped.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+
+import '../pets/pet_name_alias.dart';
+import '../pets/pet_pack_validator.dart' show decodePetJson, PetValidationException, pngIntact;
+import '../workshop/workshop_export.dart';
+import '../workshop/workshop_models.dart';
+import '../workshop/workshop_receipt.dart';
+import 'companion_adapt_contract.dart' show companionAdaptParams, companionAdaptEmotions, companionAdaptActions, companionAdaptZones;
+
+part 'companion_pack_integrity.dart';
+part 'companion_pack_export.dart';
 
 /// `runtime digest` printed by tooling/companion/build-pack.mjs.
 const companionRuntimeDigest = '20e4e35ce1de09bd9017197363a96afdb4d9fc045d574fb669ebf21b4bc92e81';
@@ -73,9 +85,10 @@ enum CompanionPackProblem {
 }
 
 class CompanionPackException implements Exception {
-  const CompanionPackException(this.problem, [this.detail]);
+  const CompanionPackException(this.problem, [this.detail, this.osErrorCode]);
   final CompanionPackProblem problem;
   final String? detail;
+  final int? osErrorCode;
 
   @override
   String toString() => 'CompanionPackException(${problem.name}${detail == null ? '' : ': $detail'})';
@@ -121,19 +134,126 @@ bool isSafePackPath(String path) {
 }
 
 class CompanionPackStore {
-  CompanionPackStore(this.root, {this.expectedRuntime = companionRuntimeDigest});
+  CompanionPackStore(this.root, {this.expectedRuntime = companionRuntimeDigest}) : _openOutput = null;
+
+  /// Runs the same install transaction in this isolate with one replaceable
+  /// output boundary. Production construction keeps the compute isolate.
+  @visibleForTesting
+  CompanionPackStore.withOutputForTesting(this.root, {
+    this.expectedRuntime = companionRuntimeDigest,
+    required OutputFileStream Function(String path) this._openOutput,
+  });
 
   /// The app's private folder for this; the pack lands in `<root>/pack`.
   final Directory root;
   final String expectedRuntime;
+  final OutputFileStream Function(String path)? _openOutput;
+
+  static final _roots = <String, _CompanionRootState>{};
+  _CompanionRootState get _state => _roots.putIfAbsent(root.absolute.uri.normalizePath().toString(), _CompanionRootState.new);
+
+  /// Shared across all stores for this root. Subscribe before an asynchronous
+  /// availability check, and discard its result if this number changed.
+  int get revision => _state.revision;
+  Stream<int> get revisions => _state.changes.stream;
+
+  /// The owner closes its WebView and then its server here. A failed hook
+  /// aborts the change before any live directory moves. Do not await another
+  /// operation on this store from a hook: it already holds the store queue.
+  void Function() beforeChanges(Future<void> Function() stopReaders) {
+    final state = _state;
+    state.before.add(stopReaders);
+    return () => state.before.remove(stopReaders);
+  }
+
+  Future<T> _exclusive<T>(Future<T> Function() body) {
+    final state = _state;
+    final run = state.queue.then((_) async {
+      await _recover();
+      return body();
+    });
+    state.queue = run.then((_) {}, onError: (_) {});
+    return run;
+  }
+
+  Future<T> _change<T>(Future<T> Function() body) async {
+    final state = _state;
+    state.changes.add(++state.revision);
+    try {
+      for (final hook in List.of(state.before)) {
+        try {
+          await hook();
+        } on Object {
+          throw const CompanionPackException(CompanionPackProblem.storage, 'companion_readers_busy');
+        }
+      }
+      return await body();
+    } finally {
+      state.changes.add(++state.revision);
+    }
+  }
+
+  Future<void> _recover() async {
+    final previous = Directory('${root.path}/pack.previous');
+    if (await previous.exists()) {
+      if (!await pack.exists()) {
+        await _change(() => previous.rename(pack.path));
+      } else {
+        await _forget(previous);
+      }
+    }
+    await _forget(Directory('${root.path}/pack.staging'));
+    await _forget(Directory('${root.path}/pack.trash'));
+  }
 
   Directory get pack => Directory('${root.path}/pack');
 
-  Future<bool> installed() async =>
+  Future<bool> installed() => _exclusive(() async =>
       await File('${pack.path}/runtime/live2dcubismcore.min.js').exists() &&
-      await File('${pack.path}/character/index.json').exists();
+      await File('${pack.path}/character/index.json').exists());
 
-  Future<CompanionCharacter> character() async {
+  /// A file-integrity gate for offering the floating renderer. The pinned
+  /// runtime, index and all model references must be complete. This cannot
+  /// prove that a device's WebGL/Core will render the model successfully.
+  Future<String?> unavailableReason() async {
+    try {
+      return await _exclusive(() => compute(_packUnavailable, (pack.path, expectedRuntime)));
+    } on CompanionPackException catch (error) {
+      return error.detail == 'companion_readers_busy' ? error.detail : 'companion_storage';
+    } on FileSystemException {
+      return 'companion_storage';
+    }
+  }
+
+  Future<WorkshopReceipt?> workshopReceipt() => _exclusive(() => WorkshopReceipt.read(pack));
+
+  /// Exports model data only. User preferences are never read. Names/persona
+  /// must be supplied explicitly for this export; otherwise a neutral name
+  /// and no persona are written. Audio, runtime and local receipts stay out.
+  Future<File> exportZip(File destination, {String? name, String? persona, String? author, String? license, String? source}) => _exclusive(() async {
+    final target = await workshopExportTarget(destination);
+    final output = target.path;
+    final home = await root.exists() ? await root.resolveSymbolicLinks() : root.absolute.uri.normalizePath().toFilePath();
+    final prefix = home.endsWith(Platform.pathSeparator) ? home : '$home${Platform.pathSeparator}';
+    if (output == home || output.startsWith(prefix)) throw const CompanionPackException(CompanionPackProblem.storage);
+    await workshopCommitExport(target, (staging) => compute(_exportCompanion, (pack.path, staging.path, <String, String>{
+      'name': ?name, 'persona': ?persona, 'author': ?author, 'license': ?license, 'source': ?source,
+    })));
+    return destination;
+  });
+
+  /// The extra disk space a character-only install needs to copy its runtime.
+  Future<int> runtimeBytes() => _exclusive(() async {
+    final runtime = Directory('${pack.path}/runtime');
+    if (!await runtime.exists()) return 0;
+    var count = 0;
+    await for (final file in runtime.list(recursive: true, followLinks: false)) {
+      if (file is File) count += await file.length();
+    }
+    return count;
+  });
+
+  Future<CompanionCharacter> character() => _exclusive(() async {
     try {
       return CompanionCharacter.fromJson(
         jsonDecode(await File('${pack.path}/character/character.json').readAsString()),
@@ -141,26 +261,56 @@ class CompanionPackStore {
     } catch (_) {
       return const CompanionCharacter();
     }
-  }
+  });
 
   /// Unpacks [zip] next to the current pack and swaps it in. If the swap fails,
   /// attempts to restore the old pack; a failed restoration leaves it in
   /// `pack.previous`. A zip with only `character/` keeps the installed runtime.
-  Future<void> install(String zip) => compute(_install, (zip, root.path, expectedRuntime));
+  Future<void> install(String zip, {WorkshopReceipt? workshop, bool replaceExisting = false}) => _exclusive(() => _change(() async {
+    if (workshop != null && workshop.kind != 'companion') workshopInvalid('workshop_install_record');
+    if (workshop != null) await workshopCheckReplacement(pack, workshop, replaceExisting: replaceExisting);
+    final args = (zip, root.path, expectedRuntime, workshop == null ? null : jsonEncode(workshop.toJson()));
+    final openOutput = _openOutput;
+    if (openOutput == null) {
+      await compute(_install, args);
+    } else {
+      await _installWithOutput(args, openOutput);
+    }
+  }));
 
-  Future<void> remove() async {
-    if (await pack.exists()) await pack.delete(recursive: true);
-  }
+  Future<void> remove({WorkshopReceipt? expectedWorkshop}) => _exclusive(() => _change(() async {
+    if (expectedWorkshop != null) await workshopCheckRemoval(pack, expectedWorkshop);
+    final trash = Directory('${root.path}/pack.trash');
+    if (await trash.exists()) await trash.delete(recursive: true);
+    // A leftover backup must never resurrect an intentional removal.
+    final previous = Directory('${root.path}/pack.previous');
+    if (await previous.exists()) await previous.delete(recursive: true);
+    if (await pack.exists()) await pack.rename(trash.path);
+    await _forget(trash);
+  }));
 }
 
-Future<void> _install((String, String, String) args) async {
-  final (zipPath, rootPath, expected) = args;
+class _CompanionRootState {
+  Future<void> queue = Future.value();
+  int revision = 0;
+  final changes = StreamController<int>.broadcast(sync: true);
+  final before = <Future<void> Function()>[];
+}
+
+Future<void> _install((String, String, String, String?) args) =>
+    _installWithOutput(args, (path) => OutputFileStream(path));
+
+Future<void> _installWithOutput((String, String, String, String?) args,
+    OutputFileStream Function(String path) openOutput) async {
+  final (zipPath, rootPath, expected, receiptJson) = args;
   final staging = Directory('$rootPath/pack.staging');
   final previous = Directory('$rootPath/pack.previous');
   final live = Directory('$rootPath/pack');
-  final input = InputFileStream(zipPath);
+  InputFileStream? input;
+  var succeeded = false;
   try {
-    await _forget(staging);
+    input = InputFileStream(zipPath);
+    if (await staging.exists()) await staging.delete(recursive: true);
     await staging.create(recursive: true);
 
     final Archive archive;
@@ -201,11 +351,22 @@ Future<void> _install((String, String, String) args) async {
     }
 
     var declared = 0;
+    final aliases = <String>{};
+    // Generated root files must not create aliases of an imported filename.
+    // Exact canonical inputs keep their existing preserve/rebuild behavior.
+    final generatedNames = {
+      for (final name in ['character/character.json', 'character/index.json']) petNameAlias(name): name,
+    };
     for (final (file, name) in targets) {
       if (!isSafePackPath(name) || (!name.startsWith('runtime/') && !name.startsWith('character/'))) {
         throw CompanionPackException(CompanionPackProblem.unsafePath, file.name);
       }
       if (file.isSymbolicLink) throw CompanionPackException(CompanionPackProblem.forbiddenFile, file.name);
+      final alias = petNameAlias(name);
+      final generatedName = generatedNames[alias];
+      if ((generatedName != null && name != generatedName) || !aliases.add(alias)) {
+        throw const CompanionPackException(CompanionPackProblem.unsafePath);
+      }
       if (name.startsWith('character/') && !_dataExtensions.contains(_extension(name))) {
         throw CompanionPackException(CompanionPackProblem.forbiddenFile, file.name);
       }
@@ -219,12 +380,18 @@ Future<void> _install((String, String, String) args) async {
     for (final (file, name) in targets) {
       final target = File('${staging.path}/$name');
       await target.parent.create(recursive: true);
-      final output = OutputFileStream(target.path);
+      final output = openOutput(target.path);
       try {
         file.writeContent(output);
-      } on Object {
-        await output.close();
-        throw CompanionPackException(CompanionPackProblem.notAPack, file.name);
+      } on Object catch (error, stack) {
+        try {
+          await output.close();
+        } on Object {
+          // Cleanup must not replace the primary extraction failure.
+        }
+        if (error is FileSystemException) rethrow;
+        Error.throwWithStackTrace(
+          CompanionPackException(CompanionPackProblem.notAPack, file.name), stack);
       }
       await output.close();
       // A header can lie about the size; what landed on disk can't.
@@ -261,6 +428,17 @@ Future<void> _install((String, String, String) args) async {
     }
     await File('${staging.path}/character/index.json').writeAsString(jsonEncode(characterFiles));
 
+    if (receiptJson != null) {
+      // Workshop character-only payloads may not smuggle a runtime, a stale
+      // generated index or the local receipt into the published archive.
+      if (targets.any((item) => !item.$2.startsWith('character/') || item.$2 == 'character/index.json')) {
+        throw const CompanionPackException(CompanionPackProblem.forbiddenFile);
+      }
+      final reason = await _packUnavailable((staging.path, expected));
+      if (reason != null) throw CompanionPackException(CompanionPackProblem.notAPack, reason);
+      await File('${staging.path}/$workshopReceiptName').writeAsString(receiptJson, flush: true);
+    }
+
     // Discard the old pack only after the new one is live. If promotion fails,
     // restore it; if that also fails, keep pack.previous for recovery.
     await _forget(previous);
@@ -273,14 +451,21 @@ Future<void> _install((String, String, String) args) async {
       rethrow;
     }
     await _forget(previous);
+    succeeded = true;
   } on CompanionPackException {
     await _forget(staging);
     rethrow;
-  } on FileSystemException catch (error) {
+  } on FileSystemException catch (error, stack) {
     await _forget(staging);
-    throw CompanionPackException(CompanionPackProblem.storage, error.osError?.message);
+    Error.throwWithStackTrace(
+      CompanionPackException(CompanionPackProblem.storage, error.osError?.message, error.osError?.errorCode), stack);
   } finally {
-    await input.close();
+    try {
+      await input?.close();
+    } on Object {
+      // Preserve the primary install error if input cleanup also fails.
+      if (succeeded) rethrow;
+    }
   }
 }
 

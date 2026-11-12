@@ -20,6 +20,7 @@ import android.view.Display
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneRegistry
+import io.github.ccch1mneyyy.dsh_app.phone.PhoneTasks
 
 /**
  * DSH's accessibility service (same process as the app). While connected it is the MAIN
@@ -72,7 +73,7 @@ class PhoneA11yService : AccessibilityService() {
     private val screenOff = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             // l10n:keep agent stop reason
-            if (intent.action == Intent.ACTION_SCREEN_OFF) stopAll("屏幕关闭了")
+            if (intent.action == Intent.ACTION_SCREEN_OFF) stopAll("屏幕关闭了", PhoneTasks.StopSource.SCREEN_OFF)
         }
     }
 
@@ -141,11 +142,15 @@ class PhoneA11yService : AccessibilityService() {
         super.onDestroy()
     }
 
-    /** Screen off, lock, interrupt: abort what runs, answer pending questions with STOP, tell the core. */
-    internal fun stopAll(reason: String) {
-        driver?.abort()
-        overlay?.stopAll()
-        PhoneRegistry.controlListener?.onStopAllRequested(reason)
+    /** Commit the ambient fence before cancelling prompts, whose STOP reply is not a user choice. */
+    internal fun stopAll(reason: String, source: PhoneTasks.StopSource =
+        PhoneTasks.StopSource.ENVIRONMENT) {
+        try {
+            PhoneRegistry.controlListener?.onStopAllRequested(reason, source)
+        } finally {
+            driver?.abort()
+            overlay?.stopAll()
+        }
     }
 
     private fun teardown(reason: String) {
@@ -158,16 +163,20 @@ class PhoneA11yService : AccessibilityService() {
         if (PhoneRegistry.overlayGate === o) PhoneRegistry.overlayGate = null
         if (instance === this) instance = null
         invalidateOverlayWindowContext()
-        d?.abort()
-        o?.destroy()
-        d?.close()
-        probe?.unregister()
-        probe = null
-        if (receiverRegistered) { runCatching { unregisterReceiver(screenOff) }; receiverRegistered = false }
-        driver = null
-        overlay = null
-        Log.i(TAG, "accessibility service gone: $reason")
-        PhoneRegistry.controlListener?.let { it.onStopAllRequested(reason); it.onAccessibilityChanged(false) }
+        try {
+            PhoneRegistry.controlListener?.onStopAllRequested(reason)
+        } finally {
+            d?.abort()
+            o?.destroy()
+            d?.close()
+            probe?.unregister()
+            probe = null
+            if (receiverRegistered) { runCatching { unregisterReceiver(screenOff) }; receiverRegistered = false }
+            driver = null
+            overlay = null
+            Log.i(TAG, "accessibility service gone: $reason")
+            PhoneRegistry.controlListener?.onAccessibilityChanged(false)
+        }
     }
 
     companion object {

@@ -31,7 +31,8 @@ extension SessionDeletionApi on DshClient {
     return response.contentType == 'application/json' && body?['version'] == 1 && body?['supported'] == true;
   }
 
-  /// Deletes exactly one confirmed session. Never retries or follows redirects:
+  /// Deletes exactly one confirmed session; the Host also removes the subagent
+  /// sessions that chat started. Never retries or follows redirects:
   /// after a lost response the outcome is unknown, not safe to replay blindly.
   /// The caller must separately hold and recheck its Host/generation authority.
   Future<void> deleteSessionPermanently(String sessionId, {Duration timeout = const Duration(seconds: 30)}) async {

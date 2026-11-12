@@ -40,6 +40,15 @@ void main() {
       expect(seatWebTarget(occupant(Slots.rowConfig, pet, '$pet#$pet')).pluginItem, [pet]);
     });
 
+    test('common page seams fall back to the corresponding web surface', () {
+      expect(seatWebTarget(occupant(Slots.sidebarFooter, probe, 'footer')), const DshWebTarget(sidebar: true));
+      expect(
+        seatWebTarget(occupant(Slots.settingsPluginsTab, probe, 'extra')),
+        const DshWebTarget(settings: DshWebSettings.plugins),
+      );
+      expect(seatWebTarget(occupant(Slots.pluginDetailSection, probe, 'details')).pluginItem, [probe]);
+    });
+
     test('panels: an official one by id, a third-party one opens the sidebar', () {
       expect(seatWebTarget(occupant(Slots.main, probe, 'schedules')), const DshWebTarget(panel: DshWebPanel.schedules));
       expect(seatWebTarget(occupant(Slots.main, probe, 'k4-panel')), const DshWebTarget(sidebar: true));

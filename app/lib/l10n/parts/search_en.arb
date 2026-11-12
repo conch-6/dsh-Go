@@ -61,6 +61,8 @@
   "searchKwPetQuiet": "quiet,pet quiet",
   "searchKwPetOutside": "overlay,floating pet,outside app",
   "searchKwPetDisplayWhen": "pet display,when to show",
+  "searchKwPetOverlayShows": "floating companion,room companion,pixel pet,live2d",
+  "searchKwPetOverlayFraming": "framing,full body,half body",
   "searchKwBlur": "blur,glass,frosted",
   "searchKwAnimations": "animation,motion,reduce motion",
   "searchKwFluidMotion": "fluid,spring,bounce,glow,smooth",

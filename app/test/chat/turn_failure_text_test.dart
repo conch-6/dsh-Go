@@ -8,7 +8,7 @@ void main() {
     'QUOTA': '余额不足',
     'ACCOUNT_QUOTA': '账号额度已用完',
     'RATE_LIMIT': '请求太频繁，稍后再试',
-    'CONTEXT_WINDOW_EXCEEDED': '对话太长，发送 /compact 压缩后再试',
+    'CONTEXT_WINDOW_EXCEEDED': '对话太长。若 /compact 也失败，请新建对话或换模型',
     'SERVER': '模型服务暂时不可用',
     'HTTP_503': '模型服务暂时不可用',
     'TIMEOUT': '模型响应超时',

@@ -47,7 +47,7 @@ test('public list preserves sessions without enumerating the reserved lifecycle 
 });
 test('a real deletion marker still hides an owned leftover log and rejects ID reuse',options,async t=>{
  const f=await fixture(t),ctx=await f.context(),id='session-0',file=f.files.get(id),saved=await fs.readFile(file);
- await ctx.sessionPersistence.dshGoDeletion.delete(id,{prepare:async()=>{},inspectTasks:async()=>false,cleanup:async()=>{}});
+ await ctx.sessionPersistence.dshGoDeletion.delete(id,{validate:async()=>{},dispose:async()=>{},inspectTasks:async()=>false,cleanup:async()=>{}});
  assert.equal(ctx.sessionPersistence.dshGoDeletion.deleted(id),true);
  // Model a leftover original artifact after the durable deletion marker, not a forged marker.
  await fs.writeFile(file,saved);

@@ -16,6 +16,7 @@ void main() {
     (const DshCarrierRefusedException('AUTH', 'raw'), '没能通过引擎的验证'),
     for (final (code, reason) in const [
       ('session/not-found', '这个对话已经不在了'),
+      ('session/format-unsupported', '当前引擎无法读取此对话的日志格式，请导出诊断包排查'),
       ('session/agent-busy', 'AI 正忙，稍后再试'),
       ('session/writer-held', '这个对话正在别处使用'),
       ('session/model-unavailable', '这个模型现在用不了'),

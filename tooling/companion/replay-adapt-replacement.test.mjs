@@ -55,14 +55,17 @@ function routed(model, checked, expectedIds, setValue, addValue) {
 }
 
 after(() => {
-  assert.equal(sha256(readFileSync(contractPath)), contractSha256, 'Checker source changed during replay');
-  if (process.env.C906_REPLAY_OUTPUT) writeFileSync(process.env.C906_REPLAY_OUTPUT,
-    JSON.stringify({ format: 'dsh-go/adapter-replacement-source-replay-v1',
-      stageSha256: stage.stageSha256, methodsSha256: stage.methodsSha256, probeSha256: stage.probeSha256,
-      checkerContractSha256: contractSha256, nodeVersion: process.version,
-      scope: 'Native call arguments before Core; no rendering, resource effects, API or device execution', records }, null, 2) + '\n',
-    { flag: 'wx' });
-  rmSync(folder, { recursive: true, force: true });
+  try {
+    assert.equal(sha256(readFileSync(contractPath)), contractSha256, 'Checker source changed during replay');
+    if (process.env.C906_REPLAY_OUTPUT) writeFileSync(process.env.C906_REPLAY_OUTPUT,
+      JSON.stringify({ format: 'dsh-go/adapter-replacement-source-replay-v1',
+        stageSha256: stage.stageSha256, methodsSha256: stage.methodsSha256, probeSha256: stage.probeSha256,
+        checkerContractSha256: contractSha256, nodeVersion: process.version,
+        scope: 'Native call arguments before Core; no rendering, resource effects, API or device execution', records }, null, 2) + '\n',
+      { flag: 'wx' });
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });
 
 test('C900 old adapter-only alias cannot certify the face in its own full replacement', () => {

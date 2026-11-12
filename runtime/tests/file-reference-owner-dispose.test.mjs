@@ -9,6 +9,7 @@ const load = name => import(pathToFileURL(join(base, name, 'lib/index.js')));
 const { Context } = await load('cordis');
 const { AgentRegistry } = await load('dsh-agent');
 const { Session } = await load('dsh-session');
+const { createScope } = await load('dsh-scope');
 const { LocalFileSystem } = await load('dsh-fs-local');
 const { WorkingDirectoryService } = await load('dsh-working-directory');
 const { LocalFileReferenceService } = await load('dsh-file-reference-local');
@@ -103,4 +104,34 @@ test('caller cancellation during real ensure keeps its original reason after ret
   controller.abort(error);
   gate.release(); await rejected;
   assert.equal(service.searches.size, 0);
+});
+
+test('Agent scope disposal before announced detach does not report a prompt cleanup failure', async t => {
+  const { ctx, service } = await fixture(t);
+  const session = Session.create('file-search-scope-owner');
+  const scope = createScope(ctx, {});
+  const agent = { id: session.id, session, ctx: scope.ctx };
+  const detach = ctx.agents.enter(agent);
+  t.after(async () => { await scope.dispose(); detach(); });
+  const warnings = [];
+  ctx.logger.exporter({ export(message) {
+    if (message.type === 'warn') warnings.push(message.args.map(String).join(' '));
+  } });
+  await ctx.agents.announce(agent, 'create');
+  const prompt = service.promptFibers.get(agent);
+  assert.ok(prompt, 'the announced Agent owns a real injected prompt fiber');
+  assert.notEqual(prompt.uid, null);
+
+  // AgentLoop teardown closes the actual scope before detaching its announced entry.
+  await scope.dispose();
+  assert.equal(prompt.uid, null, 'the parent scope already disposed the prompt fiber');
+  assert.equal(ctx.agents.get(agent.id), agent);
+  assert.equal(service.promptFibers.get(agent), prompt);
+  detach();
+  await Promise.all([...service.promptDisposals]);
+
+  assert.equal(ctx.agents.get(agent.id), undefined);
+  assert.equal(service.promptFibers.has(agent), false);
+  assert.equal(service.promptDisposals.size, 0);
+  assert.deepEqual(warnings, []);
 });

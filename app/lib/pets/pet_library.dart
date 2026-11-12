@@ -19,6 +19,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,8 +29,13 @@ import 'codex_pet_converter.dart';
 import 'overlay_channel.dart' show petOverlayChannelProvider;
 import 'pet_pack.dart';
 import 'pet_pack_validator.dart';
+import '../workshop/workshop_models.dart';
+import '../workshop/workshop_receipt.dart';
+import '../workshop/workshop_export.dart';
 
 export 'pet_pack_validator.dart' show petSheetDecodedCap, petSheetSideCap, overlayPackProblem, pngSize, pngIntact;
+
+part 'pet_library_export.dart';
 
 /// Ids of brought pets start with this; the built-in ones never do.
 const userPetPrefix = 'user-';
@@ -61,10 +67,11 @@ enum PetImportProblem {
 }
 
 class PetImportException implements Exception {
-  const PetImportException(this.problem, [this.detail]);
+  const PetImportException(this.problem, [this.detail, this.osErrorCode]);
 
   final PetImportProblem problem;
   final String? detail;
+  final int? osErrorCode;
 
   @override
   String toString() => 'PetImportException(${problem.name}${detail == null ? '' : ': $detail'})';
@@ -88,7 +95,17 @@ final petLibraryProvider = Provider<PetLibrary>(
 
 /// The brought pets on this phone.
 class PetLibrary {
-  PetLibrary(this._root, {this.onRestored});
+  PetLibrary(this._root, {this.onRestored}) : _readWorkshopReceipt = WorkshopReceipt.read;
+
+  /// Injects one listing read boundary; installs and receipt-fenced removals
+  /// still use their real files and the ordinary transaction path.
+  @visibleForTesting
+  PetLibrary.withWorkshopReceiptReader(this._root, {
+    required Future<WorkshopReceipt?> Function(Directory) readReceipt,
+    this.onRestored,
+  }) : _readWorkshopReceipt = readReceipt;
+
+  final Future<WorkshopReceipt?> Function(Directory) _readWorkshopReceipt;
 
   /// `<app support>/pets` (tests: a temporary folder).
   final Future<Directory> Function() _root;
@@ -138,25 +155,90 @@ class PetLibrary {
 
   /// Checks and unpacks [zip]; a pet with the same id is replaced. Returns
   /// its id and whether it replaced one.
-  Future<({String id, bool replaced})> install(File zip) => _exclusive(() async {
+  Future<({String id, bool replaced})> install(File zip, {WorkshopReceipt? workshop, bool replaceExisting = false}) => _exclusive(() async {
     final root = await _root();
     await _tidy(root);
-    final (:id, :backup) = await compute(_install, (zip.path, root.path, DateTime.now().microsecondsSinceEpoch));
+    final (:id, :backup) = await compute(_install, (zip.path, root.path, DateTime.now().microsecondsSinceEpoch,
+      workshop == null ? null : jsonEncode(workshop.toJson()), replaceExisting));
     // The new one is in: the old one's folder goes when it can (else on a
     // later tidy), which is no reason to call the install failed.
     if (backup != null) await _discard(Directory(backup));
     return (id: id, replaced: backup != null);
   });
 
+  Future<WorkshopReceipt?> workshopReceipt(String id) => _exclusive(() async {
+    if (!isUserPet(id) || !_plainId.hasMatch(id)) workshopInvalid('workshop_install_record');
+    final root = await _root();
+    await _tidy(root);
+    final receipt = await WorkshopReceipt.read(Directory('${root.path}/$id'));
+    if (receipt != null && (receipt.kind != 'pet' || userPetIdFor(receipt.id) != id)) workshopInvalid('workshop_install_record');
+    return receipt;
+  });
+
+  /// One result per workshop directory. A broken pack retains its trusted
+  /// receipt for removal; an unreadable or invalid receipt has no identity.
+  /// Root enumeration failures still fail the listing as a whole.
+  Future<Map<String, ({WorkshopReceipt? receipt, String? issue})>> workshopReceipts() => _exclusive(() async {
+    final root = await _root();
+    await _tidy(root);
+    if (!await root.exists()) return const {};
+    final found = <String, ({WorkshopReceipt? receipt, String? issue})>{};
+    await for (final dir in root.list(followLinks: false)) {
+      if (dir is! Directory) continue;
+      final id = _nameOf(dir);
+      if (!isUserPet(id) || !_plainId.hasMatch(id)) continue;
+      WorkshopReceipt? receipt;
+      try {
+        receipt = await _readWorkshopReceipt(dir);
+        if (receipt == null) continue;
+        if (receipt.kind != 'pet' || userPetIdFor(receipt.id) != id) workshopInvalid('workshop_install_record');
+      } on FileSystemException {
+        found[id] = (receipt: null, issue: 'workshop_storage');
+        continue;
+      } on WorkshopException {
+        found[id] = (receipt: null, issue: 'workshop_install_record');
+        continue;
+      }
+      try {
+        await _load(root, id);
+        found[id] = (receipt: receipt, issue: null);
+      } on FileSystemException {
+        found[id] = (receipt: receipt, issue: 'workshop_storage');
+      } on FormatException {
+        found[id] = (receipt: receipt, issue: 'workshop_pet_bad_pack');
+      }
+    }
+    return found;
+  });
+
+  /// A normalized schema-1 archive containing only the manifest and its
+  /// referenced PNGs. Unknown metadata and local workshop receipts stay out.
+  /// Public attribution overrides are explicit, for a new workshop submission.
+  Future<File> exportZip(String id, File destination, {String? publicId, String? author, String? license, String? source}) => _exclusive(() async {
+    if (!isUserPet(id) || !_plainId.hasMatch(id)) throw const PetImportException(PetImportProblem.noPack);
+    final root = await _root();
+    await _tidy(root);
+    final target = await workshopExportTarget(destination);
+    final output = target.path;
+    final home = await root.exists() ? await root.resolveSymbolicLinks() : root.absolute.uri.normalizePath().toFilePath();
+    final prefix = home.endsWith(Platform.pathSeparator) ? home : '$home${Platform.pathSeparator}';
+    if (output == home || output.startsWith(prefix)) throw const PetImportException(PetImportProblem.storage);
+    await workshopCommitExport(target, (staging) => compute(_exportPet, ('${root.path}/$id', staging.path, <String, String>{
+      'id': ?publicId, 'author': ?author, 'license': ?license, 'source': ?source,
+    })));
+    return destination;
+  });
+
   /// Removes a brought pet. It leaves in one rename, so a removal that fails
   /// leaves it whole; its files are then deleted when they can be. Backups
   /// of it an earlier replacement couldn't delete are moved to the trash
   /// first: left as `.old-*`, the next tidy would bring the pet back.
-  Future<void> remove(String id) async {
+  Future<void> remove(String id, {WorkshopReceipt? expectedWorkshop}) async {
     if (!isUserPet(id) || !_plainId.hasMatch(id)) return;
     await _exclusive(() async {
       final root = await _root();
       if (!await root.exists()) return;
+      if (expectedWorkshop != null) await workshopCheckRemoval(Directory('${root.path}/$id'), expectedWorkshop);
       final going = await root
           .list(followLinks: false)
           .where((e) => e is Directory && _backupName.firstMatch(_nameOf(e))?[2] == id)
@@ -310,8 +392,8 @@ PetImportException _importProblem(PetValidationException error) {
   return PetImportException(PetImportProblem.notAZip, detail);
 }
 
-Future<({String id, String? backup})> _install((String, String, int) args) async {
-  final (zipPath, rootPath, stamp) = args;
+Future<({String id, String? backup})> _install((String, String, int, String?, bool) args) async {
+  final (zipPath, rootPath, stamp, receiptJson, replaceExisting) = args;
   final staging = Directory('$rootPath/.staging-$stamp');
   try {
     final archive = PetArchive.read(await _readArchive(File(zipPath)));
@@ -325,6 +407,10 @@ Future<({String id, String? backup})> _install((String, String, int) args) async
       validated = CodexPetConverter.convert(archive).validated;
     }
     final json = validated.json, pack = validated.pack, bytes = validated.sheets;
+    if (receiptJson != null) {
+      final receipt = WorkshopReceipt.fromJson(jsonDecode(receiptJson));
+      if (receipt.kind != 'pet' || receipt.id != pack.id) throw const PetImportException(PetImportProblem.badPack, 'workshop_identity');
+    }
 
     // Written aside, then swapped in, so a pet is never half there.
     final id = userPetIdFor(pack.id);
@@ -336,7 +422,9 @@ Future<({String id, String? backup})> _install((String, String, int) args) async
     // overlay: it requires a scale, and reads a missing pixelArt the other way.
     final kept = {...json, 'id': id, 'scale': pack.scale, 'pixelArt': pack.pixelArt};
     await File('${staging.path}/pack.json').writeAsString(jsonEncode(kept), flush: true);
+    if (receiptJson != null) await File('${staging.path}/$workshopReceiptName').writeAsString(receiptJson, flush: true);
     final live = Directory('$rootPath/$id');
+    if (receiptJson != null) await workshopCheckReplacement(live, WorkshopReceipt.fromJson(jsonDecode(receiptJson)), replaceExisting: replaceExisting);
     final old = Directory('$rootPath/.old-$stamp-$id');
     final replaced = await live.exists();
     if (replaced) await live.rename(old.path);
@@ -353,7 +441,7 @@ Future<({String id, String? backup})> _install((String, String, int) args) async
   } on PetImportException {
     rethrow;
   } on FileSystemException catch (error) {
-    throw PetImportException(PetImportProblem.storage, error.osError?.message);
+    throw PetImportException(PetImportProblem.storage, error.osError?.message, error.osError?.errorCode);
   } finally {
     if (await staging.exists()) await _discard(staging);
   }

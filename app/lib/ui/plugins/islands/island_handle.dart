@@ -7,6 +7,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../plugins/seams/seat_models.dart';
+import '../../web/web_file_chooser.dart';
 import 'island_assets.dart';
 import 'island_messages.dart';
 import 'island_navigation.dart';
@@ -102,6 +103,9 @@ class IslandHandle extends ChangeNotifier {
   final void Function(IslandHandle handle)? onPhase;
 
   late final WebViewController controller;
+  late final _files = WebFileChooser(
+    canChoose: () => _phase == IslandPhase.ready && visible && views > 0 && spec.form != IslandForm.probe,
+  );
 
   IslandPhase get phase => _phase;
   IslandPhase _phase = IslandPhase.loading;
@@ -134,7 +138,16 @@ class IslandHandle extends ChangeNotifier {
 
   /// Book-keeping for the host.
   int views = 0;
-  bool visible = false;
+  bool get visible => _visible;
+  bool _visible = false;
+  set visible(bool value) {
+    if (_visible == value) return;
+    _visible = value;
+    // A warm document can outlive its view. Returning to that same document
+    // must not receive a selection requested before leaving the panel.
+    if (!value) _files.invalidate();
+  }
+
   DateTime lastSeen = DateTime.now();
   bool paused = false;
 
@@ -181,10 +194,12 @@ class IslandHandle extends ChangeNotifier {
     await Future.wait<void>(
       [
         controller.setJavaScriptMode(JavaScriptMode.unrestricted),
+        _files.attach(controller),
         controller.setBackgroundColor(Colors.transparent),
         controller.setNavigationDelegate(
           NavigationDelegate(
             onNavigationRequest: _onNavigation,
+            onPageStarted: (_) => _files.invalidate(),
             onPageFinished: (_) => unawaited(_inject()),
             onWebResourceError: (error) {
               if (kDebugMode) {
@@ -255,6 +270,7 @@ class IslandHandle extends ChangeNotifier {
     'slot': spec.slot,
     'slots': ?recipe?.slots,
     'cell': spec.cell,
+    'package': spec.package,
     'mode': spec.form.name,
     'mask': spec.maskOfficial && spec.slot != rightPaneTabSlot,
     'stretch': (recipe?.stretch ?? IslandStretch.none).name,
@@ -325,6 +341,7 @@ class IslandHandle extends ChangeNotifier {
 
   void _fail(IslandFailure failure) {
     if (_phase == IslandPhase.closed || _phase == IslandPhase.failed) return;
+    _files.invalidate();
     _readyTimer?.cancel();
     _failure = failure;
     if (kDebugMode) {
@@ -406,6 +423,7 @@ class IslandHandle extends ChangeNotifier {
   /// WebViewWidget on [IslandPhase.closed], a frame later it's detached).
   Future<void> close({IslandFailure? because}) async {
     if (_phase == IslandPhase.closed) return;
+    _files.dispose();
     _readyTimer?.cancel();
     _themeTimer?.cancel();
     _requestGate?.cancel();
@@ -421,6 +439,7 @@ class IslandHandle extends ChangeNotifier {
 
   @override
   void dispose() {
+    _files.dispose();
     _readyTimer?.cancel();
     _themeTimer?.cancel();
     _requestGate?.cancel();

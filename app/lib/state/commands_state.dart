@@ -274,7 +274,10 @@ final hostCommandsProvider = FutureProvider.autoDispose.family<List<SlashCommand
   ref.onDispose(() => unawaited(sub.cancel()));
   try {
     final value = await conn.client.rpc.call('commands/list', {'agentId': sessionId});
-    return _lastHostCommands[host] = parseCommandList(value);
+    final commands = parseCommandList(value);
+    // A retired request must not replace the catalog used by new chats.
+    if (ref.mounted) _lastHostCommands[host] = commands;
+    return commands;
   } catch (_) {
     return _lastHostCommands[host] ?? const [];
   }

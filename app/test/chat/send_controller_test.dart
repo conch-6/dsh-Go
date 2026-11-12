@@ -1160,12 +1160,24 @@ void main() {
 
     setUp(() => seq = 0);
 
+    Future<void> waitForChat(bool Function(ChatState) ready) async {
+      final completed = Completer<void>();
+      final subscription = container.listen(chatProvider('s1'), (_, next) {
+        if (!completed.isCompleted && ready(next)) completed.complete();
+      }, fireImmediately: true);
+      try {
+        await completed.future;
+      } finally {
+        subscription.close();
+      }
+    }
+
     /// A running turn with [steps] (interjections) and [turns] (queued)
     /// sent from here and placed in the inbox as `i-<text>`; their request
     /// ids in that order.
     Future<List<String>> waiting(List<String> steps, [List<String> turns = const []]) async {
       client.events.add(const SessionStatusEvent('s1', true));
-      await settle();
+      await waitForChat((next) => next.running);
       final ids = <String, String>{};
       for (final text in [...steps, ...turns]) {
         await chat().send(text, mode: steps.contains(text) ? SendMode.now : SendMode.queue);
@@ -1173,10 +1185,63 @@ void main() {
       }
       splice('next-step', inserted: [for (final t in steps) msg('i-$t', t, ids[t]!)]);
       splice('next-turn', inserted: [for (final t in turns) msg('i-$t', t, ids[t]!)]);
-      await settle();
+      await waitForChat(
+        (next) => ids.entries.every(
+          (entry) => next.pending.any(
+            (prompt) =>
+                prompt.requestId == entry.value &&
+                prompt.inboxId == 'i-${entry.key}' &&
+                prompt.slot == (steps.contains(entry.key) ? InboxSlot.nextStep : InboxSlot.nextTurn),
+          ),
+        ),
+      );
       client.calls.clear();
       return ids.values.toList();
     }
+
+    testWidgets('waiting waits for a delayed inbox publication before send-now', (tester) async {
+      var publishes = 0;
+      await runZoned(
+        () async {
+          await inTestClock(tester);
+          try {
+            var prepared = false;
+            final waitingReady = waiting(['插话一', '插话二'], ['排队']).then((ids) {
+              prepared = true;
+              return ids;
+            });
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 60));
+            await tester.pump(const Duration(milliseconds: 60));
+            expect(state().running, isTrue);
+            expect(state().pending.map((p) => p.inboxId), [null, null, null]);
+            final returnedBeforePublication = prepared;
+            final callsBefore = [...client.calls];
+            expect(await chat().sendNow(bubble('插话一')), isEmpty);
+            expect(client.calls, callsBefore, reason: 'An unpublished inbox item cannot be acted on.');
+
+            await tester.pump(const Duration(milliseconds: 120));
+            await waitingReady;
+            expect(returnedBeforePublication, isFalse, reason: 'waiting must observe the public inbox, not a delay.');
+            expect(bubble('插话一').inboxId, 'i-插话一');
+            expect(await chat().sendNow(bubble('插话一')), isEmpty);
+            expect(client.calls, ['remove:i-插话一', 'cancel', 'remove:i-排队', 'prompt:steer:插话一', 'prompt:queue:排队']);
+          } finally {
+            container.dispose();
+          }
+        },
+        zoneSpecification: ZoneSpecification(
+          createTimer: (self, parent, zone, duration, callback) {
+            // Running is published normally; only the following inbox batch
+            // arrives after the old fixture's fixed 60ms wait has elapsed.
+            if (duration == const Duration(milliseconds: 32) && ++publishes == 2) {
+              duration = const Duration(milliseconds: 120);
+            }
+            return parent.createTimer(zone, duration, callback);
+          },
+        ),
+      );
+    });
 
     test('立即发送: out, stop, back under the same request id', () async {
       final ids = await waiting(['用中文']);

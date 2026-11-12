@@ -49,6 +49,23 @@ void main() {
     expect(fileChangesOf([a, b]), same(all));
   });
 
+  test('a conversation forgets only its own calls', () {
+    ToolChatItem edit(String id) => tool(id, 'edit', {'file_path': 'f', 'old_string': id, 'new_string': '$id!'});
+    final mine = [edit('forget-a'), edit('forget-b')];
+    final other = [edit('keep-a')];
+    fileChangesOf(mine);
+    fileChangesOf(other);
+    final before = debugToolSummaryCaches;
+    forgetToolSummaries({for (final t in mine) t.callId});
+    final after = debugToolSummaryCaches;
+    expect(after.views, before.views - 2);
+    expect(after.turns, before.turns - 1);
+    // The other conversation's turn is still cached.
+    expect(fileChangesOf(other), same(fileChangesOf(other)));
+    forgetToolSummaries(const {});
+    expect(debugToolSummaryCaches, after);
+  });
+
   group('captured DSH turns', () {
     test('approval turn: one command, no file changes', () {
       final t = _load('$_clientFixtures/follow_approval_with_resync.jsonl');

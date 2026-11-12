@@ -4,6 +4,7 @@
 """
 
 import datetime
+import os
 import pathlib
 import re
 import subprocess
@@ -90,6 +91,16 @@ class BuildNumberTest(unittest.TestCase):
 class BuildApkDryRunTest(unittest.TestCase):
     def run_script(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["bash", str(SCRIPT), "--dry-run", *args], capture_output=True, text=True)
+
+    def test_relative_script_ignores_exported_cdpath(self):
+        expected = self.run_script("-n", "10251234")
+        self.assertEqual(expected.returncode, 0, expected.stderr)
+        result = subprocess.run(
+            ["bash", "tooling/build-apk.sh", "--dry-run", "-n", "10251234"],
+            cwd=ROOT, env=dict(os.environ, CDPATH="."), capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, expected.stdout)
 
     def test_both_flavors_share_one_build_number(self):
         out = self.run_script("-f", "all").stdout

@@ -255,13 +255,13 @@ void main() {
       expect(chat.commandLines, ['/compact']);
       expect(tester.widget<TextField>(field).controller!.text, isEmpty);
 
-      // A command with input goes into the composer and shows its hint.
+      // A command with input fills the composer and closes the palette.
       await tester.enterText(field, '/权');
       await pumpFrames(tester, 3);
       await tester.tap(find.textContaining('/permission').first);
       await pumpFrames(tester, 3);
       expect(tester.widget<TextField>(field).controller!.text, '/permission ');
-      expect(find.textContaining('输入参数后发送'), findsOneWidget);
+      expect(find.byType(SlashPalette), findsNothing);
 
       await tester.enterText(field, '/permission read-only');
       await tester.tap(find.byIcon(AppIcons.send));
@@ -294,7 +294,8 @@ void main() {
       expect(harness.controllers['s1']!.sent, isEmpty);
 
       // A command that normally runs immediately must also retain the draft
-      // until the user explicitly sends it.
+      // until the user explicitly sends it. Start a fresh draft for this case.
+      controller.clear();
       controller.value = const TextEditingValue(text: '  /已有文字', selection: TextSelection.collapsed(offset: 3));
       await pumpFrames(tester, 3);
       await tester.tap(find.descendant(of: palette, matching: find.textContaining('/compact')).first);
@@ -304,6 +305,7 @@ void main() {
 
       // Completing inside a known name replaces it without duplicating its
       // unselected suffix or discarding the arguments.
+      controller.clear();
       controller.value = const TextEditingValue(
         text: '/permission read-only',
         selection: TextSelection.collapsed(offset: 4),

@@ -318,10 +318,11 @@ class WorkspacePrefsController extends Notifier<WorkspacePrefs> {
   }
 
   Future<void> _save(WorkspacePrefs next) async {
+    final key = _key;
     state = next;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_key, jsonEncode(next.toJson()));
+      await prefs.setString(key, jsonEncode(next.toJson()));
     } catch (_) {
       // Kept in memory for this run.
     }

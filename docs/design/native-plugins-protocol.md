@@ -621,6 +621,7 @@ App 端协商：`contributions` 的查询参数 `features=audio,voice,micro,over
 - 租约绑定连接、插件、`instance`、scope 和媒体 id；每连接 ≤ 8 个、每插件每连接 ≤ 2 个。对一个已经播过的 `instance` 再 `play` 会换新租约（旧的作废）。暂停 / 继续 / 停 / 隐藏只作用于本连接已有的租约。
 - 插件**没声明**这种能力却返回了这种效果：按 v1.1 处理（`unknown-effect`，不计违规）。声明了但这台 App 没提出：丢弃，记 `unknown-effect`，不计违规。声明且提出了但格式不对：`bad-effect`，计违规。
 - 角色全部结束、连接断开、插件停用 / 降级 / 重载时租约撤销，`media` 的 `signal` 触发。
+- 租约记录所引用 `media` 的注册代次；该注册被撤销或替换后，整个旧租约失效。绑定后续效果和投递事件时同步检查这一点，不等待注册钩子的延后清扫：旧租约不接收晚到终态，同一 `instance` 的后续 `voice.start` / `overlay.show` 可取新租约。仅替换 `onCapability` 或变更无关资源，不使仍有效的租约退休。
 
 ### 11.4 媒体路由与事件
 

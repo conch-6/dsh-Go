@@ -183,4 +183,107 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('page b'), findsNothing);
   });
+
+  testWidgets('an external pop during edge-swipe cancellation releases the home page', (tester) async {
+    await _push(tester);
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    final gesture = await tester.startGesture(const Offset(6, 300));
+    await gesture.moveBy(const Offset(40, 0));
+    await gesture.moveBy(const Offset(80, 0));
+    await tester.pump();
+    expect(navigator.userGestureInProgress, isTrue);
+
+    await gesture.cancel();
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(navigator.userGestureInProgress, isTrue, reason: 'the cancelled swipe is still settling');
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(find.text('page b'), findsNothing);
+    expect(navigator.userGestureInProgress, isFalse);
+    await tester.tap(find.text('push'));
+    await tester.pumpAndSettle();
+    expect(find.text('page b'), findsOneWidget, reason: 'the home page accepts touch again');
+  });
+
+  testWidgets('removing a route during an edge swipe releases the home page', (tester) async {
+    await _push(tester);
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    final route = ModalRoute.of(tester.element(find.text('page b')))!;
+    final gesture = await tester.startGesture(const Offset(6, 300));
+    await gesture.moveBy(const Offset(40, 0));
+    await gesture.moveBy(const Offset(80, 0));
+    await tester.pump();
+    expect(navigator.userGestureInProgress, isTrue);
+
+    navigator.removeRoute(route);
+    await tester.pumpAndSettle();
+    await gesture.up();
+
+    expect(find.text('page b'), findsNothing);
+    expect(navigator.userGestureInProgress, isFalse);
+    await tester.tap(find.text('push'));
+    await tester.pumpAndSettle();
+    expect(find.text('page b'), findsOneWidget, reason: 'the home page accepts touch again');
+  });
+
+  testWidgets('removing a route during predictive back releases the home page', (tester) async {
+    await _push(tester);
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    final route = ModalRoute.of(tester.element(find.text('page b')))!;
+    await _backGesture(tester, 'startBackGesture', {
+      'touchOffset': <double>[5.0, 300.0],
+      'progress': 0.0,
+      'swipeEdge': 0,
+    });
+    await _backGesture(tester, 'updateBackGestureProgress', {'progress': 0.3, 'swipeEdge': 0});
+    await tester.pump();
+    expect(navigator.userGestureInProgress, isTrue);
+
+    navigator.removeRoute(route);
+    await tester.pumpAndSettle();
+    await _backGesture(tester, 'cancelBackGesture');
+
+    expect(find.text('page b'), findsNothing);
+    expect(navigator.userGestureInProgress, isFalse);
+    await tester.tap(find.text('push'));
+    await tester.pumpAndSettle();
+    expect(find.text('page b'), findsOneWidget, reason: 'the home page accepts touch again');
+  });
+
+  testWidgets('predictive cancellation finishes its gesture before a later pop', (tester) async {
+    await _push(tester);
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    await _backGesture(tester, 'startBackGesture', {
+      'touchOffset': <double>[5.0, 300.0],
+      'progress': 0.0,
+      'swipeEdge': 0,
+    });
+    await _backGesture(tester, 'updateBackGestureProgress', {'progress': 0.3, 'swipeEdge': 0});
+    await _backGesture(tester, 'cancelBackGesture');
+    await tester.pumpAndSettle();
+    expect(navigator.userGestureInProgress, isFalse);
+    expect(find.text('page b'), findsOneWidget);
+
+    navigator.pop();
+    await tester.pumpAndSettle();
+    expect(navigator.userGestureInProgress, isFalse);
+    await tester.tap(find.text('push'));
+    await tester.pumpAndSettle();
+    expect(find.text('page b'), findsOneWidget);
+  });
+
+  testWidgets('disposing the navigator during a settling swipe is safe', (tester) async {
+    await _push(tester);
+    final gesture = await tester.startGesture(const Offset(6, 300));
+    await gesture.moveBy(const Offset(40, 0));
+    await gesture.moveBy(const Offset(80, 0));
+    await gesture.cancel();
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(tester.state<NavigatorState>(find.byType(Navigator)).userGestureInProgress, isTrue);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
 }

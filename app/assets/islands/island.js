@@ -279,6 +279,10 @@
   var RIGHT_TAB = 'data-sidebar-right-tab';
 
   function ownTab(outlet, slot) {
+    if (slot === 'settings.plugins.tab' && st.settingsPanel) {
+      var panel = document.getElementById(st.settingsPanel);
+      return !!panel && !panel.hasAttribute('hidden') && panel.contains(outlet);
+    }
     if (slot !== 'sidebar.right.pane.tab' || !st.tabShown || !document.querySelector('[' + RIGHT_TAB + ']')) return true;
     for (var p = outlet.parentElement; p; p = p.parentElement) {
       var id = p.getAttribute && p.getAttribute(RIGHT_TAB);
@@ -485,16 +489,37 @@
   // popups (onboarding, update prompts) arrive the same way and stay hidden.
   var LAYER_WINDOW = 3000;
 
+  function layerRoots() {
+    var roots = document.body ? [document.body] : [];
+    if (st.cfg && st.cfg.mode !== 'overlay') {
+      var overlays = outlets('shell.overlay');
+      for (var i = 0; i < overlays.length; i++) roots.push(overlays[i]);
+    }
+    return roots;
+  }
+
+  function snapshotLayers() {
+    var nodes = [];
+    var roots = layerRoots();
+    for (var i = 0; i < roots.length; i++) {
+      for (var c = roots[i].firstElementChild; c; c = c.nextElementSibling) nodes.push(c);
+    }
+    return nodes;
+  }
+
   function markLayers() {
     if (!st.baseline) return;
     var fresh = Date.now() - st.touchedAt <= LAYER_WINDOW;
-    for (var c = document.body.firstElementChild; c; c = c.nextElementSibling) {
-      if (st.baseline.indexOf(c) >= 0 || c.tagName === 'SCRIPT' || c.tagName === 'STYLE') continue;
-      if (fresh) {
-        if (!c.getAttribute(MARK)) addMark(c, 'layer');
-      } else {
-        // Arrived on its own: part of the official page from now on.
-        st.baseline.push(c);
+    var roots = layerRoots();
+    for (var i = 0; i < roots.length; i++) {
+      for (var c = roots[i].firstElementChild; c; c = c.nextElementSibling) {
+        if (st.baseline.indexOf(c) >= 0 || c.tagName === 'SCRIPT' || c.tagName === 'STYLE') continue;
+        if (fresh) {
+          if (!c.getAttribute(MARK)) addMark(c, 'layer');
+        } else {
+          // Arrived on its own: part of the official page from now on.
+          st.baseline.push(c);
+        }
       }
     }
   }
@@ -732,6 +757,36 @@
       return now.length === 1 && isCurrent(now[0]) && drawn && drawn !== before ? true : null;
     }, 2500);
     return ok ? hit(what, 'current') : miss(what, 'not current after the click');
+  }
+
+  // rc.1 settings uses React-generated ids, but keeps the entry id verbatim
+  // in aria-controls and confirms selection with aria-selected + a visible panel.
+  async function openSettingsPlugin(cell) {
+    var dialog = await waitFor(function () { return document.querySelector('[data-shortcut-modal="settings"]'); }, 2000);
+    if (!dialog) return miss('settings-plugin', 'no settings');
+    var tabs = function () {
+      return Array.prototype.filter.call(dialog.querySelectorAll('button[role="tab"]'), function (el) {
+        return (el.getAttribute('aria-controls') || '').endsWith('-panel-' + cell);
+      });
+    };
+    var tab = await waitFor(function () { return tabs()[0]; }, 1500);
+    if (!tab) {
+      // The client omits tab controls when there is exactly one registered tab.
+      var occupants = window.__dshGoBridge.occupants('settings.plugins.tab');
+      return occupants.length === 1 && occupants[0].cell === cell && !!findSlot('settings.plugins.tab');
+    }
+    if (tabs().length !== 1) return miss('settings-plugin', 'ambiguous tab');
+    if (tab.getAttribute('aria-selected') !== 'true') tab.click();
+    var ok = await waitFor(function () {
+      var current = tabs();
+      if (current.length !== 1 || current[0].getAttribute('aria-selected') !== 'true') return null;
+      var id = current[0].getAttribute('aria-controls');
+      var panel = document.getElementById(id);
+      if (!panel || panel.getAttribute('role') !== 'tabpanel' || panel.hasAttribute('hidden')) return null;
+      st.settingsPanel = id;
+      return findSlot('settings.plugins.tab');
+    }, 2500);
+    return ok ? hit('settings-plugin', 'selected') : miss('settings-plugin', 'not selected');
   }
 
   async function openPlugin(pkg, row) {
@@ -1055,6 +1110,8 @@
     step('web done');
     var then = target.then;
     if (!then) return true;
+    if (then.sidebar) return !!(await waitFor(function () { return findSlot('sidebar.footer.action'); }, 2500));
+    if (then.settingsPlugin) return openSettingsPlugin(then.settingsPlugin);
     if (then.settings) return openSettingsSection(then.settings);
     if (then.plugin) return openPlugin(then.plugin, then.row || null);
     if (then.panel) return openPanel(then.panel);
@@ -1138,6 +1195,12 @@
     }
     window.addEventListener('resize', function () { measure(); reportHits(); });
     document.addEventListener('scroll', function () { reportHits(); }, true);
+    ['pointerup', 'pointercancel'].forEach(function (type) {
+      document.addEventListener(type, function () { reportHits(); }, true);
+    });
+    document.addEventListener('pointermove', function () {
+      if (Date.now() - st.touchedAt <= LAYER_WINDOW) reportHits();
+    }, true);
     setInterval(function () { if (st.cfg && st.cfg.mode === 'overlay') reportHits(); }, 250);
     // A plugin that selects another conversation (the official sessions
     // service writes the stored selection): the app opens it natively.
@@ -1219,10 +1282,23 @@
       st.phase = 'failed';
       return post({ t: 'error', slot: cfg.slot, code: 'boot', detail: 'no client' });
     }
+    var filtered = cfg.mode === 'overlay' || ['sidebar.footer.action', 'settings.plugins.tab', 'plugins.detail.section'].indexOf(cfg.slot) >= 0;
+    if (filtered) {
+      var bridge = await waitFor(function () { return window.__dshGoBridge; }, 2500);
+      var allowed = false;
+      try {
+        allowed = !!(cfg.package && typeof cfg.cell === 'string' && bridge && bridge.filter && bridge.occupants &&
+          bridge.filter(cfg.slot, [{ package: cfg.package, cell: cfg.cell }]) === true);
+      } catch (e) {}
+      if (!allowed) {
+        st.phase = 'failed';
+        return post({ t: 'error', slot: cfg.slot, code: 'filter-unavailable', detail: 'package isolation unavailable' });
+      }
+    }
     // List slots in a panel island: the official entries are the native
     // UI's already. The URL fragment asked the bridge at boot; ask again in
     // case the fragment got lost on the way.
-    if (cfg.mask && window.__dshGoBridge && window.__dshGoBridge.mask) {
+    if (!filtered && cfg.mask && window.__dshGoBridge && window.__dshGoBridge.mask) {
       try { window.__dshGoBridge.mask(slotsOf(cfg)); } catch (e) {}
     }
     // Navigate, then look for the slot; a transient popup (the client's own
@@ -1256,6 +1332,15 @@
         detail: opened ? '' : 'navigation',
       });
     }
+    if (filtered) {
+      var selected = window.__dshGoBridge.occupants(cfg.slot).some(function (o) {
+        return o.package === cfg.package && o.cell === cfg.cell && o.active && !o.masked;
+      });
+      if (!selected) {
+        st.phase = 'failed';
+        return post({ t: 'empty', slot: cfg.slot, code: 'empty', detail: 'selected entry not active' });
+      }
+    }
     if (cfg.mask && thirdPartyAll(cfg) === 0) {
       st.phase = 'failed';
       return post({ t: 'empty', slot: cfg.slot, code: 'empty', detail: 'only official entries' });
@@ -1272,8 +1357,8 @@
         outlet = findAny(cfg) || outlet;
       }
     }
-    // Menus open as new <body> children; what is there now never shows.
-    st.baseline = Array.prototype.slice.call(document.body.children);
+    // Menus open as new <body> or shell.overlay children; what is there now never shows.
+    st.baseline = snapshotLayers();
     apply();
     st.phase = 'ready';
     observe();

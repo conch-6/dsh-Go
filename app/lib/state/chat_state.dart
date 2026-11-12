@@ -164,6 +164,36 @@ class PendingPrompt {
     failureSeq: seq,
   );
 
+  /// Equal prompts publish as equal lists, so the chat keeps its rows (see
+  /// `ChatRowsCache`) while a reply streams with messages waiting.
+  @override
+  bool operator ==(Object other) =>
+      other is PendingPrompt &&
+      other.requestId == requestId &&
+      other.text == text &&
+      other.time == time &&
+      other.mode == mode &&
+      _sameAttachments(other.attachments, attachments) &&
+      other.inboxId == inboxId &&
+      other.slot == slot &&
+      other.resendable == resendable &&
+      other.sourceKind == sourceKind &&
+      other.sourceForm == sourceForm &&
+      other.failureSeq == failureSeq;
+
+  @override
+  int get hashCode =>
+      Object.hash(requestId, text, time, mode, inboxId, slot, resendable, sourceKind, sourceForm, failureSeq);
+
+  static bool _sameAttachments(List<DraftAttachment> a, List<DraftAttachment> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
   PendingPrompt placed(String? inboxId, InboxSlot? slot, {MessageSource? source}) => PendingPrompt(
     requestId: requestId,
     text: text,
@@ -249,6 +279,7 @@ class ChatState {
     this.loading = true,
     this.loadingOlder = false,
     this.error,
+    this.syncError,
     this.defaultModelSaveFailed = false,
     this.notice,
     this.connection,
@@ -285,6 +316,9 @@ class ChatState {
   final bool loading;
   final bool loadingOlder;
   final String? error;
+
+  /// The current history follow failure, separate from action errors.
+  final String? syncError;
 
   /// The session model changed, but remembering it for new chats failed.
   /// Independent of transient send/sync errors; only explicit dismissal or a
@@ -355,6 +389,8 @@ class ChatState {
     bool? loadingOlder,
     String? error,
     bool clearError = false,
+    String? syncError,
+    bool clearSyncError = false,
     bool? defaultModelSaveFailed,
     String? notice,
     bool clearNotice = false,
@@ -377,6 +413,7 @@ class ChatState {
     loading: loading ?? this.loading,
     loadingOlder: loadingOlder ?? this.loadingOlder,
     error: clearError ? null : (error ?? this.error),
+    syncError: clearSyncError ? null : (syncError ?? this.syncError),
     defaultModelSaveFailed: defaultModelSaveFailed ?? this.defaultModelSaveFailed,
     notice: clearNotice ? null : (notice ?? this.notice),
     connection: connection,
@@ -437,6 +474,10 @@ class ChatController extends Notifier<ChatState> {
   bool _defaultModelSaveFailed = false;
   Object? _historyRead;
   List<PendingPrompt> _pending = const [];
+
+  /// When this device first saw each inbox item it did not send: a waiting
+  /// prompt keeps one time across publishes (and so stays equal).
+  final _inboxSeen = <String, DateTime>{};
 
   /// Prompts removed elsewhere or consumed by a finished turn: dropped at
   /// the next publish unless they are back by then (「改为插话」 removes,
@@ -666,7 +707,9 @@ class ChatController extends Notifier<ChatState> {
     if (_syncReady.isCompleted) _syncReady = Completer<bool>();
     _stopTimeout?.cancel();
     _stoppingOperation = null;
-    if (!building) state = state.copyWith(syncing: true, stopping: false, loadingOlder: false);
+    if (!building) {
+      state = state.copyWith(syncing: true, stopping: false, loadingOlder: false, clearSyncError: epoch != null);
+    }
   }
 
   /// A first prompt may arrive immediately after session/create. Wait for the
@@ -870,11 +913,8 @@ class ChatController extends Notifier<ChatState> {
               return;
             }
             appErrorLog.record(AppErrorSource.session, e, stack);
-            state = state.copyWith(
-              error: chatErrorText(e, action: appL10n.stateChatSyncInterrupted),
-              streamLost: true,
-              loading: false,
-            );
+            final message = chatErrorText(e, action: appL10n.stateChatSyncInterrupted);
+            state = state.copyWith(error: message, syncError: message, streamLost: true, loading: false);
           },
           onDone: () {
             if (!current()) return;
@@ -1153,6 +1193,7 @@ class ChatController extends Notifier<ChatState> {
       loading: false,
       loadingOlder: state.loadingOlder,
       error: freshSnapshot ? null : state.error,
+      syncError: freshSnapshot ? null : state.syncError,
       defaultModelSaveFailed: _defaultModelSaveFailed,
       notice: freshSnapshot ? null : state.notice,
       connection: _transcript.connectionState,
@@ -1175,6 +1216,8 @@ class ChatController extends Notifier<ChatState> {
   /// here may move it.
   List<PendingPrompt> _placePending() {
     final inbox = _transcript.inbox;
+    final inboxIds = {for (final q in inbox) q.id};
+    _inboxSeen.removeWhere((id, _) => !inboxIds.contains(id));
     if (inbox.isEmpty && _moving.isEmpty) return _pending;
     final byRequest = {for (final q in inbox) ?q.requestId: q};
     final ours = {for (final p in _pending) p.requestId};
@@ -1192,7 +1235,7 @@ class ChatController extends Notifier<ChatState> {
           PendingPrompt(
             requestId: q.requestId ?? q.id,
             text: q.text,
-            time: DateTime.now(),
+            time: _inboxSeen.putIfAbsent(q.id, DateTime.now),
             mode: q.steering ? SendMode.steer : SendMode.queue,
             inboxId: q.id,
             slot: slotOf(q),
@@ -1853,6 +1896,7 @@ class ChatController extends Notifier<ChatState> {
         loading: state.loading,
         loadingOlder: state.loadingOlder,
         error: chatErrorText(e, action: appL10n.stateChatModelSwitchFailed),
+        syncError: state.syncError,
         defaultModelSaveFailed: _defaultModelSaveFailed,
         connection: state.connection,
         model: previous,

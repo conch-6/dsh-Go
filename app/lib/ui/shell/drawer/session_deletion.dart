@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../l10n/l10n.dart';
 import '../../../state/drawer_view_state.dart';
 import '../../../state/session_deletion_state.dart';
+import '../../../state/sessions_state.dart';
 import '../../common/app_dialog.dart';
 import '../../theme/app_icons.dart';
 import '../sessions_drawer.dart' show sessionTitle;
@@ -47,11 +48,20 @@ String? sessionDeletionDisabledReason(
 }
 
 class SessionDeleteTile extends ConsumerWidget {
-  const SessionDeleteTile({super.key, required this.ids, required this.onTap, required this.owner});
+  const SessionDeleteTile({
+    super.key,
+    required this.ids,
+    required this.onTap,
+    required this.owner,
+    this.archived = false,
+  });
 
   final List<String> ids;
   final VoidCallback onTap;
   final SessionDeletionOwner? owner;
+
+  /// Validate against the live archive instead of the drawer's visible rows.
+  final bool archived;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -60,7 +70,9 @@ class SessionDeleteTile extends ConsumerWidget {
       context,
       available: ref.watch(sessionDeletionAvailableProvider),
       busy: ref.watch(sessionDeletionBusyProvider),
-      sessions: scope?.sessions ?? const <SessionSummary>[],
+      sessions: archived
+          ? ref.read(sessionsProvider.notifier).archivedSessions
+          : scope?.sessions ?? const <SessionSummary>[],
       ids: ids,
     );
     final current = owner?.isCurrent(ref) == true;
@@ -97,19 +109,21 @@ Future<void> deleteSessionsFlow(
   List<String> ids, {
   required SessionDeletionOwner owner,
   Set<String>? selection,
+  bool archived = false,
 }) async {
   if (ids.isEmpty || !owner.isCurrent(ref)) return;
   final scope = ref.read(drawerScopeProvider);
   if (scope == null || scope.readOnly) return;
+  final rows = archived ? ref.read(sessionsProvider.notifier).archivedSessions : scope.sessions;
   final reason = sessionDeletionDisabledReason(
     context,
     available: ref.read(sessionDeletionAvailableProvider),
     busy: ref.read(sessionDeletionBusyProvider),
-    sessions: scope.sessions,
+    sessions: rows,
     ids: ids,
   );
   if (reason != null) return;
-  final titles = {for (final row in scope.sessions) row.sessionId: sessionTitle(row)};
+  final titles = {for (final row in rows) row.sessionId: sessionTitle(row)};
   final confirmed = await showAppDialog<bool>(
     context: context,
     builder: (dialog) => Consumer(
@@ -123,7 +137,9 @@ Future<void> deleteSessionsFlow(
           context,
           available: available,
           busy: busy,
-          sessions: scope?.sessions ?? const <SessionSummary>[],
+          sessions: archived
+              ? ref.read(sessionsProvider.notifier).archivedSessions
+              : scope?.sessions ?? const <SessionSummary>[],
           ids: ids,
         );
         final current = owner.isCurrent(ref);
@@ -213,8 +229,7 @@ Future<void> deleteSessionsFlow(
     if (selectionChanged) return;
   }
   if (failures.isEmpty) {
-    ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(SnackBar(content: Text(context.l10n.shellChatsDeleted(deleted.length)), persist: false));
+    _showDeletionReceipt(context, deleted.length);
     return;
   }
   await showAppDialog<void>(
@@ -240,6 +255,58 @@ Future<void> deleteSessionsFlow(
       actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: Text(context.l10n.commonDone))],
     ),
   );
+}
+
+// This receipt belongs at the top: a bottom snackbar covers the composer
+// as soon as the person closes the drawer to continue chatting.
+void _showDeletionReceipt(BuildContext context, int count) {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) return;
+  messenger
+    ..clearMaterialBanners()
+    ..removeCurrentMaterialBanner();
+  var current = true;
+  late final ScaffoldFeatureController<MaterialBanner, MaterialBannerClosedReason> receipt;
+  void close() {
+    if (current && messenger.mounted) receipt.close();
+  }
+
+  receipt = messenger.showMaterialBanner(
+    MaterialBanner(
+      content: _DeletionReceiptText(text: context.l10n.shellChatsDeleted(count), onTimeout: close),
+      actions: [TextButton(onPressed: close, child: Text(context.l10n.commonClose))],
+    ),
+  );
+  unawaited(receipt.closed.then((_) => current = false));
+}
+
+class _DeletionReceiptText extends StatefulWidget {
+  const _DeletionReceiptText({required this.text, required this.onTimeout});
+
+  final String text;
+  final VoidCallback onTimeout;
+
+  @override
+  State<_DeletionReceiptText> createState() => _DeletionReceiptTextState();
+}
+
+class _DeletionReceiptTextState extends State<_DeletionReceiptText> {
+  late final Timer _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(const Duration(seconds: 4), widget.onTimeout);
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Text(widget.text);
 }
 
 String sessionDeletionFailureText(BuildContext context, String code) => switch (code) {

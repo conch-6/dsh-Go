@@ -18,6 +18,7 @@ String? engineErrorReason(Object error) => switch (error) {
   _ when engineUnreachable(error) => appL10n.commonEngineUnreachable,
   DshCarrierRefusedException() || DshHttpException(statusCode: 401 || 403) => appL10n.stateEngineAuthFailed,
   DshRemoteException(code: 'session/not-found') => appL10n.stateChatMissing,
+  DshRemoteException(code: 'session/format-unsupported') => appL10n.stateChatFormatUnsupported,
   DshRemoteException(
     code: 'gateway/service-unavailable' || 'gateway/context-unavailable' || 'gateway/lookup-unavailable',
   ) =>

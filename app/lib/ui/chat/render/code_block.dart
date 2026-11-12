@@ -1,5 +1,6 @@
 // Portions derived from PiPilot (https://github.com/CikeSeven/pi_pilot), MIT, Copyright (c) 2026 CikeSeven. See THIRD_PARTY_NOTICES.md.
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -376,7 +377,11 @@ class CodeBlock extends StatefulWidget {
 }
 
 class _CodeBlockState extends State<CodeBlock> {
+  /// [_cachedCode] highlighted.
   TextSpan? _span;
+
+  /// What is drawn: [_span], plus the code that came after it, plain.
+  TextSpan? _shown;
   String? _cachedCode;
   String? _cachedLanguage;
   Brightness? _cachedBrightness;
@@ -388,6 +393,24 @@ class _CodeBlockState extends State<CodeBlock> {
 
   /// 长行折回显示,而不是横向滚动。
   bool _wrap = false;
+
+  /// While code streams in, it is highlighted again at most this often (the
+  /// last chunk of up to 8000 characters, every delta, was the cost); what
+  /// came since shows plain until then.
+  static const _highlightEvery = Duration(milliseconds: 250);
+  Timer? _cooldown;
+
+  @override
+  void dispose() {
+    _cooldown?.cancel();
+    super.dispose();
+  }
+
+  void _cooled() {
+    _cooldown = null;
+    // Still behind the code: highlight the rest.
+    if (mounted && !identical(_shown, _span)) setState(() {});
+  }
 
   bool get _mermaid => widget.language?.trim().toLowerCase() == 'mermaid';
 
@@ -417,18 +440,37 @@ class _CodeBlockState extends State<CodeBlock> {
     final code = _trimmedCode;
     final style = widget.dense ? AppType.monoSmall(color: dsh.codeWellFg) : AppType.mono(color: dsh.codeWellFg);
 
-    if (_span == null ||
-        _cachedCode != code ||
-        _cachedLanguage != widget.language ||
-        _cachedBrightness != brightness ||
-        _cachedAccent != accent ||
-        _cachedDense != widget.dense) {
-      _span = highlightCode(code, widget.language, brightness, style: style, accent: accent);
-      _cachedCode = code;
-      _cachedLanguage = widget.language;
-      _cachedBrightness = brightness;
-      _cachedAccent = accent;
-      _cachedDense = widget.dense;
+    final previous = _cachedCode;
+    final sameLook =
+        _span != null &&
+        _cachedLanguage == widget.language &&
+        _cachedBrightness == brightness &&
+        _cachedAccent == accent &&
+        _cachedDense == widget.dense;
+    if (!sameLook || previous != code) {
+      final grows = sameLook && previous != null && code.length > previous.length && code.startsWith(previous);
+      if (grows && _cooldown != null) {
+        _shown = TextSpan(
+          style: style,
+          children: [
+            _span!,
+            TextSpan(text: code.substring(previous.length)),
+          ],
+        );
+      } else {
+        _span = _shown = highlightCode(code, widget.language, brightness, style: style, accent: accent);
+        _cachedCode = code;
+        _cachedLanguage = widget.language;
+        _cachedBrightness = brightness;
+        _cachedAccent = accent;
+        _cachedDense = widget.dense;
+        _cooldown?.cancel();
+        _cooldown = grows ? Timer(_highlightEvery, _cooled) : null;
+      }
+    } else if (!identical(_shown, _span)) {
+      // Back to exactly what was highlighted (a resync): drop the plain tail
+      // the cooldown was showing after it.
+      _shown = _span;
     }
 
     final diff = !widget.showLineNumbers && normalizedLanguage(widget.language) == 'diff';
@@ -443,7 +485,7 @@ class _CodeBlockState extends State<CodeBlock> {
           widget.dense ? 12 : 16,
           12,
         ),
-        child: Text.rich(_span!),
+        child: Text.rich(_shown!),
       );
       if (!_wrap) {
         body = HorizontalEdgeFade(

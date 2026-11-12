@@ -12,6 +12,7 @@ class FakeOverlayNative {
     this.sdk = 35,
     this.manufacturer = 'vivo',
     this.opens = true,
+    this.companionFallback = false,
   });
 
   static const channel = MethodChannel('dsh/pet_overlay');
@@ -25,6 +26,9 @@ class FakeOverlayNative {
 
   /// What requestPermission / openAppDetails answer (the settings page opened).
   bool opens;
+
+  /// The companion gave up and the pixel pet is filling in.
+  bool companionFallback;
 
   final calls = <MethodCall>[];
 
@@ -40,6 +44,7 @@ class FakeOverlayNative {
     'showing': false,
     'sdk': sdk,
     'manufacturer': manufacturer,
+    if (companionFallback) 'companionFallback': true,
   };
 
   TestDefaultBinaryMessenger get _messenger => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -65,6 +70,8 @@ class FakeOverlayNative {
         snoozed = false;
         return status;
       case 'status' || 'permissionStatus':
+        return status;
+      case 'configureCompanion':
         return status;
       case 'requestPermission' || 'openAppDetails':
         return opens;

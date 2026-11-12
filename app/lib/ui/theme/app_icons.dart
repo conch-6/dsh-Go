@@ -35,6 +35,7 @@ abstract final class AppIcons {
   static const allFeatures = DshGlyphs.dotsNine;
   static const browser = DshGlyphs.browser;
   static const scrollToBottom = DshGlyphs.arrowDown;
+  static const scrollToTop = DshGlyphs.arrowUp;
   static const sidebar = DshGlyphs.sidebarSimpleRight;
   static const dragHandle = DshGlyphs.dotsSixVertical;
   static const swap = DshGlyphs.arrowsLeftRight;

@@ -231,11 +231,17 @@ class TerminalScreenState extends ConsumerState<TerminalScreen> {
   }
 
   Future<void> _paste() async {
+    final terminal = _terminal;
     _selection.clearSelection();
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
-    if (text == null || text.isEmpty || !mounted || !_canType) return;
-    _terminal.paste(text);
+    if (text == null || text.isEmpty || !mounted) return;
+    // A reconnect can replace the attachment before this widget rebuilds.
+    final current = ref.read(terminalWorkspaceProvider(widget.sessionId)).selected;
+    if (current == null || current.terminal != terminal || current.phase != TerminalPhase.live || !current.writable) {
+      return;
+    }
+    terminal.paste(text);
     _toBottom();
   }
 

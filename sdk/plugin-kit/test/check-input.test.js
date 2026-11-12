@@ -47,23 +47,38 @@ test('malformed panels preserve bridge diagnostics instead of throwing', async t
   }
 })
 
-test('checker does not parse a sibling-prefix path or a symlink rejected by the bridge', async t => {
+test('checker does not parse a sibling-prefix path rejected by the bridge', async t => {
   const f = fixture(t)
   const sibling = join(f.root, 'plugin-outside')
   mkdirSync(sibling)
   writeFileSync(join(sibling, 'view.json'), '{"type":"not-a-component"}')
-  symlinkSync(join(sibling, 'view.json'), join(f.dir, 'link.json'))
-  for (const path of ['../plugin-outside/view.json', 'link.json']) {
-    f.write(pkg([{ id: 'outside', title: 'Outside', placement: ['features'], view: path }]))
-    const r = await checkPlugin(f.dir)
-    assert.ok(r.manifest.issues.some(i => i.code === 'view-file'))
-    assert.deepEqual(r.views, [], 'rejected file must not become an app-side view report')
-  }
+  f.write(pkg([{ id: 'outside', title: 'Outside', placement: ['features'], view: '../plugin-outside/view.json' }]))
+  const r = await checkPlugin(f.dir)
+  assert.ok(r.manifest.issues.some(i => i.code === 'view-file'))
+  assert.deepEqual(r.views, [], 'rejected file must not become an app-side view report')
   writeFileSync(join(f.dir, 'view.json'), view)
   f.write(pkg([{ id: 'inside', title: 'Inside', placement: ['features'], view: './view.json' }]))
   const normal = await checkPlugin(f.dir)
   assert.equal(exitCode(normal), 0)
   assert.equal(normal.views.length, 1)
+})
+
+test('checker does not parse a symlink rejected by the bridge', async t => {
+  const f = fixture(t)
+  const sibling = join(f.root, 'plugin-outside')
+  mkdirSync(sibling)
+  writeFileSync(join(sibling, 'view.json'), '{"type":"not-a-component"}')
+  try {
+    symlinkSync(join(sibling, 'view.json'), join(f.dir, 'link.json'))
+  } catch (error) {
+    if (process.platform !== 'win32' || error.code !== 'EPERM') throw error
+    t.skip('Windows did not permit creating the symlink (EPERM)')
+    return
+  }
+  f.write(pkg([{ id: 'outside', title: 'Outside', placement: ['features'], view: 'link.json' }]))
+  const r = await checkPlugin(f.dir)
+  assert.ok(r.manifest.issues.some(i => i.code === 'view-file'))
+  assert.deepEqual(r.views, [], 'rejected file must not become an app-side view report')
 })
 
 test('missing option values and prototype names produce argument diagnostics', () => {

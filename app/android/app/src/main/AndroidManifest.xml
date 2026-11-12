@@ -43,8 +43,8 @@
     <!-- libadb-android declares no targetSdk, so the merger implies READ_PHONE_STATE ("读取手机状态");
          nothing here reads it. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" tools:node="remove" />
-    <!-- flutter_webrtc's AudioSwitch asks for these; DSH Remote's direct path is data only and
-         never routes audio. -->
+    <!-- flutter_webrtc's AudioSwitch asks for these; DSH Remote is data only and must not
+         manage system audio routing. Its native audio module uses media attributes (webrtc_peer.dart). -->
     <uses-permission android:name="android.permission.BLUETOOTH" tools:node="remove" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" tools:node="remove" />
 

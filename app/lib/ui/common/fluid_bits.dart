@@ -60,7 +60,11 @@ class _HoldLiftState extends State<HoldLift> with SingleTickerProviderStateMixin
 
   void _settle({double velocity = 0}) {
     _delay?.cancel();
-    if (_press.value == 0 && velocity == 0) return;
+    if (_press.value == 0 && velocity == 0) {
+      // The sink can already be running before its first tick moves the value.
+      _press.stop();
+      return;
+    }
     _press.animateWith(
       SpringSimulation(
         AppMotion.releaseSpring,

@@ -282,6 +282,26 @@ void main() {
       expect(() => client.updateProvider('custom-mygw'), throwsArgumentError);
     });
 
+    for (final headers in [
+      <String, String>{'x-opencode-session': 'synthetic-route'},
+      <String, String>{},
+    ]) {
+      test('updateProvider replaces the header map, including an explicit empty map: $headers', () async {
+        await (await connect()).updateProvider('custom-mygw', headers: headers, expectedRevision: 4);
+        expect(mutations.single, {
+          'ns': 'llm-pi-ai',
+          'ops': [
+            {
+              'op': 'set',
+              'path': ['providers', 'custom-mygw', 'headers'],
+              'value': headers,
+            },
+          ],
+          'expectedRevision': 4,
+        });
+      });
+    }
+
     test('removeProvider unsets the route', () async {
       await (await connect()).removeProvider('custom-mygw', expectedRevision: 4);
       expect(mutations.single, {
@@ -591,6 +611,83 @@ void main() {
         'settingsNs': 'llm-pi-ai',
         'request': {'provider': 'custom-mygw', 'baseURL': 'https://gw.example.com/v1'},
       });
+    });
+
+    for (final (headers, wire) in [
+      (
+        <String, String>{'x-opencode-session': 'synthetic-draft'},
+        [
+          {'name': 'x-opencode-session', 'value': 'synthetic-draft'},
+        ],
+      ),
+      (<String, String>{}, <Map<String, String>>[]),
+    ]) {
+      test('discovery sends a one-shot replacement header map: $headers', () async {
+        final requests = <Map<String, Object?>>[];
+        host.handlers['llm/discoverModelsWithHeaders'] = (args) {
+          requests.add(args);
+          return ok(<Object?>[]);
+        };
+        await (await connect()).discoverModels(
+          provider: 'custom-mygw',
+          baseUrl: 'https://gw.example.com/v1',
+          headers: headers,
+        );
+        expect(requests, [
+          {
+            'settingsNs': 'llm-pi-ai',
+            'request': {'provider': 'custom-mygw', 'baseURL': 'https://gw.example.com/v1', 'headers': wire},
+          },
+        ]);
+      });
+    }
+
+    test('a Host rejection does not retry discovery without draft headers', () async {
+      final requests = <Map<String, Object?>>[];
+      host.handlers['llm/discoverModelsWithHeaders'] = (args) {
+        requests.add(args);
+        return fail('llm/model-discovery-rejected', 'synthetic rejection');
+      };
+      final client = await connect();
+      await expectLater(
+        client.discoverModels(
+          baseUrl: 'https://gw.example.com/v1',
+          headers: const {'x-opencode-session': 'synthetic-draft'},
+        ),
+        throwsA(isA<DshRemoteException>()),
+      );
+      expect(requests, hasLength(1));
+      expect((requests.single['request'] as Map)['headers'], [
+        {'name': 'x-opencode-session', 'value': 'synthetic-draft'},
+      ]);
+    });
+
+    test('an old Host rejects explicit headers without falling back to headerless discovery', () async {
+      var legacyCalls = 0;
+      var headerCalls = 0;
+      host.handlers['llm/discoverModels'] = (_) {
+        legacyCalls++;
+        return ok(<Object?>[]);
+      };
+      host.handlers['llm/discoverModelsWithHeaders'] = (_) {
+        headerCalls++;
+        return fail('remote/method-not-found', 'Header-aware discovery is unavailable');
+      };
+      final client = await connect();
+      await client.discoverModels(baseUrl: 'https://gw.example.com/v1');
+      await client.discoverModels(provider: 'custom-mygw', headers: null);
+      expect(legacyCalls, 2);
+      for (final headers in [
+        <String, String>{'x-route': 'draft'},
+        <String, String>{},
+      ]) {
+        await expectLater(
+          client.discoverModels(baseUrl: 'https://gw.example.com/v1', headers: headers),
+          throwsA(isA<DshRemoteException>().having((e) => e.code, 'code', 'remote/method-not-found')),
+        );
+      }
+      expect(headerCalls, 2);
+      expect(legacyCalls, 2, reason: 'explicit headers never disappear in a fallback request');
     });
 
     test('listConfigurableProviders keeps diagnostics', () async {

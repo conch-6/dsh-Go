@@ -13,26 +13,37 @@ const { createSessionDeletion } = await import(
 const CAP = '/dsh-go/v1/sessions/deletion';
 const DEL = '/dsh-go/v1/sessions/delete';
 
-function harness({ active = [], fail, scheduleOk = true } = {}) {
+function harness({ active = [], tasks = [], fail, scheduleOk = true, tree = false, seamVersion = 2 } = {}) {
   const calls = [];
   const logs = [];
+  const related = () => Object.assign(new Error('tasks'), { code: 'session-related' });
   const services = {
     sessionPersistence: {
       dshGoDeletion: {
-        version: 1,
+        version: seamVersion,
         async delete(id, hooks) {
-          calls.push(['delete', id, hooks]);
+          calls.push(['delete', id]);
           if (fail) throw fail;
-          await hooks.prepare();
-          if (await hooks.inspectTasks()) throw Object.assign(new Error('tasks'), { code: 'session-related' });
-          await hooks.cleanup();
+          // Mirror the seam: target first plus its subagent descendants, then validate
+          // the whole tree, dispose leaves first, and delete leaves first.
+          const nodes = tree ? [id, 'child-1'] : [id];
+          for (const node of nodes) if (await hooks.inspectTasks(node)) throw related();
+          for (const node of nodes) await hooks.validate(node);
+          for (const node of nodes.slice(1).reverse()) await hooks.dispose(node, { cascade: true });
+          await hooks.dispose(id, { cascade: false });
+          for (const node of nodes.slice(1).reverse()) {
+            if (await hooks.inspectTasks(node)) throw related();
+            await hooks.cleanup(node);
+          }
+          if (await hooks.inspectTasks(id)) throw related();
+          await hooks.cleanup(id);
         },
       },
     },
     agentLoop: {
-      dshGoDeletionVersion: 1,
-      async dshGoDisposeForDeletion(id) {
-        calls.push(['dispose', id]);
+      dshGoDeletionVersion: 2,
+      async dshGoDisposeForDeletion(id, options) {
+        calls.push(['dispose', id, options?.cascade === true]);
       },
     },
     sessionProjectionCache: { dshGoDeletionVersion: 1, async dshGoForget(id) { calls.push(['cache', id]); } },
@@ -40,7 +51,7 @@ function harness({ active = [], fail, scheduleOk = true } = {}) {
     schedule: {
       dshGoDeletionVersion: 1,
       async dshGoCanDelete() { return scheduleOk; },
-      async dshGoInspectDeletion(id) { calls.push(['tasks', id]); return active.includes(id); },
+      async dshGoInspectDeletion(id) { calls.push(['tasks', id]); return tasks.includes(id); },
     },
     workspaceRegistry: { dshGoDeletionVersion: 1, async dshGoForget(id) { calls.push(['workspace', id]); } },
   };
@@ -104,6 +115,8 @@ test('capability is false when the pinned seam is absent, and only GET is allowe
 test('capability is true only when every patched seam and the schedule backend are usable', async () => {
   assert.deepEqual((await harness().request('GET', CAP)).last, [200, { supported: true, version: 1 }]);
   assert.deepEqual((await harness({ scheduleOk: false }).request('GET', CAP)).last, [200, { supported: false, version: 1 }]);
+  // An engine seam from a previous protocol version is not mistaken for a usable one.
+  assert.deepEqual((await harness({ seamVersion: 1 }).request('GET', CAP)).last, [200, { supported: false, version: 1 }]);
 });
 
 test('the mutation refuses non-JSON, malformed, oversized and extra-field bodies without deleting', async () => {
@@ -131,26 +144,61 @@ test('an unavailable host answers 503 and never runs the destructive path', asyn
   assert.equal(logs[0][1].error.code, 'unavailable');
 });
 
-test('a confirmed deletion runs dispose, derived-state cleanup, and reports the exact id', async () => {
+test('a confirmed deletion validates, disposes, cleans up, and reports the exact id', async () => {
   const h = harness();
   const { last } = await h.request('POST', DEL, { body: JSON.stringify({ sessionId: 's1' }) });
   assert.deepEqual(last, [200, { deleted: true, sessionId: 's1' }]);
-  assert.deepEqual(h.calls.map(([kind, id]) => `${kind}:${id}`), [
-    'delete:s1',
-    'activity:s1',
-    'dispose:s1',
-    'tasks:s1',
-    'cache:s1',
-    'query:s1',
-    'workspace:s1',
+  assert.deepEqual(h.calls, [
+    ['delete', 's1'],
+    ['tasks', 's1'],
+    ['activity', 's1'],
+    ['dispose', 's1', false],
+    ['tasks', 's1'],
+    ['cache', 's1'],
+    ['query', 's1'],
+    ['workspace', 's1'],
   ]);
 });
 
-test('active work and related reminders are refused with stable codes', async () => {
-  const active = harness({ active: ['s1'] });
-  assert.deepEqual((await active.request('POST', DEL, { body: '{"sessionId":"s1"}' })).last[0], 409);
-  assert.deepEqual(active.logs.at(-1)[1].error.code, 'session-active');
-  assert.deepEqual(active.calls.filter(([kind]) => kind === 'cache'), []);
+test('a cascading deletion forwards per-session hooks with the cascade flag', async () => {
+  const h = harness({ tree: true });
+  const { last } = await h.request('POST', DEL, { body: JSON.stringify({ sessionId: 's1' }) });
+  assert.deepEqual(last, [200, { deleted: true, sessionId: 's1' }]);
+  assert.deepEqual(h.calls, [
+    ['delete', 's1'],
+    ['tasks', 's1'],
+    ['tasks', 'child-1'],
+    ['activity', 's1'],
+    ['activity', 'child-1'],
+    ['dispose', 'child-1', true],
+    ['dispose', 's1', false],
+    ['tasks', 'child-1'],
+    ['cache', 'child-1'],
+    ['query', 'child-1'],
+    ['workspace', 'child-1'],
+    ['tasks', 's1'],
+    ['cache', 's1'],
+    ['query', 's1'],
+    ['workspace', 's1'],
+  ]);
+});
+
+test('active work anywhere in the tree is refused before any disposal or cleanup', async () => {
+  for (const sessionId of ['s1', 'child-1']) {
+    const active = harness({ tree: true, active: [sessionId] });
+    const { last } = await active.request('POST', DEL, { body: JSON.stringify({ sessionId: 's1' }) });
+    assert.equal(last[0], 409);
+    assert.equal(last[1].error.code, 'session-active');
+    assert.deepEqual(active.calls.filter(([kind]) => kind === 'dispose' || kind === 'cache'), []);
+  }
+});
+
+test('a reminder on any member refuses the tree without disposal or cleanup', async () => {
+  const h = harness({ tree: true, tasks: ['child-1'] });
+  const { last } = await h.request('POST', DEL, { body: JSON.stringify({ sessionId: 's1' }) });
+  assert.equal(last[0], 409);
+  assert.equal(last[1].error.code, 'session-related');
+  assert.deepEqual(h.calls.filter(([kind]) => kind === 'dispose' || kind === 'cache'), []);
 });
 
 test('engine refusals map to stable codes without leaking host details', async () => {

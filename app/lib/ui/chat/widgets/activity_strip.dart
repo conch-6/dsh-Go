@@ -218,6 +218,8 @@ class _ActivityStripState extends State<ActivityStrip> {
       child: GlassSurface(
         tier: GlassTier.chrome,
         stadium: true,
+        // One backdrop sample with the deck's other bars (chat page).
+        grouped: true,
         onTap: widget.onTap,
         onLongPress: _showStats,
         child: ConstrainedBox(

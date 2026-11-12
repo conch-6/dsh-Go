@@ -2,6 +2,7 @@ package io.github.ccch1mneyyy.dsh_app.update.privileged
 
 import android.content.Context
 import android.os.Process
+import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import java.io.File
@@ -61,7 +62,7 @@ class PrivilegedSelfUpdater(context: Context) {
             runCatching { transport?.close() }
             runCatching { snapshot?.close() }
             synchronized(globalGuard) { if (reservation === ticket) reservation = null }
-            throw stable(error)
+            throw stableSelfUpdateFailure(error)
         }
     }
 
@@ -86,8 +87,11 @@ class PrivilegedSelfUpdater(context: Context) {
                 if (!preferences.edit().clear().putString("state", "pending").putString("backend", prepared.backend)
                         .putString("requestId", requestId).putLong("versionCode", prepared.versionCode)
                         .putLong("size", prepared.snapshot.size).putString("sha256", prepared.sha256)
-                        .putStringSet("signers", prepared.identity.signers).commit())
+                        .putStringSet("signers", prepared.identity.signers).commit()) {
+                    // commit already changed memory; this attempt never reached the transport.
+                    preferences.edit().clear().apply()
                     throw SelfUpdateException("persistenceFailed")
+                }
                 persisted = true
                 installing = true
             }
@@ -99,7 +103,7 @@ class PrivilegedSelfUpdater(context: Context) {
                     SelfUpdateReceipt("success", submitted = true) else SelfUpdatePolicy.unknown()
             }
         } catch (error: Exception) {
-            receipt = if (persisted) SelfUpdatePolicy.unknown() else SelfUpdateReceipt("unavailable", stable(error).code)
+            receipt = if (persisted) SelfUpdatePolicy.unknown() else SelfUpdateReceipt("unavailable", stableSelfUpdateFailure(error).code)
         } finally {
             synchronized(globalGuard) { installing = false }
         }
@@ -213,12 +217,17 @@ class PrivilegedSelfUpdater(context: Context) {
         }
     }
 
-    private fun stable(error: Exception): SelfUpdateException =
-        if (error is SelfUpdateException) error else SelfUpdateException("unavailable")
-
     private companion object {
         val globalGuard = Any()
         var reservation: Any? = null
         var installing = false
     }
+}
+
+internal fun stableSelfUpdateFailure(error: Exception): SelfUpdateException = when {
+    error is SelfUpdateException -> error
+    // Os.open throws errno directly; FileOutputStream.write wraps it in IOException.
+    (error as? ErrnoException ?: error.cause as? ErrnoException)?.errno == OsConstants.ENOSPC ->
+        SelfUpdateException("storage")
+    else -> SelfUpdateException("unavailable")
 }

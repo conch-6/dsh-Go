@@ -397,7 +397,12 @@ class PetPack {
   }
 
   static String? _string(Object? v) => v is String ? v : null;
-  static double? _num(Object? v) => v is num ? v.toDouble() : null;
+  static double? _num(Object? v) {
+    if (v is! num) return null;
+    final number = v.toDouble();
+    if (!number.isFinite) throw const FormatException('pack.json: non-finite number');
+    return number;
+  }
   static Map<String, Object?> _map(Object? v) =>
       v is Map ? {for (final MapEntry(:key, :value) in v.entries) '$key': value} : const {};
   static List<Object?> _list(Object? v) => v is List ? v : const [];

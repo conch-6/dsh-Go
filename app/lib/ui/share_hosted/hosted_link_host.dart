@@ -7,12 +7,13 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../links/app_links.dart';
-import '../../share_code/conversation_share.dart' show decodeConversationFile;
+import '../../share_code/conversation_share.dart' show DecodedConversation, decodeConversationFile;
 import '../../share_code/share_models.dart' show ShareFormatException;
 import '../../share_hosted/hosted_client.dart';
 import '../../share_hosted/hosted_link.dart';
@@ -37,23 +38,29 @@ Future<bool> openHostedLink(BuildContext context, Uri uri) async {
   // Quiet unless it takes a moment.
   var hinted = false;
   final hint = Timer(const Duration(milliseconds: 600), () {
+    if (!context.mounted) return;
     hinted = true;
     messenger?.showSnackBar(SnackBar(content: Text(l10n.remoteOpening), duration: const Duration(seconds: 20)));
   });
   try {
     final bytes = await container.read(hostedShareClientProvider).download('${ref.origin}/c/${ref.id}#k=${ref.key}');
-    final conversation = decodeConversationFile(utf8.decode(bytes));
+    final conversation = await compute(_decodeConversation, (bytes, l10n.pluginsChat));
     hint.cancel();
-    if (hinted) messenger?.hideCurrentSnackBar();
+    if (hinted && messenger?.mounted == true) messenger!.hideCurrentSnackBar();
     if (!context.mounted) return true;
     await openConversationReplay(context, conversation);
   } catch (e) {
     hint.cancel();
-    if (hinted) messenger?.hideCurrentSnackBar();
-    messenger?.showSnackBar(SnackBar(content: Text(hostedOpenError(e))));
+    if (hinted && messenger?.mounted == true) messenger!.hideCurrentSnackBar();
+    if (context.mounted) {
+      messenger?.showSnackBar(SnackBar(content: Text(hostedOpenError(e))));
+    }
   }
   return true;
 }
+
+DecodedConversation _decodeConversation((Uint8List, String) input) =>
+    decodeConversationFile(utf8.decode(input.$1), fallbackTitle: input.$2);
 
 /// Registers `<share host>/c` with [router] — https and `dshgo://` links
 /// alike — so hosted links open in the replay page. [LinkHost] calls it.

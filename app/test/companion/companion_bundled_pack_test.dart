@@ -75,6 +75,7 @@ final class _FailingWrites extends IOOverrides {
 void main() {
   late Directory root;
   late CompanionPackStore store;
+  const stageKey = Key('companion-bundled-stage');
 
   setUp(() {
     root = Directory.systemTemp.createTempSync('companion-bundled');
@@ -104,7 +105,7 @@ void main() {
           home: CompanionPage(
             storeOverride: store,
             bundledPack: bundled,
-            stageBuilder: (_, _) => const SizedBox.expand(),
+            stageBuilder: (_, _) => const SizedBox.expand(key: stageKey),
             stageController: CompanionStageController(sink: (_, _) {}),
           ),
         ),
@@ -127,18 +128,25 @@ void main() {
 
   bool installed() => File('${store.pack.path}/character/index.json').existsSync();
 
+  Iterable<File> temporaryPacks() =>
+      root.listSync().whereType<File>().where((file) => file.path.contains('companion-bundled'));
+
+  // The arriving text also appears during setup. Wait for the real stage
+  // branch and its finally cleanup, not a fixed number of file-I/O turns.
+  bool installationSettled() => find.byKey(stageKey).evaluate().isNotEmpty && temporaryPacks().isEmpty;
+
   testWidgets('the first time, the pack inside the app unpacks while she swims over', (tester) async {
     await open(tester, () async => _zip());
     await tester.pump();
     expect(find.text('导入素材包'), findsNothing);
-    await settle(tester, until: installed);
-    await settle(tester, rounds: 5);
+    await settle(tester, until: installationSettled);
+    expect(find.byKey(stageKey), findsOneWidget);
     expect(installed(), isTrue);
     // Straight on to her: the stage loading, no setup screen in between.
     expect(find.text('她正在游过来…'), findsOneWidget);
     expect(find.text('接她回家'), findsNothing);
     // Nothing left lying around next to her folder.
-    expect(root.listSync().whereType<File>().where((f) => f.path.contains('companion-bundled')), isEmpty);
+    expect(temporaryPacks(), isEmpty);
     await close(tester);
   });
 
@@ -151,10 +159,11 @@ void main() {
     expect(installed(), isFalse);
 
     await tester.tap(find.text('接她回家'));
-    await settle(tester, until: installed);
-    await settle(tester, rounds: 5);
+    await settle(tester, until: installationSettled);
+    expect(find.byKey(stageKey), findsOneWidget);
     expect(installed(), isTrue);
     expect(find.text('她正在游过来…'), findsOneWidget);
+    expect(temporaryPacks(), isEmpty);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool('companion_pack_removed'), isNull);
     await close(tester);

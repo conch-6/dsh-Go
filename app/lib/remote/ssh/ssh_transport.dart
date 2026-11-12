@@ -58,6 +58,7 @@ class SshConnectParams {
     required this.username,
     required this.auth,
     required this.secrets,
+    this.compression = true,
     this.connectTimeout = const Duration(seconds: 12),
   });
 
@@ -67,6 +68,7 @@ class SshConnectParams {
     username: config.user.trim(),
     auth: config.auth,
     secrets: secrets,
+    compression: config.compression,
   );
 
   final String host;
@@ -74,6 +76,7 @@ class SshConnectParams {
   final String username;
   final SshAuthMethod auth;
   final SshSecrets secrets;
+  final bool compression;
   final Duration connectTimeout;
 }
 
@@ -127,6 +130,7 @@ class DartSshTransport implements SshTransport, RemoteBootstrapShell {
     final client = SSHClient(
       socket,
       username: params.username,
+      compression: params.compression,
       identities: identities,
       onPasswordRequest: params.auth == SshAuthMethod.password ? () => params.secrets.password : null,
       // Keyboard-interactive servers ask for the same password.

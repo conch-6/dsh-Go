@@ -62,6 +62,7 @@ import '../pets/pet_stage.dart';
 import '../plugins/native/composer_strip.dart' show ComposerStripSlot;
 import '../plugins/native/native_composer_bar.dart';
 import '../plugins/native/native_taps.dart' show NativeComposerHost, NativeComposerScope, runNativeAction;
+import '../plugins/seats/plugin_overlay_layer.dart';
 import '../safe_mode/engine_failure_card.dart';
 import '../safe_mode/safe_mode_banner.dart';
 import '../session/session_detail_page.dart';
@@ -128,6 +129,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _keyboardInset ??= View.of(context).viewInsets.bottom;
     _interactionRoute = ModalRoute.of<Object?>(context);
     final current = ModalRoute.isCurrentOf(context) ?? true;
     if (current == _routeCurrent) return;
@@ -163,6 +165,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     if (state == AppLifecycleState.resumed) _scheduleInteraction();
   }
 
+  @override
+  void didChangeMetrics() {
+    final inset = View.of(context).viewInsets.bottom;
+    final hidden = (_keyboardInset ?? 0) > 0 && inset == 0;
+    _keyboardInset = inset;
+    if (hidden && (_interactionRoute?.isCurrent ?? true)) _dismissSlashPalette();
+  }
+
   final _input = MentionTextController();
 
   /// The composer as plugin controls and ui.json capsules see it.
@@ -185,6 +195,44 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   /// Where [_voice] says it is on, for what waits for a quiet moment.
   late final VoiceInputActiveController _voiceFlag;
   final _focus = FocusNode();
+
+  // Keep this slash draft closed until it leaves slash input or starts again at "/".
+  String? _dismissedSlashText;
+  double? _keyboardInset;
+  final _composerGroup = Object();
+
+  void _resetSlashDismissal() {
+    final dismissed = _dismissedSlashText;
+    if (dismissed == null) return;
+    final text = _input.text;
+    final newSlash = text.trim() == '/' && dismissed.trim() != '/';
+    _dismissedSlashText = parseSlashInput(text) == null || newSlash ? null : text;
+  }
+
+  void _dismissSlashPalette() {
+    if (_dismissedSlashText != null || parseSlashInput(_input.text) == null) return;
+    setState(() => _dismissedSlashText = _input.text);
+  }
+
+  PaletteContent? _slashContent(List<SlashCommand> commands) => _dismissedSlashText != null
+      ? null
+      : PaletteContent.of(
+          commands,
+          _input.text,
+          caret: _input.selection.isCollapsed ? _input.selection.extentOffset : -1,
+        );
+
+  KeyEventResult _composerKey(FocusNode node, KeyEvent event) {
+    final mention = _mentions.handleKey(node, event);
+    if (mention != KeyEventResult.ignored) return mention;
+    final composing = _input.value.composing;
+    if (composing.isValid && !composing.isCollapsed) return KeyEventResult.ignored;
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape && _slashContent(_commands) != null) {
+      _dismissSlashPalette();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   /// 底色遮罩的实心高度:页面布局排好输入条时写入(见 [_ChatLayout])。
   final _veilHeight = ValueNotifier<double>(0);
@@ -285,6 +333,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     _composerToastWait?.cancel();
     if (_voice.active) unawaited(_voice.cancel());
     _mentions.dismiss();
+    _dismissedSlashText = null;
     _saveDraft();
     _draftKey = key;
     _spoken = null;
@@ -312,6 +361,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
           ref.read(voiceModelProvider).status == VoiceModelStatus.ready,
       // The capability probe is async and can finish after this page is gone.
       client: () => mounted ? ref.read(activeConnectionProvider).value?.client : null,
+      inputOwner: () => mounted ? ref.read(activeHostProvider) : null,
       onRecognized: () {
         if (mounted) ref.read(usageStatsProvider.notifier).count(UsageCount.voice);
       },
@@ -329,6 +379,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     // Start reading what earlier sessions still owe before the first send.
     ref.read(owedSetupsProvider.notifier);
     _showDraft(ref.read(draftStoreProvider).drafts[_draftKey]);
+    _input.addListener(_resetSlashDismissal);
     _input.addListener(_saveDraft);
     ref.listenManual(currentSessionProvider, (_, next) => _switchDraft(next));
     ref.listenManual(activeConnectionProvider.select((c) => c.value?.client), (_, _) {
@@ -445,6 +496,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     _creating = null;
     _syncWait = null;
     _composerToastWait?.cancel();
+    _input.removeListener(_resetSlashDismissal);
     _input.removeListener(_saveDraft);
     _mentions.dispose();
     _voice.removeListener(_reportVoice);
@@ -1299,19 +1351,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   /// A row picked in the palette: app commands and commands without input run
   /// now; commands that take input go into the composer for the arguments.
   void _pick(SlashCommand command, {bool atCaret = true}) {
+    _dismissSlashPalette();
     final value = _input.value;
     final caret = atCaret && value.selection.isValid ? value.selection.end : value.text.length;
-    final leading = value.text.length - value.text.trimLeft().length;
-    final full = parseSlashInput(value.text);
-    // Completing inside an already known command replaces its whole name.
-    // Otherwise preserve the draft to the right of the cursor (e.g. /|hello).
-    final end = full != null && resolveSlashCommand(_commands, full.token) != null
-        ? leading + 1 + full.token.length
-        : caret;
-    final suffix = value.text.substring(end);
-    if ((command.kind == SlashCommandKind.host && command.takesInput) ||
-        command.kind == SlashCommandKind.skill ||
-        suffix.isNotEmpty) {
+    final (:leading, :suffix) = slashCompletionContext(_commands, value.text, caret);
+    if (slashPickInsertsText(command, hasSuffix: suffix.isNotEmpty)) {
       final prefix = '${value.text.substring(0, leading)}/${command.name}';
       final separator = suffix.isEmpty || !RegExp(r'^\s').hasMatch(suffix) ? ' ' : '';
       final text = '$prefix$separator$suffix';
@@ -1372,7 +1416,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   }
 
   void _openUsage(String sessionId, ModelSelection? model) {
-    ref.read(balanceProvider.notifier).refresh();
     showUsageSheet(context, sessionId: sessionId, model: model);
   }
 
@@ -1517,6 +1560,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                 singleQuestion: s.singleQuestion != null,
                 model: s.model,
                 error: s.error,
+                syncError: s.syncError,
                 defaultModelSaveFailed: s.defaultModelSaveFailed,
                 notice: s.notice,
                 autoApprove: s.autoApprove,
@@ -1588,7 +1632,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
       connection: chat?.connection,
       running: chat?.running ?? false,
       stopping: chat?.stopping ?? false,
-      waiting: approval != null || question != null,
+      waiting: approval != null
+          ? l10n.commonWaitingApproval
+          : question != null
+          ? l10n.commonWaitingAnswer
+          : null,
       // The live region reads out what is waiting, or how the turn ended.
       spoken: approval != null
           ? approvalText(approval)
@@ -1632,6 +1680,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
         : ref.watch(mediaCatalogProvider.select((c) => c.resolve(generate.model, generate.kind)?.model));
     // 引用追问: the passage waiting above this conversation's composer.
     final quote = ref.watch(composerQuoteProvider.select((quotes) => quotes[_draftKey]));
+    // Mirror _send for ordinary text; attachments, quotes and generation
+    // stay messages even while a question is waiting.
+    final answerInComposer =
+        (chat?.singleQuestion ?? false) && approval == null && _drafts.isEmpty && quote == null && generate == null;
     final modelDefaultWarning = sessionId != null && chat?.error == null && (chat?.defaultModelSaveFailed ?? false);
     final error = sessionId == null
         ? _localError
@@ -1693,6 +1745,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                       const EngineFailureCard(padding: EdgeInsets.fromLTRB(16, 0, 16, 20)),
                                     ChatEmptyState(
                                       connected: connected,
+                                      suggestions: ref.watch(settingsProvider.select((s) => s.chatSuggestions))
+                                          ? defaultSuggestions
+                                          : const [],
                                       connecting: connAsync.isLoading,
                                       starting: starting,
                                       tidying: tidying,
@@ -1756,6 +1811,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                               ),
                             ),
                           ),
+                  ),
+                  LayoutId(
+                    id: _Slot.pluginOverlay,
+                    child: ClipRect(
+                      child: MediaQuery(
+                        // The layout already reserves the native chrome and keyboard.
+                        data: MediaQuery.of(context).copyWith(padding: EdgeInsets.zero, viewInsets: EdgeInsets.zero),
+                        child: PluginOverlayLayer(sessionId: sessionId),
+                      ),
+                    ),
                   ),
                   // The page's own backdrop again under the composer area: content
                   // scrolled behind the composer and strip fades into it, so the
@@ -1821,37 +1886,38 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                             // The `@` word at the caret wins over a "/" line.
                             final live = connected && !readOnly;
                             final mention = live && _mentions.isOpen;
-                            final content = live && !mention
-                                ? PaletteContent.of(
-                                    commands,
-                                    _input.text,
-                                    caret: _input.selection.isCollapsed ? _input.selection.extentOffset : -1,
-                                  )
-                                : null;
+                            final content = live && !mention ? _slashContent(commands) : null;
                             // The pet steps aside while a panel is up.
-                            return PetCover(
-                              active: mention || content != null,
-                              child: AnimatedSwitcher(
-                                duration: AppMotion.of(context, AppMotion.quick),
-                                switchInCurve: AppMotion.enter,
-                                switchOutCurve: AppMotion.exit,
-                                transitionBuilder: (child, animation) => FadeTransition(
-                                  opacity: animation,
-                                  child: ScaleTransition(
-                                    alignment: Alignment.bottomCenter,
-                                    scale: Tween(begin: 0.96, end: 1.0).animate(animation),
-                                    child: child,
+                            return PopScope<Object?>(
+                              canPop: content == null,
+                              onPopInvokedWithResult: (didPop, _) {
+                                if (!didPop) _dismissSlashPalette();
+                              },
+                              child: PetCover(
+                                active: mention || content != null,
+                                child: AnimatedSwitcher(
+                                  duration: AppMotion.of(context, AppMotion.quick),
+                                  switchInCurve: AppMotion.enter,
+                                  switchOutCurve: AppMotion.exit,
+                                  transitionBuilder: (child, animation) => FadeTransition(
+                                    opacity: animation,
+                                    child: ScaleTransition(
+                                      alignment: Alignment.bottomCenter,
+                                      scale: Tween(begin: 0.96, end: 1.0).animate(animation),
+                                      child: child,
+                                    ),
                                   ),
+                                  child: mention
+                                      ? MentionPicker(key: const ValueKey('mention'), controller: _mentions)
+                                      : content == null
+                                      ? const SizedBox(key: ValueKey('none'), width: double.infinity)
+                                      : TextFieldTapRegion(
+                                          key: ValueKey(content is PaletteHint),
+                                          groupId: _composerGroup,
+                                          onTapOutside: (_) => _dismissSlashPalette(),
+                                          child: SlashPalette(content: content, onPick: _pick),
+                                        ),
                                 ),
-                                child: mention
-                                    ? MentionPicker(key: const ValueKey('mention'), controller: _mentions)
-                                    : content == null
-                                    ? const SizedBox(key: ValueKey('none'), width: double.infinity)
-                                    : SlashPalette(
-                                        key: ValueKey(content is PaletteHint),
-                                        content: content,
-                                        onPick: _pick,
-                                      ),
                               ),
                             );
                           },
@@ -1887,9 +1953,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                         ? Padding(
                                             padding: const EdgeInsets.only(bottom: 8),
                                             child: ErrorBanner(
+                                              maxLines: null,
                                               info: !(chat?.streamLost ?? false),
                                               message: chat?.streamLost ?? false
-                                                  ? l10n.stateChatSyncInterrupted
+                                                  ? chat?.syncError ?? l10n.stateChatSyncInterrupted
                                                   : l10n.stateChatSynchronizing,
                                               action: chat?.resyncing ?? false
                                                   ? null
@@ -2027,6 +2094,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                   Composer(
                                     hardwareEnterSends: ref.watch(settingsProvider.select((s) => s.hardwareEnterSends)),
                                     controller: _input,
+                                    groupId: _composerGroup,
                                     // The page's context: Scaffold drops the keyboard inset below.
                                     maxLines: Composer.linesFor(context),
                                     focusNode: _focus,
@@ -2039,9 +2107,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                     // already say an approval waits: the hint
                                     // stays the plain one.
                                     waiting: approval != null || question != null,
+                                    modeLabel: question == null
+                                        ? null
+                                        : answerInComposer
+                                        ? l10n.chatAnswerMode
+                                        : l10n.chatMessageMode,
                                     waitHint: approval != null
                                         ? null
-                                        : chat?.singleQuestion ?? false
+                                        : answerInComposer
                                         ? l10n.chatAnswerHint
                                         : question != null
                                         ? l10n.commonWaitingAnswer
@@ -2056,7 +2129,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                     onSend: _send,
                                     onSendOptions: chat?.controlReady ?? true ? _sendOptions : null,
                                     voice: _voice,
-                                    onKeyEvent: _mentions.handleKey,
+                                    onKeyEvent: _composerKey,
                                     onContentInserted: connected ? _pasteContent : null,
                                     onStop: _stop,
                                     hasAttachments: _drafts.isNotEmpty,
@@ -2186,7 +2259,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     required DshConnectionState? connection,
     required bool running,
     required bool stopping,
-    required bool waiting,
+    required String? waiting,
     String? spoken,
   }) {
     if (!connected) {
@@ -2208,8 +2281,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     }
     if (syncing) return HeaderStatus(StatusTone.busy, appL10n.stateChatSynchronizing);
     if (stopping) return HeaderStatus(StatusTone.busy, appL10n.commonStopping);
-    if (waiting) {
-      return HeaderStatus(StatusTone.warn, appL10n.commonWaitingApproval, spoken: spoken);
+    if (waiting != null) {
+      return HeaderStatus(StatusTone.warn, waiting, spoken: spoken);
     }
     if (running) {
       return HeaderStatus(StatusTone.busy, appL10n.chatGenerating, spoken: spoken);
@@ -2362,7 +2435,7 @@ class _HeaderAside extends StatelessWidget {
   }
 }
 
-enum _Slot { body, veil, header, palette, composer }
+enum _Slot { body, pluginOverlay, veil, header, palette, composer }
 
 /// 整页布局:先排输入条区域,挂在它上沿的东西(列表的下沿、底色遮罩、
 /// 斜杠面板)在同一次布局里跟上。
@@ -2398,8 +2471,11 @@ class _ChatLayout extends MultiChildLayoutDelegate {
     positionChild(_Slot.body, Offset.zero);
     layoutChild(_Slot.veil, BoxConstraints.tight(size));
     positionChild(_Slot.veil, Offset.zero);
-    layoutChild(_Slot.header, along);
+    final header = layoutChild(_Slot.header, along);
     positionChild(_Slot.header, Offset.zero);
+    // Web content cannot paint or receive touches on native navigation/input.
+    layoutChild(_Slot.pluginOverlay, BoxConstraints.tight(Size(width, math.max(0, top - header.height))));
+    positionChild(_Slot.pluginOverlay, Offset(0, header.height));
 
     final paletteWidth = math.max(0.0, width - 2 * _side);
     final palette = layoutChild(_Slot.palette, BoxConstraints(minWidth: paletteWidth, maxWidth: paletteWidth));

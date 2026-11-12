@@ -34,6 +34,7 @@ abstract class ProviderBackend {
     String? baseUrl,
     String? apiKeyEnv,
     List<ProviderModelSpec>? models,
+    Map<String, String>? headers,
     int? expectedRevision,
   });
 
@@ -62,7 +63,13 @@ abstract class ProviderBackend {
 
   Future<void> clearKey(String ref);
 
-  Future<List<DiscoveredModel>> discover({String? provider, String? baseUrl, ProviderApi? api, String? apiKey});
+  Future<List<DiscoveredModel>> discover({
+    String? provider,
+    String? baseUrl,
+    ProviderApi? api,
+    String? apiKey,
+    Map<String, String>? headers,
+  });
 }
 
 class ClientProviderBackend implements ProviderBackend {
@@ -114,6 +121,7 @@ class ClientProviderBackend implements ProviderBackend {
     String? baseUrl,
     String? apiKeyEnv,
     List<ProviderModelSpec>? models,
+    Map<String, String>? headers,
     int? expectedRevision,
   }) => client.updateProvider(
     id,
@@ -122,6 +130,7 @@ class ClientProviderBackend implements ProviderBackend {
     baseUrl: baseUrl,
     apiKeyEnv: apiKeyEnv,
     models: models,
+    headers: headers,
     expectedRevision: expectedRevision,
   );
 
@@ -152,6 +161,11 @@ class ClientProviderBackend implements ProviderBackend {
   Future<void> clearKey(String ref) => client.clearProviderKey(ref: ref);
 
   @override
-  Future<List<DiscoveredModel>> discover({String? provider, String? baseUrl, ProviderApi? api, String? apiKey}) =>
-      client.discoverModels(provider: provider, baseUrl: baseUrl, api: api, apiKey: apiKey);
+  Future<List<DiscoveredModel>> discover({
+    String? provider,
+    String? baseUrl,
+    ProviderApi? api,
+    String? apiKey,
+    Map<String, String>? headers,
+  }) => client.discoverModels(provider: provider, baseUrl: baseUrl, api: api, apiKey: apiKey, headers: headers);
 }

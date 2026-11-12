@@ -86,6 +86,16 @@ class FakeUpdate extends AppUpdateController {
     return systemInstallerOpens;
   }
 
+  /// What [exportApk] answers; null = the copy failed. Counts the calls.
+  String? exportResult = 'Download/DSH-Go/dsh-go-1.2.0-arm64.apk';
+  int exports = 0;
+
+  @override
+  Future<String?> exportApk() async {
+    exports++;
+    return exportResult;
+  }
+
   @override
   Future<void> setAutoCheck(bool value) async {
     calls.add('autoCheck:$value');
@@ -100,6 +110,7 @@ AppUpdateState _offer({
   int received = 0,
   String? source,
   UpdateProblem? problem,
+  bool apkHere = false,
 }) => AppUpdateState(
   loaded: true,
   current: AppVersion.tryParse('1.0.0+1')!,
@@ -111,6 +122,7 @@ AppUpdateState _offer({
   total: _release.apkFor(ApkFlavor.arm64)!.size,
   source: source,
   problem: problem,
+  apkHere: apkHere,
 );
 
 List<Override> _overrides(FakeUpdate update) => [
@@ -314,6 +326,28 @@ void main() {
       expect(find.text('签名不一致，不能直接覆盖'), findsOneWidget);
       expect(find.text('打开发布页'), findsOneWidget);
       expect(find.text('重试'), findsNothing);
+    });
+
+    testWidgets('the downloaded package can be saved to sign by hand', (tester) async {
+      final update = await pump(
+        tester,
+        FakeUpdate(_offer(task: UpdateTaskPhase.failed, problem: UpdateProblem.signature, apkHere: true)),
+      );
+      await _openSheet(tester);
+      await tester.tap(find.text('导出安装包'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('导出安装包')));
+      await tester.pumpAndSettle();
+      expect(update.exports, 1);
+      expect(find.text('已存到 下载/DSH-Go/dsh-go-1.2.0-arm64.apk'), findsOneWidget);
+    });
+
+    testWidgets('nothing was downloaded, so nothing is offered for signing', (tester) async {
+      await pump(tester, FakeUpdate(_offer(task: UpdateTaskPhase.failed, problem: UpdateProblem.signature)));
+      await _openSheet(tester);
+      expect(find.text('签名不一致，不能直接覆盖'), findsOneWidget);
+      expect(find.text('导出安装包'), findsNothing);
     });
 
     testWidgets('manual check: up to date / unavailable say so in a snack bar, no dialog', (tester) async {

@@ -227,6 +227,41 @@ void main() {
     });
   });
 
+  testWidgets('widening the window keeps the docked sidebar and chat state', (tester) async {
+    await _pumpHome(tester, size: const Size(1312, 800));
+    final chat = tester.state(find.byType(ChatScreen));
+    for (final width in [1313.0, 1314.0, 1315.0, 1316.0]) {
+      useWindow(tester, Size(width, 800));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('persistent-sidebar')), findsOneWidget, reason: '$width');
+      expect(find.byKey(const ValueKey('rail-menu')), findsNothing, reason: '$width');
+      expect(find.byKey(const ValueKey('chat-menu')), findsOneWidget, reason: '$width');
+      expect(tester.state(find.byType(ChatScreen)), same(chat));
+      final rect = tester.getRect(find.byType(ChatScreen));
+      expect(rect.left, _near(320));
+      expect(rect.width, greaterThanOrEqualTo(600));
+      expect(rect.right, _near(tester.getRect(find.byType(SessionDetailPage)).left));
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('the rail unfolds the persistent sidebar at the panel grid step', (tester) async {
+    await _pumpHome(tester, size: const Size(1314, 800), prefs: const LayoutPrefs(loaded: true, sidebarOpen: false));
+    final panelWidth = tester.getRect(find.byType(SessionDetailPage)).width;
+    await tester.tap(find.byKey(const ValueKey('rail-menu')));
+    await pumpFrames(tester, 8);
+    expect(find.byKey(const ValueKey('persistent-sidebar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('rail-menu')), findsNothing);
+    expect(tester.getRect(find.byType(ChatScreen)).width, greaterThanOrEqualTo(600));
+    expect(tester.getRect(find.byType(SessionDetailPage)).width, panelWidth);
+    await tester.tap(find.byKey(const ValueKey('chat-menu')));
+    await pumpFrames(tester, 8);
+    expect(find.byKey(const ValueKey('persistent-sidebar')), findsNothing);
+    expect(find.byKey(const ValueKey('rail-menu')), findsOneWidget);
+    expect(find.byType(SessionDetailPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final brightness in Brightness.values) {
     final mode = brightness == Brightness.dark ? 'dark' : 'light';
     group('goldens ($mode)', () {

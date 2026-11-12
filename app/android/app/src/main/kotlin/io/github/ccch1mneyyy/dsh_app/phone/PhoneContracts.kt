@@ -333,7 +333,7 @@ interface ControlListener {
     fun shownControls(): TaskControls? = null
 
     /** Device-wide boundary: screen off, lock, or loss of the accessibility service. [reason] is Chinese. */
-    fun onStopAllRequested(reason: String) {}
+    fun onStopAllRequested(reason: String, source: PhoneTasks.StopSource = PhoneTasks.StopSource.ENVIRONMENT) {}
 
     /** The accessibility service connected or went away (for the `status` event). */
     fun onAccessibilityChanged(connected: Boolean) {}

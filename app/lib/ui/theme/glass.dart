@@ -297,9 +297,9 @@ class _GlassShadowPainter extends CustomPainter {
 
 /// The glass of a panel that slides in and out on [motion] (0..1): an opaque fill while it
 /// moves, since a moving blur re-samples what is behind it every frame, and glass at rest.
-/// Between the two it fades over [AppMotion.glassIn]: the fill and the glass differ, most in
-/// a light theme, and a cut between them flashes. The blur stays in the tree throughout, so
-/// the panel's content is not rebuilt either.
+/// Once it stops, the opaque fill clears into glass over [AppMotion.glassIn]. Moving uses
+/// the opaque fill immediately so disabling the blur cannot expose sharp background text.
+/// The blur stays in the tree throughout, so the panel's content is not rebuilt either.
 class SlidingGlass extends StatefulWidget {
   const SlidingGlass({super.key, required this.motion, required this.tier, required this.borderRadius, this.child});
 
@@ -351,7 +351,7 @@ class _SlidingGlassState extends State<SlidingGlass> with SingleTickerProviderSt
     } else if (value == 1) {
       if (!_settled.isForwardOrCompleted) _settled.forward();
     } else if (_settled.isForwardOrCompleted) {
-      _settled.reverse();
+      _settled.value = 0;
     }
   }
 

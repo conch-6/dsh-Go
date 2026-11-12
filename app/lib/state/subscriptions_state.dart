@@ -119,6 +119,19 @@ final subscriptionsProvider = FutureProvider.autoDispose<SubscriptionsSnapshot?>
   }
 });
 
+/// Quota belongs to the active host and is fetched only while the sheet is open.
+final subscriptionUsageProvider = FutureProvider.autoDispose.family<SubscriptionUsage?, Subscription>((
+  ref,
+  subscription,
+) async {
+  final active = ref.watch(activeConnectionProvider);
+  // A reconnect may retain a disposed client in AsyncValue.value.
+  final connection = active.isLoading || active.hasError ? null : active.value;
+  if (connection == null) return null;
+  ref.watch(readListCredentialEpochProvider);
+  return connection.client.subscriptionUsage(subscription);
+});
+
 /// After a sign-in or sign-out: the model list and both rows, now.
 void refreshAfterSubscriptionChange(WidgetRef ref) {
   ref.read(readListCredentialEpochProvider.notifier).advance();

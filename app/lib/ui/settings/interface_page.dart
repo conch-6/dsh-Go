@@ -1,4 +1,5 @@
-// 界面: which home the app opens to (原生 / 网页), then everything about the
+// 界面: which home the app opens to (原生 / 网页), the native start page,
+// then everything about the
 // web app — opening it once, its phone layout, and the display and sending
 // preferences the official General settings keep on the host's engine (only
 // the web app reads them; they were 通用设置).
@@ -70,6 +71,17 @@ class InterfacePage extends ConsumerWidget {
                   onTap: () => choose(context, ref, m),
                 ),
               ),
+          ],
+        ),
+        SettingsSection(
+          title: l10n.hubStartPage,
+          children: [
+            SettingsSwitchTile(
+              spot: Spots.chatSuggestions,
+              subtitle: l10n.hubChatSuggestionsHint,
+              value: settings.chatSuggestions,
+              onChanged: (v) => unawaited(ref.read(settingsProvider.notifier).setChatSuggestions(v)),
+            ),
           ],
         ),
         SettingsSection(
@@ -166,6 +178,7 @@ class InterfacePage extends ConsumerWidget {
           ...schemaFormGroups([
             SchemaFormSection(
               title: l10n.engineGeneralWebDisplay,
+              footer: l10n.engineGeneralWebOnlyHint,
               fields: [
                 _field('ui-settings', 'enabled'),
                 _field('ui-chat', 'transcriptView'),
@@ -175,6 +188,7 @@ class InterfacePage extends ConsumerWidget {
             ),
             SchemaFormSection(
               title: l10n.engineGeneralWebSending,
+              footer: l10n.engineGeneralWebOnlyHint,
               fields: [_field('ui-conversation', 'busyEnter'), _field('ui-chat', 'linkOpening')],
             ),
           ], settings: engine),

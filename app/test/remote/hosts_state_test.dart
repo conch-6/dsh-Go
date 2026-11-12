@@ -97,8 +97,19 @@ void main() {
       expect(min.name, 'h');
       expect(min.launchCommand, 'dsh web');
       expect(min.auth, SshAuthMethod.password);
+      expect(min.dshMode, SshDshMode.managed);
+      expect(min.compression, isTrue);
       expect(SshHostConfig.fromJson({'host': 'h'}), isNull);
       expect(SshHostConfig.newId(), matches(RegExp(r'^ssh-[0-9a-f]{16}$')));
+    });
+
+    test('attach settings and compression round-trip without secrets', () {
+      final config = sampleSsh.copyWith(dshMode: SshDshMode.attachOnly, remotePort: 4080, compression: false);
+      expect(SshHostConfig.fromJson(config.toJson()), config);
+      expect(config.connectionKey, isNot(sampleSsh.connectionKey));
+      expect(sampleSsh.copyWith(compression: false).connectionKey, isNot(sampleSsh.connectionKey));
+      expect(config.toJson().containsKey('attachToken'), isFalse);
+      expect(SshHostConfig.fromJson({...config.toJson(), 'remotePort': 0}), isNull);
     });
 
     test('moving to another machine forgets the pinned key; renaming does not', () {
@@ -127,6 +138,32 @@ void main() {
       await loaded(again);
       expect(again.read(hostsProvider).ssh.single, sampleSsh);
       expect((await again.read(hostsProvider.notifier).loadSecrets(sampleSsh.id)).password, 'hunter2');
+    });
+
+    test('attach token stays in secure storage and is removed with the host', () async {
+      final c = container();
+      await loaded(c);
+      final hosts = c.read(hostsProvider.notifier);
+      final config = sampleSsh.copyWith(dshMode: SshDshMode.attachOnly, remotePort: 4080);
+      await hosts.saveSsh(config, secrets: const SshSecrets(password: 'pw', attachToken: 'synthetic-token'));
+      final raw = (await SharedPreferences.getInstance()).getString(HostsController.prefsKey)!;
+      expect(raw, isNot(contains('synthetic-token')));
+      expect((await hosts.loadSecrets(config.id)).attachToken, 'synthetic-token');
+      expect(secrets.values[SshSecrets.attachTokenKey(config.id)], 'synthetic-token');
+      await hosts.removeSsh(config.id);
+      expect(secrets.values, isEmpty);
+    });
+
+    test('switching back to managed mode drops the attach token', () async {
+      final c = container();
+      await loaded(c);
+      final hosts = c.read(hostsProvider.notifier);
+      await hosts.saveSsh(
+        sampleSsh.copyWith(dshMode: SshDshMode.attachOnly),
+        secrets: const SshSecrets(password: 'pw', attachToken: 'synthetic-token'),
+      );
+      await hosts.saveSsh(sampleSsh, secrets: const SshSecrets(password: 'pw'));
+      expect((await hosts.loadSecrets(sampleSsh.id)).attachToken, isNull);
     });
 
     test('switching to key auth drops the stored password', () async {

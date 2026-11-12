@@ -40,7 +40,7 @@ for(const op of ['set','unset'])for(const path of [['parent','opaque'],['parent'
  test(`existing read-only secret blocks ${op} ${path.join('.')}`,async()=>{
   const f=fixture(graph,{inherited:{count:1,parent:{opaque:{key:marker}}}});
   const result=await f.post([{op,path,...op==='set'?{value:{key:'replacement'}}:{}}]);
-  assert.equal(result.status,400);assert.deepEqual(result.body.path,path);assert.equal(f.writes(),0);
+  assert.equal(result.status,400);assert.deepEqual(result.body.error.path,path);assert.equal(f.writes(),0);
  });
 }
 test('BLOCKER: unrelated validated field copies inherited opaque secret despite redaction and path guard',async()=>{

@@ -355,3 +355,21 @@ html[data-paused='1'] .shafts i,
 html[data-paused='1'] .whale {
   animation-play-state: paused;
 }
+
+/* Native float mode owns gestures and crops a fixed viewport to alpha bounds. */
+html[data-mode='float'],
+html[data-mode='float'] body {
+  background: transparent;
+}
+html[data-mode='float'] .scene,
+html[data-mode='float'] .props,
+html[data-mode='float'] #fx,
+html[data-mode='float'] .vignette {
+  display: none;
+}
+html[data-mode='float'] #stage {
+  opacity: 1;
+  transform: none;
+  transition: none;
+  pointer-events: none;
+}

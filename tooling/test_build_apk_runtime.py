@@ -1,0 +1,205 @@
+"""Exercise the shipped build-apk shell with tiny files and a fake Flutter.
+
+No Flutter, Gradle, JVM, actual runtime archive or APK is built by these tests.
+"""
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parent.parent
+ABIS = {"arm64": "arm64-v8a", "x64": "x86_64"}
+JNI = ("libproot.so", "libproot-loader.so", "libtalloc.so", "libandroid-shmem.so")
+
+
+class BuildApkRuntimeTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="build-apk-runtime-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        (self.root / "tooling").mkdir()
+        (self.root / "app").mkdir()
+        for name in ("build-apk.sh", "build_number.py", "check_runtime_bundle.py"):
+            shutil.copy2(ROOT / "tooling" / name, self.root / "tooling" / name)
+        (self.root / "app/pubspec.yaml").write_text("version: 1.0.0+1\n")
+        self.calls_file = self.root / "flutter-calls.jsonl"
+        tools = self.root / "bin"
+        tools.mkdir()
+        flutter = tools / "flutter"
+        flutter.write_text(f"#!{sys.executable}\n" + '''import json, os, pathlib, sys
+args = sys.argv[1:]
+with open(os.environ['RUNTIME_GATE_TEST_CALLS'], 'a') as out:
+    out.write(json.dumps(args) + '\\n')
+flavor = args[args.index('--flavor') + 1]
+mode = next((arg[2:] for arg in reversed(args) if arg in ('--release', '--debug', '--profile')), 'release')
+apk = pathlib.Path('build/app/outputs/flutter-apk') / f'app-{flavor}-{mode}.apk'
+apk.parent.mkdir(parents=True, exist_ok=True)
+apk.write_bytes(b'fake APK: shell flow only')
+''')
+        flutter.chmod(0o755)
+        aapt = tools / "aapt2"
+        aapt.write_text(f"#!{sys.executable}\n" + '''print("package: name='fixture' versionCode='10251234' versionName='1.0.0'")
+''')
+        aapt.chmod(0o755)
+        self.env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
+                        RUNTIME_GATE_TEST_CALLS=str(self.calls_file))
+
+    def run_script(self, *args):
+        self.calls_file.unlink(missing_ok=True)
+        return subprocess.run(["bash", str(self.root / "tooling/build-apk.sh"),
+                               "--keep-daemon", "--build-name", "1.0.0", "-n", "10251234", *args],
+                              env=self.env, capture_output=True, text=True, timeout=15)
+
+    def calls(self):
+        if not self.calls_file.exists():
+            return []
+        return [json.loads(line) for line in self.calls_file.read_text().splitlines()]
+
+    def make_bundle(self, flavor, schema):
+        abi = ABIS[flavor]
+        bundle = self.root / "runtime/out" / abi
+        assets = bundle / "assets/runtime"
+        assets.mkdir(parents=True, exist_ok=True)
+        jni = bundle / "jniLibs" / abi
+        jni.mkdir(parents=True, exist_ok=True)
+        records = {}
+        for name in JNI:
+            payload = f"fixture {abi} {name}".encode()
+            (jni / name).write_bytes(payload)
+            records[name] = {"bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+        data = {"schema": schema, "abi": abi, "jniLibs": records}
+        archives = {}
+        for kind in (("rootfs",) if schema == 1 else ("base", "engine")):
+            payload = f"fixture {abi} {kind} archive".encode()
+            name = f"{kind}-{abi}.tar.xz"
+            (assets / name).write_bytes(payload)
+            archives[kind] = {"asset": name, "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+        if schema == 1:
+            rootfs = archives["rootfs"]
+            data.update(rootfs=rootfs["asset"], rootfsBytes=rootfs["bytes"], rootfsSha256=rootfs["sha256"])
+        else:
+            data["layers"] = archives
+        path = assets / "manifest.json"
+        path.write_text(json.dumps(data))
+        return path, data
+
+    def assert_blocked(self, result, message):
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(message, result.stderr)
+        self.assertEqual(self.calls(), [], "preflight must finish before any Flutter build")
+
+    def test_release_missing_runtime_blocks_each_flavor(self):
+        for flavor in ("arm64", "x64", "all"):
+            with self.subTest(flavor=flavor):
+                self.assert_blocked(self.run_script("--release", "-f", flavor), "manifest.json")
+
+    def test_all_preflights_both_before_building_either(self):
+        self.make_bundle("arm64", 1)
+        self.assert_blocked(self.run_script("-f", "all"), "x86_64/assets/runtime/manifest.json")
+
+    def test_both_schemas_and_abis_accept_complete_bundles(self):
+        for flavor in ABIS:
+            for schema in (1, 2):
+                with self.subTest(flavor=flavor, schema=schema):
+                    self.make_bundle(flavor, schema)
+                    result = self.run_script("-f", flavor)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(len(self.calls()), 1)
+
+    def test_all_complete_flavors_build_with_one_number(self):
+        self.make_bundle("arm64", 1)
+        self.make_bundle("x64", 2)
+        result = self.run_script("-f", "all")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([args[args.index("--flavor") + 1] for args in self.calls()], ["arm64", "x64"])
+        self.assertEqual({args[args.index("--build-number") + 1] for args in self.calls()}, {"10251234"})
+
+    def test_each_archive_is_required(self):
+        for schema, kind in ((1, "rootfs"), (2, "base"), (2, "engine")):
+            with self.subTest(schema=schema, kind=kind):
+                path, data = self.make_bundle("arm64", schema)
+                name = data["rootfs"] if schema == 1 else data["layers"][kind]["asset"]
+                (path.parent / name).unlink()
+                self.assert_blocked(self.run_script(), name)
+
+    def test_each_required_jni_file_is_required(self):
+        for name in JNI:
+            with self.subTest(name=name):
+                self.make_bundle("arm64", 2)
+                (self.root / "runtime/out/arm64-v8a/jniLibs/arm64-v8a" / name).unlink()
+                self.assert_blocked(self.run_script(), name)
+
+    def test_jni_cannot_be_omitted_from_manifest(self):
+        path, data = self.make_bundle("arm64", 2)
+        del data["jniLibs"]["libproot-loader.so"]
+        path.write_text(json.dumps(data))
+        self.assert_blocked(self.run_script(), "libproot-loader.so")
+
+    def test_declared_archive_and_jni_size_and_hash_are_checked(self):
+        for item in ("archive", "jni"):
+            for field, value, message in (("bytes", 1, "size mismatch"), ("sha256", "0" * 64, "sha256 mismatch")):
+                with self.subTest(item=item, field=field):
+                    path, data = self.make_bundle("arm64", 2)
+                    record = data["layers"]["engine"] if item == "archive" else data["jniLibs"]["libproot.so"]
+                    record[field] = value
+                    path.write_text(json.dumps(data))
+                    self.assert_blocked(self.run_script(), message)
+
+    def test_wrong_abi_unknown_schema_and_mixed_manifests_fail(self):
+        cases = [(1, {"abi": "x86_64"}, "expected ABI"), (1, {"schema": 9}, "schema"),
+                 (1, {"layers": {}}, "schema 1"), (2, {"rootfs": "old.tar.xz"}, "schema 2")]
+        for schema, change, message in cases:
+            with self.subTest(change=change):
+                path, data = self.make_bundle("arm64", schema)
+                data.update(change)
+                path.write_text(json.dumps(data))
+                self.assert_blocked(self.run_script(), message)
+
+    def test_debug_and_profile_keep_allowing_no_runtime(self):
+        for mode in ("debug", "profile"):
+            with self.subTest(mode=mode):
+                result = self.run_script("--" + mode, "-f", "x64")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.calls()), 1)
+
+    def test_dry_run_does_not_require_runtime_or_invoke_flutter(self):
+        result = self.run_script("--dry-run", "-f", "all")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(result.stdout.count("flutter build apk"), 2)
+
+    def test_leading_zero_build_number_uses_one_decimal_value(self):
+        result = self.run_script("--debug", "-n", "00010251234")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.calls()), 1)
+        args = self.calls()[0]
+        self.assertEqual(args[args.index("--build-number") + 1], "10251234")
+        self.assertIn("--dart-define=DSH_APP_VERSION=1.0.0+10251234", args)
+        # The existing fake aapt2 returns integer metadata 10251234; the actual
+        # shell has completed its readback check, without running Flutter/Gradle.
+
+    def test_placeholder_build_number_is_rejected_before_flutter(self):
+        for value in ("1", "0001"):
+            with self.subTest(value=value):
+                self.assert_blocked(self.run_script("--debug", "-n", value), "reserved")
+
+    def test_invalid_custom_build_number_is_rejected_before_flutter(self):
+        for value in ("0", "0000", "2100000001"):
+            with self.subTest(value=value):
+                self.assert_blocked(self.run_script("--debug", "-n", value), "versionCode must be")
+
+    def test_extra_mode_flags_cannot_bypass_the_release_gate(self):
+        for arg in ("--release", "--profile", "--debug", "--no-debug", "--release=true"):
+            with self.subTest(arg=arg):
+                self.assert_blocked(self.run_script("--debug", "--", arg), "set by this script")
+
+
+if __name__ == "__main__":
+    unittest.main()

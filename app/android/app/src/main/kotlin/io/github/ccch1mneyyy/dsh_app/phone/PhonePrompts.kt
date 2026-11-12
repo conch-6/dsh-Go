@@ -77,7 +77,10 @@ class PhonePrompts(
             PromptContent(PromptKind.NATIVE_CONFIRM, shown.sentence.take(4096), shown, sessionId = sessionId), request.timeoutMs.coerceIn(1, 30_000),
             { enabled() && !locked() && task.isCurrent(taskOwner) }) ?: return Decision.UNAVAILABLE
         schedule(ticket)
-        return when (ticket.await().outcome) {
+        val result = ticket.await()
+        // Revocation/lock is not a user STOP. Reuse the worker interruption path.
+        if (result.outcome == PromptOutcome.STOPPED && result.reason != null) throw InterruptedException()
+        return when (result.outcome) {
             PromptOutcome.ALLOW_ONCE -> Decision.ALLOW_ONCE
             PromptOutcome.ALLOW_APP -> Decision.ALLOW_APP_FOR_TASK
             PromptOutcome.ALLOW_TASK -> Decision.ALLOW_ALL_FOR_TASK
@@ -103,7 +106,10 @@ class PhonePrompts(
         val ticket = arbiter.begin(null, task, PromptContent(PromptKind.HANDOFF, (if (sessionId == null) reason else "[$sessionId]\n$reason").take(4096), cause = cause, sessionId = sessionId),
             timeoutMs.coerceIn(1, 600_000), { enabled() && !locked() && task.isCurrent(taskOwner) }) ?: return HandoffResult.STOP
         schedule(ticket)
-        return when (ticket.await().outcome) {
+        val result = ticket.await()
+        // Revocation/lock is not a user STOP. Reuse the worker interruption path.
+        if (result.outcome == PromptOutcome.STOPPED && result.reason != null) throw InterruptedException()
+        return when (result.outcome) {
             PromptOutcome.CONTINUE -> HandoffResult.CONTINUE
             PromptOutcome.TIMEOUT -> HandoffResult.TIMEOUT
             else -> HandoffResult.STOP

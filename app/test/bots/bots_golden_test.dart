@@ -32,6 +32,7 @@ void goldenBots(
   for (final brightness in Brightness.values) {
     final mode = brightness == Brightness.dark ? 'dark' : 'light';
     testWidgets('$name ($mode)', (tester) async {
+      useBotGoldenClock();
       SharedPreferences.setMockInitialValues({});
       await tester.runAsync(loadGoldenFonts);
       tester.view.devicePixelRatio = 2;
@@ -65,13 +66,8 @@ Map<String, Object?> notice(int seq, String kind, String text, {String? roomId})
   'title': roomId == null ? null : '发布会',
   'text': text,
   // Today at a fixed clock time, so the row's time reads the same on every run.
-  'time': _today(9, 40 + seq).millisecondsSinceEpoch,
+  'time': todayAt(9, 40 + seq).millisecondsSinceEpoch,
 };
-
-DateTime _today(int hour, int minute) {
-  final now = DateTime.now();
-  return DateTime(now.year, now.month, now.day, hour, minute);
-}
 
 void main() {
   goldenBots(

@@ -181,6 +181,51 @@ void main() {
       expect(_resolve(1280, panelOpen: false).left, LeftPane.sidebar);
       expect(_resolve(1280).left, LeftPane.rail);
     });
+
+    test('a panel grid step does not fold a sidebar that already fits', () {
+      for (final width in [1312.0, 1313.0, 1314.0, 1315.0, 1316.0]) {
+        final layout = _resolve(width);
+        expect(layout.left, LeftPane.sidebar, reason: '$width');
+        expect(layout.chatRect.width, greaterThanOrEqualTo(600), reason: '$width');
+      }
+      expect(_resolve(1314).panelWidth, 392);
+      expect(_resolve(1316).panelWidth, 396);
+    });
+
+    test('a folded sidebar can still be expanded at the panel grid step', () {
+      final folded = _resolve(1314, sidebarOpen: false);
+      expect(folded.left, LeftPane.rail);
+      expect(folded.sidebarFits, isTrue);
+      expect(folded.menuAction, MenuAction.expand);
+      final unfolded = _resolve(1314);
+      expect(unfolded.menuAction, MenuAction.collapse);
+      expect(unfolded.chatRect.width, greaterThanOrEqualTo(600));
+      expect(unfolded.panelWidth, folded.panelWidth);
+    });
+
+    for (final padding in [
+      EdgeInsets.zero,
+      const EdgeInsets.only(right: 16),
+      const EdgeInsets.only(left: 32),
+      const EdgeInsets.symmetric(horizontal: 48),
+      const EdgeInsets.fromLTRB(17, 24, 41, 16),
+    ]) {
+      test('sidebar availability is monotonic with $padding', () {
+        var fitted = false;
+        for (var width = 840.0; width <= 1600; width += 0.25) {
+          final layout = _resolve(width, padding: padding);
+          final reason = '$width, $padding';
+          if (fitted) expect(layout.sidebarFits, isTrue, reason: reason);
+          fitted = layout.sidebarFits;
+          if (layout.left == LeftPane.sidebar) {
+            expect(layout.chatRect.width, greaterThanOrEqualTo(600), reason: reason);
+            expect(layout.panelWidth, inInclusiveRange(360, 420), reason: reason);
+            expect(layout.panelWidth % 4, 0, reason: reason);
+          }
+        }
+        expect(fitted, isTrue);
+      });
+    }
   });
 
   test('equal inputs, equal layouts', () {

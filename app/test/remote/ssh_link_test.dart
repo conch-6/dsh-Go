@@ -43,11 +43,12 @@ void main() {
     HostKeyPinner? pin,
     Backoff? backoff,
     bool retryFirstOpen = true,
+    SshSecrets secrets = const SshSecrets(password: 'pw'),
     StreamController<void>? kicks,
   }) {
     final l = SshHostLink(
       config: config,
-      loadSecrets: () async => const SshSecrets(password: 'pw'),
+      loadSecrets: () async => secrets,
       promptHostKey: prompt,
       pinHostKey: pin,
       transportFactory: server.connect,
@@ -86,12 +87,12 @@ void main() {
     expect(l.currentClient, same(original));
   });
 
-  test('a refused reused port forces just one fresh server', () async {
+  test('a refused reused port never replaces a live server', () async {
     server.remote.pid = 500;
     server.remote.tunnelErrors.add(const TunnelRefused());
     final l = link();
     await l.open();
-    expect(server.remote.launches, 1);
+    expect(server.remote.launches, 0);
     expect(l.status.isConnected, isTrue);
   });
 
@@ -111,14 +112,119 @@ void main() {
     expect(server.remote.launches, 1);
   });
 
-  test('a token rejected by a reused DSH restarts it once', () async {
+  test('a token rejected by a reused DSH is final and never kills it', () async {
     server.remote.pid = 500;
     connector.failNext.add(const DshHttpException(401, 'stale'));
     final l = link();
-    await l.open();
-    expect(connector.calls, hasLength(2));
-    expect(server.remote.launches, 1);
+    await expectLater(l.open(), throwsA(isA<HostLinkError>().having((e) => e.retryable, 'retryable', isFalse)));
+    expect(connector.calls, hasLength(1));
+    expect(server.remote.launches, 0);
+    expect(server.remote.pid, 500);
   });
+
+  for (final missingLog in [false, true]) {
+    test('live but non-reusable process survives (missing log: $missingLog)', () async {
+      server.remote.pid = 500;
+      server.remote.sameCommand = missingLog;
+      server.remote.hasLaunchLine = !missingLog;
+      final l = link();
+      await expectLater(l.open(), throwsA(isA<HostLinkError>().having((e) => e.retryable, 'retryable', isFalse)));
+      expect(server.remote.launches, 0);
+      expect(server.remote.pid, 500);
+      expect(server.last.scripts, hasLength(1));
+      expect(server.last.tunnels, isEmpty);
+    });
+  }
+
+  test('explicit managed restart replaces a live instance', () async {
+    server.remote.pid = 500;
+    final l = link();
+    await l.restartManaged();
+    expect(server.remote.launches, 1);
+    expect(server.last.scripts.single, contains('kill "\$P"'));
+  });
+
+  test('one restart action is not reused after a transient login failure', () async {
+    server.remote.pid = 500;
+    connector.failNext.add(const DshTransportException('temporary'));
+    final l = link();
+    await l.restartManaged();
+    expect(server.remote.launches, 1);
+    expect(server.transports.expand((t) => t.scripts).where((s) => s.contains(r'kill "$P"')), hasLength(1));
+  });
+
+  test('failed SSH authentication consumes restart consent before ordinary open', () async {
+    server.remote.pid = 500;
+    server.failNext.add(const HostLinkError(HostLinkErrorKind.authFailed, 'denied'));
+    final l = link();
+    await expectLater(l.restartManaged(), throwsA(isA<HostLinkError>()));
+    await l.open();
+    expect(server.remote.pid, 500);
+    expect(server.remote.launches, 0);
+    expect(server.last.scripts, hasLength(1));
+    expect(server.last.scripts.single, isNot(contains(r'kill "$P"')));
+  });
+
+  test('a network retry cannot inherit restart consent from the failed SSH attempt', () async {
+    server.remote.pid = 500;
+    server.failNext.add(const HostLinkError(HostLinkErrorKind.unreachable, 'offline', retryable: true));
+    final l = link();
+    await l.restartManaged();
+    expect(server.connects, hasLength(2));
+    expect(server.remote.pid, 500);
+    expect(server.remote.launches, 0);
+    expect(server.last.scripts.single, isNot(contains(r'kill "$P"')));
+  });
+
+  test('compression preference reaches SSH connection parameters', () {
+    expect(SshConnectParams.of(sampleSsh, const SshSecrets()).compression, isTrue);
+    expect(SshConnectParams.of(sampleSsh.copyWith(compression: false), const SshSecrets()).compression, isFalse);
+  });
+
+  test('attach-only opens the fixed loopback port and never executes shell commands', () async {
+    server.remote.pid = 500;
+    final l = link(
+      config: sampleSsh.copyWith(dshMode: SshDshMode.attachOnly, remotePort: server.remote.port),
+      secrets: const SshSecrets(password: 'pw', attachToken: 'existing-token'),
+    );
+    await l.open();
+    expect(server.last.scripts, isEmpty);
+    expect(server.last.tunnels.single, ('127.0.0.1', server.remote.port));
+    expect(connector.calls.single.token, 'existing-token');
+    expect(connector.calls.single.hostHeader, '127.0.0.1:${server.remote.port}');
+    await expectLater(l.restartManaged(), throwsStateError);
+    await l.close();
+    expect(server.remote.launches, 0);
+    expect(server.remote.pid, 500);
+    expect(server.transports.expand((t) => t.scripts), isEmpty);
+  });
+
+  test('attach-only missing token fails without bootstrap', () async {
+    final l = link(config: sampleSsh.copyWith(dshMode: SshDshMode.attachOnly));
+    await expectLater(l.open(), throwsA(isA<HostLinkError>()));
+    expect(server.last.scripts, isEmpty);
+    expect(server.last.tunnels, isEmpty);
+  });
+
+  for (final loginFailure in [false, true]) {
+    test('attach-only failure never starts a server (login: $loginFailure)', () async {
+      server.remote.pid = 500;
+      if (loginFailure) {
+        connector.failNext.add(const DshHttpException(401, 'rejected'));
+      } else {
+        server.remote.tunnelErrors.add(const TunnelRefused());
+      }
+      final l = link(
+        config: sampleSsh.copyWith(dshMode: SshDshMode.attachOnly, remotePort: server.remote.port),
+        secrets: const SshSecrets(password: 'pw', attachToken: 'existing-token'),
+      );
+      await expectLater(l.open(), throwsA(isA<HostLinkError>()));
+      expect(server.transports, hasLength(1));
+      expect(server.last.scripts, isEmpty);
+      expect(server.remote.launches, 0);
+      expect(server.remote.pid, 500);
+    });
+  }
 
   test('first connect walks every step and logs in through the tunnel', () async {
     final l = link();

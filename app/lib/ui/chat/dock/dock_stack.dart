@@ -243,6 +243,8 @@ class _FoldButton extends StatelessWidget {
         key: const ValueKey('dock-fold'),
         tier: GlassTier.chrome,
         stadium: true,
+        // One backdrop sample with the deck's bars.
+        grouped: true,
         onTap: onTap,
         child: SizedBox.square(
           dimension: DockStackMetrics.foldSize,

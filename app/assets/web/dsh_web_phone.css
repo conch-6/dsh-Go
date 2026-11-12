@@ -40,6 +40,18 @@
 
 /* ── Both layouts ─────────────────────────────────────────────────────────── */
 
+/* The main slot holds plugin pages and the official conversation. A subtree
+   can keep its own geometry with data-dsh-adapt="off", including on html or
+   main itself. Range/switch controls keep their authored track/thumb sizes. */
+@media (pointer: coarse) {
+  :root[data-dsh-app-layout] [data-slot="main"] :is(button, [role="button"], select, input):not([role="switch"], [role="slider"], [type="range"], [type="hidden"], [hidden], [hidden] *, [data-dsh-adapt="off"], [data-dsh-adapt="off"] *) {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+  /* Inline links/spans also need the low-priority display default installed
+     by dsh_web_phone.js before the page's styles. */
+}
+
 /* Full-screen layers clear the app's controls and the gesture bar. The app
    pins #root inside the safe area (--dsh-app-inset-*); modal backdrops are
    fixed to the viewport, so they get the same insets here (the drawer below

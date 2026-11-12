@@ -20,7 +20,7 @@ from unittest import mock
 
 import apk_delta
 from build_number import MAX_VERSION_CODE
-from release_assets import BADGING_RE, ReleaseError, check_abis, patch_from, previous_releases, published_apk, release_build
+from release_assets import BADGING_RE, ReleaseError, check_abis, find_aapt2, patch_from, previous_releases, published_apk, release_build
 
 # Stands in for gh: `release list` prints $FAKE_RELEASES, `release download`
 # copies the asset files from $FAKE_ASSETS/<tag>/; every call goes to $FAKE_LOG.
@@ -62,6 +62,26 @@ def sha(path):
 
 
 class ReleaseBuildTest(unittest.TestCase):
+    def test_sdk_tool_lookup_uses_platform_filename_newest_version_and_path_first(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for platform, filename in (("win32", "aapt2.exe"), ("linux", "aapt2")):
+                with self.subTest(platform=platform):
+                    sdk = root / platform / "Android SDK"
+                    for version in ("35.0.9", "35.0.10"):
+                        tool = sdk / "build-tools" / version / filename
+                        tool.parent.mkdir(parents=True)
+                        tool.write_bytes(b"not executed")
+                    with mock.patch("release_assets.ROOT", root), \
+                            mock.patch("release_assets.sys.platform", platform), \
+                            mock.patch("release_assets.shutil.which", return_value=None) as which, \
+                            mock.patch.dict(os.environ, {"ANDROID_HOME": str(sdk), "ANDROID_SDK_ROOT": ""}):
+                        self.assertEqual(find_aapt2(), str(sdk / "build-tools" / "35.0.10" / filename))
+                        preferred = root / filename
+                        preferred.write_bytes(b"not executed")
+                        which.return_value = str(preferred)
+                        self.assertEqual(find_aapt2(), str(preferred))
+
     def test_both_flavors_agree(self):
         apks = {"arm64": ("1.2.0", 10251234), "x64": ("1.2.0", 10251234)}
         self.assertEqual(release_build("1.2.0", None, apks), 10251234)
@@ -132,6 +152,36 @@ class DeltaTest(unittest.TestCase):
             self.assertIsNone(patch_from(old, "1.0.7+10311844", new, "1.0.8", self.dir / "out"))
         self.assertIn("left out", out.getvalue())
         self.assertEqual(list((self.dir / "out").iterdir()), [])
+
+    def add_base_layer(self, path, data):
+        asset = "base-arm64-v8a.tar.xz"
+        with zipfile.ZipFile(path, "a") as archive:
+            # This diagnostic compares the actual asset, not a possibly stale declared digest.
+            archive.writestr("assets/runtime/manifest.json", json.dumps({"schema": 2, "layers": {
+                "base": {"asset": asset, "sha256": "a" * 64}}}))
+            archive.writestr("assets/runtime/" + asset, data)
+
+    def test_base_warning_compares_actual_bytes_and_does_not_reject_patch(self):
+        old, new = apk(self.dir / "old.apk", 1), apk(self.dir / "new.apk", 2, libapp_seed=1)
+        self.add_base_layer(old, b"old base bytes")
+        self.add_base_layer(new, b"new base bytes")
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            patch = patch_from(old, "1.0.7+10311844", new, "1.0.8", self.dir / "out")
+        self.assertIsNotNone(patch)
+        self.assertEqual(output.getvalue().count("WARNING: base layer SHA-256 changed"), 1)
+        apk_delta.apply(old, self.dir / "out" / patch["name"], self.dir / "again.apk")
+        self.assertEqual((self.dir / "again.apk").read_bytes(), new.read_bytes())
+
+    def test_unchanged_base_and_legacy_transition_do_not_claim_a_changed_base(self):
+        for legacy in [False, True]:
+            with self.subTest(legacy=legacy):
+                old, new = apk(self.dir / "old.apk", 1), apk(self.dir / "new.apk", 2, libapp_seed=1)
+                if not legacy:
+                    self.add_base_layer(old, b"same base bytes")
+                self.add_base_layer(new, b"same base bytes")
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertIsNotNone(patch_from(old, "1.0.7+10311844", new, "1.0.8", self.dir / "out"))
+                self.assertNotIn("WARNING: base layer", output.getvalue())
 
 
 class PublishedTest(unittest.TestCase):

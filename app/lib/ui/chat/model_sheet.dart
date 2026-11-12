@@ -1024,7 +1024,13 @@ class _EmptyCatalog extends StatelessWidget {
       icon: AppIcons.noApiKey,
       title: l10n.viewModelNone,
       message: failure != null && failure.isNotEmpty ? failure : l10n.viewModelKeyHint,
-      action: FilledButton(onPressed: () => push(const ProvidersPage()), child: Text(l10n.viewModelManageProviders)),
+      // An empty picker has no selection to resume after provider management.
+      action: FilledButton(
+        onPressed: () =>
+            Navigator.of(context)
+                .pushReplacement<void, void>(MaterialPageRoute<void>(builder: (_) => const ProvidersPage())),
+        child: Text(l10n.viewModelManageProviders),
+      ),
     );
   }
 }

@@ -20,6 +20,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'binary_response.dart';
 import 'connection.dart';
@@ -208,14 +209,11 @@ class _WebSocketMuxLink implements DshMuxLink {
   @override
   void start({required DshMuxFrameHandler onFrame, required DshMuxLossHandler onLost}) {
     _onLost = onLost;
-    _socket.listen(
-      (data) {
+    final frames = _socket.asyncMap((data) => _lost ? null : _decodeMuxFrame(data));
+    frames.listen(
+      (decoded) {
         if (_lost) return;
-        if (data is! String) {
-          _protocolFailure('binary WebSocket message');
-          return;
-        }
-        final frame = asMap(tryDecodeJson(data));
+        final frame = asMap(decoded);
         final streamId = asString(frame?['streamId']);
         final type = asString(frame?['type']);
         if (frame == null ||
@@ -228,7 +226,13 @@ class _WebSocketMuxLink implements DshMuxLink {
         _tracer?.call(DshTraceEntry('in', 'mux', frame));
         onFrame(frame);
       },
-      onError: (Object error) => _lose(DshCarrierLostException('WebSocket error: $error'), null),
+      onError: (Object error) {
+        if (error is DshProtocolException) {
+          _protocolFailure(error.message);
+        } else {
+          _lose(DshCarrierLostException('WebSocket error: $error'), null);
+        }
+      },
       onDone: () => _lose(
         DshCarrierLostException(
           'WebSocket closed (${_socket.closeCode ?? 'no code'} ${_socket.closeReason ?? ''})'.trim(),
@@ -273,4 +277,12 @@ class _WebSocketMuxLink implements DshMuxLink {
     _lost = true;
     await _socket.close(code, reason);
   }
+}
+
+FutureOr<Object?> _decodeMuxFrame(Object? data) {
+  if (data is! String) throw const DshProtocolException('binary WebSocket message');
+  // Large follow snapshots must not block input while decoding. Small control
+  // frames stay synchronous; asyncMap preserves their order around the worker.
+  if (data.length < 1024 * 1024) return tryDecodeJson(data);
+  return Isolate.run(() => tryDecodeJson(data), debugName: 'dsh-mux-json');
 }

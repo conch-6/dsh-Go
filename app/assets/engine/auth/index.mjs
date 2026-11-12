@@ -4,6 +4,7 @@
 // Claude) to the app as the `appAuth` Remote service:
 //
 //   appAuth/list                  → {providers: [{id, signedIn, account?}]}
+//   appAuth/usage {provider}      → {provider, status, windows, plan?}
 //   appAuth/begin  {provider}     → {attemptId}
 //   appAuth/poll   {attemptId}    → {phase, url?, userCode?, message?, placeholder?, error?}
 //   appAuth/answer {attemptId, value} → {}
@@ -57,7 +58,7 @@ async function hostImport(specifier) {
 const { TypertRemoteService, Remote, RemoteError } = await hostImport('@deepseek-ai/dsh-typert-protocol')
 
 /** The Remote methods, by implementation name (= wire method name). */
-const REMOTE_METHODS = ['list', 'begin', 'poll', 'answer', 'cancel', 'signOut']
+const REMOTE_METHODS = ['list', 'usage', 'begin', 'poll', 'answer', 'cancel', 'signOut']
 const markRemoteMethods = []
 
 export default class AppAuth extends TypertRemoteService {
@@ -75,6 +76,10 @@ export default class AppAuth extends TypertRemoteService {
 
   list() {
     return this.bridge.list()
+  }
+
+  usage(provider) {
+    return this.bridge.usage(provider)
   }
 
   begin(provider) {

@@ -168,6 +168,7 @@
   "stateDrawerEarlier": "更早",
   "stateEngineAuthFailed": "没能通过引擎的验证",
   "stateChatMissing": "这个对话已经不在了",
+  "stateChatFormatUnsupported": "当前引擎无法读取此对话的日志格式，请导出诊断包排查",
   "stateEngineUnsupported": "当前引擎版本不支持",
   "stateEngineServiceUnavailable": "所需的引擎服务未就绪，请查看引擎日志或导出诊断包",
   "stateEngineOperationUnavailable": "引擎当前无法执行此操作，请查看引擎日志",

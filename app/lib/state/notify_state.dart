@@ -217,8 +217,9 @@ AlertDelivery deliveryFor(
   bool petOnScreen = false,
 }) {
   if (!prefs.allows(alert.kind)) return AlertDelivery.none;
-  if (viewed != null && viewed.host == alert.host && viewed.sessionId == alert.sessionId) return AlertDelivery.none;
+  // A lifecycle listener may still see the last foreground viewed target.
   if (!foreground) return AlertDelivery.system;
+  if (viewed != null && viewed.host == alert.host && viewed.sessionId == alert.sessionId) return AlertDelivery.none;
   return petOnScreen ? AlertDelivery.pet : AlertDelivery.banner;
 }
 
@@ -339,16 +340,17 @@ class ChatAlertsController extends Notifier<ChatAlert?> {
       }
     });
     ref.listen(appForegroundProvider, (_, foreground) {
-      // Leaving the app with a banner up: keep it as a notification.
+      // Attention banners are recovered from pending requests below, exactly
+      // once. Only terminal banners need a separate migration to the shade.
       final banner = _banner;
       if (!foreground && banner != null) {
         _banner = null;
-        if (!banner.kind.attention || !banner.host.isLocal) unawaited(_channel.show(postFor(banner)));
+        if (!banner.kind.attention) unawaited(_channel.show(postFor(banner)));
       }
       if (!foreground) {
-        // An approval can already be visible in the chat when the person
-        // leaves for another app. It still needs an operational prompt.
-        final pending = _trackers[HostRef.local]?.$2.pendingAlerts.toList() ?? const <ChatAlert>[];
+        // A request may have been quiet because its conversation was visible.
+        // Revisit every host; only local requests can use the phone prompt.
+        final pending = [for (final (_, tracker) in _trackers.values) ...tracker.pendingAlerts];
         for (final alert in pending) {
           if (!_offerPhonePrompt(alert)) _deliver(alert);
         }

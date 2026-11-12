@@ -44,10 +44,13 @@ class PhoneTaskSessionsTest {
     @Volatile private var cancelScope: (PhoneTaskSessions.Task, PhoneTasks.Snapshot) -> Unit = { task, state ->
         if (state.stopped) task.activeWorker?.interruptCurrent(task.tasks)
     }
+    @Volatile private var enabled = true
+    @Volatile private var locked = false
+    @Volatile private var beforeRecoveryRead: () -> Unit = {}
     private val env = object : PhoneEnv {
-        override fun enabled() = true
+        override fun enabled() = enabled
         override fun policies() = PhonePolicies()
-        override fun isLocked() = false
+        override fun isLocked() = locked
         override fun gate() = object : UserGate {
             override fun confirm(request: ConfirmRequest) = this@PhoneTaskSessionsTest.confirm(request)
             override fun handoff(reason: String, timeoutMs: Long) = HandoffResult.STOP
@@ -86,11 +89,19 @@ class PhoneTaskSessionsTest {
     private var journalBytes: String? = null
     @Volatile private var journalCommit: (String) -> Boolean = { journalBytes = it; true }
     @Volatile private var recoveryAdmission: () -> String? = { null }
+    private var skillEpoch: Long? = null
+    private var completeSkill: (PhoneTasks.Owner, Long, String) -> Boolean = { _, _, _ -> false }
     private val journal = PhoneTaskJournal({ journalBytes }, { journalCommit(it) })
     // Deadline reads must not trip the Tasks.begin barrier used by the reserved-successor test.
     private val sessions = PhoneTaskSessions(time::get, ids::incrementAndGet,
         { tasks, _ -> PhoneCore(env, tasks, ActionLog(), worker) }, legacy, legacyCore, { changed() }, settleResources = { cleanup(it) }, dispatchCleanup = { cleanupDispatch(it) }, cancelScope = { task, state -> cancelScope(task, state) },
         journal = journal, recoveryAdmission = { recoveryAdmission() },
+        screenRecoveryReady = {
+            val ready = env.enabled() && !env.isLocked()
+            beforeRecoveryRead()
+            ready
+        },
+        startSkillScope = { skillEpoch }, completeSkillScope = { owner, epoch, result -> completeSkill(owner, epoch, result) },
         prepareBackground = { _, _ -> backgroundPreparations.incrementAndGet(); null },
         createBackgroundWorker = { SerialWorker("session-background", time::get) { false }.also { backgroundWorkers += it } })
     private fun admit(session: String?, run: String = "1") = sessions.admit(session?.let { PhoneCaller(it, run, "call", runLifecycle = 1) })
@@ -121,6 +132,332 @@ class PhoneTaskSessionsTest {
             assertTrue(sessions.run(admit("A"), PhoneToolCatalog.APPS, emptyMap()).isError)
             assertEquals(true, sessions.callerCapability()["modernSeen"])
         } finally { sessions.releaseSelfCheck(lease) }
+    }
+
+    @Test fun coldStopAllInvalidatesOldAdmissionAndPromptWithoutAStoppedEdgeOrHold() {
+        val prompt = checkNotNull(legacy.beforeTaskOwner())
+        val queued = admit(null)
+        val notices = mutableListOf<PhoneTasks.Snapshot>()
+        legacy.addListener { notices += it }
+        sessions.stopAll("screen off")
+        assertFalse(legacy.isCurrent(prompt))
+        assertFalse(legacy.isStopped())
+        assertTrue(notices.isNotEmpty())
+        assertTrue(notices.none { it.stopped })
+        assertTrue(sessions.snapshot().none { it["stopped"] == true })
+        assertTrue(sessions.run(queued, PhoneToolCatalog.APPS, emptyMap()).isError)
+        assertEquals(0L, legacy.snapshot().id)
+        assertFalse(invoke(null).isError) // No 30-second delay for a genuinely new admission.
+    }
+
+    @Test fun stopAllFencesAnUnstartedModernCallWithoutPoisoningItsSession() {
+        val queued = admit("A")
+        val record = task("A")
+        val before = record.tasks.snapshot()
+        sessions.stopAll("screen off")
+        assertTrue(record.tasks.snapshot().lifecycle > before.lifecycle)
+        assertFalse(record.tasks.isStopped())
+        assertFalse(record.stopped)
+        assertTrue(sessions.run(queued, PhoneToolCatalog.APPS, emptyMap()).isError)
+        assertEquals(0L, record.tasks.snapshot().id)
+        assertFalse(invoke("A").isError)
+        assertFalse(invoke("A", "2").isError)
+    }
+
+    @Test fun stopAllDoesNotFenceAFinishedSessionsNextRunOrReopenItsEndedRun() {
+        assertFalse(invoke("A").isError)
+        end("A")
+        val finished = task("A")
+        assertFalse(finished.tasks.snapshot().active)
+        sessions.stopAll("screen off")
+        assertFalse(finished.tasks.isStopped())
+        assertFalse(finished.stopped)
+        assertTrue(invoke("A").isError) // The exact host run-end fence is still permanent.
+        assertFalse(invoke("A", "2").isError)
+    }
+
+    @Test fun stopAllEndsAnIdleProjectedLegacyScopeWithoutHoldingOrKeepingItsApprovals() {
+        assertFalse(invoke(null).isError)
+        val oldOwner = checkNotNull(legacy.activeOwner())
+        legacy.approve("example.app"); legacy.waive()
+        time.addAndGet(legacy.idleMs + 1)
+        assertFalse(legacy.snapshot().active)
+        assertTrue(legacy.isActive)
+        sessions.stopAll("screen off")
+        assertFalse(legacy.isActive)
+        assertFalse(legacy.isStopped())
+        assertFalse(legacy.isCurrent(oldOwner))
+        assertFalse(legacy.isApproved("example.app"))
+        assertFalse(legacy.isWaived)
+        assertEquals(0, journalCount())
+        assertFalse(invoke(null).isError)
+        assertNotEquals(oldOwner.taskId, legacy.snapshot().id)
+    }
+
+    @Test fun stopAllStillStopsAPausedTaskEvenBeyondItsIdleTimeout() {
+        assertFalse(invoke(null).isError)
+        legacy.setPaused(true)
+        time.addAndGet(legacy.idleMs + 1)
+        sessions.stopAll("screen off")
+        assertFalse(legacy.isPaused)
+        assertTrue(legacy.isStopped())
+        assertTrue(invoke(null).isError)
+    }
+
+    @Test fun repeatedAmbientStopDoesNotRenewAnInactiveTasksExistingHold() {
+        assertFalse(invoke(null).isError)
+        sessions.stopAll("first stop")
+        val stoppedEpoch = legacy.admissionEpoch()
+        time.addAndGet(legacy.stopHoldMs / 2)
+        sessions.stopAll("second screen-off receiver")
+        assertTrue(legacy.admissionEpoch() > stoppedEpoch)
+        assertTrue(legacy.isStopped())
+        assertEquals("first stop", legacy.snapshot().stopReason)
+        time.addAndGet(legacy.stopHoldMs - legacy.stopHoldMs / 2)
+        assertFalse(legacy.isStopped())
+        assertFalse(invoke(null).isError)
+    }
+
+    @Test fun environmentStopStillFencesLaterRunsUntilExplicitResume() {
+        assertFalse(invoke("A").isError)
+        val record = task("A")
+        sessions.stopAll("screen off")
+        time.addAndGet(record.tasks.stopHoldMs + 1)
+        assertFalse(record.tasks.isStopped())
+        assertTrue(invoke("A", "2").isError)
+        end("A")
+        assertTrue(invoke("A", "2").isError)
+        assertTrue(sessions.resume(record))
+        assertFalse(invoke("A", "2").isError)
+    }
+
+    @Test fun unlockedScreenStopAdmitsOnlyANewRunAndNeverRevivesOldAdmissionsOrGrants() {
+        assertFalse(invoke("A").isError)
+        val old = task("A")
+        val owner = checkNotNull(old.tasks.activeOwner())
+        old.tasks.approve("example.app"); old.tasks.waive()
+        val queued = admit("A")
+        val cold = admit("A", "cold")
+        sessions.stopAll("screen off", PhoneTasks.StopSource.SCREEN_OFF)
+        assertTrue(invoke("A", "2").isError) // Old admitted calls have not drained.
+        assertTrue(sessions.run(queued, PhoneToolCatalog.APPS, emptyMap()).isError)
+        assertTrue(sessions.run(cold, PhoneToolCatalog.APPS, emptyMap()).isError)
+        assertFalse(invoke("A", "2").isError)
+        assertTrue(old.stopped); assertTrue(task("A", "cold").stopped)
+        assertTrue(invoke("A").isError); assertTrue(invoke("A", "cold").isError)
+        assertFalse(old.tasks.isCurrent(owner))
+        assertFalse(old.tasks.confirmIfCurrent(owner, pkg = "late.app", waiveTask = true))
+        assertFalse(old.tasks.systemDispatch(owner).commitStart())
+        assertFalse(old.tasks.isApproved("late.app"))
+        assertFalse(old.tasks.isApproved("example.app")); assertFalse(old.tasks.isWaived)
+        val fresh = task("A", "2")
+        assertFalse(fresh.tasks.isApproved("example.app")); assertFalse(fresh.tasks.isWaived)
+        end("A") // A late old host end cannot finish or stop the successor.
+        assertTrue(fresh.tasks.snapshot().active)
+        assertFalse(invoke("A", "2").isError)
+    }
+
+    @Test fun screenRecoveryRequiresActualEnabledUnlockedAndAnUnseenNonEndedRun() {
+        assertFalse(invoke("A").isError)
+        sessions.stopAll("screen off", PhoneTasks.StopSource.SCREEN_OFF)
+        locked = true
+        assertTrue(invoke("A", "2").isError)
+        locked = false; enabled = false
+        assertTrue(invoke("A", "2").isError)
+        enabled = true
+        end("A", "already-ended")
+        assertTrue(invoke("A", "already-ended").isError)
+        assertTrue(invoke("A").isError)
+        end("A") // Host end before the next run is also supported.
+        assertFalse(invoke("A", "2").isError)
+        assertTrue(invoke("A").isError)
+    }
+
+    @Test fun aReadySampleFromBeforeScreenOffCannotClearTheNewStopFence() {
+        assertFalse(invoke("A").isError)
+        val sampled = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        beforeRecoveryRead = {
+            beforeRecoveryRead = {}
+            sampled.countDown()
+            check(release.await(2, TimeUnit.SECONDS))
+        }
+        val raced = pool.submit<PhoneTaskSessions.Admission> { admit("A", "2") }
+        try {
+            check(sampled.await(2, TimeUnit.SECONDS))
+            locked = true
+            sessions.stopAll("screen off", PhoneTasks.StopSource.SCREEN_OFF)
+        } finally {
+            release.countDown()
+        }
+        val refused = raced.get(2, TimeUnit.SECONDS)
+        assertNull(refused.task)
+        assertTrue(sessions.run(refused, PhoneToolCatalog.APPS, emptyMap()).isError)
+        assertTrue(invoke("A", "2").isError)
+        locked = false
+        assertFalse(invoke("A", "2").isError)
+        assertTrue(invoke("A").isError)
+    }
+
+    @Test fun nonScreenStopRevokesRecoveryBeforeAfterHoldExpiryAndAfterHostEnd() {
+        for (boundary in listOf("user", "service", "expired", "ended")) {
+            assertFalse(invoke(boundary).isError)
+            val old = task(boundary)
+            sessions.stopAll("screen off", PhoneTasks.StopSource.SCREEN_OFF)
+            if (boundary == "expired") time.addAndGet(old.tasks.stopHoldMs + 1)
+            if (boundary == "ended") end(boundary)
+            if (boundary == "user") assertTrue(sessions.stop(old, "user stop"))
+            else sessions.stopAll("service left", PhoneTasks.StopSource.ENVIRONMENT)
+            sessions.stopAll("second screen receiver", PhoneTasks.StopSource.SCREEN_OFF)
+            assertTrue(invoke(boundary, "2").isError)
+        }
+    }
+
+    @Test fun aPriorUserOrEnvironmentStopCannotBecomeScreenRecoverable() {
+        for (source in listOf(PhoneTasks.StopSource.USER, PhoneTasks.StopSource.ENVIRONMENT)) {
+            val session = source.name
+            assertFalse(invoke(session).isError)
+            if (source == PhoneTasks.StopSource.USER) assertTrue(sessions.stop(task(session), "user stop"))
+            else sessions.stopAll("disabled", source)
+            sessions.stopAll("screen off", PhoneTasks.StopSource.SCREEN_OFF)
+            time.addAndGet(task(session).tasks.stopHoldMs + 1)
+            sessions.stopAll("second screen receiver", PhoneTasks.StopSource.SCREEN_OFF)
+            assertTrue(invoke(session, "2").isError)
+        }
+    }
+
+    @Test fun screenRecoveryWaitsForTheActualRunningPreparationToReturn() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        lookup = { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+        val running = pool.submit<ToolOutput> { invoke("A") }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            sessions.stopAll("screen off", PhoneTasks.StopSource.SCREEN_OFF)
+            assertTrue(task("A").running); assertEquals(1, task("A").pending)
+            assertTrue(invoke("A", "2").isError)
+            release.countDown()
+            assertTrue(running.get(5, TimeUnit.SECONDS).isError)
+            lookup = {}
+            assertFalse(invoke("A", "2").isError)
+        } finally { release.countDown() }
+    }
+
+    @Test fun screenRecoveryWaitsForCancellationSideEffectsToFinish() {
+        assertFalse(invoke("A").isError)
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        cancelScope = { record, _ ->
+            if (record.sessionId == "A") { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+        }
+        val stopping = pool.submit { sessions.stopAll("screen off", PhoneTasks.StopSource.SCREEN_OFF) }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertTrue(task("A").cancelling)
+            assertTrue(invoke("A", "2").isError)
+            release.countDown(); stopping.get(5, TimeUnit.SECONDS)
+            assertFalse(invoke("A", "2").isError)
+        } finally { release.countDown() }
+    }
+
+    @Test fun screenRecoveryCannotSkipAnUnsettledCancelledSkillScope() {
+        skillEpoch = 7L
+        val completions = AtomicLong()
+        completeSkill = { _, epoch, _ -> assertEquals(7L, epoch); completions.incrementAndGet(); error("unsettled skill") }
+        assertFalse(invoke("A").isError)
+        sessions.stopAll("screen off", PhoneTasks.StopSource.SCREEN_OFF)
+        val old = task("A")
+        assertTrue(old.resourcesReleased)
+        assertTrue(old.cleanupFailed); assertFalse(checkNotNull(old.skillScope).settled)
+        assertTrue(invoke("A", "2").isError)
+        completeSkill = { _, _, _ -> completions.incrementAndGet(); true }
+        assertTrue(sessions.retryCleanup(old.tasks.snapshot().id))
+        assertTrue(checkNotNull(old.skillScope).settled)
+        assertEquals(2L, completions.get())
+        assertFalse(invoke("A", "2").isError)
+    }
+
+    @Test fun screenRecoveryWaitsForClosingPhysicalCleanupAndExplicitFailureRetry() {
+        assertFalse(invoke("A", tool = PhoneToolCatalog.SCREEN).isError)
+        val old = task("A")
+        val cleanups = mutableListOf<() -> Unit>()
+        cleanupDispatch = { cleanups += it }
+        sessions.stopAll("screen off", PhoneTasks.StopSource.SCREEN_OFF)
+        assertTrue(old.closing)
+        assertTrue(invoke("A", "2").isError)
+        cleanup = { error("unconfirmed physical release") }
+        cleanups.removeAt(0).invoke()
+        assertTrue(old.cleanupFailed); assertFalse(old.resourcesReleased)
+        assertTrue(invoke("A", "2").isError)
+        cleanupDispatch = { it() }; cleanup = {}
+        assertTrue(sessions.retryCleanup(old.tasks.snapshot().id))
+        assertFalse(invoke("A", "2").isError)
+        assertTrue(invoke("A").isError)
+    }
+
+    @Test fun screenRecoveryWaitsForJournalSettlementAndRetireDropsEligibility() {
+        assertFalse(invoke("A").isError)
+        journalCommit = { false }
+        sessions.stopAll("screen off", PhoneTasks.StopSource.SCREEN_OFF)
+        assertTrue(task("A").journalFailed)
+        assertTrue(invoke("A", "2").isError)
+        journalCommit = { journalBytes = it; true }
+        assertTrue(sessions.retryJournalStorage())
+        assertFalse(invoke("A", "2").isError)
+        sessions.stopAll("screen off again", PhoneTasks.StopSource.SCREEN_OFF)
+        sessions.retire()
+        assertFalse(invoke("A").isError) // A new launch, not recovery of an old Task.
+        assertFalse(task("A").stopped)
+    }
+
+    @Test fun stopAllExportsTheStopTimeFactWithoutAnEarlierActiveDelivery() {
+        val delivered = legacy.snapshot().toMap()
+        assertFalse(invoke(null).isError)
+        sessions.stopAll("screen off")
+        assertEquals(false, delivered["active"])
+        assertEquals(true, legacy.snapshot().toMap()["interrupted"])
+        val wire = sessions.snapshot().single { it["sessionId"] == null }
+        assertEquals(true, wire["stopped"])
+        assertEquals(true, wire["interrupted"])
+    }
+
+    @Test fun normalFinishImmediatelyBeforeStopAllDoesNotInterruptTheOldDeliveredActiveTask() {
+        assertFalse(invoke(null).isError)
+        val delivered = legacy.snapshot()
+        val record = sessions.all().single { it.sessionId == null }
+        assertNotNull(sessions.finish(record))
+        sessions.stopAll("screen off")
+        assertTrue(delivered.active)
+        assertEquals(false, legacy.snapshot().toMap()["interrupted"])
+        assertFalse(legacy.snapshot().stopped)
+        assertEquals(false, sessions.snapshot().single { it["sessionId"] == null }["interrupted"])
+    }
+
+    @Test fun idleStopAllIsNotInterruptedEvenThoughTheInternalLifetimeStillExists() {
+        assertFalse(invoke(null).isError)
+        time.addAndGet(legacy.idleMs + 1)
+        assertTrue(legacy.isActive)
+        sessions.stopAll("screen off")
+        assertFalse(legacy.snapshot().stopped)
+        assertFalse(legacy.snapshot().interrupted)
+        assertFalse(invoke(null).isError)
+        assertFalse(legacy.snapshot().interrupted)
+    }
+
+    @Test fun environmentInterruptionExpiresWithoutRemovingTheModernSessionStopFence() {
+        assertFalse(invoke("A").isError)
+        val record = task("A")
+        sessions.stopAll("first receiver")
+        assertTrue(record.tasks.snapshot().interrupted)
+        time.addAndGet(record.tasks.stopHoldMs / 2)
+        sessions.stopAll("second receiver")
+        assertTrue(record.tasks.snapshot().interrupted)
+        time.addAndGet(record.tasks.stopHoldMs - record.tasks.stopHoldMs / 2)
+        val heldSession = sessions.snapshot().single { it["sessionId"] == "A" }
+        assertEquals(true, heldSession["stopped"])
+        assertEquals(false, heldSession["interrupted"])
+        assertTrue(invoke("A", "2").isError)
+        assertTrue(sessions.resume(record))
+        assertFalse(invoke("A", "2").isError)
+        assertFalse(task("A", "2").tasks.snapshot().interrupted)
     }
 
     @Test fun stopAllCommitsEveryExistingOwnerBeforeAnyExternalCancellation() {

@@ -220,7 +220,6 @@ class SlotAdapterRegistry {
 
   /// The island [o] could open in [seat], before the budget is asked; null
   /// when the rules of §3, §5 and §9 rule one out.
-  @visibleForTesting
   static IslandSpec? islandSpecFor(
     SlotInfo? info,
     SeatPolicy policy,

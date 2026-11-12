@@ -36,12 +36,12 @@ const message = () => createUserMessage({ content: [{ type: 'text', text: 'synth
 async function create(f, id) { return (await f.ctx.agentLoop.createAgent(f.ctx, { sessionId: id })).agent; }
 function remove(f, id, beforeDispose = async () => {}) {
   return f.ctx.sessionPersistence.dshGoDeletion.delete(id, {
-    prepare: async () => {
-      const activity = await f.ctx.waterfall('workspace/session-activity', { sessionId: id }, () => Promise.resolve([]));
+    validate: async (sessionId) => {
+      const activity = await f.ctx.waterfall('workspace/session-activity', { sessionId }, () => Promise.resolve([]));
       assert.deepEqual(activity, []);
       await beforeDispose();
-      await f.ctx.agentLoop.dshGoDisposeForDeletion(id);
     },
+    dispose: (_id, opts) => f.ctx.agentLoop.dshGoDisposeForDeletion(_id, opts),
     inspectTasks: async () => false,
     cleanup: async () => {},
   });
@@ -61,6 +61,49 @@ test('idle policy notification is discarded by real teardown and permanent delet
   assert.equal(f.ctx.sessions.get(id), undefined);
   assert.equal(f.ctx.sessionPersistence.tracker.writers.has(id), false);
   assert.equal(f.modelCalls, 0);
+});
+
+test('permanent deletion cascades to the chat subagent sessions', async t => {
+  const f = await fixture(t), parent = 'cascade-parent', child = 'cascade-child';
+  await create(f, parent);
+  const { agent: childAgent } = await f.ctx.agentLoop.createAgent(f.ctx, {
+    sessionId: child,
+    meta: { origin: 'subagent', parentSession: parent, delegationDepth: 1 },
+  });
+  assert.equal(childAgent.session.header.origin, 'subagent');
+  // A freshly created session materialises on its first append or flush; deletion only
+  // finds physical artifacts, so make the whole tree durable before deleting the chat.
+  await f.ctx.sessionPersistence.flush();
+  await remove(f, parent);
+  assert.equal(f.ctx.sessionPersistence.dshGoDeletion.deleted(parent), true);
+  assert.equal(f.ctx.sessionPersistence.dshGoDeletion.deleted(child), true);
+  for (const id of [parent, child]) {
+    assert.equal(f.ctx.agents.get(id), undefined);
+    assert.equal(f.ctx.sessions.get(id), undefined);
+    assert.equal(f.ctx.sessionPersistence.tracker.writers.has(id), false);
+  }
+});
+
+test('an active subagent refuses the whole tree before the chat is disposed', async t => {
+  const f = await fixture(t), parent = 'cascade-blocked-parent', child = 'cascade-blocked-child';
+  await create(f, parent);
+  const { agent: childAgent } = await f.ctx.agentLoop.createAgent(f.ctx, {
+    sessionId: child,
+    meta: { origin: 'subagent', parentSession: parent, delegationDepth: 1 },
+  });
+  await f.ctx.sessionPersistence.flush();
+  const release = Promise.withResolvers();
+  const work = childAgent.runMaintenance(() => release.promise);
+  try {
+    await assert.rejects(remove(f, parent), { code: 'session-active' });
+    for (const id of [parent, child]) {
+      assert.equal(f.ctx.sessionPersistence.dshGoDeletion.deleted(id), false);
+      assert.notEqual(f.ctx.agents.get(id), undefined, 'no agent in the tree is torn down by a refused cascade');
+    }
+  } finally { release.resolve(); await work; }
+  // The whole tree stayed usable: an idle retry cascades as usual.
+  await remove(f, parent);
+  for (const id of [parent, child]) assert.equal(f.ctx.sessionPersistence.dshGoDeletion.deleted(id), true);
 });
 
 test('pending fence rejects input before disposal and late microtasks cannot restart retired driver', async t => {

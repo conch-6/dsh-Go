@@ -182,6 +182,9 @@ abstract final class Slots {
   static const guideActions = 'sidebar.right.tab.guide.actions';
   static const generalItem = 'settings.general.item';
   static const shellOverlay = 'shell.overlay';
+  static const sidebarFooter = 'sidebar.footer.action';
+  static const settingsPluginsTab = 'settings.plugins.tab';
+  static const pluginDetailSection = 'plugins.detail.section';
 
   /// Declarative panels (§4.3): the app's own surface, served by the bridge.
   static const dshGoPanel = 'dsh-go.panel';
@@ -201,6 +204,9 @@ abstract final class Slots {
     cordisView,
     dshGoPanel,
     conversationView,
+    sidebarFooter,
+    settingsPluginsTab,
+    pluginDetailSection,
     ...chatPanel,
   };
 
@@ -491,7 +497,12 @@ const Map<String, SlotInfo> slotCatalog = {
   ),
   'plugins.detail.actions': SlotInfo('plugins.detail.actions', SlotKind.list, SlotScope.root),
   'plugins.detail.badge': SlotInfo('plugins.detail.badge', SlotKind.list, SlotScope.root),
-  'plugins.detail.section': SlotInfo('plugins.detail.section', SlotKind.list, SlotScope.root),
+  'plugins.detail.section': SlotInfo(
+    'plugins.detail.section',
+    SlotKind.list,
+    SlotScope.root,
+    policy: SeatPolicy.p1MaskedPage,
+  ),
   'plugins.item': SlotInfo('plugins.item', SlotKind.list, SlotScope.root),
   'plugins.row.config': SlotInfo('plugins.row.config', SlotKind.keyed, SlotScope.root, policy: SeatPolicy.p0RowConfig),
   'plugins.tab': SlotInfo('plugins.tab', SlotKind.list, SlotScope.root),
@@ -542,7 +553,12 @@ const Map<String, SlotInfo> slotCatalog = {
     policy: SeatPolicy.never,
   ),
   'settings.onboarding': SlotInfo('settings.onboarding', SlotKind.list, SlotScope.root),
-  'settings.plugins.tab': SlotInfo('settings.plugins.tab', SlotKind.list, SlotScope.root),
+  'settings.plugins.tab': SlotInfo(
+    'settings.plugins.tab',
+    SlotKind.list,
+    SlotScope.root,
+    policy: SeatPolicy.p1MaskedPage,
+  ),
   'settings.section': SlotInfo('settings.section', SlotKind.list, SlotScope.root, policy: SeatPolicy.p0Page),
   'settings.section.icon': SlotInfo('settings.section.icon', SlotKind.list, SlotScope.root),
   'settings.trigger': SlotInfo(
@@ -590,7 +606,12 @@ const Map<String, SlotInfo> slotCatalog = {
     replacesShippedUi: true,
     policy: SeatPolicy.never,
   ),
-  'sidebar.footer.action': SlotInfo('sidebar.footer.action', SlotKind.list, SlotScope.root),
+  'sidebar.footer.action': SlotInfo(
+    'sidebar.footer.action',
+    SlotKind.list,
+    SlotScope.root,
+    policy: SeatPolicy.p1MaskedPage,
+  ),
   'sidebar.panellist': SlotInfo('sidebar.panellist', SlotKind.list, SlotScope.root, policy: SeatPolicy.p0Entry),
   'sidebar.panellist.actions': SlotInfo('sidebar.panellist.actions', SlotKind.list, SlotScope.root),
   'sidebar.right.pane.tab': SlotInfo(

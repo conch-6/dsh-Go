@@ -556,6 +556,7 @@ class _RefusingBackend extends FakeProviderBackend {
     String? baseUrl,
     String? apiKeyEnv,
     List<ProviderModelSpec>? models,
+    Map<String, String>? headers,
     int? expectedRevision,
   }) async => throw const DshRemoteException('settings/conflict', 'revision 3 is stale');
 }

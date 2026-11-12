@@ -520,8 +520,7 @@ class RuntimeBridge {
       .receiveBroadcastStream()
       .map((raw) => _parse(raw as Map<Object?, Object?>))
       .where((e) => e != null)
-      .cast<RuntimeEvent>()
-      .asBroadcastStream();
+      .cast<RuntimeEvent>();
 
   Future<RuntimeStatus> status() async {
     final map = await _methods.invokeMapMethod<Object?, Object?>('getStatus');

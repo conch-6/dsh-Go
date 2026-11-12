@@ -111,6 +111,115 @@ void main() {
     expect(_web.controllers.first.scripts.where((s) => s.contains('"session":"s2"')), isEmpty);
   });
 
+  testWidgets('an old main-frame error cannot cover the reopened page', (tester) async {
+    await _pumpPage(tester);
+    final first = _web.controllers.single;
+    _islands.gone();
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('重新打开'));
+    await _settle(tester);
+    final second = _web.controllers.last;
+    second.finish();
+    await _settle(tester);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+
+    first.fail();
+    await tester.pump();
+    expect(find.text('页面没有打开'), findsNothing);
+    expect(find.byKey(fakeWebViewKey), findsOneWidget);
+
+    // Failures of this page still reach its error UI and retry action.
+    second.fail();
+    await tester.pump();
+    expect(find.text('页面没有打开'), findsOneWidget);
+    await tester.tap(find.text('重试'));
+    await tester.pump();
+    expect(second.loads, [_url, _url]);
+    expect(first.loads, [_url]);
+    first.start();
+    await tester.pump();
+    expect(find.text('页面没有打开'), findsOneWidget);
+    second.start();
+    await tester.pump();
+    expect(find.text('页面没有打开'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+  });
+
+  testWidgets('an old finish cannot spend a queued target on the loading replacement', (tester) async {
+    final link = DshWebLink();
+    await _pumpPage(tester, link: link);
+    final first = _web.controllers.single;
+    _islands.gone();
+    await tester.pump();
+    await tester.pump();
+    await link.open(const DshWebTarget(sessionId: 'pending-session'));
+    await tester.tap(find.text('重新打开'));
+    await _settle(tester);
+    final second = _web.controllers.last;
+
+    first.finish();
+    await _settle(tester);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(second.scripts, isEmpty);
+
+    second.finish();
+    for (var i = 0; i < 40 && !second.scripts.any((s) => s.contains('"session":"pending-session"')); i++) {
+      await _settle(tester);
+    }
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(second.scripts.where((s) => s.contains('"session":"pending-session"')), hasLength(1));
+    expect(first.scripts, isEmpty);
+  });
+
+  testWidgets('an old progress event cannot replace the new load progress', (tester) async {
+    await _pumpPage(tester);
+    final first = _web.controllers.single;
+    _islands.gone();
+    await tester.pump();
+    await tester.tap(find.text('重新打开'));
+    await _settle(tester);
+    final second = _web.controllers.last;
+    second.delegate!.onProgress!(30);
+    await tester.pump();
+    expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, 0.3);
+
+    first.delegate!.onProgress!(90);
+    await tester.pump();
+    expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, 0.3);
+    second.delegate!.onProgress!(75);
+    await tester.pump();
+    expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, 0.75);
+  });
+
+  testWidgets('closed and disposed pages ignore their remaining navigation callbacks', (tester) async {
+    await _pumpPage(tester);
+    final page = _web.controllers.single;
+    _islands.gone();
+    await tester.pump();
+    await tester.pump();
+
+    page.start();
+    page.delegate!.onProgress!(80);
+    await tester.pump();
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    page.finish();
+    page.fail();
+    await _settle(tester);
+    expect(page.scripts, isEmpty);
+    expect(find.text('网页已关闭'), findsOneWidget);
+    expect(find.text('重新打开'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    page.start();
+    page.delegate!.onProgress!(90);
+    page.finish();
+    page.fail();
+    await _settle(tester);
+    expect(page.scripts, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('back on a closed page leaves it without asking the dead WebView', (tester) async {
     usePhoneView(tester);
     await tester.pumpWidget(

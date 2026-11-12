@@ -159,9 +159,10 @@ class LaunchClipPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val scaled = LaunchClips.posterSize(frame.width, frame.height).let { (pw, ph) ->
                 if (pw == frame.width && ph == frame.height) frame else Bitmap.createScaledBitmap(frame, pw, ph, true)
             }
-            FileOutputStream(poster).use { scaled.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            val encoded = FileOutputStream(poster).use { scaled.compress(Bitmap.CompressFormat.PNG, 100, it) }
             if (scaled !== frame) scaled.recycle()
             frame.recycle()
+            if (!encoded) return null
             mapOf("durationMs" to ms.toInt(), "width" to width, "height" to height)
         } catch (_: Exception) {
             null

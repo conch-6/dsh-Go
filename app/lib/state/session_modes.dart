@@ -52,9 +52,11 @@ SessionModes foldSessionModes(SessionProjections projections, Iterable<SessionLo
 }
 
 /// [SessionModes] of an open conversation; recomputed whenever its log
-/// changes, and only notifies when the answer does.
+/// changes, and only notifies when the answer does. The turns are traced
+/// afresh exactly when the log changes; the items also change with every
+/// streamed delta.
 final sessionModesProvider = Provider.autoDispose.family<SessionModes, String>((ref, sessionId) {
-  ref.watch(chatProvider(sessionId).select((s) => s.items));
+  ref.watch(chatProvider(sessionId).select((s) => s.turns));
   final chat = ref.read(chatProvider(sessionId).notifier);
   return foldSessionModes(chat.projections, chat.events);
 });

@@ -1,10 +1,11 @@
-// 添加 / 编辑渠道 (a form page): name, protocol, Base URL, API Key, then the models —
+// 添加 / 编辑渠道: name, protocol, Base URL, API Key, optional headers, then models —
 // fetched from the endpoint (`llm/discoverModels`) and picked in a sheet, or
 // added by hand. One pinned 「保存」.
 
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +15,7 @@ import '../../state/providers_state.dart';
 import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/discard_guard.dart';
+import '../common/expand_reveal.dart';
 import '../common/sheet_title_bar.dart';
 import '../common/smooth_size.dart';
 import '../settings/settings_widgets.dart';
@@ -43,7 +45,16 @@ class ProviderFormPage extends ConsumerStatefulWidget {
 }
 
 /// The fields that can carry an error, in page order.
-enum _F { baseUrl, key, models }
+enum _F { baseUrl, key, headers, models }
+
+class _HeaderDraft {
+  _HeaderDraft(this.name, this.value, {this.locked = false});
+
+  final key = UniqueKey();
+  final bool locked;
+  String name;
+  String value;
+}
 
 class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
   late final _name = TextEditingController(text: widget.existing?.displayName ?? '');
@@ -51,6 +62,11 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
   final _key = TextEditingController();
   late ProviderApi _api = widget.existing?.api ?? ProviderApi.openaiCompletions;
   late List<ProviderModelSpec> _models = [...?widget.existing?.models];
+  late final _headers = [
+    for (final entry in (widget.existing?.headers ?? const <String, String>{}).entries)
+      _HeaderDraft(entry.key, entry.value, locked: isReservedProviderHeader(entry.key)),
+  ];
+  bool _headersOpen = false;
 
   /// The provider being edited; set after a create whose key failed, so the
   /// next 「保存」 only retries what is missing.
@@ -75,6 +91,48 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
 
   bool get _isEdit => _editing != null;
 
+  /// A stored base is authoritative until its address or protocol is edited.
+  String _baseUrlForRequest(String raw, ProviderApi api) {
+    final existing = _editing;
+    if (existing != null && existing.api == api && existing.baseUrl == raw) return raw;
+    return normalizeBaseUrl(raw, api);
+  }
+
+  String _headersSignature() => jsonEncode([
+    for (final header in _headers) [header.name, header.value],
+  ]);
+
+  bool get _headersEdited =>
+      _headersSignature() !=
+      jsonEncode([
+        for (final entry in (_editing?.headers ?? const <String, String>{}).entries) [entry.key, entry.value],
+      ]);
+
+  String? _headersError() {
+    // Existing settings can come from a newer or differently configured Host.
+    // An unrelated edit must not rewrite or reject those stored fields.
+    if (!_headersEdited) return null;
+    return providerHeadersError([
+      for (final header in _headers)
+        if (!header.locked) MapEntry(header.name, header.value),
+    ]);
+  }
+
+  Map<String, String>? _headersForRequest() {
+    if (!_headersEdited) return null;
+    final headers = {
+      for (final header in _headers)
+        if (header.name.trim().isNotEmpty) (header.locked ? header.name : header.name.trim()): header.value,
+    };
+    return mapEquals(headers, _editing?.headers ?? const {}) ? null : headers;
+  }
+
+  void _editHeaders(VoidCallback edit) => setState(() {
+    edit();
+    _errors = {..._errors}..remove(_F.headers);
+    _formError = null;
+  });
+
   late final Listenable _edits = Listenable.merge([_name, _baseUrl, _key]);
   late String _clean;
 
@@ -83,6 +141,7 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
     _baseUrl.text,
     _key.text,
     _api.name,
+    _headersSignature(),
     [for (final model in _models) model.toJson()],
   ]);
 
@@ -110,7 +169,10 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
   }
 
   void _showErrors(Map<_F, String> errors) {
-    setState(() => _errors = errors);
+    setState(() {
+      _errors = errors;
+      if (errors.containsKey(_F.headers)) _headersOpen = true;
+    });
     if (errors.isEmpty) return;
     final first = _F.values.firstWhere(errors.containsKey);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -153,19 +215,26 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
     final keyError = !_isEdit && key.isEmpty
         ? context.l10n.engineProviderKeyFirst
         : providerKeyError(key, required: false);
-    final errors = <_F, String>{_F.baseUrl: ?baseUrlError(_baseUrl.text), _F.key: ?keyError};
+    final errors = <_F, String>{
+      _F.baseUrl: ?baseUrlError(_baseUrl.text),
+      _F.key: ?keyError,
+      _F.headers: ?_headersError(),
+    };
     _showErrors(errors);
     if (errors.isNotEmpty) return;
     final backend = ref.read(providerBackendProvider);
     final api = _api;
+    final expectedHeaders = _headersSignature();
+    final headers = _headersForRequest();
     var expectedUrl = _baseUrl.text;
-    final url = normalizeBaseUrl(expectedUrl, api);
+    final url = _baseUrlForRequest(expectedUrl, api);
     bool isCurrent() =>
         mounted &&
         identical(ref.read(providerBackendProvider), backend) &&
         _api == api &&
         _baseUrl.text == expectedUrl &&
-        normalizeProviderKey(_key.text) == key;
+        normalizeProviderKey(_key.text) == key &&
+        _headersSignature() == expectedHeaders;
     setState(() {
       _discovering = true;
       _modelsError = null;
@@ -174,15 +243,15 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
     try {
       final result = await ref
           .read(providerActionsProvider)
-          .discover(api: api, baseUrl: url, apiKey: key, existingId: _editing?.id);
+          .discover(api: api, baseUrl: url, apiKey: key, existingId: _editing?.id, headers: headers);
       if (!mounted || !isCurrent()) return;
       if (result.baseUrl != url) {
         _baseUrl.text = result.baseUrl;
         setState(() => _baseUrlNote = context.l10n.engineProviderCompletedUrl(result.baseUrl));
-      } else if (_baseUrl.text != url) {
-        _baseUrl.text = url;
       }
-      // Our own normalization belongs to this discovery; later user edits do not.
+      // Keep pasted endpoints intact: saving must normalize the original input
+      // once, not strip a second suffix from discovery's normalized base.
+      // An actual discovery fallback belongs to this request; later edits do not.
       expectedUrl = _baseUrl.text;
       if (result.models.isEmpty) {
         setState(() => _modelsError = context.l10n.engineProviderNoDiscoveredModels);
@@ -233,6 +302,7 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
     final errors = <_F, String>{
       _F.baseUrl: ?baseUrlError(_baseUrl.text),
       _F.key: ?providerKeyError(key, required: !_isEdit),
+      _F.headers: ?_headersError(),
       if (_models.isEmpty) _F.models: context.l10n.engineProviderNeedModel,
     };
     setState(() => _formError = null);
@@ -241,9 +311,10 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
     final draft = ProviderDraft(
       name: _name.text,
       api: _api,
-      baseUrl: normalizeBaseUrl(_baseUrl.text, _api),
+      baseUrl: _baseUrlForRequest(_baseUrl.text, _api),
       apiKey: key,
       models: _models,
+      headers: _headersForRequest(),
     );
     setState(() => _saving = true);
     try {
@@ -260,6 +331,7 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
             api: draft.api,
             baseUrl: draft.baseUrl,
             models: draft.models,
+            headers: draft.headers ?? _editing?.headers ?? const {},
             apiKeyEnv: deriveProviderKeyRef(id),
           );
         }
@@ -376,6 +448,86 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
                       ),
                     ),
                   ],
+                ),
+              ],
+            ),
+            SettingsSection(
+              children: [
+                SettingsTile(
+                  key: _fieldKeys[_F.headers],
+                  title: l10n.engineProviderHeaders,
+                  trailing: Icon(_headersOpen ? AppIcons.collapse : AppIcons.expand, size: 18),
+                  onTap: () => setState(() => _headersOpen = !_headersOpen),
+                ),
+                ExpandReveal(
+                  open: _headersOpen,
+                  child: FormFieldGroup(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: Text(
+                          l10n.engineProviderHeadersWarning,
+                          style: theme.textTheme.bodySmall?.copyWith(color: colors.textTertiary),
+                        ),
+                      ),
+                      if (_errors[_F.headers] case final error?)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Text(error, style: theme.textTheme.bodySmall?.copyWith(color: colors.danger)),
+                        ),
+                      for (final (index, header) in _headers.indexed)
+                        Column(
+                          key: header.key,
+                          children: [
+                            FormFieldBlock(
+                              label: l10n.engineProviderHeaderName,
+                              helper: header.locked ? l10n.engineProviderHeaderLocked : null,
+                              trailing: FormSmallButton(
+                                label: l10n.commonDelete,
+                                onPressed: _saving || header.locked
+                                    ? null
+                                    : () => _editHeaders(() => _headers.remove(header)),
+                              ),
+                              child: TextFormField(
+                                key: ValueKey('provider-header-name-$index'),
+                                initialValue: header.name,
+                                enabled: !_saving,
+                                readOnly: header.locked,
+                                autocorrect: false,
+                                enableSuggestions: true,
+                                textInputAction: TextInputAction.next,
+                                onChanged: header.locked ? null : (value) => _editHeaders(() => header.name = value),
+                                decoration: const InputDecoration(hintText: 'x-opencode-session'),
+                              ),
+                            ),
+                            FormFieldBlock(
+                              label: l10n.engineProviderHeaderValue,
+                              child: TextFormField(
+                                key: ValueKey('provider-header-value-$index'),
+                                initialValue: header.value,
+                                enabled: !_saving,
+                                readOnly: header.locked,
+                                autocorrect: false,
+                                enableSuggestions: true,
+                                textInputAction: TextInputAction.next,
+                                onChanged: header.locked ? null : (value) => _editHeaders(() => header.value = value),
+                              ),
+                            ),
+                          ],
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: _saving ? null : () => _editHeaders(() => _headers.add(_HeaderDraft('', ''))),
+                            icon: const Icon(AppIcons.add, size: 18),
+                            label: Text(l10n.engineProviderHeaderAdd),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),

@@ -37,7 +37,7 @@ async function fixture(t) {
 }
 
 
-const hooks = () => ({ prepare: async () => {}, inspectTasks: async () => false, cleanup: async () => {} });
+const hooks = () => ({ validate: async () => {}, dispose: async () => {}, inspectTasks: async () => false, cleanup: async () => {} });
 function interceptSync(t, f, failures) {
   const slot = join(f.root, '.dsh-go-lifecycle', createHash('sha256').update(f.id).digest('hex'));
   const required = [slot, join(f.root, '.dsh-go-lifecycle'), f.root, dirname(f.root)];

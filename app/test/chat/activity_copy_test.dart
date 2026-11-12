@@ -145,6 +145,61 @@ void main() {
       expect(extractNarration('⏵ ${'长' * 50}')!.length, 40);
     });
 
+    test('only a document start or LF starts a marked line', () {
+      for (final prefix in ['', '\n', '正文\r\n']) {
+        expect(extractNarration('$prefix⏵ 更新状态'), '更新状态');
+      }
+      for (final prefix in [' ', '\t', '\r', '\u2028', '\n ', '正文']) {
+        expect(extractNarration('$prefix⏵ 仅是正文'), isNull, reason: 'prefix ${prefix.codeUnits}');
+      }
+      expect(extractNarration('⏵ 当前状态\n正文里 ⏵ 不是新状态'), '当前状态');
+    });
+
+    test('an empty latest marked line clears the earlier narration', () {
+      for (final tail in ['', ' ', '\t\r', '\u0000\u007f', '\u00a0', '⏵ 忽略同一行的第二个标记']) {
+        expect(extractNarration('⏵ 旧状态\n正文\n⏵$tail'), isNull, reason: 'tail ${tail.codeUnits}');
+      }
+    });
+
+    test('a marked line stops at LF or the next marker and strips controls', () {
+      expect(extractNarration('⏵\t  第一项⏵第二项\n正文'), '第一项');
+      expect(extractNarration('⏵ 旧项\r\n⏵\t 新\u0000状\t态\u007f\r\n正文'), '新状态');
+      expect(extractNarration('⏵ 修复\u00a0页面\u00a0'), '修复\u00a0页面');
+    });
+
+    test('streamed text keeps the current narration until a new marked line', () {
+      var text = '⏵ 当前状态\n';
+      for (final unit in '持续输出正文，含行内 ⏵ 格式说明\n'.codeUnits) {
+        text += String.fromCharCode(unit);
+        expect(extractNarration(text), '当前状态');
+      }
+      text += '⏵';
+      expect(extractNarration(text), isNull);
+      text += ' ';
+      expect(extractNarration(text), isNull);
+      text += '新';
+      expect(extractNarration(text), '新');
+      text += '状态。后续正文';
+      expect(extractNarration(text), '新状态');
+    });
+
+    test('keeps sentence, path, and display-column boundaries', () {
+      expect(extractNarration('⏵ Read lib/main.dart. Then continue'), 'Read lib/main.dart');
+      expect(extractNarration('⏵ Done.Next step'), 'Done');
+      expect(extractNarration('⏵ Really? Then continue'), 'Really?');
+      expect(extractNarration('⏵ ${'a' * 79}😀'), 'a' * 79);
+      expect(extractNarration('⏵ ${'😀' * 41}'), '😀' * 40);
+      expect(extractNarration('⏵ ${'a' * 70} ${'b' * 20}'), 'a' * 70);
+    });
+
+    test('selects the last marked line in a long reply', () {
+      final body = '正文里提及 ⏵ 格式但不改变状态\n' * 6000;
+      expect(extractNarration(body), isNull);
+      expect(extractNarration('⏵ 初始状态\n$body'), '初始状态');
+      expect(extractNarration('⏵ 初始状态\n$body⏵ 最新状态\n正文'), '最新状态');
+      expect(extractNarration('${'⏵ 旧状态\n' * 6000}⏵ 最后状态'), '最后状态');
+    });
+
     test('the latest reply of the turn decides; a reply without one clears it', () {
       expect(narrationOf([user(1, '修一下'), assistant(2, '⏵ 看看登录页\n先读文件')]), '看看登录页');
       expect(narrationOf([user(1, '修一下'), assistant(2, '⏵ 看看登录页\n先读文件'), assistant(3, '找到了，原因是……')]), isNull);

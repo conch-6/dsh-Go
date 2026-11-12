@@ -6,6 +6,7 @@ import 'package:dsh_app/runtime/runtime_bridge.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/attachments.dart';
 import 'package:dsh_app/state/chat_state.dart';
+import 'package:dsh_app/state/composer_quote.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/models_state.dart';
 import 'package:dsh_app/state/sessions_state.dart';
@@ -251,6 +252,8 @@ void main() {
         expect(tester.widget<TextField>(field).decoration!.hintText, count == 1 ? '输入回答…' : '等你回答');
         await tester.enterText(field, '蓝色');
         await tester.pump();
+        expect(find.text(count == 1 ? '发送文字将回答待答问题' : '发送新消息'), findsOneWidget);
+        expect(tester.widget<ChatHeader>(find.byType(ChatHeader)).status.label, '等你回答');
         await tester.tap(find.byIcon(AppIcons.send));
         await pumpFrames(tester);
         final controller = harness.controllers['s1']!;
@@ -289,6 +292,8 @@ void main() {
       await pumpFrames(tester);
       expect(tester.widget<TextField>(field).controller!.text, '蓝色');
       expect(harness.controllers['s1']!.sent, isEmpty);
+      expect(find.text('发送文字将回答待答问题'), findsOneWidget);
+      expect(find.text('已回答'), findsNothing, reason: 'a failed send is not a durable answer');
     });
 
     testWidgets('attachments keep the normal prompt route during a single question', (tester) async {
@@ -315,11 +320,42 @@ void main() {
       await tester.pump();
       await tester.enterText(field, '看图');
       await tester.pump();
+      expect(find.text('发送新消息'), findsOneWidget);
+      expect(find.text('发送文字将回答待答问题'), findsNothing);
       await tester.tap(find.byIcon(AppIcons.send));
       await pumpFrames(tester);
       expect(harness.controllers['s1']!.sent, ['看图']);
       expect(harness.controllers['s1']!.answers, isEmpty);
       expect(harness.controllers['s1']!.sentAttachments.single, hasLength(1));
+    });
+
+    testWidgets('a quote switches the visible intent back to a message', (tester) async {
+      final harness = ChatHarness(
+        session: 's1',
+        states: {
+          's1': const ChatState(
+            running: true,
+            loading: false,
+            questions: [
+              UserQuestionRequest(
+                eventId: 'q',
+                sessionId: 's1',
+                questions: [UserQuestion(id: 'q1', question: '选什么？')],
+              ),
+            ],
+          ),
+        },
+      );
+      await pumpScreen(tester, harness);
+      containerOf(tester).read(composerQuoteProvider.notifier).set('s1', '引用原文');
+      await tester.enterText(field, '另外说一句');
+      await tester.pump();
+      expect(find.text('发送新消息'), findsOneWidget);
+      expect(find.text('发送文字将回答待答问题'), findsNothing);
+      await tester.tap(find.byIcon(AppIcons.send));
+      await pumpFrames(tester);
+      expect(harness.controllers['s1']!.answers, isEmpty);
+      expect(harness.controllers['s1']!.sent.single, contains('引用原文'));
     });
   });
 

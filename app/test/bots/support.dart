@@ -7,9 +7,11 @@ import 'package:dsh_app/state/bots_state.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/notify_state.dart';
 import 'package:dsh_app/state/plugins_state.dart';
+import 'package:dsh_app/ui/bots/bot_format.dart' show botClock;
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
+import 'package:flutter_test/flutter_test.dart';
 
 import '../chat/support/harness.dart' show fakeConnection;
 
@@ -204,7 +206,7 @@ Map<String, Object?> sampleTeam({bool working = true, Map<String, Object?> quest
 
 Map<String, Object?> liveOf(Map<String, Object?> data, {List<Object?> approvals = const []}) {
   final working = data['working'] != false;
-  final now = DateTime.now().millisecondsSinceEpoch;
+  final now = botClock().millisecondsSinceEpoch;
   return {
     'revision': data['revision'] ?? 7,
     'activity': working ? {'m1': 'tool'} : <String, Object?>{},
@@ -291,9 +293,16 @@ Future<void> settle([int rounds = 6]) async {
   }
 }
 
-/// Today at a fixed clock time: times in the goldens read the same every day.
+/// Pins both the displayed time and sample dates, away from their "just now" windows.
+void useBotGoldenClock() {
+  final previous = botClock;
+  botClock = () => DateTime(2026, 10, 24, 18);
+  addTearDown(() => botClock = previous);
+}
+
+/// A time on the same calendar day as the Bot timestamp formatter.
 DateTime todayAt(int hour, int minute) {
-  final now = DateTime.now();
+  final now = botClock();
   return DateTime(now.year, now.month, now.day, hour, minute);
 }
 

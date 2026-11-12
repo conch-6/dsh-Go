@@ -9,13 +9,21 @@ class _Bridge extends RuntimeBridge {
   final stream = StreamController<RuntimeEvent>.broadcast(sync: true);
   final initialStatus = Completer<RuntimeStatus>();
   final initialLogs = Completer<RuntimeLogSnapshot>();
+  final statusResults = <Completer<RuntimeStatus>>[];
 
   @override
   Stream<RuntimeEvent> get events => stream.stream;
   @override
-  Future<RuntimeStatus> status() => initialStatus.future;
+  Future<RuntimeStatus> status() {
+    final result = statusResults.isEmpty ? initialStatus : Completer<RuntimeStatus>();
+    statusResults.add(result);
+    return result.future;
+  }
+
   @override
   Future<RuntimeLogSnapshot> logSnapshot({int lines = 300}) => initialLogs.future;
+  @override
+  Future<void> reset({ResetKeep keep = const ResetKeep()}) async {}
 }
 
 void main() {
@@ -42,6 +50,71 @@ void main() {
     await flush();
     expect(container.read(localRuntimeProvider).status.phase, RuntimePhase.running);
     expect(container.read(localRuntimeLogsProvider), ['old log']);
+  });
+
+  for (final latest in [
+    const RuntimeStatus(
+      phase: RuntimePhase.running,
+      baseUrl: 'http://127.0.0.1:41234',
+      token: 'synthetic-current-launch',
+    ),
+    const RuntimeStatus(phase: RuntimePhase.installed),
+    const RuntimeStatus(phase: RuntimePhase.installing),
+  ]) {
+    test('late initial status cannot overwrite a newer ${latest.phase.name} event', () async {
+      bridge.stream.add(RuntimeStatusEvent(latest));
+      expect(container.read(localRuntimeProvider).status, same(latest));
+      if (latest.phase == RuntimePhase.installing) {
+        bridge.stream.add(const RuntimeProgressEvent(step: 'extract', done: 1, total: 2));
+      }
+      bridge.initialStatus.complete(
+        const RuntimeStatus(
+          phase: RuntimePhase.running,
+          baseUrl: 'http://127.0.0.1:3080',
+          token: 'synthetic-retired-launch',
+        ),
+      );
+      await flush();
+      final current = container.read(localRuntimeProvider);
+      expect(
+        (current.status.phase, current.status.baseUrl, current.status.token),
+        (latest.phase, latest.baseUrl, latest.token),
+      );
+      expect(current.loaded, isTrue);
+      if (latest.phase == RuntimePhase.installing) expect(current.progress?.done, 1);
+    });
+  }
+
+  test('the status read after reset supersedes a pending initial read', () async {
+    final reset = container.read(localRuntimeProvider.notifier).reset();
+    await flush();
+    expect(bridge.statusResults, hasLength(2));
+    const resetStatus = RuntimeStatus(phase: RuntimePhase.notInstalled);
+    bridge.statusResults.last.complete(resetStatus);
+    await reset;
+    bridge.initialStatus.complete(
+      const RuntimeStatus(
+        phase: RuntimePhase.running,
+        baseUrl: 'http://127.0.0.1:3080',
+        token: 'synthetic-retired-launch',
+      ),
+    );
+    await flush();
+    final status = container.read(localRuntimeProvider).status;
+    expect((status.phase, status.baseUrl, status.token), (RuntimePhase.notInstalled, null, null));
+  });
+
+  test('a retired read failure cannot finish loading for a newer read', () async {
+    final reset = container.read(localRuntimeProvider.notifier).reset();
+    await flush();
+    expect(bridge.statusResults, hasLength(2));
+    bridge.initialStatus.completeError(StateError('retired status query failed'));
+    await flush();
+    final loadedWhilePending = container.read(localRuntimeProvider).loaded;
+    bridge.statusResults.last.complete(const RuntimeStatus(phase: RuntimePhase.notInstalled));
+    await reset;
+    expect(loadedWhilePending, isFalse);
+    expect(container.read(localRuntimeProvider).loaded, isTrue);
   });
 
   test('keeps the most recent 1000 log lines', () async {

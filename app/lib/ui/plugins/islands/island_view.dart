@@ -268,7 +268,9 @@ class _IslandViewState extends ConsumerState<IslandView> {
       _release();
       _none = false;
     }
-    if (_closed) return _Closed(onReopen: _reopen);
+    if (_closed) {
+      return widget.spec.form == IslandForm.overlay ? widget.fallback(context) : _Closed(onReopen: _reopen);
+    }
     if (_none || _noRoom) return widget.fallback(context);
     final handle = _handle;
     if (handle == null) {

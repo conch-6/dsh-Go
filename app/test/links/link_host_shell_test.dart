@@ -144,9 +144,7 @@ void main() {
 
     final engine = FakeEngine();
     await tester.pumpWidget(_shell(extra: _shareOverrides(engine)));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 600));
-    expect(find.text('安装插件'), findsOneWidget);
+    await _waitFor(tester, find.text('安装插件'));
     expect(find.text('读书笔记'), findsOneWidget);
     await tester.pumpAndSettle();
     expect(find.text('安装'), findsOneWidget);

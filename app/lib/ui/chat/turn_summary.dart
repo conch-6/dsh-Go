@@ -1,6 +1,7 @@
 // Tool-group summaries and per-turn file changes.
 
 import 'package:dsh_client/dsh_client.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../../l10n/l10n.dart';
 import 'render/diff_view.dart';
@@ -533,6 +534,19 @@ String? _normalisePath(String? path) {
 // 视图,用 [ToolView.matches] 校验,diff 每次调用只算一遍。
 final _views = <String, ToolView>{};
 const _maxCachedViews = 600;
+
+/// Drops what the caches here hold for [callIds]: one conversation's calls,
+/// when its chat closes. They are global and keep the calls' results (and
+/// diffs) alive until 600 calls / 200 turns of other chats push them out.
+void forgetToolSummaries(Set<String> callIds) {
+  if (callIds.isEmpty) return;
+  _views.removeWhere((callId, _) => callIds.contains(callId));
+  _changeCache.removeWhere((_, entry) => entry.tools.any((tool) => callIds.contains(tool.callId)));
+}
+
+/// How many calls and turns the caches here hold.
+@visibleForTesting
+({int views, int turns}) get debugToolSummaryCaches => (views: _views.length, turns: _changeCache.length);
 
 ToolView _cachedView(ToolChatItem tool) {
   final previous = _views.remove(tool.callId);

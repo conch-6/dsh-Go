@@ -56,7 +56,11 @@ final uiRootfsResolverProvider = Provider<UiRootfsResolver>(
 /// follows the connection); null when the host can't be read now.
 typedef UiConfigSourceBuilder = UiConfigSource? Function(Ref ref, HostRef host);
 
-final uiConfigSourceBuilderProvider = Provider<UiConfigSourceBuilder>((ref) => defaultUiConfigSource);
+/// What [uiConfigSourceBuilderProvider] uses; tests swap in a no-op builder so
+/// pages that read `ui.json` do not open `dsh/runtime/events` unasked.
+UiConfigSourceBuilder defaultUiConfigSourceBuilder = defaultUiConfigSource;
+
+final uiConfigSourceBuilderProvider = Provider<UiConfigSourceBuilder>((ref) => defaultUiConfigSourceBuilder);
 
 /// Local: the rootfs file, looked at again on resumes and runtime changes.
 /// Remote: only the active host's, over its open connection.
@@ -387,8 +391,7 @@ final uiDensityProvider = Provider<UiValue<UiDensity>>((ref) {
   return UiValue(density, ref.watch(uiSettingEntryProvider(UiSettingKey.density)));
 });
 
-/// ui.json `plugins.seats` for the seat planner (not yet read by
-/// `seatOverridesProvider` in lib/plugins/seams/seat_state.dart).
+/// Applied ui.json `plugins.seats`, before the planner merges local preferences.
 final uiSeatOverridesProvider = Provider<SeatOverrides>((ref) {
   final seats = ref.watch(uiOverridesProvider.select((o) => o.config.seats));
   if (seats.isEmpty) return SeatOverrides.none;

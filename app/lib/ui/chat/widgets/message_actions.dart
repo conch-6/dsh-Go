@@ -44,7 +44,8 @@ class ReplyActionRow extends StatefulWidget {
     this.trailing,
   });
 
-  final String text;
+  /// What 「复制」 copies, worked out when it is tapped.
+  final String Function() text;
 
   /// 「分享」: the share panel for this reply.
   final VoidCallback? onShare;
@@ -71,7 +72,7 @@ class _ReplyActionRowState extends State<ReplyActionRow> {
   bool _copied = false;
 
   void _copy() {
-    copyMessage(context, widget.text, toast: false);
+    copyMessage(context, widget.text(), toast: false);
     setState(() => _copied = true);
     Future.delayed(const Duration(milliseconds: 1400), () {
       if (mounted) setState(() => _copied = false);

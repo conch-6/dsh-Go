@@ -99,12 +99,12 @@ internal object PhoneSkillBundleInstaller {
                     channel.force(true)
                 }
             }
-            Files.createLink(directory.resolve("route.json"), stages[1])
-            Files.createLink(directory.resolve("revision.json"), stages[2])
+            Files.move(stages[1], directory.resolve("route.json"))
+            Files.move(stages[2], directory.resolve("revision.json"))
             // Sidecars alone are not published. Cancellation may still win this short permit.
             if (!beginCommit()) return Result.Refused.STALE
             attemptedPublication = true
-            Files.createLink(directory.resolve("SKILL.md"), stages[0])
+            Files.move(stages[0], directory.resolve("SKILL.md"))
             published = true
             return when (val read = PhoneSkillBundleReader.read(root, identity.name, identity.revision, document.descriptors)) {
                 is PhoneSkillBundleReader.Read.Accepted -> if (matches(identity, read)) Result.Saved(identity)
@@ -114,7 +114,7 @@ internal object PhoneSkillBundleInstaller {
                     else Verification.BUNDLE_INVALID)
             }
         } catch (_: FileAlreadyExistsException) {
-            // createLink explicitly reports no-replace conflict: this invocation did not publish.
+            // A target found before a default move is a conflict, not permission to replace it.
             if (!published) return Result.Refused.CONFLICT
             return Result.Unverified(identity, Publication.PUBLISHED, Verification.VERIFICATION_UNAVAILABLE)
         } catch (_: Exception) {

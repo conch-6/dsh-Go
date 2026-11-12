@@ -12,6 +12,7 @@ import '../../update/release.dart' show releaseNotesFor;
 import '../../update/privileged_installer.dart';
 import '../../update/update_config.dart';
 import '../chat/render/markdown_body.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/sheet_title_bar.dart';
 import '../settings/settings_widgets.dart' show SettingsSection;
@@ -134,6 +135,36 @@ class _UpdateSheetState extends ConsumerState<UpdateSheet> {
   }
 
   static const _buttonSize = Size.fromHeight(48);
+
+  /// 「导出安装包」: says what signing by hand costs, then copies the verified
+  /// download into `Download/DSH-Go` and shows where it landed.
+  Future<void> _exportApk() async {
+    final l10n = appL10n;
+    final save = await showAppDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text(l10n.updateExportApkTitle),
+        content: Text(l10n.updateExportApkMessage),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog, false), child: Text(l10n.commonCancel)),
+          FilledButton(onPressed: () => Navigator.pop(dialog, true), child: Text(l10n.updateExportApk)),
+        ],
+      ),
+    );
+    if (save != true || !mounted) return;
+    final where = await ref.read(appUpdateProvider.notifier).exportApk();
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text(
+          where == null
+              ? l10n.updateExportApkFailed
+              // `Download/DSH-Go/x.apk`, named as the rest of the app names it.
+              : l10n.updateExportApkDone(where.replaceFirst(RegExp(r'^Download/'), '')),
+        ),
+      ),
+    );
+  }
 
   Future<void> _openPage(BuildContext context, Uri? page) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -514,6 +545,20 @@ class _UpdateSheetState extends ConsumerState<UpdateSheet> {
       ],
     );
 
+    // The verified package is still here: it can be saved to sign by hand.
+    Widget withExport(Widget buttons) => Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        buttons,
+        TextButton(
+          key: const ValueKey('update-export-apk'),
+          onPressed: () => unawaited(_exportApk()),
+          child: Text(l10n.updateExportApk),
+        ),
+      ],
+    );
+
     Widget busy(String label) => FilledButton(
       style: FilledButton.styleFrom(minimumSize: _buttonSize),
       onPressed: null,
@@ -602,8 +647,9 @@ class _UpdateSheetState extends ConsumerState<UpdateSheet> {
           update.loadingInstallStatus || !_validPort || unsupportedUid ? null :
             () => _submitInstall(),
         );
-        return update.installRoute == UpdateInstallRoute.system && _installUnfinished.contains(update.problem)
+        final buttons = update.installRoute == UpdateInstallRoute.system && _installUnfinished.contains(update.problem)
             ? withSystemInstaller(install) : install;
+        return update.apkHere ? withExport(buttons) : buttons;
       case UpdateTaskPhase.needsPermission:
         if (update.installRoute != UpdateInstallRoute.system) {
           return pair(l10n.commonLater, close, l10n.commonInstall,
@@ -618,12 +664,14 @@ class _UpdateSheetState extends ConsumerState<UpdateSheet> {
         );
       case UpdateTaskPhase.failed:
         if (_browserOnly.contains(update.problem)) {
-          return pair(l10n.commonClose, close, l10n.updateOpenReleasePage, () => unawaited(_openPage(context, page)));
+          final buttons = pair(l10n.commonClose, close, l10n.updateOpenReleasePage, () => unawaited(_openPage(context, page)));
+          return update.apkHere ? withExport(buttons) : buttons;
         }
         final retry = pair(l10n.commonLater, close, l10n.commonRetry,
           update.loadingInstallStatus || !_validPort ? null : () => _submitInstall(retry: true));
-        return update.installRoute == UpdateInstallRoute.system && _systemInstallerHelps.contains(update.problem)
+        final buttons = update.installRoute == UpdateInstallRoute.system && _systemInstallerHelps.contains(update.problem)
             ? withSystemInstaller(retry) : retry;
+        return update.apkHere ? withExport(buttons) : buttons;
     }
   }
 }

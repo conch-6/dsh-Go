@@ -205,16 +205,40 @@ DSHAPP url dsh web: http://127.0.0.1:51234/?token=launch-tok
       expect(File('${home.path}/dsh-args.txt').readAsLinesSync(), hasLength(1));
     });
 
-    test('a changed launch command restarts the managed instance', () async {
+    test('a changed launch command needs explicit consent before restarting', () async {
       // Only initial empty-state setup is fast. The replacement still delays
       // its URL, so returning a stale old log entry remains observable.
       final first = await bootstrap(extra: {'FAKE_DSH_MODE': 'fast'}).ensureRunning();
-      final second = await bootstrap(command: '${bin.path}/dsh web').ensureRunning();
+      final changed = bootstrap(command: '${bin.path}/dsh web');
+      await expectLater(
+        changed.ensureRunning(),
+        throwsA(isA<HostLinkError>().having((e) => e.retryable, 'retryable', isFalse)),
+      );
+      expect(Process.runSync('kill', ['-0', '${first.pid}']).exitCode, 0);
+      expect(File('${home.path}/dsh-args.txt').readAsLinesSync(), hasLength(1));
+      final second = await changed.ensureRunning(forceRestart: true);
       expect(second.reused, isFalse);
       expect(second.token, isNot(first.token));
       // The old process was stopped.
       await Future<void>.delayed(const Duration(milliseconds: 300));
       expect(Process.runSync('kill', ['-0', '${first.pid}']).exitCode, isNot(0));
+    });
+
+    test('a missing launch log leaves the live instance alone', () async {
+      final b = bootstrap(extra: {'FAKE_DSH_MODE': 'fast'});
+      final first = await b.ensureRunning();
+      File('${home.path}/.dsh-app-remote/web.log').deleteSync();
+      await expectLater(b.ensureRunning(), throwsA(isA<HostLinkError>()));
+      expect(Process.runSync('kill', ['-0', '${first.pid}']).exitCode, 0);
+      expect(File('${home.path}/dsh-args.txt').readAsLinesSync(), hasLength(1));
+    });
+
+    test('a process appearing after probe is protected by the start script', () async {
+      final b = bootstrap(extra: {'FAKE_DSH_MODE': 'fast'});
+      final first = await b.ensureRunning();
+      await expectLater(b.start(), throwsA(isA<HostLinkError>()));
+      expect(Process.runSync('kill', ['-0', '${first.pid}']).exitCode, 0);
+      expect(File('${home.path}/dsh-args.txt').readAsLinesSync(), hasLength(1));
     });
 
     test('finds dsh outside PATH (nvm layout)', () async {

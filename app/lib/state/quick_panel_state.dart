@@ -5,7 +5,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../ui/shell/drawer/drawer_destination.dart';
+import 'drawer_destination.dart';
 
 class QuickPanelPrefs {
   const QuickPanelPrefs({this.swipe = true, this.items = defaultItems});

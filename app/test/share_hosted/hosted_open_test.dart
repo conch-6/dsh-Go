@@ -13,6 +13,7 @@ import 'package:dsh_app/share_hosted/hosted_config.dart';
 import 'package:dsh_app/share_hosted/hosted_crypto.dart';
 import 'package:dsh_app/share_hosted/hosted_link.dart';
 import 'package:dsh_app/share_hosted/hosted_links_state.dart';
+import 'package:dsh_app/state/settings_state.dart';
 import 'package:dsh_app/ui/replay/conversation_out.dart' show ManageLinksButton;
 import 'package:dsh_app/ui/replay/replay_page.dart';
 import 'package:dsh_app/ui/share_hosted/hosted_links_page.dart';
@@ -106,6 +107,7 @@ void main() {
             },
           ),
           overrides: [
+            settingsProvider.overrideWith(() => TestSettings()),
             hostedShareClientProvider.overrideWithValue(HostedShareClient(client: host.client)),
             hostedLinkStoreProvider.overrideWithValue(MemoryStore()),
           ],
@@ -119,6 +121,10 @@ void main() {
       testWidgets('$scheme link → replay', (tester) async {
         final links = await pumpHome(tester);
         links.add(Uri.parse('$scheme://go.dshtui.com/c/M000000001#k=$key'));
+        for (var i = 0; i < 100 && find.byType(ReplayPage).evaluate().isEmpty; i++) {
+          await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+          await tester.pump();
+        }
         await pumpFrames(tester, 6);
         expect(find.byType(ReplayPage), findsOneWidget);
         expect(find.text('修复登录重复提交'), findsWidgets);

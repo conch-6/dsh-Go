@@ -134,7 +134,7 @@ object GuestSetup {
                     else "\$DSH_HOME/dsh-app/diagnostics.md",
                 )
             file.parentFile?.mkdirs()
-            if (!file.exists() || file.readText() != text) file.writeText(text)
+            if (!file.exists() || file.readText() != text) SafeMode.writeAtomic(file.canonicalFile, text)
         } catch (_: Exception) {
         }
     }

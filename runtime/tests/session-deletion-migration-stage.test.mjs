@@ -1,5 +1,5 @@
 // Real released-v3 codec, JSONL migration publisher, filesystem and native writer locks.
-// Only the filesystem cleanup failure is controlled; no synthetic migration implementation.
+// Filesystem link/cleanup failures are controlled; no synthetic migration implementation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -18,10 +18,10 @@ const { createUserMessage } = await load('dsh-llm');
 const { releasedV3SessionFormatCodec } = await load('dsh-session-format-v2-to-v3');
 const { apply } = await load('dsh-session-persistence-jsonl');
 
-const hooks = () => ({ prepare: async () => {}, inspectTasks: async () => false, cleanup: async () => {} });
+const hooks = () => ({ validate: async () => {}, dispose: async () => {}, inspectTasks: async () => false, cleanup: async () => {} });
 const message = 'historical transcript retained by the actual migration publisher';
 
-async function fixture(t, compression) {
+async function fixture(t, compression, applyRuntime = apply) {
   const root = await fs.mkdtemp(join(tmpdir(), 'dsh-delete-migration-stage-'));
   const ctx = new Context();
   const handles = new Set();
@@ -60,7 +60,7 @@ async function fixture(t, compression) {
   const current = join(directory, `session.v4${suffix}`);
   await fs.mkdir(directory, { recursive: true });
   await fs.writeFile(source, original);
-  await apply(ctx, { root, compression, listConcurrency: 1 });
+  await applyRuntime(ctx, { root, compression, listConcurrency: 1 });
   const storage = ctx.sessionPersistence;
   const openWriter = async () => {
     const handle = await storage.open(id, 'write');
@@ -107,6 +107,32 @@ async function absent(path, message) {
 }
 
 for (const compression of ['none', 'zstd']) {
+  test(`${compression}: historical write open survives an app-domain hard-link refusal`, { skip: process.platform === 'win32' }, async t => {
+    const originalLink = fs.link;
+    let denied = 0;
+    // The bundled migration runtime captures link when the module is initialized.
+    // Isolate that captured dependency; restore global fs before using the backend.
+    fs.link = async () => {
+      denied++;
+      throw Object.assign(new Error('controlled migration link EACCES'), { code: 'EACCES' });
+    };
+    let applyDenied;
+    try {
+      syncBuiltinESMExports();
+      ({ apply: applyDenied } = await import(pathToFileURL(join(base, 'dsh-session-persistence-jsonl/lib/index.js')).href
+        + `?migration-link-refusal=${compression}`));
+    } finally { fs.link = originalLink; syncBuiltinESMExports(); }
+    const f = await fixture(t, compression, applyDenied);
+    const writer = await f.openWriter();
+    await f.closeWriter(writer);
+    assert.equal(denied, 1, 'the actual historical publisher reached the refused link');
+    assert.deepEqual(await fs.readFile(f.source), f.original);
+    assert.equal((await fs.readdir(f.directory)).some(name => name.startsWith('session.migration.')), false);
+    const reopened = await f.openWriter();
+    await f.closeWriter(reopened);
+    assert.equal(denied, 1, 'a later writer reads the committed current generation');
+  });
+
   test(`${compression}: permanent deletion removes the real committed migration stage`, async t => {
     const f = await fixture(t, compression);
     const { writer, stage } = await leaveCommittedStage(t, f);

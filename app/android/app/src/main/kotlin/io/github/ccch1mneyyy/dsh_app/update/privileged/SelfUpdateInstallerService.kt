@@ -159,8 +159,15 @@ class SelfUpdateInstallerService(private val context: Context) : ISelfUpdateInst
                 result = runInstall(apk, size, sha, version, userId, timedOut)
                 if (timedOut.get()) result = SelfUpdatePolicy.unknown()
             } catch (error: Exception) {
-                result = if (dispatched.get() || timedOut.get()) SelfUpdatePolicy.unknown()
-                    else SelfUpdateReceipt("invalid", (error as? SelfUpdateException)?.code ?: "invalidApk")
+                result = if (dispatched.get() || timedOut.get()) SelfUpdatePolicy.unknown() else {
+                    val code = stableSelfUpdateFailure(error).code
+                    val status = when (code) {
+                        "storage" -> "storage"
+                        "unavailable" -> "unavailable"
+                        else -> "invalid"
+                    }
+                    SelfUpdateReceipt(status, code)
+                }
             } finally {
                 completed.set(true)
                 timer.interrupt()

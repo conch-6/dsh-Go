@@ -1,10 +1,28 @@
 package io.github.ccch1mneyyy.dsh_app.runtime
 
 import java.io.File
+import java.nio.file.Files
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class GuestAgentsModeTest {
+    @Test fun aManagedInstructionsLinkIsKeptWhileItsTargetIsUpdated() {
+        assumeTrue("Linux symlink regression", System.getProperty("os.name").startsWith("Linux"))
+        val root = kotlin.io.path.createTempDirectory("agents-link").toFile()
+        try {
+            val file = File(root, "root/.dsh/AGENTS.md")
+            val target = File(root, "managed-instructions.md")
+            GuestSetup.writeAgentsMd(root, phoneStorage = false)
+            Files.move(file.toPath(), target.toPath())
+            Files.createSymbolicLink(file.toPath(), target.toPath())
+            GuestSetup.writeAgentsMd(root, phoneStorage = false, directEngine = true)
+            assertTrue(Files.isSymbolicLink(file.toPath()))
+            assertTrue(target.readText().contains("`${root.canonicalPath}/root/workspace`"))
+            assertEquals(target.readText(), file.readText())
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun compatibleLaunchRestoresTheExactOriginalDefaultInstructionsAfterDirect() {
         val root = kotlin.io.path.createTempDirectory("agents-mode").toFile()
         try {

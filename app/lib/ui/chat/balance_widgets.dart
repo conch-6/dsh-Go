@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/balance_state.dart';
+import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../common/sheet_title_bar.dart';
 import '../theme/app_icons.dart';
@@ -25,12 +26,21 @@ String formatThreshold(double value, [String symbol = '¥']) {
 }
 
 /// 打开 DeepSeek 开放平台的充值页(外部浏览器)。
-Future<void> openTopUp() async {
+Future<void> openTopUp(BuildContext context) async {
   try {
-    await launchUrl(Uri.parse(deepSeekTopUpUrl), mode: LaunchMode.externalApplication);
+    if (await launchUrl(Uri.parse(deepSeekTopUpUrl), mode: LaunchMode.externalApplication)) return;
   } catch (_) {
-    // No browser: nothing sensible to add.
+    // A thrown launch and a false result share the visible feedback below.
   }
+  if (!context.mounted) return;
+  // The balance card can be inside a modal sheet, above the page's SnackBars.
+  await showAppDialog<void>(
+    context: context,
+    builder: (dialog) => AlertDialog(
+      content: Text(dialog.l10n.engineAccountBrowserFailed),
+      actions: [TextButton(onPressed: () => Navigator.of(dialog).pop(), child: Text(dialog.l10n.commonClose))],
+    ),
+  );
 }
 
 /// 设置 → 模型与密钥里、API Key 下面的一行余额。
@@ -315,7 +325,7 @@ class _TopUpButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => TextButton.icon(
-    onPressed: openTopUp,
+    onPressed: () => openTopUp(context),
     iconAlignment: IconAlignment.end,
     icon: const Icon(AppIcons.openLink, size: 16),
     label: Text(context.l10n.viewBalanceGoTopUp),
@@ -379,7 +389,7 @@ class LowBalanceBanner extends ConsumerWidget {
                   ),
                 ),
                 TextButton(
-                  onPressed: openTopUp,
+                  onPressed: () => openTopUp(context),
                   style: TextButton.styleFrom(
                     minimumSize: const Size(48, 40),
                     padding: const EdgeInsets.symmetric(horizontal: 10),

@@ -796,6 +796,8 @@ class _TextPreviewState extends ConsumerState<_TextPreview> {
       setState(() => _error = const ArtifactError('offline'));
       return;
     }
+    // A page started during this read must keep its own busy state.
+    final wasPaging = _more;
     final token = ++_token;
     final limit = again && _lines > previewPageLines
         ? _lines.clamp(previewPageLines, previewMaxLines)
@@ -810,12 +812,16 @@ class _TextPreviewState extends ConsumerState<_TextPreview> {
         _version = page.version;
         _bytes = page.bytes ?? _bytes;
         _loaded = true;
+        if (wasPaging) _more = false;
         _error = null;
       });
     } catch (error) {
       if (!mounted || token != _token) return;
       // A reload that fails keeps what is on screen.
-      if (!_loaded) setState(() => _error = error);
+      setState(() {
+        if (wasPaging) _more = false;
+        if (!_loaded) _error = error;
+      });
       // 文件较大 says how large.
       if (_bytes == null && widget.artifact.bytes == null) {
         try {
@@ -854,7 +860,7 @@ class _TextPreviewState extends ConsumerState<_TextPreview> {
         _more = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _more = false);
+      if (mounted && token == _token) setState(() => _more = false);
     }
   }
 

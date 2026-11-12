@@ -195,7 +195,20 @@ Future<void> offerEngineRestart(BuildContext context, ProviderContainer containe
       ],
     ),
   );
-  if (restart == true) await EngineControl.restart(container);
+  if (restart != true) return;
+  try {
+    if (await EngineControl.restart(container)) return;
+  } on Object {
+    // Native start/stop errors need the same visible failure as a stop timeout.
+  }
+  if (!context.mounted) return;
+  await showAppDialog<void>(
+    context: context,
+    builder: (dialog) => AlertDialog(
+      content: Text(l10n.pluginsReloadFailed),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: Text(l10n.commonClose))],
+    ),
+  );
 }
 
 /// A confirmation that a host change retired: nothing was sent. These open

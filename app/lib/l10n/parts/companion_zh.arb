@@ -48,6 +48,7 @@
       }
     }
   },
+  "companionFailedBodyPlain": "她刚才没加载出来。先重试，还不行再重新导入素材包。",
   "companionPackBroken": "这个文件打不开，可能不是素材包或已经损坏。",
   "companionPackRuntimeMismatch": "素材包里的运行库和这个版本的 App 对不上。",
   "companionPackNoRuntime": "这个包只有角色，手机上还没有运行库。先导入完整的素材包。",
@@ -90,6 +91,9 @@
   "companionTease1": "别闹了，头都晕了。",
   "companionTease2": "再戳就不理你了！",
   "companionTease3": "你是不是很闲？",
+  "companionShake1": "哇啊，别摇啦！",
+  "companionShake2": "头好晕……水都晃起来了。",
+  "companionShake3": "再摇我要吐泡泡了！",
   "companionStatusIdle": "在发呆",
   "companionStatusListening": "在听你说",
   "companionStatusThinking": "在想",

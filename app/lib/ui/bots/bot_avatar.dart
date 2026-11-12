@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/bots_state.dart';
+import '../common/display_image.dart';
 import '../common/status_dot.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
@@ -34,8 +35,13 @@ class BotAvatar extends ConsumerWidget {
     final face = photo == null
         ? BotMonogram(name: bot.name, color: bot.ink, size: size)
         : ClipOval(
-            child: Image.memory(
-              photo,
+            child: Image(
+              image: imageForDisplay(
+                MemoryImage(photo),
+                width: size,
+                height: size,
+                pixelRatio: MediaQuery.devicePixelRatioOf(context),
+              ),
               width: size,
               height: size,
               fit: BoxFit.cover,

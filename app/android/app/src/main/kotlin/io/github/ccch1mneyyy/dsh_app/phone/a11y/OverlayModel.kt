@@ -314,3 +314,19 @@ internal object BallGeometry {
     fun ballOver(windowX: Int, windowY: Int, padX: Int, padTop: Int, circleLeft: Int, circleTop: Int, pad: Int) =
         WindowPos(windowX + padX + circleLeft - pad, windowY + padTop + circleTop - pad)
 }
+
+/**
+ * The confirm and handoff cards' windows: nearly the display's width, capped so a sentence keeps a
+ * readable measure on a tablet. The width is measured from the window the manager laid out (see
+ * ControlOverlay.fitCardWidth), never from the context's configuration, which can still describe
+ * the previous rotation for a moment after a cold start.
+ */
+internal object CardMetrics {
+    /** Window cap of the confirm card and of the handoff card, in dp. */
+    const val CONFIRM_DP = 472
+    const val HANDOFF_DP = 492
+
+    /** The window width in px for a display [displayW] px wide ([density] as DisplayMetrics has it). */
+    fun windowWidthPx(displayW: Int, density: Float, capDp: Int): Int =
+        minOf(displayW - (CapsuleMetrics.EDGE_DP * density).roundToInt(), (capDp * density).roundToInt())
+}

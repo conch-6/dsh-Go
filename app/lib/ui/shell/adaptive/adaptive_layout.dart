@@ -93,6 +93,7 @@ abstract final class AdaptiveMetrics {
   static const panelIdealMin = 360.0;
   static const panelMax = 420.0;
   static const panelFraction = 0.3;
+  static const panelStep = 4.0;
 
   /// The chat column never gets narrower than a phone (DSH Web keeps 400).
   static const chatMin = 400.0;
@@ -102,7 +103,7 @@ abstract final class AdaptiveMetrics {
 
   /// Snapped to the 4dp grid.
   static double panelIdeal(double windowWidth) {
-    final raw = (windowWidth * panelFraction / 4).roundToDouble() * 4;
+    final raw = (windowWidth * panelFraction / panelStep).roundToDouble() * panelStep;
     return raw.clamp(panelIdealMin, panelMax);
   }
 }
@@ -156,14 +157,24 @@ class AdaptiveLayout {
     final width = math.min(AdaptiveMetrics.panelIdeal(window.width), room);
     final available = hasSession && width >= AdaptiveMetrics.panelMin;
     final shown = available && panelOpen;
-    final used = shown ? width : 0.0;
-    final fits = inner - AdaptiveMetrics.sidebarWidth - used >= AdaptiveMetrics.chatComfort;
+    final sidebarRoom = inner - AdaptiveMetrics.sidebarWidth - AdaptiveMetrics.chatComfort;
+    // A 4dp rounding step must not fold the sidebar as the window grows.
+    // Decide from the continuous lower bound, then keep the drawn panel on
+    // its grid within the chat's 600dp budget.
+    final panelLowerBound = (window.width * AdaptiveMetrics.panelFraction - AdaptiveMetrics.panelStep / 2).clamp(
+      AdaptiveMetrics.panelIdealMin,
+      AdaptiveMetrics.panelMax,
+    );
+    final fits = sidebarRoom >= (shown ? panelLowerBound : 0.0);
+    final fittedWidth = shown && fits
+        ? math.min(width, (sidebarRoom / AdaptiveMetrics.panelStep).floorToDouble() * AdaptiveMetrics.panelStep)
+        : width;
     return AdaptiveLayout(
       windowClass: windowClass,
       window: window,
       padding: padding,
       left: sidebarOpen && fits ? LeftPane.sidebar : LeftPane.rail,
-      panelWidth: available ? width : 0,
+      panelWidth: available ? fittedWidth : 0,
       panelAvailable: available,
       panelShown: shown,
       sidebarFits: fits,
