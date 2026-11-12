@@ -128,7 +128,9 @@ fi
 
 # Check every selected flavor before starting any build or writing build config.
 # Debug/profile may intentionally exercise UI without a bundled runtime.
-if [[ $mode == release ]]; then
+# DSH_SKIP_RUNTIME_CHECK=1: remote-only fork builds bundle no runtime (it lives
+# on the server), so the manifest preflight does not apply.
+if [[ $mode == release && -z ${DSH_SKIP_RUNTIME_CHECK:-} ]]; then
   python3 -I "$ROOT/tooling/check_runtime_bundle.py" "${flavors[@]}"
 fi
 

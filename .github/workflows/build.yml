@@ -47,6 +47,9 @@ jobs:
 
       - name: Build APK (arm64, release)
         run: tooling/build-apk.sh
+        env:
+          # remote-only fork: no bundled runtime, skip the manifest preflight
+          DSH_SKIP_RUNTIME_CHECK: "1"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
