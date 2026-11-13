@@ -157,10 +157,13 @@ fi
 
 # libtawcroot.so for the opt-in tawcroot launch method, from the pinned tawc commit.
 # Release builds must carry it; other builds go on without it (the option shows unavailable).
-if ! python3 -I "$ROOT/runtime/tawcroot/build.py"; then
-  [[ $mode == release ]] && die "tawcroot: libtawcroot.so did not build"
-  rm -rf "$ROOT/runtime/out-tawcroot" # never package an older build's library
-  echo "build-apk: building without libtawcroot.so; the tawcroot launch option will be unavailable" >&2
+# DSH_SKIP_RUNTIME_CHECK=1: remote-only fork never launches a local runtime, skip.
+if [[ -z ${DSH_SKIP_RUNTIME_CHECK:-} ]]; then
+  if ! python3 -I "$ROOT/runtime/tawcroot/build.py"; then
+    [[ $mode == release ]] && die "tawcroot: libtawcroot.so did not build"
+    rm -rf "$ROOT/runtime/out-tawcroot" # never package an older build's library
+    echo "build-apk: building without libtawcroot.so; the tawcroot launch option will be unavailable" >&2
+  fi
 fi
 
 # aapt2 to read back what was built (optional).
