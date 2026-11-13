@@ -6,6 +6,14 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class BackgroundPreviewWorkerTest {
+    @Test fun shutdownWaitsForRealTerminationWhenTheEncoderFinishesInTime() {
+        val worker = BackgroundPreviewWorker(); val original = checkNotNull(worker.acquire())
+        original.execute { Thread.sleep(100) }
+        worker.stop()
+        assertTrue(original.isTerminated)
+        assertTrue(worker.drained())
+    }
+
     @Test fun shutdownDoesNotDiscardTheOriginalEncoderOrAllowAnotherBeforeTermination() {
         val worker = BackgroundPreviewWorker(); val original = checkNotNull(worker.acquire())
         val entered = CountDownLatch(1); val exit = CountDownLatch(1)

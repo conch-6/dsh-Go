@@ -18,7 +18,9 @@ import 'package:dsh_app/ui/engine_settings/subagent_settings_page.dart';
 import 'package:dsh_app/ui/engine_settings/web_search_page.dart';
 import 'package:dsh_app/ui/features/permission_page.dart';
 import 'package:dsh_app/ui/pets/pet_settings_page.dart';
+import 'package:dsh_app/ui/common/list_page_row.dart';
 import 'package:dsh_app/ui/phone/phone_control_screen.dart';
+import 'package:dsh_app/ui/phone/phone_widgets.dart';
 import 'package:dsh_app/ui/providers/providers_page.dart';
 import 'package:dsh_app/ui/remote/remote_screen.dart';
 import 'package:dsh_app/ui/settings/appearance/appearance_page.dart';
@@ -102,7 +104,24 @@ Future<void> _check(
     AppLocale.use(locale);
     await tester.pumpWidget(const SizedBox());
     await pump();
+    await _expandFolds(tester);
     _verify(tester, page, appL10n, absent: absent);
+  }
+}
+
+/// Folded rows are still real entries; open them before asserting reachability.
+Future<void> _expandFolds(WidgetTester tester) async {
+  for (var i = 0; i < find.byType(PhoneOptionsFold, skipOffstage: false).evaluate().length; i++) {
+    final header = find
+        .descendant(
+          of: find.byType(PhoneOptionsFold, skipOffstage: false).at(i),
+          matching: find.byType(ListPageRow, skipOffstage: false),
+        )
+        .first;
+    await tester.ensureVisible(header);
+    await tester.pumpAndSettle();
+    await tester.tap(header, warnIfMissed: false);
+    await tester.pumpAndSettle();
   }
 }
 

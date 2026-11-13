@@ -62,6 +62,8 @@ class Composer extends StatefulWidget {
     this.onContentInserted,
     this.maxLines = 6,
     this.hardwareEnterSends = false,
+    this.sendWhenEmpty = false,
+    this.emptySendLabel,
   });
 
   final TextEditingController controller;
@@ -133,6 +135,12 @@ class Composer extends StatefulWidget {
 
   /// Opt-in physical Enter-to-send; never changes the software IME action.
   final bool hardwareEnterSends;
+
+  /// An empty box sends too (the tavern: the character speaks next). The key
+  /// is drawn quietly then, and labelled [emptySendLabel]; the mic, when
+  /// there is one, still comes first.
+  final bool sendWhenEmpty;
+  final String? emptySendLabel;
 
   /// Shown beside the keys while the field is being typed in: the capsule opens into a
   /// rounded rectangle, the text on a line of its own and the keys and this in a row
@@ -259,7 +267,7 @@ class _ComposerState extends State<Composer> with SingleTickerProviderStateMixin
         (widget.hardwareEnterSends && !keys.isShiftPressed && !keys.isAltPressed);
     if (sendEnter && (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter)) {
       if (event is KeyRepeatEvent) return KeyEventResult.handled;
-      final draft = widget.controller.text.trim().isNotEmpty || widget.hasAttachments;
+      final draft = widget.controller.text.trim().isNotEmpty || widget.hasAttachments || widget.sendWhenEmpty;
       final dictating = widget.voice?.active ?? false;
       if (draft && widget.connected && !widget.busy && !dictating) _send();
       return KeyEventResult.handled;
@@ -395,7 +403,9 @@ class _ComposerState extends State<Composer> with SingleTickerProviderStateMixin
             final empty = _draftEmpty.value && !widget.hasAttachments;
             final showStop = widget.running && empty && !dictating;
             final showMic = !dictating && !showStop && empty && !widget.busy && (voice?.available ?? false);
-            final enabled = !widget.busy && widget.connected && widget.sessionReady && (showStop || !empty);
+            final enabled =
+                !widget.busy && widget.connected && widget.sessionReady && (showStop || !empty || widget.sendWhenEmpty);
+            final emptySend = empty && widget.sendWhenEmpty && !showStop && !showMic && !dictating;
             final waiting = widget.waiting || widget.waitHint != null;
             final hint = switch (phase) {
               VoicePhase.listening => l10n.chatListeningEllipsis,
@@ -496,7 +506,8 @@ class _ComposerState extends State<Composer> with SingleTickerProviderStateMixin
             final sendKey = _SendButton(
               mode: mode,
               busy: keyBusy,
-              quiet: showStop && waiting && !widget.stopping,
+              quiet: (showStop && waiting && !widget.stopping) || emptySend,
+              sendLabel: emptySend ? widget.emptySendLabel : null,
               enabled: switch (mode) {
                 _KeyMode.mic => true,
                 _KeyMode.stopVoice => phase == VoicePhase.listening,
@@ -801,9 +812,13 @@ class _SendButton extends StatefulWidget {
     required this.onTap,
     this.onLongPress,
     this.quiet = false,
+    this.sendLabel,
   });
 
   final _KeyMode mode;
+
+  /// In place of 发送, for what sending does just now.
+  final String? sendLabel;
 
   /// Drawn like the mic key (something else on screen is primary).
   final bool quiet;
@@ -839,7 +854,7 @@ class _SendButtonState extends State<_SendButton> {
         ? colors.onPrimary
         : colors.onSurface.withValues(alpha: 0.38);
     final (icon, size, label) = switch (mode) {
-      _KeyMode.send => (AppIcons.send, 20.0, l10n.commonSend),
+      _KeyMode.send => (AppIcons.send, 20.0, widget.sendLabel ?? l10n.commonSend),
       _KeyMode.stopRun => (AppIcons.stopGenerating, 18.0, l10n.chatStopGenerating),
       _KeyMode.mic => (AppIcons.voice, 20.0, l10n.chatVoiceInput),
       _KeyMode.stopVoice => (AppIcons.stopGenerating, 18.0, l10n.chatStopVoiceInput),

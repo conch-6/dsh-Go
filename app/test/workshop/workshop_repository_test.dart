@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dsh_app/companion/companion_pack.dart';
+import 'package:dsh_app/pets/pet_library.dart' show PetImportException, PetImportProblem;
 import 'package:dsh_app/update/update_http.dart';
 import 'package:dsh_app/workshop/workshop_client.dart';
 import 'package:dsh_app/workshop/workshop_models.dart';
@@ -488,6 +489,51 @@ void main() {
     await expectLater(repository.install(entry), workshopError('workshop_no_space'));
   });
 
+  test('package validation membership follows the real local mapper and its detail priority', () {
+    for (final problem in PetImportProblem.values) {
+      final code = workshopLocalError(PetImportException(problem)).code;
+      expect(workshopPackageValidationCodes.contains(code), problem != PetImportProblem.storage,
+        reason: 'PetImportProblem.${problem.name}: $code');
+    }
+    for (final problem in CompanionPackProblem.values) {
+      final code = workshopLocalError(CompanionPackException(problem)).code;
+      expect(workshopPackageValidationCodes.contains(code),
+        problem != CompanionPackProblem.storage && problem != CompanionPackProblem.noRuntime,
+        reason: 'CompanionPackProblem.${problem.name}: $code');
+    }
+    for (final (error, expected, recognized) in const [
+      (CompanionPackException(CompanionPackProblem.storage, 'companion_bad_json'),
+        'workshop_companion_bad_json', true),
+      (CompanionPackException(CompanionPackProblem.noRuntime, 'companion_bad_json'),
+        'workshop_runtime_missing', false),
+      (CompanionPackException(CompanionPackProblem.notAPack, 'companion_readers_busy'),
+        'workshop_readers_busy', false),
+      (CompanionPackException(CompanionPackProblem.notAPack, 'companion_future'),
+        'workshop_companion_future', false),
+      (PetImportException(PetImportProblem.storage, null, 28), 'workshop_no_space', false),
+    ]) {
+      final code = workshopLocalError(error).code;
+      expect(code, expected);
+      expect(workshopPackageValidationCodes.contains(code), recognized);
+    }
+  });
+
+  test('non-validation and unknown codes do not become package failures by prefix', () {
+    for (final code in [
+      null,
+      'workshop_companion_disabled',
+      'workshop_preview_png',
+      'workshop_install_record',
+      'workshop_companion_storage',
+      'workshop_companion_runtime_missing',
+      'workshop_companion_export_exists',
+      'workshop_pet_future',
+      'companion_bad_json',
+    ]) {
+      expect(workshopPackageValidationCodes.contains(code), isFalse, reason: '$code');
+    }
+  });
+
   test('companion prepare applies the same full PNG gate as the Worker', () async {
     final store = CompanionPackStore(Directory('${temp.path}/companion'), expectedRuntime: workshopRuntimeDigest());
     final publication = WorkshopPublication(workshopMeta(kind: 'companion'));
@@ -496,6 +542,7 @@ void main() {
       expect(await store.installed(), isTrue, reason: 'the general local import acceptance is unchanged');
       final output = File('${temp.path}/bad-texture.zip');
       await expectLater(repository.prepareCompanion(store, output, publication), workshopError('workshop_companion_bad_png'));
+      expect(workshopPackageValidationCodes.contains('workshop_companion_bad_png'), isTrue);
       expect(output.existsSync(), isFalse);
     }
     await store.install(workshopZip(temp, {...workshopRuntime(), ...workshopCharacter()}).path);

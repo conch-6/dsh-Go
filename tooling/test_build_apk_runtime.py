@@ -29,6 +29,10 @@ class BuildApkRuntimeTest(unittest.TestCase):
         for name in ("build-apk.sh", "build_number.py", "check_runtime_bundle.py"):
             shutil.copy2(ROOT / "tooling" / name, self.root / "tooling" / name)
         (self.root / "app/pubspec.yaml").write_text("version: 1.0.0+1\n")
+        # Stand-in for runtime/tawcroot/build.py: TAWCROOT_EXIT decides whether it "builds".
+        tawcroot = self.root / "runtime/tawcroot"
+        tawcroot.mkdir(parents=True)
+        (tawcroot / "build.py").write_text("import os, sys\nsys.exit(int(os.environ.get('TAWCROOT_EXIT', '0')))\n")
         self.calls_file = self.root / "flutter-calls.jsonl"
         tools = self.root / "bin"
         tools.mkdir()
@@ -161,6 +165,15 @@ apk.write_bytes(b'fake APK: shell flow only')
                 data.update(change)
                 path.write_text(json.dumps(data))
                 self.assert_blocked(self.run_script(), message)
+
+    def test_release_needs_libtawcroot_and_debug_goes_on_without_it(self):
+        self.make_bundle("arm64", 2)
+        self.env["TAWCROOT_EXIT"] = "1"
+        self.assert_blocked(self.run_script("--release", "-f", "arm64"), "libtawcroot.so did not build")
+        result = self.run_script("--debug", "-f", "arm64")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("tawcroot launch option will be unavailable", result.stderr)
+        self.assertEqual(len(self.calls()), 1)
 
     def test_debug_and_profile_keep_allowing_no_runtime(self):
         for mode in ("debug", "profile"):

@@ -32,6 +32,10 @@ class _Bridge extends RuntimeBridge {
     if (fail) throw StateError('native rejected transition');
     if (pending case final future?) await future.future;
   }
+
+  final tawcChanges = <bool>[];
+  @override
+  Future<void> setTawcEngine(bool enabled) async => tawcChanges.add(enabled);
 }
 
 void main() {
@@ -66,7 +70,8 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  SettingsSwitchTile tile(WidgetTester tester) => tester.widget<SettingsSwitchTile>(find.byType(SettingsSwitchTile));
+  SettingsSwitchTile tile(WidgetTester tester) =>
+      tester.widget<SettingsSwitchTile>(find.byType(SettingsSwitchTile).first);
 
   testWidgets('failed direct launch offers original compatible setter, once', (tester) async {
     final bridge = _Bridge()..pending = Completer<void>();
@@ -188,7 +193,7 @@ void main() {
     expect(tile(tester).value, isFalse);
     expect(tile(tester).subtitle, l10n.phoneDirectFailedHint);
     expect(find.text(l10n.phoneReturnCompatible), findsNothing);
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.byType(Switch).first);
     await tester.pumpAndSettle();
     expect(bridge.changes, [true]);
     // Native now reports it on; the last launch's reason no longer explains the switch.
@@ -232,7 +237,7 @@ void main() {
     await show(tester, runtime, bridge);
     expect(tile(tester).value, isFalse);
     expect(tile(tester).onChanged, isNotNull);
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.byType(Switch).first);
     await tester.pump();
     expect(bridge.changes, [true]);
     expect(tile(tester).onChanged, isNull);
@@ -260,7 +265,7 @@ void main() {
     runtime.update(const RuntimeStatus(phase: RuntimePhase.installed, directEngineEnabled: true));
     await tester.pumpAndSettle();
     expect(tile(tester).onChanged, isNotNull);
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.byType(Switch).first);
     await tester.pumpAndSettle();
     expect(bridge.changes, [false]);
   });
@@ -271,11 +276,44 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     final bridge = _Bridge()..fail = true;
     await show(tester, _Runtime(stopped), bridge);
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.byType(Switch).first);
     await tester.pumpAndSettle();
     expect(tile(tester).value, isFalse);
     expect(find.text(lookupL10n(AppLocale.zhCN).phoneDirectChangeFailed), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  SettingsSwitchTile tawcTile(WidgetTester tester) =>
+      tester.widget<SettingsSwitchTile>(find.byType(SettingsSwitchTile).last);
+
+  testWidgets('tawcroot switch is off by default and turns on through the bridge', (tester) async {
+    final bridge = _Bridge();
+    await show(tester, _Runtime(const RuntimeStatus(phase: RuntimePhase.installed, tawcEngineAvailable: true)), bridge);
+    final l10n = lookupL10n(AppLocale.zhCN);
+    expect(tawcTile(tester).value, isFalse);
+    expect(tawcTile(tester).subtitle, l10n.phoneTawcHint);
+    await tester.tap(find.byType(Switch).last);
+    await tester.pumpAndSettle();
+    expect(bridge.tawcChanges, [true]);
+    expect(bridge.changes, isEmpty);
+  });
+
+  testWidgets('tawcroot switch explains a build without it and a failed start', (tester) async {
+    final l10n = lookupL10n(AppLocale.zhCN);
+    final runtime = _Runtime(const RuntimeStatus(phase: RuntimePhase.installed));
+    await show(tester, runtime, _Bridge());
+    expect(tawcTile(tester).subtitle, l10n.phoneTawcUnavailable);
+    expect(tawcTile(tester).onChanged, isNull);
+    runtime.update(
+      const RuntimeStatus(
+        phase: RuntimePhase.installed,
+        tawcEngineAvailable: true,
+        directEngineFallbackReason: 'tawcrootFailed',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tawcTile(tester).subtitle, l10n.phoneTawcFailedHint);
+    expect(tawcTile(tester).onChanged, isNotNull);
   });
 
   for (final locale in AppLocale.supported) {

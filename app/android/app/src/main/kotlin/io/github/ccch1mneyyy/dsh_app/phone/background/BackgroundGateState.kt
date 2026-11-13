@@ -48,9 +48,9 @@ internal class BackgroundGateState {
     @Volatile var snapshot = Snapshot()
         private set
 
-    // Physical cleanup/retest is not a transport error or a fabricated probe observation.
-    // Connected/reset cannot clear it; either the original accepted new probe plus cleanup,
-    // or a capability handshake rejected before allocation, can.
+    // Cleanup/retest is separate from capability success. Connected/reset cannot clear it;
+    // only the current attempt with confirmed cleanup (even on failure), or a rejection
+    // before allocation, can. Its capability/connection error remains in snapshot.
     @Volatile var needsRetest: Boolean = false
         private set
 

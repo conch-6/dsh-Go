@@ -3,17 +3,27 @@
 // to render. Rows are decoded one at a time, including all Adam7 passes.
 import { crc32, zlib } from './workshop-archive';
 import { PET_LIMITS } from './generated/workshop-data';
-import { requireWorkshop as need } from './workshop-common';
+import { previewDimensions, requireWorkshop as need, whole } from './workshop-common';
 
 const passes = [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]] as const;
 export interface PngInfo { width: number; height: number; pixels: number; rgbaSum: number }
-export function validatePng(bytes: Uint8Array): PngInfo {
+export interface PngRegion { x: number; y: number; width: number; height: number }
+export function validatePng(bytes: Uint8Array): PngInfo { return readPng(bytes); }
+// Reconstruct every source pixel through the same validator; retain only the
+// explicitly requested, bounded cell. No full-source RGBA buffer is created.
+export function cropPng(bytes: Uint8Array, region: PngRegion): Uint8Array { return readPng(bytes, region).rgba!; }
+function readPng(bytes: Uint8Array, region?: PngRegion): PngInfo & { rgba?: Uint8Array } {
   need(bytes.length >= 33 && bytes.length <= PET_LIMITS.sheetBytes, 'png_size');
   need([137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes[i] === b), 'png_header');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
   const width = view.getUint32(16), height = view.getUint32(20), depth = bytes[24]!, color = bytes[25]!, interlace = bytes[28]!;
   need(view.getUint32(8) === 13 && String.fromCharCode(...bytes.subarray(12, 16)) === 'IHDR', 'png_header');
   need(width > 0 && height > 0 && width <= PET_LIMITS.sheetSide && height <= PET_LIMITS.sheetSide && width * height * 4 <= PET_LIMITS.sheetDecodedBytes, 'png_decoded_size');
+  let rgba: Uint8Array | undefined;
+  if (region) {
+    need(previewDimensions(region.width, region.height) && whole(region.x, 0, width - region.width) && whole(region.y, 0, height - region.height), 'preview_dimensions');
+    rgba = new Uint8Array(region.width * region.height * 4);
+  }
   const depths: Record<number, number[]> = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] };
   const channels = ({ 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 } as Record<number, number>)[color];
   need(channels && depths[color]!.includes(depth) && bytes[26] === 0 && bytes[27] === 0 && interlace <= 1, 'png_format');
@@ -47,7 +57,7 @@ export function validatePng(bytes: Uint8Array): PngInfo {
   const bits = channels * depth, bpp = Math.max(1, Math.ceil(bits / 8));
   const rows = (interlace ? passes : [[0, 0, 1, 1]]).map(([x, y, dx, dy]) => {
     const w = width <= x! ? 0 : Math.ceil((width - x!) / dx!), h = height <= y! ? 0 : Math.ceil((height - y!) / dy!);
-    return { width: w, height: h, stride: Math.ceil(w * bits / 8) };
+    return { width: w, height: h, stride: Math.ceil(w * bits / 8), x: x!, y: y!, dx: dx!, dy: dy! };
   }).filter(row => row.width > 0 && row.height > 0);
   const expected = rows.reduce((sum, row) => sum + (row.stride + 1) * row.height, 0);
   const compressed = new Uint8Array(compressedSize); let write = 0;
@@ -93,12 +103,19 @@ export function validatePng(bytes: Uint8Array): PngInfo {
           else if (transparent && first === transparent.getUint16(0) && second === transparent.getUint16(2) && third === transparent.getUint16(4)) a = 0;
         }
         rgbaSum = (rgbaSum + r + g + b + a) >>> 0; pixels++;
+        if (region && rgba) {
+          const imageX = pass.x + x * pass.dx, imageY = pass.y + y * pass.dy;
+          if (imageX >= region.x && imageX < region.x + region.width && imageY >= region.y && imageY < region.y + region.height) {
+            const target = ((imageY - region.y) * region.width + imageX - region.x) * 4;
+            rgba[target] = r; rgba[target + 1] = g; rgba[target + 2] = b; rgba[target + 3] = a;
+          }
+        }
       }
       [previous, row] = [row, previous];
     }
   }
   need(cursor === raw.length && pixels === width * height, 'png_decode');
-  return { width, height, pixels, rgbaSum };
+  return { width, height, pixels, rgbaSum, ...(rgba ? { rgba } : {}) };
 }
 function paeth(a: number, b: number, c: number): number {
   const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);

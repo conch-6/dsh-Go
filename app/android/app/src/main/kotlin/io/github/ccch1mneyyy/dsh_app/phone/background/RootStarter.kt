@@ -173,7 +173,7 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
 private class RootChannel(
     val process: RootProcess,
     private val peer: String?,
-    private val supportedBackgroundLimit: Int,
+    @Volatile private var supportedBackgroundLimit: Int,
     private val onFailure: (String) -> Unit,
 ) : PrivilegedChannel {
     private val calls = PrivilegedCalls(if (peer == null) 1 else 3)
@@ -186,8 +186,11 @@ private class RootChannel(
     override fun tryExecute(request: Bundle): Bundle? = calls.tryPreview { exchange(request) }
 
     private fun exchange(request: Bundle): Bundle = try {
-        if (peer == null) Bundles.unmarshal(process.exchange(Bundles.marshal(request), 30_000))
+        val response = if (peer == null) Bundles.unmarshal(process.exchange(Bundles.marshal(request), 30_000))
         else process.exchangeMux(request, peer)
+        if (request.get(Proto.OP) == Proto.OP_PROBE)
+            supportedBackgroundLimit = backgroundRequestLimit(response::get, response::containsKey, peer != null)
+        response
     } catch (error: Exception) {
         val timeout = error is IOException && error.message == "rootTimeout"
         close()

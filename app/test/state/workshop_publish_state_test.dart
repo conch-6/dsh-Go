@@ -1,17 +1,392 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:dsh_app/forum/discourse_client.dart';
 import 'package:dsh_app/state/workshop_auth_state.dart';
 import 'package:dsh_app/state/workshop_preferences.dart';
 import 'package:dsh_app/state/workshop_publish_sources.dart';
 import 'package:dsh_app/state/workshop_publish_state.dart';
+import 'package:dsh_app/workshop/workshop_client.dart';
 import 'package:dsh_app/workshop/workshop_models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../workshop/support.dart' show FakeWorkshopHttp, workshopCaps, workshopJsonResponse, workshopSubmissionJson;
 import 'workshop_auth_test_support.dart';
 import 'workshop_publish_test_support.dart';
 
+/// Auth and archive preparation use the existing memory harness. The mutation
+/// itself runs the real Client preflight, HTTP boundary and response parser.
+/// The fake transport records the exact request method; no socket/file opens.
+class _PreflightPublishClient extends PublishClient {
+  _PreflightPublishClient(super.events) {
+    transport = FakeWorkshopHttp((method, url, headers, body) {
+      if (method == 'GET' && url.path == '/api/workshop/v1/capabilities') {
+        return workshopJsonResponse(workshopCaps(companion: companionEnabled));
+      }
+      if (method == 'POST' && url.path == '/api/workshop/v1/submissions') {
+        if (postFailure != null) {
+          throw postFailure!;
+        }
+        if (rejectAfterPost) {
+          return workshopJsonResponse({'error': 'workshop_companion_disabled'}, status: 409);
+        }
+        final metadata = WorkshopMetadata.fromJson(jsonDecode(utf8.decode(body!)));
+        return workshopJsonResponse({'submission': workshopSubmissionJson(
+          metadata: metadata.toJson(), status: 'pending')});
+      }
+      throw StateError('Unexpected publisher recovery request: $method ${url.path}');
+    });
+    delegate = WorkshopClient(origin: origin, cacheFile: File('unused-publish-recovery-cache.json'), http: transport);
+  }
+  late final FakeWorkshopHttp transport;
+  late final WorkshopClient delegate;
+  bool companionEnabled = false, rejectAfterPost = false;
+  SocketException? postFailure;
+  int get posts => transport.requests.where((request) => request.method == 'POST').length;
+
+  @override
+  Future<WorkshopSubmission> createSubmission(WorkshopMetadata metadata, {required String requestId,
+    required bool rightsConfirmed, required WorkshopCredential credential}) {
+    events.add('create');
+    creates.add(PublishCreateCall(metadata, requestId, rightsConfirmed, credential));
+    return delegate.createSubmission(metadata, requestId: requestId,
+      rightsConfirmed: rightsConfirmed, credential: credential);
+  }
+}
+
+Future<void> _prepareCompanion(PublishHarness h) async {
+  await h.start();
+  expect(h.controller.selectSource(const WorkshopPublishSource(
+    kind: 'companion', localId: 'companion', name: '小猫伙伴')), isTrue);
+  expect(h.controller.setInput(publishInput()), isTrue);
+  await h.controller.prepare();
+  expect(h.state.phase, WorkshopPublishPhase.ready);
+}
+
 void main() {
+  test('real create preflight rejection can leave its unsent journal and select a pet', () async {
+    final events = <String>[];
+    final client = _PreflightPublishClient(events);
+    final h = PublishHarness(client: client, events: events);
+    try {
+      await _prepareCompanion(h);
+      final input = h.state.input;
+      await h.controller.submit();
+      final pending = h.preferences.pending.values.single;
+      expect(h.state.error?.code, 'workshop_companion_disabled');
+      expect(h.state.error?.mutationNotSent, isTrue);
+      expect(h.state.error?.resultUnknown, isFalse);
+      expect(client.posts, 0);
+      expect(client.transport.requests.single.method, 'GET');
+      expect(h.state.hasPending, isTrue);
+      expect(h.state.pendingKnownUnsent, isTrue);
+      expect(h.state.canDiscardUnsentSubmission, isTrue);
+      expect(h.state.canEditMetadata, isFalse);
+      expect(h.drafts.probes.single.draft.retained, isTrue);
+      await h.controller.discardUnsentSubmission();
+      expect(h.state.phase, WorkshopPublishPhase.idle);
+      expect(h.state.hasPending, isFalse);
+      expect(h.state.pendingKnownUnsent, isFalse);
+      expect(h.state.canDiscardUnsentSubmission, isFalse);
+      expect(h.state.canEditMetadata, isTrue);
+      expect(h.state.source?.kind, 'companion');
+      expect(h.state.input.declaration('companion'), input.declaration('companion'));
+      expect(h.state.input.rightsConfirmed, isFalse);
+      expect(h.state.preparedMetadata, isNull);
+      expect(h.preferences.pending, isEmpty);
+      expect(h.preferences.ids[pending.fingerprint], pending.requestId);
+      expect(h.preferences.retired, isEmpty);
+      expect(h.drafts.probes.single.cleanups, 1);
+      expect(client.transport.requests, hasLength(1));
+      expect(h.controller.selectSource(publishSource), isTrue);
+      expect(h.controller.setInput(publishInput()), isTrue);
+      await h.controller.prepare();
+      await h.controller.submit();
+      expect(client.posts, 1);
+      expect(client.creates.last.metadata.kind, 'pet');
+      expect(client.creates.last.requestId, isNot(pending.requestId));
+      expect(h.state.result?.status, WorkshopSubmissionStatus.pending);
+      expect(h.state.hasPending, isFalse);
+    } finally { await h.close(); }
+  });
+
+  test('the same error code returned by an actual POST does not permit discarding', () async {
+    final events = <String>[];
+    final client = _PreflightPublishClient(events)
+      ..companionEnabled = true
+      ..rejectAfterPost = true;
+    final h = PublishHarness(client: client, events: events);
+    try {
+      await _prepareCompanion(h);
+      await h.controller.submit();
+      final pending = h.preferences.pending.values.single;
+      expect(client.posts, 1);
+      expect(h.state.error?.code, 'workshop_companion_disabled');
+      expect(h.state.error?.mutationNotSent, isFalse);
+      expect(h.state.error?.resultUnknown, isFalse);
+      expect(h.state.pendingKnownUnsent, isFalse);
+      expect(h.state.canDiscardUnsentSubmission, isFalse);
+      final refusal = h.state.error;
+      await h.controller.discardUnsentSubmission();
+      expect(h.state.error, same(refusal));
+      expect(h.preferences.pending.values.single, same(pending));
+      expect(h.preferences.clears, 0);
+      expect(h.drafts.probes.single.draft.retained, isTrue);
+      expect(client.posts, 1);
+    } finally { await h.close(); }
+  });
+
+  test('a later unsent preflight cannot erase an earlier unknown create', () async {
+    final events = <String>[];
+    final client = _PreflightPublishClient(events)..companionEnabled = true
+      ..postFailure = const SocketException('Synthetic response loss');
+    final h = PublishHarness(client: client, events: events);
+    try {
+      await _prepareCompanion(h);
+      await h.controller.submit();
+      final pending = h.preferences.pending.values.single;
+      expect(h.state.error?.resultUnknown, isTrue);
+      expect(h.state.canDiscardUnsentSubmission, isFalse);
+      expect(client.posts, 1);
+      final unknown = h.state.error;
+      await h.controller.discardUnsentSubmission();
+      expect(h.state.error, same(unknown));
+      expect(h.state.error?.resultUnknown, isTrue);
+      expect(h.preferences.clears, 0);
+      client.companionEnabled = false;
+      client.postFailure = null;
+      await h.controller.retrySubmission();
+      expect(h.state.error?.code, 'workshop_companion_disabled');
+      expect(h.state.error?.mutationNotSent, isTrue);
+      expect(h.state.pendingKnownUnsent, isFalse);
+      expect(h.state.canDiscardUnsentSubmission, isFalse);
+      expect(client.posts, 1);
+      expect(client.creates.map((call) => call.requestId), [pending.requestId, pending.requestId]);
+      final preflight = h.state.error;
+      await h.controller.discardUnsentSubmission();
+      expect(h.state.error, same(preflight));
+      expect(h.preferences.pending.values.single, same(pending));
+      expect(h.preferences.clears, 0);
+      expect(h.drafts.probes.single.cleanups, 0);
+      client.companionEnabled = true;
+      await h.controller.retrySubmission();
+      expect(client.creates.last.requestId, pending.requestId);
+      expect(h.state.result?.status, WorkshopSubmissionStatus.pending);
+      expect(h.preferences.pending, isEmpty);
+    } finally { await h.close(); }
+  });
+
+  test('a restored journal has no in-memory unsent proof even after a new preflight rejection', () async {
+    final events = <String>[];
+    final client = _PreflightPublishClient(events);
+    final first = PublishHarness(client: client, events: events);
+    PublishHarness? recovered;
+    try {
+      await _prepareCompanion(first);
+      await first.controller.submit();
+      final pending = first.preferences.pending.values.single;
+      expect(first.state.canDiscardUnsentSubmission, isTrue);
+      await first.close();
+      final next = _PreflightPublishClient(events);
+      recovered = PublishHarness(client: next, preferences: first.preferences, events: events);
+      await recovered.start();
+      expect(recovered.state.source, isNull);
+      expect(recovered.state.hasPending, isTrue);
+      expect(recovered.state.pendingKnownUnsent, isFalse);
+      expect(recovered.state.canDiscardUnsentSubmission, isFalse);
+      expect(next.transport.requests, isEmpty);
+      recovered.controller.setInput(recovered.state.input.copyWith(rightsConfirmed: true));
+      await recovered.controller.retrySubmission();
+      expect(recovered.state.error?.mutationNotSent, isTrue);
+      expect(next.posts, 0);
+      expect(recovered.state.canDiscardUnsentSubmission, isFalse);
+      final preflight = recovered.state.error;
+      await recovered.controller.discardUnsentSubmission();
+      expect(recovered.state.error, same(preflight));
+      expect(first.preferences.pending.values.single.requestId, pending.requestId);
+      expect(first.preferences.clears, 0);
+      expect(recovered.drafts.probes.single.draft.retained, isTrue);
+    } finally {
+      if (recovered != null) await recovered.close();
+      await first.close();
+    }
+  });
+
+  test('a failed journal setter before create can be cleared without sending any request', () async {
+    final h = PublishHarness();
+    h.preferences.saving = (scope, pending) async {
+      h.preferences.pending[scope] = pending;
+      throw const WorkshopException('workshop_preferences');
+    };
+    try {
+      await h.prepared();
+      await h.controller.submit();
+      final pending = h.preferences.pending.values.single;
+      expect(h.client.creates, isEmpty);
+      expect(h.state.preferenceError?.code, 'workshop_preferences');
+      expect(h.state.canDiscardUnsentSubmission, isTrue);
+      await h.controller.discardUnsentSubmission();
+      expect(h.preferences.pending, isEmpty);
+      expect(h.preferences.ids[pending.fingerprint], pending.requestId);
+      expect(h.state.hasPending, isFalse);
+      expect(h.state.preferenceError, isNull);
+      expect(h.state.canEditMetadata, isTrue);
+      expect(h.drafts.probes.single.cleanups, 1);
+      expect(h.client.creates, isEmpty);
+    } finally { await h.close(); }
+  });
+
+  for (final removedBeforeFailure in [false, true]) {
+    test('unsent journal clear failure after disk removal=$removedBeforeFailure stays retained and retries locally', () async {
+      final events = <String>[];
+      final client = _PreflightPublishClient(events);
+      final h = PublishHarness(client: client, events: events);
+      try {
+        await _prepareCompanion(h);
+        await h.controller.submit();
+        final pending = h.preferences.pending.values.single;
+        h.preferences.clearing = (scope, expected) async {
+          expect(expected, pending.requestId);
+          if (removedBeforeFailure && h.preferences.pending[scope]?.requestId == expected) {
+            h.preferences.pending.remove(scope);
+          }
+          throw const WorkshopException('workshop_preferences');
+        };
+        await h.controller.discardUnsentSubmission();
+        expect(h.state.preferenceError?.code, 'workshop_preferences');
+        expect(h.state.hasPending, isTrue);
+        expect(h.state.canDiscardUnsentSubmission, isTrue);
+        expect(h.state.canEditMetadata, isFalse);
+        expect(h.preferences.pending.length, removedBeforeFailure ? 0 : 1);
+        expect(h.drafts.probes.single.draft.retained, isTrue);
+        expect(h.drafts.probes.single.cleanups, 0);
+        expect(h.controller.selectSource(publishSource), isFalse);
+        h.preferences.clearing = null;
+        await h.controller.discardUnsentSubmission();
+        expect(h.state.hasPending, isFalse);
+        expect(h.state.preferenceError, isNull);
+        expect(h.state.error, isNull);
+        expect(h.state.canEditMetadata, isTrue);
+        expect(h.preferences.pending, isEmpty);
+        expect(h.preferences.ids[pending.fingerprint], pending.requestId);
+        expect(h.drafts.probes.single.cleanups, 1);
+        expect(client.transport.requests, hasLength(1));
+        expect(client.posts, 0);
+      } finally { await h.close(); }
+    });
+  }
+
+  test('late unsent discard clears only its captured account and releases the draft after storage settles', () async {
+    final events = <String>[];
+    final client = _PreflightPublishClient(events);
+    final h = PublishHarness(client: client, events: events);
+    final entered = Completer<void>(), release = Completer<void>();
+    Future<void>? pending, settled;
+    try {
+      await _prepareCompanion(h);
+      await h.controller.submit();
+      final oldSession = h.state.session;
+      final old = h.preferences.pending.entries.single;
+      h.preferences.clearing = (scope, expected) async {
+        expect(scope, old.key);
+        expect(expected, old.value.requestId);
+        entered.complete();
+        await release.future;
+      };
+      pending = h.controller.discardUnsentSubmission();
+      settled = authSettled(pending);
+      await authSignal(entered, pending);
+      expect(h.state.busy, isTrue);
+      expect(h.state.canDiscardUnsentSubmission, isFalse);
+      expect(h.drafts.probes.single.draft.retained, isTrue);
+      expect(h.drafts.probes.single.cleanups, 0);
+      await h.controller.discardUnsentSubmission();
+      expect(h.state.error, isNull);
+      expect(h.state.busy, isTrue);
+      expect(h.preferences.clears, 1);
+      h.forum.emit(authSignedIn(credentials: const ForumCredentials(
+        key: 'TEST_ONLY_KEY_B', clientId: 'test-client'), userId: 43));
+      await authReady(h.container);
+      expect(h.state.session, isNot(same(oldSession)));
+      expect(h.state.waitingForPreviousOperation, isTrue);
+      release.complete();
+      await pending;
+      expect(h.preferences.pending, isEmpty);
+      expect(h.preferences.ids[old.value.fingerprint], old.value.requestId);
+      expect(h.drafts.probes.single.cleanups, 1);
+      expect(h.state.source, isNull);
+      expect(h.state.result, isNull);
+      expect(h.state.pendingChecked, isFalse);
+      expect(h.state.pendingKnownUnsent, isFalse);
+      expect(h.state.hasPending, isFalse);
+      expect(h.state.working, isFalse);
+      expect(client.posts, 0);
+    } finally {
+      if (!release.isCompleted) release.complete();
+      if (settled != null) await settled;
+      await h.close();
+    }
+  });
+
+  test('known unsent local cleanup needs no rights, profile or successful capabilities refresh', () async {
+    const credentials = ForumCredentials(key: 'TEST_ONLY_KEY_A', clientId: 'test-client');
+    final events = <String>[];
+    final client = _PreflightPublishClient(events);
+    final h = PublishHarness(client: client, events: events,
+      initial: authSignedIn(credentials: credentials));
+    try {
+      await _prepareCompanion(h);
+      await h.controller.submit();
+      final session = h.state.session;
+      expect(h.controller.setInput(h.state.input.copyWith(rightsConfirmed: false)), isTrue);
+      h.forum.emit(authSignedIn(credentials: credentials, userId: null));
+      await authReady(h.container);
+      expect(h.state.session, same(session));
+      expect(h.container.read(workshopAccessProvider).forumUserId, isNull);
+      client.readCapabilities = () async => throw const WorkshopException('workshop_network');
+      await h.container.read(workshopAccessProvider.notifier).refresh();
+      expect(h.container.read(workshopAccessProvider).error?.code, 'workshop_network');
+      expect(h.state.session, same(session));
+      final reads = client.capabilityReads;
+      await h.controller.discardUnsentSubmission();
+      expect(h.state.hasPending, isFalse);
+      expect(h.state.input.rightsConfirmed, isFalse);
+      expect(h.state.error, isNull);
+      expect(client.capabilityReads, reads);
+      expect(client.transport.requests, hasLength(1));
+      expect(client.posts, 0);
+    } finally { await h.close(); }
+  });
+
+  test('owned archive cleanup failure does not recreate a cleared unsent journal', () async {
+    final events = <String>[];
+    final client = _PreflightPublishClient(events);
+    final h = PublishHarness(client: client, events: events);
+    h.drafts.cleanup = (_) async => throw StateError('Synthetic cleanup failure');
+    try {
+      await _prepareCompanion(h);
+      await h.controller.submit();
+      await h.controller.discardUnsentSubmission();
+      expect(h.state.phase, WorkshopPublishPhase.idle);
+      expect(h.state.hasPending, isFalse);
+      expect(h.state.canEditMetadata, isTrue);
+      expect(h.state.error, isNull);
+      expect(h.state.cleanupError?.code, 'workshop_draft_cleanup');
+      expect(h.preferences.pending, isEmpty);
+      expect(h.drafts.probes.single.draft.retained, isFalse);
+      h.drafts.cleanup = null;
+      await h.controller.retryCleanup();
+      expect(h.state.cleanupError, isNull);
+      expect(h.drafts.probes.single.cleanups, 2);
+      expect(client.transport.requests, hasLength(1));
+      expect(client.posts, 0);
+    } finally {
+      h.drafts.cleanup = null;
+      await h.close();
+    }
+  });
+
   test('editing waits for one successful pending check and later keystrokes are synchronous', () async {
     final h = PublishHarness();
     try {

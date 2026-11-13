@@ -16,13 +16,17 @@ import 'package:dsh_app/companion/companion_keeper.dart';
 import 'package:dsh_app/companion/companion_pack.dart';
 import 'package:dsh_app/l10n/gen/app_localizations.dart';
 import 'package:dsh_app/state/connection_state.dart';
+import 'package:dsh_app/state/workshop_catalog_state.dart';
+import 'package:dsh_app/state/workshop_dependencies.dart';
 import 'package:dsh_app/ui/companion/companion_page.dart';
 import 'package:dsh_app/ui/companion/companion_stage.dart';
 import 'package:dsh_app/ui/plugins/islands/island_platform.dart';
 import 'package:dsh_app/ui/theme/app_icons.dart';
 import 'package:dsh_app/ui/theme/app_theme.dart';
+import 'package:dsh_app/ui/workshop/workshop_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
@@ -80,6 +84,16 @@ class _Islands extends FakeIslandPlatform {
   Future<void> destroy(int webViewId) async => destroyed.add(webViewId);
 }
 
+/// A catalogue that is still being read: the workshop page opens and asks
+/// nothing of the network.
+class _QuietCatalog extends WorkshopCatalogController {
+  @override
+  WorkshopCatalogState build() => WorkshopCatalogState(origin: Uri.parse('https://workshop.example'), loading: true);
+
+  @override
+  Future<void> refresh() async {}
+}
+
 Future<bool> _listening(Uri page) async {
   try {
     (await Socket.connect(page.host, page.port, timeout: const Duration(seconds: 5))).destroy();
@@ -114,9 +128,14 @@ void main() {
     await store.install(zip.path);
   });
 
-  Future<void> open(WidgetTester tester, {CompanionStageBuilder? stageBuilder}) => tester.pumpWidget(
+  Future<void> open(
+    WidgetTester tester, {
+    CompanionStageBuilder? stageBuilder,
+    List<Override> overrides = const [],
+  }) => tester.pumpWidget(
     ProviderScope(
       overrides: [
+        ...overrides,
         activeConnectionProvider.overrideWithValue(const AsyncData<HostConnection?>(null)),
         companionPhoneKeeperProvider.overrideWithValue((_) => FakePhoneKeeper() as CompanionKeeper),
       ],
@@ -205,6 +224,47 @@ void main() {
     expect(find.text('这台手机上加载失败了（timeout）。可以重新导入素材包再试一次。'), findsOneWidget);
     expect(find.text('导入素材包'), findsOneWidget);
     expect(find.text('重试'), findsNothing);
+    await close(tester);
+  });
+
+  testWidgets('back from the workshop after her pack changed there: a new stage, not the failed screen', (tester) async {
+    await install(tester);
+    CompanionStageEvents? stageEvents;
+    var stages = 0;
+    await open(
+      tester,
+      overrides: [
+        workshopOriginProvider.overrideWithValue(Uri.parse('https://workshop.example')),
+        workshopCatalogProvider.overrideWith(_QuietCatalog.new),
+      ],
+      stageBuilder: (_, events) {
+        stageEvents = events;
+        stages++;
+        return const SizedBox.expand();
+      },
+    );
+    await settle(tester, until: () => stageEvents != null);
+    stageEvents!.onReady();
+    await settle(tester, rounds: 6);
+
+    await tester.tap(find.byIcon(AppIcons.more));
+    await settle(tester, rounds: 6);
+    await tester.ensureVisible(find.text('创意工坊'));
+    await tester.tap(find.text('创意工坊'));
+    await settle(tester, rounds: 6);
+    expect(find.byType(WorkshopScreen), findsOneWidget);
+
+    // Installing a companion there retires the stage under the page.
+    final before = stages;
+    stageEvents!.onFailed(companionStagePackChanged);
+    await settle(tester, rounds: 6);
+
+    Navigator.of(tester.element(find.byType(WorkshopScreen))).pop();
+    await settle(tester, until: () => stages > before, rounds: 20);
+    await settle(tester, rounds: 6);
+    expect(find.byType(WorkshopScreen), findsNothing);
+    expect(find.text('她没能出来'), findsNothing);
+    expect(stages, greaterThan(before));
     await close(tester);
   });
 

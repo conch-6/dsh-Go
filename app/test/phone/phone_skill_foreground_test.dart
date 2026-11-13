@@ -12,7 +12,8 @@ import 'support.dart';
 Map<String, Object?> _status([int? candidate]) => {
   ...phoneStatus(a11y: true),
   'skills': {
-    'v': 1, 'askAfterSuccess': true,
+    'v': 1,
+    'askAfterSuccess': true,
     'candidates': [
       if (candidate != null) {'taskId': candidate, 'generation': 1, 'steps': 1},
     ],
@@ -50,6 +51,7 @@ void main() {
     await settlePhone(tester);
     expect(find.text(appL10n.phoneSkillConfirmGoal), findsNothing);
     expect(phoneOf(tester).status.skills.candidates.map((candidate) => candidate.taskId), [7]);
+    await openPhoneFold(tester, 'phone-more-options');
     final save = find.text(appL10n.phoneSkillSaveAction);
     // AppPage uses a lazy SliverList; ensureVisible requires an already built element.
     await tester.scrollUntilVisible(save, 200, scrollable: find.byType(Scrollable).first);
@@ -68,7 +70,9 @@ void main() {
   });
 
   for (final alreadyKnown in [false, true]) {
-    testWidgets('resume read is a baseline even when its candidate is ${alreadyKnown ? 'unchanged' : 'new'}', (tester) async {
+    testWidgets('resume read is a baseline even when its candidate is ${alreadyKnown ? 'unchanged' : 'new'}', (
+      tester,
+    ) async {
       _resume(tester);
       final native = FakePhoneNative(status: _status(alreadyKnown ? 7 : null));
       await pumpPhone(tester, const PhoneControlScreen(), native: native);

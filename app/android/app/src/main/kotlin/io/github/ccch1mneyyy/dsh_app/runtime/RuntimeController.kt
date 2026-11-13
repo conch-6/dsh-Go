@@ -149,6 +149,9 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         "directEngineAvailable" to directEngineAvailable(),
         "directEngineActive" to (process?.executionMode == "direct"),
         "directEngineFallbackReason" to lastLaunch?.fallbackReason,
+        "tawcEngineEnabled" to tawcEngine().enabled,
+        "tawcEngineAvailable" to (tawcEngineUnavailable() == null),
+        "tawcEngineActive" to (process?.executionMode == "tawcroot"),
         "currentExecutionMode" to process?.executionMode,
         "launchSelectedMode" to lastLaunch?.selectedMode,
         "launchSpawned" to (lastLaunch?.spawned == true),
@@ -162,6 +165,15 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         failedRuntime = prefs.getString(K_DIRECT_FAILED, null),
         runtime = runCatching { manifest.runtimeVersion }.getOrNull(),
     )
+    private fun tawcEngine() = DirectLaunch.Preference(
+        saved = prefs.getBoolean(K_TAWC_ENGINE, false),
+        available = tawcEngineUnavailable() == null,
+        failedRuntime = prefs.getString(K_TAWC_FAILED, null),
+        runtime = runCatching { manifest.runtimeVersion }.getOrNull(),
+    )
+    private fun tawcEngineUnavailable(): String? =
+        TawcrootLaunch.unavailable(app.applicationInfo.nativeLibraryDir, android.os.Build.VERSION.SDK_INT)
+
     private fun directEngineAvailable(): Boolean = runCatching {
         manifest.raw.optJSONObject("directEngine")?.optInt("schema") == 2
     }.getOrDefault(false)
@@ -173,7 +185,22 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     @Synchronized fun setDirectEngine(enabled: Boolean) {
         check(process == null && phase !in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING, Phase.INSTALLING) && !resetting) { "stop the engine before changing its launch method" }
         check(!enabled || directEngineAvailable()) { "this bundled runtime does not support direct launch" }
-        prefs.edit().putBoolean(K_DIRECT_ENGINE, enabled).remove(K_DIRECT_FAILED).apply()
+        val edit = prefs.edit().putBoolean(K_DIRECT_ENGINE, enabled).remove(K_DIRECT_FAILED)
+        if (enabled) edit.putBoolean(K_TAWC_ENGINE, false)
+        edit.apply()
+        emitStatus()
+    }
+
+    /**
+     * The opt-in tawcroot launch, off by default; same rules as [setDirectEngine]. Only one
+     * of the two is on at a time. Turning it on forgets an earlier failed tawcroot start.
+     */
+    @Synchronized fun setTawcEngine(enabled: Boolean) {
+        check(process == null && phase !in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING, Phase.INSTALLING) && !resetting) { "stop the engine before changing its launch method" }
+        check(!enabled || tawcEngineUnavailable() == null) { "this build does not include tawcroot" }
+        val edit = prefs.edit().putBoolean(K_TAWC_ENGINE, enabled).remove(K_TAWC_FAILED)
+        if (enabled) edit.putBoolean(K_DIRECT_ENGINE, false)
+        edit.apply()
         emitStatus()
     }
 
@@ -530,7 +557,9 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 }
                 timeline.spawned()
                 val direct = directEngine()
-                p.start(env, if (storage) PhoneStorage.binds() else emptyList(), safe, phone, direct.requested, direct.failed, searchOverlay, authOverlay, speechOverlay) { actualDirect ->
+                val tawc = tawcEngine()
+                p.start(env, if (storage) PhoneStorage.binds() else emptyList(), safe, phone, direct.requested, direct.failed, searchOverlay, authOverlay, speechOverlay,
+                    tawcEngine = tawc.saved == true, tawcFailed = tawc.failed) { actualDirect ->
                     // SafeMode.prepare writes its own briefing; leave the original home untouched.
                     if (!safe) GuestSetup.writeAgentsMd(installer.rootfs, storage, phone, pendingVisualReplies, actualDirect)
                 }
@@ -1006,6 +1035,17 @@ class RuntimeController private constructor(private val app: Context) : DshProce
             token = null
             healthyAt = null
             log("[dsh-app] DSH exited with code $code", "system")
+            if (source.tawc && readyAt == null && !expected && stopGen < runGen) {
+                // tawcroot never got DSH up: PRoot from now on with this runtime, no failure card,
+                // no strike. A new runtime, or turning tawcroot on again, gives it another try.
+                prefs.edit().putString(K_TAWC_FAILED, manifest.runtimeVersion).apply()
+                log("[dsh-app] tawcroot launch failed (exit $code${source.startupError?.let { ": $it" } ?: ""}); starting again with compatible launch", "system")
+                // A startup deadline already published its card and STOPPING: this retry replaces both.
+                error = null
+                setPhase(Phase.STARTING)
+                restartNow("with compatible launch")
+                return
+            }
             val tail = synchronized(runTail) { runTail.toList() }
             var f = CrashClassifier.classify(code, readyAt, SystemClock.elapsedRealtime(), System.currentTimeMillis(), tail, runSafe, source.direct)
             val startupError = source.startupError
@@ -1123,6 +1163,9 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         private const val K_DIRECT_ENGINE = "directEngine"
         /** Runtime version Direct failed to launch with (see [SafePolicy.directLaunchFailed]). */
         private const val K_DIRECT_FAILED = "directEngineFailedRuntime"
+        private const val K_TAWC_ENGINE = "tawcEngine"
+        /** Runtime version tawcroot failed to start DSH with. */
+        private const val K_TAWC_FAILED = "tawcEngineFailedRuntime"
         private const val MAIN_FAILURE_LOG = "failure-normal.log"
         private const val LATEST_FAILURE_LOG = "failure-latest.log"
 

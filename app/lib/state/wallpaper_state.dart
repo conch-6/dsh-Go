@@ -109,3 +109,28 @@ final wallpaperImageProvider = FutureProvider.autoDispose.family<ui.Image?, Wall
   if (image != null) ref.onDispose(image.dispose);
   return image;
 });
+
+/// Bakes a page's own picture ([sceneImageProvider]); apart from [wallpaperRendererProvider], so
+/// the app's wallpaper stays decoded meanwhile.
+final _sceneRendererProvider = Provider.autoDispose<WallpaperRenderer>((ref) {
+  final renderer = WallpaperRenderer();
+  ref.onDispose(renderer.release);
+  return renderer;
+});
+
+/// A page's own picture (a tavern chat's background, `WallpaperBackdrop.scene`) baked for its
+/// frame the way the wallpaper is; null when it can't be read.
+final sceneImageProvider = FutureProvider.autoDispose.family<ui.Image?, (CustomWallpaper, WallpaperFrame)>((
+  ref,
+  key,
+) async {
+  final (picture, frame) = key;
+  final lightweight = ref.watch(performanceDefaultsProvider.select((p) => p.lightweight));
+  final image = await ref.watch(_sceneRendererProvider).bake(picture, frame.copyWith(lightweight: lightweight));
+  if (!ref.mounted) {
+    image?.dispose();
+    return null;
+  }
+  if (image != null) ref.onDispose(image.dispose);
+  return image;
+});

@@ -197,18 +197,18 @@ object SafeMode {
         },
     ): List<Hazard> {
         val out = ArrayList<Hazard>()
-        readIfFile(guestFile(rootfs, MOVABLE[0]))?.let { text ->
+        readIfFile(rootfs, MOVABLE[0])?.let { text ->
             if (!isTrivialPatch(text)) {
                 out += Hazard(MOVABLE[0], "homePatch", patchDetail)
             }
         }
-        readIfFile(guestFile(rootfs, MOVABLE[1]))?.let { text ->
+        readIfFile(rootfs, MOVABLE[1])?.let { text ->
             val names = launchOnlyNames(text, home = true)
             if (names.isNotEmpty()) {
                 out += Hazard(MOVABLE[1], "homeEnv", envDetail(names))
             }
         }
-        readIfFile(guestFile(rootfs, MOVABLE[2]))?.let { text ->
+        readIfFile(rootfs, MOVABLE[2])?.let { text ->
             val names = launchOnlyNames(text, home = false)
             if (names.isNotEmpty()) {
                 out += Hazard(MOVABLE[2], "cwdEnv", envDetail(names))
@@ -225,7 +225,7 @@ object SafeMode {
         for (path in guestPaths.distinct()) {
             if (path !in MOVABLE) continue
             val file = guestFile(rootfs, path)
-            if (!file.isFile) continue
+            if (readableFile(rootfs, path) == null) continue
             var target = File(file.parentFile, "${file.name}.off-$stamp")
             var n = 1
             while (target.exists()) target = File(file.parentFile, "${file.name}.off-$stamp-${n++}")
@@ -467,8 +467,17 @@ object SafeMode {
 
     fun guestFile(rootfs: File, guestPath: String): File = File(rootfs, guestPath.removePrefix("/"))
 
-    private fun readIfFile(file: File): String? = try {
-        if (file.isFile) file.readText() else null
+    private fun readIfFile(rootfs: File, guestPath: String): String? = try {
+        readableFile(rootfs, guestPath)?.readText()
+    } catch (_: Exception) {
+        null
+    }
+
+    // Preflight precedes the safe launch's tawc materialization. Resolve bytes for reading;
+    // moveAside must still rename the original guest name, never its shared store object.
+    private fun readableFile(rootfs: File, guestPath: String): File? = try {
+        guestFile(rootfs, guestPath).takeIf { it.isFile }
+            ?: io.github.ccch1mneyyy.dsh_app.files.GuestFiles.resolve(rootfs, guestPath, phoneRoot = PhoneStorage.GUEST_PATH)
     } catch (_: Exception) {
         null
     }
@@ -865,24 +874,36 @@ function trial (args) {
   const seconds = function (ms) { return Math.round(ms / 1000) }
   const capture = function (stream) {
     let pending = ''
+    let line = ''
+    const saveLine = function () {
+      if (line) {
+        const text = line.length > 2000 ? line.slice(0, 2000).replace(/[\uD800-\uDBFF]$/, '') + '…' : line
+        tail.push(redact(text))
+        if (tail.length > 60) tail.shift()
+      }
+      line = ''
+    }
+    stream.setEncoding('utf8')
     stream.on('data', function (chunk) {
       const text = pending + String(chunk)
       if (!upAt && text.indexOf('token=') >= 0) upAt = Date.now()
       // A pipe can split the six-byte marker anywhere; streams stay separate.
       pending = text.slice(-5)
-      for (const line of String(chunk).split('\n')) {
-        if (!line) continue
-        tail.push(redact(line))
-        if (tail.length > 60) tail.shift()
+      const lines = String(chunk).split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        // One extra character records truncation without retaining an unbounded line.
+        line += lines[i].slice(0, 2001 - line.length)
+        if (i + 1 < lines.length) saveLine()
       }
     })
+    return saveLine
   }
-  capture(child.stdout)
-  capture(child.stderr)
+  const flushOutput = [capture(child.stdout), capture(child.stderr)]
   const finish = function (code, text, showTail) {
     if (finished) return
     finished = true
     clearInterval(timer)
+    flushOutput.forEach(function (flush) { flush() })
     out(text)
     if (showTail) out(tail.slice(-40).join('\n'))
     else {

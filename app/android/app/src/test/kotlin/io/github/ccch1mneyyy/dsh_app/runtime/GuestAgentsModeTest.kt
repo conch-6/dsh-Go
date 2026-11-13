@@ -2,11 +2,62 @@ package io.github.ccch1mneyyy.dsh_app.runtime
 
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Paths
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class GuestAgentsModeTest {
+    private fun tawcBackup(root: File, file: File): File {
+        val obj = File(root.parentFile, "tawcroot/link/123").apply { parentFile!!.mkdirs() }
+        Files.move(file.toPath(), obj.toPath())
+        File(obj.parentFile, "123.cnt").writeText("0000000002\n")
+        val target = Paths.get("tawcroot:link:123")
+        Files.createSymbolicLink(file.toPath(), target)
+        Files.createSymbolicLink(File(root, "root/agents-backup.md").toPath(), target)
+        return obj
+    }
+
+    @Test fun tawcUserOwnedInstructionsRemainUntouchedAcrossLaunchModes() {
+        val base = kotlin.io.path.createTempDirectory("agents-tawc-user").toFile()
+        val root = File(base, "rootfs")
+        try {
+            val file = File(root, "root/.dsh/AGENTS.md").apply { parentFile!!.mkdirs() }
+            val original = "# My own instructions\nKeep them across startup.\n".toByteArray()
+            file.writeBytes(original)
+            val obj = tawcBackup(root, file)
+            assertFalse(file.exists())
+            for (direct in listOf(false, true)) {
+                GuestSetup.writeAgentsMd(root, phoneStorage = true, phoneControl = true, directEngine = direct)
+                assertEquals("tawcroot:link:123", Files.readSymbolicLink(file.toPath()).toString())
+                assertArrayEquals(original, obj.readBytes())
+            }
+            assertEquals("tawcroot:link:123", Files.readSymbolicLink(File(root, "root/agents-backup.md").toPath()).toString())
+        } finally { base.deleteRecursively() }
+    }
+
+    @Test fun tawcManagedInstructionsSkipIdenticalBytesAndKeepTheBackupOnUpdate() {
+        val base = kotlin.io.path.createTempDirectory("agents-tawc-managed").toFile()
+        val root = File(base, "rootfs")
+        try {
+            GuestSetup.writeAgentsMd(root, phoneStorage = false)
+            val file = File(root, "root/.dsh/AGENTS.md")
+            val original = file.readBytes()
+            val obj = tawcBackup(root, file)
+            assertTrue(obj.setLastModified(1_234_567_000L))
+            val modified = obj.lastModified()
+
+            GuestSetup.writeAgentsMd(root, phoneStorage = false)
+            assertTrue(Files.isSymbolicLink(file.toPath()))
+            assertEquals(modified, obj.lastModified())
+            GuestSetup.writeAgentsMd(root, phoneStorage = true)
+            assertFalse(Files.isSymbolicLink(file.toPath()))
+            assertTrue(file.readText().contains("`/sdcard/Download/DSH-Go/`"))
+            assertArrayEquals(original, obj.readBytes())
+            assertEquals("tawcroot:link:123", Files.readSymbolicLink(File(root, "root/agents-backup.md").toPath()).toString())
+        } finally { base.deleteRecursively() }
+    }
+
     @Test fun aManagedInstructionsLinkIsKeptWhileItsTargetIsUpdated() {
         assumeTrue("Linux symlink regression", System.getProperty("os.name").startsWith("Linux"))
         val root = kotlin.io.path.createTempDirectory("agents-link").toFile()

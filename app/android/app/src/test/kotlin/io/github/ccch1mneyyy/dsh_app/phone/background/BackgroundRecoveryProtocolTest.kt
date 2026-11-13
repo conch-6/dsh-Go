@@ -50,14 +50,18 @@ class BackgroundRecoveryProtocolTest {
         assertNull(BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey))
     }
 
-    @Test fun unavailableNamespaceCannotConsumeDeadPeerEmptyButCanUseIndependentProofs() {
+    @Test fun unavailableNamespaceCanConsumeDeadPeerEmptyFromTheHostProof() {
         val unavailable = record(11).copy(birth = birth.copy(pidNsDev = 0L, pidNsIno = 0L, pidNsAvailable = false))
         val receipt = mutableMapOf<String, Any?>(Proto.OK to true,
             Proto.RESOURCE_RECOVERY_VERSION to 1, Proto.RECOVERY_PEER to peer,
             Proto.OWNER to owner, Proto.RECOVERY_KIND to "deadPeerEmpty", Proto.DISPLAY_ID to 11)
-        assertFalse(BackgroundRecoveryProtocol.recovered(unavailable, receipt::get, receipt::containsKey))
-        receipt[Proto.RECOVERY_KIND] = "previousBoot"
         assertTrue(BackgroundRecoveryProtocol.recovered(unavailable, receipt::get, receipt::containsKey))
+        receipt[Proto.DISPLAY_ID] = null
+        assertFalse(BackgroundRecoveryProtocol.recovered(unavailable, receipt::get, receipt::containsKey))
+        receipt[Proto.DISPLAY_ID] = 11; receipt[Proto.RECOVERY_KIND] = "previousBoot"
+        assertTrue(BackgroundRecoveryProtocol.recovered(unavailable, receipt::get, receipt::containsKey))
+        receipt.remove(Proto.DISPLAY_ID)
+        assertFalse(BackgroundRecoveryProtocol.recovered(unavailable, receipt::get, receipt::containsKey))
         receipt[Proto.RECOVERY_KIND] = "peerRetired"
         assertTrue(BackgroundRecoveryProtocol.retired(peer, receipt::get))
     }
@@ -82,11 +86,14 @@ class BackgroundRecoveryProtocolTest {
         receipt[Proto.DISPLAY_ID] = 12
         assertFalse(BackgroundRecoveryProtocol.recovered(record(11), receipt::get, receipt::containsKey))
         receipt.remove(Proto.DISPLAY_ID)
-        assertFalse(BackgroundRecoveryProtocol.recovered(record(null), receipt::get, receipt::containsKey))
-        receipt[Proto.RECOVERY_KIND] = "previousBoot"
         assertTrue(BackgroundRecoveryProtocol.recovered(record(null), receipt::get, receipt::containsKey))
+        receipt[Proto.DISPLAY_ID] = 11
+        assertFalse(BackgroundRecoveryProtocol.recovered(record(null), receipt::get, receipt::containsKey))
         receipt[Proto.DISPLAY_ID] = null
         assertFalse(BackgroundRecoveryProtocol.recovered(record(null), receipt::get, receipt::containsKey))
+        receipt.remove(Proto.DISPLAY_ID)
+        receipt[Proto.RECOVERY_KIND] = "previousBoot"
+        assertTrue(BackgroundRecoveryProtocol.recovered(record(null), receipt::get, receipt::containsKey))
     }
 
     @Test fun retireProofIsOnlyTheExactPeerRetiredReceipt() {

@@ -1,4 +1,5 @@
 import { Script, runInNewContext } from 'node:vm';
+import { createHash, webcrypto } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { WORKSHOP_ADMIN_HTML, WORKSHOP_ADMIN_SCRIPT } from '../src/workshop-admin-page';
 
@@ -35,6 +36,28 @@ function detail(id = SID, status = 'pending'): any {
   return { submission: submission(id, status), current: status === 'approved', inspection: { status: 'valid', validator: 'synthetic-validator',
     summary: { validator: 'synthetic-validator', files: 2, expandedBytes: 2345 }, checks: [{ level: 'pass', code: 'package_validation_passed', message: special }],
     files: [file()], nextFileCursor: null } };
+}
+// A complete synthetic 1x1 RGBA PNG. The controlled DOM below still does not
+// decode pixels: each test explicitly supplies the browser load/error event.
+const publicPng = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNwaDjwHwAFBAKAPJ4DgAAAAABJRU5ErkJggg==', 'base64'));
+const publicHash = createHash('sha256').update(publicPng).digest('hex');
+function publicDetail(id = SID, status = 'pending'): any {
+  const value = detail(id, status), m = value.submission.metadata;
+  m.previewSource = 'pet-idle';
+  value.submission.preview = { path: `/market/workshop/${m.kind}/${m.id}/${m.version}/${m.sha256}/preview/${publicHash}.png`,
+    sha256: publicHash, size: publicPng.length, width: 1, height: 1 };
+  return value;
+}
+// Synthetic 4x2 PNGs with eXIf orientation and density metadata. Tests below
+// supply browser callbacks; no claim is made that this fake DOM decodes EXIF.
+const orientationPng = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAAGmVYSWZJSSoACAAAAAEAEgEDAAEAAAAGAAAAAAAAALdIESkAAAASSURBVHicY3BoOPAfGTOgCwAASbUT+UK3jwUAAAAASUVORK5CYII=', 'base64'));
+const densityPng = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAAbGVYSWZJSSoACAAAAAQAGgEFAAEAAAA+AAAAGwEFAAEAAABGAAAAKAEDAAEAAAACAAAAaYcEAAEAAABOAAAAAAAAAJAAAAABAAAAkAAAAAEAAAACAAKgBAABAAAAAgAAAAOgBAABAAAAAQAAAAAAAABVIRXPAAAAEklEQVR4nGNwaDjwHxkzoAsAAEm1E/lCt48FAAAAAElFTkSuQmCC', 'base64'));
+function publicDetailForPng(bytes: Uint8Array, width: number, height: number): any {
+  const value = publicDetail(), m = value.submission.metadata, hash = createHash('sha256').update(bytes).digest('hex');
+  m.kind = 'companion'; m.previewSource = 'companion-preview';
+  value.submission.preview = { path: `/market/workshop/${m.kind}/${m.id}/${m.version}/${m.sha256}/preview/${hash}.png`,
+    sha256: hash, size: bytes.length, width, height };
+  return value;
 }
 function report(id = RID, status = 'open'): any {
   return { reportId: id, status, kind: 'pet', id: 'ordinary-pet', version: '1.0.0', reason: special,
@@ -176,6 +199,7 @@ class FakeElement {
   readonly attributes = new Map<string, string>();
   value = ''; className = ''; type = ''; isConnected = true;
   onload: null | (() => void) = null; onerror: null | (() => void) = null;
+  naturalWidth = 0; naturalHeight = 0;
   private content = ''; private invisible = false; private inactive = false; private source = '';
   constructor(readonly tagName: string, readonly document: FakeDocument) {}
   set innerHTML(_: string) { throw new Error('HTML insertion is forbidden'); }
@@ -235,6 +259,15 @@ function imageResponse(type = 'image/png'): any {
   const bytes = type === 'image/png' ? new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]) : new Uint8Array([255, 216, 255]);
   return { ok: true, status: 200, headers: { get: (name: string) => name === 'content-type' ? type : String(bytes.length) }, arrayBuffer: async () => bytes.buffer };
 }
+function publicImageResponse(bytes: Uint8Array = publicPng, type = 'image/png', length: number | null = bytes.length) {
+  const headers: Record<string, string> = { 'content-type': type };
+  if (length !== null) headers['content-length'] = String(length);
+  return new Response(new Uint8Array(bytes).buffer, { headers });
+}
+function loadedPublicImage(f: ReturnType<typeof browser>, width = 1, height = 1) {
+  const image = f.byId('public-preview-image'); image.naturalWidth = width; image.naturalHeight = height;
+  expect(image.onload).not.toBeNull(); image.onload!();
+}
 function browser(handler: (path: string, init: any) => Promise<any> | any) {
   const document = new FakeDocument(), windowEvents = new Map<string, Listener>(), calls: { path: string; init: any }[] = [];
   const tasks: Promise<unknown>[] = [], timers = new Map<number, () => void>(), urls: string[] = [], revoked: string[] = [];
@@ -245,7 +278,7 @@ function browser(handler: (path: string, init: any) => Promise<any> | any) {
   }
   let timerId = 0;
   runInNewContext(delivered, { document, window: { addEventListener: (name: string, listener: Listener) => windowEvents.set(name, listener) },
-    location: { origin: 'https://worker.example' }, Uint8Array, Blob, AbortController,
+    location: { origin: 'https://worker.example' }, Uint8Array, Blob, AbortController, crypto: webcrypto,
     URL: { createObjectURL: () => { const url = 'blob:synthetic-' + urls.length; urls.push(url); return url; }, revokeObjectURL: (url: string) => revoked.push(url) },
     setTimeout: (callback: () => void) => { timers.set(++timerId, callback); return timerId; }, clearTimeout: (id: number) => timers.delete(id),
     fetch: (path: string, init: any) => {
@@ -420,5 +453,192 @@ describe('same delivered script with controlled DOM and fetch', () => {
       expect(f.byId('console').hidden).toBe(true); expect(f.byId('submissions-rows').textContent).toBe(''); expect(f.byId('admin-key').value).toBe('');
       expect(f.windowEvents.has('visibilitychange')).toBe(false); expect(f.timers.size).toBe(0);
     } finally { read.resolve(response({ submissions: [], nextCursor: null })); await f.cleanup(); }
+  });
+});
+
+describe('registered public preview in the same delivered admin script', () => {
+  it('constructs only the fixed authenticated candidate endpoint and validates its optional descriptor', () => {
+    const L = logic(), item = publicDetail().submission;
+    const plan = L.request('publicPreview', { id: SID, url: 'https://unused.example', file: 99 }, KEY);
+    expect(plan.path).toBe(`/api/workshop/v1/admin/submissions/${SID}/public-preview`);
+    expect(plan.options).toMatchObject({ method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'error',
+      headers: { 'X-Admin-Key': KEY, Accept: 'image/png' } });
+    expect(L.submission(item)).toBe(item); expect(L.submission(submission()).preview).toBeUndefined();
+    for (const fields of [null, { ...item.preview, path: 'https://unused.example/image.png' },
+      { ...item.preview, path: item.preview.path + '?file=1' }, { ...item.preview, size: 2097153 },
+      { ...item.preview, width: 513 }, { ...item.preview, height: 0 }, { ...item.preview, sha256: 'e'.repeat(64) }]) {
+      expect(thrown(() => L.submission({ ...item, preview: fields })).code).toBe('console_bad_response');
+    }
+  });
+  it('explicitly shows no image for a legacy candidate and does not borrow another current image', async () => {
+    const value = detail(); value.current = false;
+    const f = browser(path => response(path.includes('?status=') ? { submissions: [submission()], nextCursor: null } : value));
+    try {
+      await f.login(); await f.open();
+      expect(f.byId('public-preview').hidden).toBe(false); expect(f.byId('public-preview-caption').textContent).toContain('本次没有');
+      expect(f.byId('public-preview-retry').hidden).toBe(true); expect(f.byId('approve').disabled).toBe(false);
+      expect(f.calls.some(call => call.path.endsWith('/public-preview'))).toBe(false); expect(f.urls).toEqual([]);
+    } finally { await f.cleanup(); }
+  });
+  it('binds approval to the fetched digest, PNG pixel dimensions and successful load of this candidate', async () => {
+    const value = publicDetail();
+    const f = browser(path => path.endsWith('/public-preview') ? publicImageResponse()
+      : response(path.includes('?status=') ? { submissions: [value.submission], nextCursor: null } : value));
+    try {
+      await f.login(); await f.open(); expect(f.byId('approve').disabled).toBe(true); expect(f.byId('reject').disabled).toBe(false);
+      const call = f.calls.find(call => call.path.endsWith('/public-preview'))!;
+      expect(call.path).toBe(`/api/workshop/v1/admin/submissions/${SID}/public-preview`);
+      expect(call.init.headers['X-Admin-Key']).toBe(KEY); expect(call.init.redirect).toBe('error');
+      loadedPublicImage(f); expect(f.byId('approve').disabled).toBe(false); expect(f.byId('public-preview-image').hidden).toBe(false);
+      f.byId('review-reason').value = special; await f.byId('approve').fire('click');
+      expect(f.byId('confirm-impact').textContent).toContain(publicHash); expect(f.calls.filter(call => call.init.method === 'POST')).toHaveLength(0);
+    } finally { await f.cleanup(); }
+  });
+  it.each(['approve', 'reject'])('reloads the registered image after an acknowledged %s while the write guard is active', async (decision) => {
+    let status = 'pending';
+    const f = browser((path, init) => {
+      if (init.method === 'POST') {
+        status = decision === 'approve' ? 'approved' : 'rejected'; return response({ submission: publicDetail(SID, status).submission });
+      }
+      if (path.endsWith('/public-preview')) return publicImageResponse();
+      return response(path.includes('?status=') ? { submissions: [publicDetail(SID, status).submission], nextCursor: null } : publicDetail(SID, status));
+    });
+    try {
+      await f.login(); await f.open(); loadedPublicImage(f); f.byId('review-reason').value = special;
+      await f.byId(decision).fire('click'); await f.byId('confirm-send').fire('click');
+      expect(f.calls.filter(call => call.path.endsWith('/public-preview'))).toHaveLength(2);
+      expect(f.byId('public-preview').hidden).toBe(false); expect(f.byId('public-preview-image').src).toBe('blob:synthetic-1');
+      expect(f.revoked).toEqual(['blob:synthetic-0']); loadedPublicImage(f);
+      expect(f.byId('public-preview-image').hidden).toBe(false); expect(f.byId('submission-status-text').textContent).toContain('随后重新读取');
+    } finally { await f.cleanup(); }
+  });
+  it.each(['type', 'hash', 'declared-size', 'body-overflow', 'body-truncated'])('refuses %s mismatch before creating a public Blob and permits a manual retry', async (mode) => {
+    let repaired = false; const value = publicDetail(), changed = new Uint8Array(publicPng); changed[changed.length - 1]! ^= 1;
+    const f = browser(path => {
+      if (!path.endsWith('/public-preview')) return response(path.includes('?status=') ? { submissions: [value.submission], nextCursor: null } : value);
+      if (repaired) return publicImageResponse();
+      if (mode === 'type') return publicImageResponse(publicPng, 'image/jpeg');
+      if (mode === 'hash') return publicImageResponse(changed);
+      if (mode === 'declared-size') return publicImageResponse(publicPng, 'image/png', publicPng.length + 1);
+      if (mode === 'body-overflow') return publicImageResponse(new Uint8Array([...publicPng, 0]), 'image/png', null);
+      return publicImageResponse(publicPng.subarray(0, publicPng.length - 1), 'image/png', null);
+    });
+    try {
+      await f.login(); await f.open(); expect(f.urls).toEqual([]); expect(f.byId('approve').disabled).toBe(true);
+      expect(f.byId('reject').disabled).toBe(false); expect(f.byId('public-preview-retry').disabled).toBe(false);
+      expect(f.byId('public-preview-status').textContent).toContain('console_public_preview_');
+      repaired = true; await f.byId('public-preview-retry').fire('click'); loadedPublicImage(f);
+      expect(f.byId('approve').disabled).toBe(false); expect(f.byId('submission-files').textContent).toContain(file().path);
+    } finally { await f.cleanup(); }
+  });
+  it('keeps a decode failure recoverable without approving an unseen image', async () => {
+    const value = publicDetail();
+    const f = browser(path => path.endsWith('/public-preview') ? publicImageResponse()
+      : response(path.includes('?status=') ? { submissions: [value.submission], nextCursor: null } : value));
+    try {
+      await f.login(); await f.open();
+      f.byId('public-preview-image').onerror!();
+      expect(f.revoked).toEqual(['blob:synthetic-0']); expect(f.byId('public-preview-image').src).toBe('');
+      expect(f.byId('approve').disabled).toBe(true); expect(f.byId('reject').disabled).toBe(false);
+      expect(f.byId('public-preview-retry').disabled).toBe(false);
+      await f.byId('public-preview-retry').fire('click'); loadedPublicImage(f); expect(f.byId('approve').disabled).toBe(false);
+    } finally { await f.cleanup(); }
+  });
+  it.each(['short-header', 'header-type', 'header-length', 'pixel-dimensions'])('rejects %s after digest verification and before creating a Blob', async (mode) => {
+    const bytes = mode === 'short-header' ? publicPng.slice(0, 8) : new Uint8Array(publicPng);
+    if (mode === 'header-type') bytes[12] = 74;
+    if (mode === 'header-length') bytes[11] = 12;
+    const value = publicDetailForPng(bytes, mode === 'pixel-dimensions' ? 2 : 1, 1);
+    const f = browser(path => path.endsWith('/public-preview') ? publicImageResponse(bytes)
+      : response(path.includes('?status=') ? { submissions: [value.submission], nextCursor: null } : value));
+    try {
+      await f.login(); await f.open(); expect(f.urls).toEqual([]); expect(f.byId('approve').disabled).toBe(true);
+      expect(f.byId('reject').disabled).toBe(false);
+      expect(f.byId('public-preview-status').textContent).toContain(mode === 'pixel-dimensions'
+        ? 'console_public_preview_dimensions' : 'console_public_preview_type');
+    } finally { await f.cleanup(); }
+  });
+  it.each(['orientation', 'density'])('allows a successfully loaded %s-adjusted natural size while binding raw PNG dimensions', async (mode) => {
+    const bytes = mode === 'orientation' ? orientationPng : densityPng, value = publicDetailForPng(bytes, 4, 2);
+    const f = browser(path => path.endsWith('/public-preview') ? publicImageResponse(bytes)
+      : response(path.includes('?status=') ? { submissions: [value.submission], nextCursor: null } : value));
+    try {
+      await f.login(); await f.open(); expect(f.byId('approve').disabled).toBe(true);
+      loadedPublicImage(f, 2, mode === 'orientation' ? 4 : 1);
+      expect(f.byId('approve').disabled).toBe(false); expect(f.byId('public-preview-image').hidden).toBe(false);
+      expect(f.revoked).toEqual([]); expect(f.byId('public-preview-caption').textContent).toContain('4 × 2');
+    } finally { await f.cleanup(); }
+  });
+  it('drops a public image response that arrives after a different submission is selected', async () => {
+    const image = deferred<any>(), started = deferred<null>(), value = publicDetail();
+    const f = browser(path => {
+      if (path.endsWith('/public-preview')) { started.resolve(null); return image.promise; }
+      return response(path.includes('?status=') ? { submissions: [value.submission, submission(OTHER)], nextCursor: null }
+        : path.includes(OTHER) ? detail(OTHER) : value);
+    });
+    let pending: Promise<void> | undefined;
+    try {
+      await f.login(); pending = f.byId('submissions-rows').querySelectorAll('button')[0]!.fire('click');
+      await started.promise;
+      await f.open(OTHER); image.resolve(publicImageResponse()); await pending;
+      expect(f.urls).toEqual([]); expect(f.byId('public-preview-caption').textContent).toContain('本次没有');
+      expect(f.byId('submission-summary').textContent).toContain(OTHER); expect(f.byId('approve').disabled).toBe(false);
+    } finally { image.resolve(publicImageResponse()); await pending; await f.cleanup(); }
+  });
+  it('clears a previous candidate Blob before displaying a different no-image submission', async () => {
+    const value = publicDetail();
+    const f = browser(path => path.endsWith('/public-preview') ? publicImageResponse() : response(path.includes('?status=')
+      ? { submissions: [value.submission, submission(OTHER)], nextCursor: null } : path.includes(OTHER) ? detail(OTHER) : value));
+    try {
+      await f.login(); await f.open(); const lateLoad = f.byId('public-preview-image').onload!;
+      await f.open(OTHER); lateLoad();
+      expect(f.revoked).toEqual(['blob:synthetic-0']); expect(f.byId('public-preview-image').hidden).toBe(true);
+      expect(f.byId('public-preview-image').src).toBe(''); expect(f.byId('public-preview-caption').textContent).toContain('本次没有');
+    } finally { await f.cleanup(); }
+  });
+  it('clears the session when the authenticated registered-image read is rejected', async () => {
+    const value = publicDetail();
+    const f = browser(path => path.endsWith('/public-preview') ? response({ error: 'workshop_admin_auth_required' }, 401)
+      : response(path.includes('?status=') ? { submissions: [value.submission], nextCursor: null } : value));
+    try {
+      await f.login(); await f.byId('submissions-rows').querySelectorAll('button')[0]!.fire('click');
+      expect(f.byId('console').hidden).toBe(true); expect(f.byId('auth-error').textContent).toContain('workshop_admin_auth_required');
+      expect(f.byId('submission-summary').textContent).toBe(''); expect(f.urls).toEqual([]);
+    } finally { await f.cleanup(); }
+  });
+  it('invalidates a confirmation on explicit image retry and ignores the old load event', async () => {
+    const value = publicDetail();
+    const f = browser(path => path.endsWith('/public-preview') ? publicImageResponse()
+      : response(path.includes('?status=') ? { submissions: [value.submission], nextCursor: null } : value));
+    try {
+      await f.login(); await f.open(); const oldLoad = f.byId('public-preview-image').onload!; loadedPublicImage(f);
+      f.byId('review-reason').value = special; await f.byId('approve').fire('click'); expect(f.byId('confirm').hidden).toBe(false);
+      await f.byId('public-preview-retry').fire('click'); expect(f.byId('confirm').hidden).toBe(true);
+      oldLoad(); expect(f.byId('approve').disabled).toBe(true); expect(f.revoked).toEqual(['blob:synthetic-0']);
+      loadedPublicImage(f); expect(f.byId('approve').disabled).toBe(false); expect(f.calls.filter(call => call.init.method === 'POST')).toHaveLength(0);
+    } finally { await f.cleanup(); }
+  });
+  it('keeps the registered image independent from optional private member previews', async () => {
+    const value = publicDetail();
+    const f = browser(path => path.endsWith('/public-preview') ? publicImageResponse() : path.includes('/preview?') ? imageResponse()
+      : response(path.includes('?status=') ? { submissions: [value.submission], nextCursor: null } : value));
+    try {
+      await f.login(); await f.open(); loadedPublicImage(f);
+      await f.byId('submission-files').querySelectorAll('button')[0]!.fire('click'); f.byId('preview-image').onload!();
+      await f.byId('preview-clear').fire('click');
+      expect(f.byId('public-preview-image').src).toBe('blob:synthetic-0'); expect(f.byId('approve').disabled).toBe(false);
+      expect(f.revoked).toEqual(['blob:synthetic-1']);
+    } finally { await f.cleanup(); }
+  });
+  it.each(['logout', 'pagehide'])('revokes the public Blob and ignores its late load after %s', async (event) => {
+    const value = publicDetail();
+    const f = browser(path => path.endsWith('/public-preview') ? publicImageResponse()
+      : response(path.includes('?status=') ? { submissions: [value.submission], nextCursor: null } : value));
+    try {
+      await f.login(); await f.open(); const lateLoad = f.byId('public-preview-image').onload!;
+      if (event === 'logout') await f.byId('logout').fire('click'); else f.windowEvents.get('pagehide')!({});
+      lateLoad(); expect(f.revoked).toEqual(['blob:synthetic-0']); expect(f.byId('public-preview-image').src).toBe('');
+      expect(f.byId('public-preview').hidden).toBe(true); expect(f.byId('console').hidden).toBe(true); expect(f.timers.size).toBe(0);
+    } finally { await f.cleanup(); }
   });
 });

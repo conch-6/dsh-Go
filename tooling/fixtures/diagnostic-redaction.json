@@ -3740,6 +3740,175 @@
         "EN=••• d",
         "one"
       ]
+    },
+    {
+      "name": "query launch token preserves the following route fragment",
+      "inputParts": [
+        "http://1",
+        "27.0.0.1",
+        ":3080/?t",
+        "oken=x#/",
+        "chat/123"
+      ],
+      "expectedParts": [
+        "http://1",
+        "27.0.0.1",
+        ":3080/?t",
+        "oken=•••",
+        "#/chat/1",
+        "23"
+      ]
+    },
+    {
+      "name": "query launch token preserves the enclosing URL parenthesis",
+      "inputParts": [
+        "(http://",
+        "127.0.0.",
+        "1:3080/?",
+        "token=x)"
+      ],
+      "expectedParts": [
+        "(http://",
+        "127.0.0.",
+        "1:3080/?",
+        "token=••",
+        "•)"
+      ]
+    },
+    {
+      "name": "query launch token fragment still masks a nested credential",
+      "inputParts": [
+        "http://1",
+        "27.0.0.1",
+        ":3080/?t",
+        "oken=x#/",
+        "chat/123",
+        "?api_key",
+        "=synthet",
+        "ic"
+      ],
+      "expectedParts": [
+        "http://1",
+        "27.0.0.1",
+        ":3080/?t",
+        "oken=•••",
+        "#/chat/1",
+        "23?api_k",
+        "ey=•••"
+      ]
+    },
+    {
+      "name": "quoted token keeps a fragment inside the secret",
+      "inputParts": [
+        "token=\"s",
+        "ynthetic",
+        "#/chat/1",
+        "23\""
+      ],
+      "expectedParts": [
+        "token=\"•",
+        "••\""
+      ]
+    },
+    {
+      "name": "unquoted token keeps a closing parenthesis inside the secret",
+      "inputParts": [
+        "token=sy",
+        "nthetic)",
+        "tail"
+      ],
+      "expectedParts": [
+        "token=••",
+        "•"
+      ]
+    },
+    {
+      "name": "unquoted token keeps a hash inside the secret",
+      "inputParts": [
+        "token=sy",
+        "nthetic#",
+        "/chat/12",
+        "3"
+      ],
+      "expectedParts": [
+        "token=••",
+        "•"
+      ]
+    },
+    {
+      "name": "query launch token keeps the route after colon plus slash and padding",
+      "inputParts": [
+        "http://1",
+        "27.0.0.1",
+        ":3080/?p",
+        "age=1&to",
+        "ken=123:",
+        "syntheti",
+        "c+value/",
+        "x==#/cha",
+        "t/123"
+      ],
+      "expectedParts": [
+        "http://1",
+        "27.0.0.1",
+        ":3080/?p",
+        "age=1&to",
+        "ken=•••#",
+        "/chat/12",
+        "3"
+      ]
+    },
+    {
+      "name": "fragment launch token keeps the enclosing URL parenthesis",
+      "inputParts": [
+        "(http://",
+        "127.0.0.",
+        "1:3080/#",
+        "token=sy",
+        "nthetic-",
+        "value)"
+      ],
+      "expectedParts": [
+        "(http://",
+        "127.0.0.",
+        "1:3080/#",
+        "token=••",
+        "•)"
+      ]
+    },
+    {
+      "name": "query token keeps an interior parenthesis inside the opaque value",
+      "inputParts": [
+        "http://1",
+        "27.0.0.1",
+        ":3080/?t",
+        "oken=syn",
+        "thetic)t",
+        "ail"
+      ],
+      "expectedParts": [
+        "http://1",
+        "27.0.0.1",
+        ":3080/?t",
+        "oken=•••"
+      ]
+    },
+    {
+      "name": "query token does not expose an opaque suffix before its last parenthesis",
+      "inputParts": [
+        "http://1",
+        "27.0.0.1",
+        ":3080/?t",
+        "oken=syn",
+        "thetic)t",
+        "ail)"
+      ],
+      "expectedParts": [
+        "http://1",
+        "27.0.0.1",
+        ":3080/?t",
+        "oken=•••"
+      ]
     }
   ]
 }

@@ -44,6 +44,7 @@ void main() {
   group('rows', () {
     testWidgets('one group, three rows, in this order; defaults: 70 %, auto off, return on', (tester) async {
       await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: phoneStatus()));
+      await openPhoneFold(tester, 'phone-more-options');
       expect(find.text(_group), findsOneWidget);
       final ys = [
         for (final t in [_group, _opacity, _auto, _return]) tester.getTopLeft(find.text(t)).dy,
@@ -60,6 +61,7 @@ void main() {
 
     testWidgets('hidden while phone control is off', (tester) async {
       await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: phoneStatus(enabled: false)));
+      await openPhoneFold(tester, 'phone-more-options');
       expect(find.text('规则'), findsOneWidget);
       for (final t in [_group, _opacity, _auto, _return]) {
         expect(find.text(t), findsNothing);
@@ -69,6 +71,7 @@ void main() {
     testWidgets('reads what the native side keeps', (tester) async {
       final native = FakePhoneNative(status: phoneStatus())..overlay = {'idleOpacity': 0.45, 'autoCollapse': true};
       await pumpPhone(tester, const PhoneControlScreen(), native: native);
+      await openPhoneFold(tester, 'phone-more-options');
       expect(find.text('45%'), findsOneWidget);
       expect(_switch(tester, _auto).value, isTrue);
     });
@@ -77,6 +80,7 @@ void main() {
   group('changes', () {
     testWidgets('the slider moves in 5 % steps down to 30 %, each step sent at once', (tester) async {
       final h = await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: phoneStatus()));
+      await openPhoneFold(tester, 'phone-more-options');
       final slider = find.byType(Slider);
       // Center the gesture target, not a later row that can scroll it under the app bar.
       await Scrollable.ensureVisible(tester.element(slider), alignment: 0.5);
@@ -105,6 +109,7 @@ void main() {
 
     testWidgets('闲置时自动收起: the row or the switch toggles it on the native side', (tester) async {
       final h = await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: phoneStatus()));
+      await openPhoneFold(tester, 'phone-more-options');
       await _reveal(tester);
       await tester.tap(find.text(_auto));
       await settlePhone(tester);
@@ -118,6 +123,7 @@ void main() {
 
     testWidgets('完成后返回 DSH Go: toggled and kept in the app', (tester) async {
       await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: phoneStatus()));
+      await openPhoneFold(tester, 'phone-more-options');
       await _reveal(tester);
       await tester.tap(find.text(_return));
       await settlePhone(tester);
@@ -128,6 +134,7 @@ void main() {
 
     testWidgets('without the native side a change still shows for this run', (tester) async {
       await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: phoneStatus()));
+      await openPhoneFold(tester, 'phone-more-options');
       removePhoneNative();
       await _reveal(tester);
       tester.widget<Slider>(find.byType(Slider)).onChanged!(55);
@@ -140,6 +147,7 @@ void main() {
     testWidgets('the slider reads its name and percent; switches read their state', (tester) async {
       final semantics = tester.ensureSemantics();
       await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: phoneStatus()));
+      await openPhoneFold(tester, 'phone-more-options');
       final slider = tester.getSemantics(find.byType(Slider)).getSemanticsData();
       expect(slider.label, contains(_opacity));
       expect(slider.value, '70%');
@@ -174,6 +182,7 @@ void main() {
         size: const Size(390, 844),
         brightness: brightness,
       );
+      await openPhoneFold(tester, 'phone-more-options');
       // The whole group in view, a little above the middle.
       await tester.scrollUntilVisible(find.byType(Slider), 200, scrollable: find.byType(Scrollable).first);
       await Scrollable.ensureVisible(tester.element(find.byType(Slider)), alignment: 0.4);

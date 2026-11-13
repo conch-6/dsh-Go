@@ -2,6 +2,30 @@
 
 每个版本先中文、后英文。发版时把对应版本的正文（不含版本标题）作为 Release 正文，见 `docs/release.md`。
 
+## 1.0.16 · 2026-11-13
+
+### 中文
+
+- **酒馆：新的角色扮演模式。** 抽屉顶栏的「模式」键可以在工作、伙伴、酒馆之间切换，设置 › 界面 › 启动时进入可以选默认进哪个。兼容 SillyTavern 的角色卡、预设、世界书、正则和聊天记录：导入卡（文件、分享、卡站链接）或自己写一张；对话有气泡、小说、视觉小说三种排版，支持备选、接着写、帮我写、分支和书签；资源库里管理预设、世界书、正则、人设和快速回复。消息里的 HTML 在隔离的网页里显示，相关安全开关默认关。
+- **创意工坊。** 宠物设置和伙伴小屋的菜单里多了「创意工坊」：浏览、安装大家做的像素宠物和伙伴，不用登录；也可以投稿自己做的，先审后发，有问题的作品可以举报。投稿、查看自己的投稿和举报要用论坛账号，第一次会先说明会把什么发给工坊服务，同意后才发。
+- **悬浮伙伴。** 宠物的「App 外显示」可以选「小屋里的她」，让伙伴小屋的角色待在悬浮窗里。悬浮窗里点一下是互动，连点两下才打开对话（像素宠物也改成这样）；伙伴小屋会跟着手机倾斜和摇晃动。悬浮伙伴比像素宠物更耗电。
+- **tawcroot 加速启动（实验，默认关）。** 在 诊断 › 开发者选项 里打开后，本机引擎改用 tawcroot 启动：在测试手机上启动从约 5 秒降到约 1.5 秒，装包和 apt 也更快。起不来时自动改用原来的方式，不算启动失败；和「直接启动」二选一。关掉后的第一次启动会先把它留下的文件整理一遍。
+- **超长工具输出只显示头尾。** 几万行的命令输出不再把对话卡住：中间折叠，点「查看全部」在单独的页面里看全文，可以跳到开头或末尾、复制全部。
+- 其他新功能：可以删除已归档的会话；已安装插件可以筛选；自定义渠道支持自定义请求头（也用于模型发现）；SSH 主机支持认证后压缩和连接已有实例；更新窗口可以导出已下载的安装包，给需要自己重签的手机兜底；Shizuku 和本机 ADB 可以直接完成自更新；新对话首页的建议可以关掉。
+- **大量稳定性修复。** 这一版合入了一百多处运行时、桥接、媒体和更新流程的修复，主要是：直接启动模式下会话、附件、媒体和文件的落盘；磁盘满时的提示和恢复；请求中途断开、进程被杀后的恢复；日志和诊断包里的凭据打码；更新下载被重定向到另一个域名后超时不生效；带「保留」的重置不再丢掉硬链接过的文件内容。聊天、终端、插件、设置和无障碍另有约六十处修复。
+- **验证情况。** 这一版的测试包在一台手机（vivo X200 Pro，Android 16）上跑过一遍主要功能。大部分修复只经过自动测试和编译检查；直接启动在部分手机上（包括这台）仍会被系统拦下，届时自动改用兼容启动。遇到问题请导出诊断并开 issue。
+
+### English
+
+- **Tavern: a new role-play mode.** The Mode button in the drawer's top bar switches between Work, Companion and Tavern, and Settings › Interface › Open on start picks the default. It is compatible with SillyTavern character cards, presets, lorebooks, regex scripts and chat logs: import a card (file, share or card-site link) or write your own. Chats can be laid out as bubbles, a novel or a visual novel, with alternatives, continue, write-for-me, branches and bookmarks. The library manages presets, lorebooks, regex, personas and quick replies. HTML inside messages is shown in an isolated web view, and the related safety switches are off by default.
+- **Creative Workshop.** Pet settings and the companion room's menu now have Creative Workshop: browse and install pixel pets and companions others made, with no sign-in needed, or submit your own. Submissions are reviewed before they appear, and you can report a problem item. Submitting, viewing your submissions and reporting use your forum account; the first time, the app explains what it will send to the workshop service and only sends it after you agree.
+- **Floating companion.** A pet's Show outside the app can now be set to the companion from the room, so she stays in the floating window. In the floating window a single tap interacts and a double tap opens the chat (pixel pets work the same way now). The companion room also reacts to tilting and shaking the phone. The floating companion uses more battery than a pixel pet.
+- **tawcroot fast launch (experimental, off by default).** Turn it on under Diagnostics › Developer options and the local engine starts with tawcroot: on the test phone, startup went from about 5 seconds to about 1.5, and package installs and apt are faster too. If it can't start, the app falls back to the usual method, which doesn't count as a start failure. Only one of it and direct launch can be on. The first start after turning it off tidies up the files it left behind.
+- **Very long tool output shows only its start and end.** Command output tens of thousands of lines long no longer bogs the chat down: the middle is folded, and View all opens the full text on its own page, where you can jump to the start or end and copy everything.
+- Other new features: archived chats can be deleted; installed plugins can be filtered; custom providers support custom request headers, also used for model discovery; SSH hosts support compression after authentication and connecting to an existing instance; the update sheet can export the downloaded package as a fallback for phones that need to re-sign it themselves; Shizuku and local ADB can complete self-updates directly; the suggestions on the new-chat start page can be turned off.
+- **Many stability fixes.** This version brings in over a hundred fixes to the runtime, bridge, media and update flow, mainly: how sessions, attachments, media and files are written in direct launch mode; messages and recovery when storage is full; recovery after a request is cut off or the process is killed; masking credentials in logs and diagnostics; the timeout not applying after an update download is redirected to another domain; and a reset that keeps your files no longer losing the contents of hard-linked files. Chat, terminal, plugins, settings and accessibility get about sixty more fixes.
+- **How this version was checked.** The test build went through the main features on one phone (vivo X200 Pro, Android 16). Most fixes have only been through automated tests and compile checks. Direct launch is still blocked by the system on some phones (including that one), and the app then falls back to compatible launch. If you hit a problem, please export diagnostics and open an issue.
+
 ## 1.0.15 · 2026-11-10
 
 ### 中文

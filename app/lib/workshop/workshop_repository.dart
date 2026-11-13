@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/services.dart';
 
 import '../companion/companion_pack.dart';
@@ -11,8 +12,10 @@ import '../update/installer.dart';
 import '../update/update_config.dart' show DownloadUrl;
 import '../update/update_http.dart';
 import 'workshop_client.dart';
+import 'workshop_export.dart';
 import 'workshop_http.dart';
 import 'workshop_models.dart';
+import 'workshop_preview.dart';
 import 'workshop_receipt.dart';
 
 export '../update/downloader.dart' show CancelToken, DownloadProgress;
@@ -138,6 +141,7 @@ class WorkshopPublication {
   String get author => _value.author;
   String get license => _value.license;
   String get source => _value.source;
+  String? get previewSource => _value.previewSource;
   WorkshopMetadata withArchive(String sha256, int size) => WorkshopMetadata.fromJson({..._value.toJson(), 'sha256': sha256, 'size': size});
 }
 
@@ -300,11 +304,44 @@ class WorkshopRepository {
     return _prepared(file, publication);
   });
 
-  Future<WorkshopPreparedUpload> prepareCompanion(CompanionPackStore store, File destination, WorkshopPublication publication, {String? name, String? persona}) => _exclusive(() async {
+  Future<WorkshopPreparedUpload> prepareCompanion(CompanionPackStore store, File destination, WorkshopPublication publication,
+    {String? name, String? persona, WorkshopPreviewInput? preview}) => _exclusive(() async {
     if (publication.kind != 'companion') workshopInvalid('workshop_unsupported_kind');
-    final file = await store.exportZip(destination, name: name, persona: persona,
-      author: publication.author, license: publication.license, source: publication.source);
-    return _prepared(file, publication);
+    if (publication.previewSource != null && preview == null) workshopInvalid('workshop_preview_missing');
+    if (preview?.source != publication.previewSource) workshopInvalid('workshop_bad_metadata');
+    if (preview == null) {
+      final file = await store.exportZip(destination, name: name, persona: persona,
+        author: publication.author, license: publication.license, source: publication.source);
+      return _prepared(file, publication);
+    }
+    final target = await workshopExportTarget(destination);
+    // Preserve exportZip's source-directory boundary before creating either
+    // the intermediate snapshot or the final ZIP. No live model is rewritten.
+    final home = await store.root.exists() ? await store.root.resolveSymbolicLinks()
+        : store.root.absolute.uri.normalizePath().toFilePath();
+    final prefix = home.endsWith(Platform.pathSeparator) ? home : '$home${Platform.pathSeparator}';
+    if (target.path == home || target.path.startsWith(prefix)) {
+      throw const CompanionPackException(CompanionPackProblem.storage);
+    }
+    Directory? owned;
+    try {
+      await target.parent.create(recursive: true);
+      final directory = await target.parent.createTemp('.workshop-preview-');
+      owned = directory;
+      final exported = await store.exportZip(File('${directory.path}/model.zip'), name: name, persona: persona,
+        author: publication.author, license: publication.license, source: publication.source);
+      final bytes = await compute(workshopCompanionPreviewZip, (await exported.readAsBytes(), preview));
+      // Export has already released its queue. This writer only writes its
+      // staging file; nesting store.exportZip here would wait on the same queue.
+      await workshopCommitExport(target, (staging) async {
+        await staging.writeAsBytes(bytes, flush: true);
+      });
+      return await _prepared(target, publication);
+    } finally {
+      final directory = owned;
+      try { if (directory != null && await directory.exists()) await directory.delete(recursive: true); }
+      on FileSystemException { /* Preserve the preparation result; only our private snapshot may remain. */ }
+    }
   });
 
   Future<WorkshopPreparedUpload> _prepared(File file, WorkshopPublication publication) async {
@@ -313,6 +350,7 @@ class WorkshopRepository {
     final metadata = publication.withArchive(await _hasher(file), size);
     final bytes = await workshopArchiveSnapshot(file, metadata);
     final archive = ZipDecoder().decodeBytes(bytes);
+    if (publication.previewSource == 'pet-idle') workshopCheckPetPreview(archive);
     return WorkshopPreparedUpload(file: file, metadata: metadata,
       files: List.unmodifiable(archive.files.where((f) => f.isFile).map((f) => f.name).toList()..sort()));
   }
@@ -327,6 +365,49 @@ Future<int?> _nativeFreeBytes() async {
   on MissingPluginException { return null; }
   on PlatformException { return null; }
 }
+
+/// Known package format, content, path, size and compatibility diagnostics.
+///
+/// Use with an explicitly local diagnostic, not to infer its origin from the
+/// string. Membership does not prove corruption or authorize removal. The
+/// installed listing does not fully validate model or image contents; a valid
+/// receipt with a local issue still keeps its ordinary removal fence.
+///
+/// Receipt, storage, missing-runtime, export-target, preview and catalog
+/// availability codes keep their separate handling. This classifies the mapped
+/// code, not the source exception's enum. Unlisted/future codes retain the
+/// caller's fallback; an equal string from another source proves no provenance.
+const Set<String> workshopPackageValidationCodes = {
+  'workshop_pet_not_a_zip',
+  'workshop_pet_no_pack',
+  'workshop_pet_bad_pack',
+  'workshop_pet_missing_sheet',
+  'workshop_pet_bad_sheet',
+  'workshop_pet_too_large',
+  'workshop_companion_bad_index',
+  'workshop_companion_bad_json',
+  'workshop_companion_bad_metadata',
+  'workshop_companion_bad_moc',
+  'workshop_companion_bad_model',
+  'workshop_companion_bad_png',
+  'workshop_companion_bad_reference',
+  'workshop_companion_changed',
+  'workshop_companion_empty_file',
+  'workshop_companion_forbidden_file',
+  'workshop_companion_legacy_model',
+  'workshop_companion_missing_file',
+  'workshop_companion_missing_index',
+  'workshop_companion_missing_model',
+  'workshop_companion_missing_reference',
+  'workshop_companion_missing_texture',
+  'workshop_companion_moc_version',
+  'workshop_companion_no_model',
+  'workshop_companion_not_a_pack',
+  'workshop_companion_runtime_incomplete',
+  'workshop_companion_runtime_mismatch',
+  'workshop_companion_too_large',
+  'workshop_companion_unsafe_path',
+};
 
 WorkshopException workshopLocalError(Object error) {
   if (error is WorkshopException) return error;

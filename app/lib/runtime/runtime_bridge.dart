@@ -167,6 +167,9 @@ class RuntimeStatus {
     this.directEngineAvailable = false,
     this.directEngineActive = false,
     this.directEngineFallbackReason,
+    this.tawcEngineEnabled = false,
+    this.tawcEngineAvailable = false,
+    this.tawcEngineActive = false,
     this.currentExecutionMode,
     this.launchSelectedMode,
     this.launchSpawned = false,
@@ -229,6 +232,11 @@ class RuntimeStatus {
   final bool directEngineActive;
   final String? directEngineFallbackReason;
 
+  /// The opt-in tawcroot launch (native `TawcrootLaunch`); one of it and Direct is on at most.
+  final bool tawcEngineEnabled;
+  final bool tawcEngineAvailable;
+  final bool tawcEngineActive;
+
   /// Native process observation, never inferred from the saved direct preference.
   final String? currentExecutionMode;
 
@@ -246,6 +254,9 @@ class RuntimeStatus {
     'directEngineAvailable': directEngineAvailable,
     'directEngineActive': directEngineActive,
     'directEngineFallbackReason': directEngineFallbackReason,
+    'tawcEngineEnabled': tawcEngineEnabled,
+    'tawcEngineAvailable': tawcEngineAvailable,
+    'tawcEngineActive': tawcEngineActive,
     'currentExecutionMode': currentExecutionMode,
     'launchSelectedMode': launchSelectedMode,
     'launchSpawned': launchSpawned,
@@ -299,6 +310,9 @@ class RuntimeStatus {
     directEngineAvailable: map['directEngineAvailable'] == true,
     directEngineActive: map['directEngineActive'] == true,
     directEngineFallbackReason: map['directEngineFallbackReason'] as String?,
+    tawcEngineEnabled: map['tawcEngineEnabled'] == true,
+    tawcEngineAvailable: map['tawcEngineAvailable'] == true,
+    tawcEngineActive: map['tawcEngineActive'] == true,
     currentExecutionMode: map['currentExecutionMode'] as String?,
     launchSelectedMode: map['launchSelectedMode'] as String?,
     launchSpawned: map['launchSpawned'] == true,
@@ -618,6 +632,7 @@ class RuntimeBridge {
 
   /// Takes effect on the next start; native code rejects changes while active.
   Future<void> setDirectEngine(bool enabled) => _methods.invokeMethod<void>('setDirectEngine', {'enabled': enabled});
+  Future<void> setTawcEngine(bool enabled) => _methods.invokeMethod<void>('setTawcEngine', {'enabled': enabled});
 
   /// Output around the last failure, tokens masked.
   Future<List<String>> failureLog() async => (await _methods.invokeListMethod<String>('failureLog')) ?? const [];

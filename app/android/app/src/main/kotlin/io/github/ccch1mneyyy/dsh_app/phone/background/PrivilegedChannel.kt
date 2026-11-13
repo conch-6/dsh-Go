@@ -10,7 +10,7 @@ import io.github.muntashirakon.adb.AdbStream
  * preview polls on each live channel; [execute] blocks, [tryExecute] skips a busy channel.
  */
 interface PrivilegedChannel {
-    /** Initial strict capability intersected with this link's installed transport; no IPC here. */
+    /** Latest strict PROBE capability intersected with this link's installed transport; no IPC here. */
     val backgroundLimit: Int
     fun execute(request: Bundle): Bundle = execute(request) {}
     /** Actual admission commits the original resource pin before any transport write. */
@@ -21,7 +21,7 @@ interface PrivilegedChannel {
 }
 
 class ShizukuChannel(private val remote: IPrivilegedDisplay, private val peer: String?,
-                     private val supportedBackgroundLimit: Int) : PrivilegedChannel {
+                     @Volatile private var supportedBackgroundLimit: Int) : PrivilegedChannel {
     private val calls = PrivilegedCalls(if (peer == null) 1 else 3)
     override val backgroundLimit: Int get() = if (calls.alive()) supportedBackgroundLimit else 0
     private val ids = java.util.concurrent.atomic.AtomicLong(1)
@@ -31,13 +31,16 @@ class ShizukuChannel(private val remote: IPrivilegedDisplay, private val peer: S
     override fun alive(): Boolean = calls.alive() && runCatching { remote.asBinder().pingBinder() }.getOrDefault(false)
     override fun close() { calls.retire() }
     private fun exchange(request: Bundle): Bundle = try {
-        if (peer == null) remote.execute(request) else {
+        val response = if (peer == null) remote.execute(request) else {
             val id = ids.getAndIncrement()
             if (id <= 0 || id == Long.MAX_VALUE) throw java.io.IOException("identityChanged")
             val response = MuxProtocol.unwrap(remote.execute(MuxProtocol.request(request, peer, id)), peer)
             if (response.id != id) throw java.io.IOException("identityChanged")
             response.value
         }
+        if (request.get(Proto.OP) == Proto.OP_PROBE)
+            supportedBackgroundLimit = backgroundRequestLimit(response::get, response::containsKey, peer != null)
+        response
     } catch (error: Exception) { close(); throw error }
 }
 
@@ -75,8 +78,11 @@ class AdbChannel(private val stream: AdbStream) : PrivilegedChannel {
     override fun tryExecute(request: Bundle): Bundle? = calls.tryPreview { exchange(request) }
     private fun exchange(request: Bundle): Bundle = try {
         val expected = peer
-        if (expected != null) session.exchangeMux(request, expected)
+        val response = if (expected != null) session.exchangeMux(request, expected)
         else session.exchange(Bundles.marshal(request))?.let(Bundles::unmarshal) ?: throw java.io.IOException("deviceUnavailable")
+        if (request.get(Proto.OP) == Proto.OP_PROBE)
+            supportedBackgroundLimit = backgroundRequestLimit(response::get, response::containsKey, expected != null)
+        response
     } catch (error: Exception) {
         close()
         Bundle().apply { putBoolean(Proto.OK, false); putString(Proto.ERROR, "deviceUnavailable") }

@@ -1,6 +1,8 @@
 package io.github.ccch1mneyyy.dsh_app.phone.shell
 
 import android.content.Context
+import io.github.ccch1mneyyy.dsh_app.phone.Decision
+import io.github.ccch1mneyyy.dsh_app.phone.PhoneAndroidShell
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -99,7 +101,7 @@ class AndroidShellController(context: Context, private val onChanged: () -> Unit
         command: String,
         timeoutMs: Long,
         stillWanted: () -> Boolean,
-        confirm: (backend: String, uid: Int) -> Boolean,
+        confirm: (backend: String, uid: Int) -> Decision,
     ): Map<String, Any?> {
         ShellProtocol.commandError(command)?.let { return ShellProtocol.failure(it) }
         ShellProtocol.timeoutError(timeoutMs)?.let { return ShellProtocol.failure(it) }
@@ -121,9 +123,9 @@ class AndroidShellController(context: Context, private val onChanged: () -> Unit
             // Read real UID on this very channel before every confirmation, not from provider status.
             if (!link.probe()) { link.close(); return result(lease, ShellProtocol.failure("identityChanged")) }
             readyLink = link
-            val approved = confirm(lease.backend, link.uid)
+            val decision = confirm(lease.backend, link.uid)
             if (!wanted()) return result(lease, ShellProtocol.failure("cancelled"))
-            if (!approved) return result(lease, ShellProtocol.failure("confirmationDenied"))
+            PhoneAndroidShell.confirmationError(decision)?.let { return result(lease, ShellProtocol.failure(it)) }
             var response = link.call(mapOf("op" to "start", "jobId" to lease.id,
                 "command" to command, "timeoutMs" to timeoutMs, "uid" to link.uid)) {
                 wanted() && synchronized(guard) {

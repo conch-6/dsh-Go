@@ -42,6 +42,8 @@ Direct local engine launch is off by default; you turn it on under Developer opt
 
 After an upgrade from an earlier version, the first direct start tidies your plugin files once; the engine shows **Tidying plugin files** meanwhile. If the phone is short of space or the tidy-up doesn't finish, that start uses compatible launch, **Fallback reason** on the **Diagnostics** page says why, and the next start carries on. No files are lost.
 
+**tawcroot fast launch** is also under **Developer options**, off by default, and only one of it and direct launch can be on. With it on, tawcroot runs the local engine: it starts about three times faster, and package installs and apt get faster too. If it can't start, the app switches to compatible launch on its own; that doesn't count as a failed start either, and **Diagnostics** shows **tawcroot failed to start**. To try again, stop the local engine and turn it back on. The first start after you turn it off first turns the hard links it made into ordinary files, and the engine shows **Tidying plugin files**. If the phone is short on space, that start fails and says how much is missing; free up space or turn tawcroot back on. No files are lost.
+
 ## The app can chat, but headless reports MISSING_CREDENTIAL
 
 `dsh --profile headless` starts a separate one-shot task. Its default profile disables the interactive credential store, authorization and DeepSeek account services, so it does not automatically use API keys or account sign-ins saved in the app. A working chat in the app does not mean this command has credentials configured.
@@ -93,7 +95,7 @@ These statistics never include accounts, API keys, chats, files, prompts or host
 <!-- nav: commonSettings,hubSettingsPhoneControl -->
 `Settings › Phone control`
 
-Phone control uses bundled Google ML Kit Chinese text recognition (`com.google.mlkit:text-recognition-chinese:16.0.1`), enabled by default; turn it off separately with **On-device text recognition (ML Kit)** on that page. Recognition runs on this device; screenshots and recognized text are not sent to Google. Google’s SDK collects usage statistics such as device model, app version and processing time. The anonymous usage statistics switch above does not control this SDK.
+Phone control uses bundled Google ML Kit Chinese text recognition (`com.google.mlkit:text-recognition-chinese:16.0.1`), enabled by default; expand **More settings** on that page and turn it off separately with **Text recognition**. Recognition runs on this device; screenshots and recognized text are not sent to Google. Google’s SDK collects usage statistics such as device model, app version and processing time. The anonymous usage statistics switch above does not control this SDK.
 
 Screenshots and recognized text may be sent to your configured model as part of phone control. While off, recognition requests do not trigger SDK loading or initialization. Turning local recognition off prevents new recognition; work already started may still finish. It does not uninstall the SDK, clear previously accumulated SDK statistics, or guarantee that old SDK statistics stop being sent. A device that has never initialized the SDK and a device previously used with recognition enabled have different histories.
 

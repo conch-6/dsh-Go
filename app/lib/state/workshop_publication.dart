@@ -34,7 +34,9 @@ class WorkshopPublicationInput {
     if (tags.isNotEmpty) 'tags': tags,
   };
 
-  WorkshopPublication publication(String kind) => WorkshopPublication(declaration(kind));
+  WorkshopPublication publication(String kind, {String? previewSource}) => WorkshopPublication({
+    ...declaration(kind), 'previewSource': ?previewSource,
+  });
 
   WorkshopPublicationInput copyWith({String? id, String? version, String? minApp,
     String? titleZh, String? titleEn, String? author, String? license, String? source,

@@ -4,8 +4,8 @@ import type { Env } from './env';
 import { record } from './pet-catalog';
 import { readBounded } from './pet-market-io';
 import { strictJson } from './workshop-archive';
-import { assetUrl, encoder, hash, id, identity, kind, releaseId, requireWorkshop as need, sha256, validVersion, text, validMeta, whole,
-  WorkshopError, type SubmissionMeta, type WorkshopKind } from './workshop-common';
+import { assetUrl, encoder, hash, id, identity, kind, releaseId, requireWorkshop as need, sha256, validVersion, text, validMeta, validPreview, whole,
+  WorkshopError, type PublicPreview, type SubmissionMeta, type WorkshopKind } from './workshop-common';
 import type { PackSummary } from './workshop-pack';
 
 export const STATE_KEY = 'workshop/state-v1.json';
@@ -16,7 +16,7 @@ export type Status = typeof STATUSES[number];
 export interface Owner { forumOrigin: string; forumUserId: number; username: string }
 export interface Submission {
   submissionId: string; owner: Owner; metadata: SubmissionMeta; status: Status; createdAt: string; updatedAt: string;
-  submittedAt?: string; validation?: PackSummary;
+  submittedAt?: string; validation?: PackSummary; preview?: PublicPreview;
   review?: { at: string; decision: 'approve' | 'reject'; reason: string };
   withdrawal?: { at: string; reason: string };
 }
@@ -50,6 +50,13 @@ function validSubmission(v: unknown): v is Submission {
   if (!record(v) || !token(v.submissionId) || !validOwner(v.owner) || !validMeta(v.metadata) || !STATUSES.includes(v.status as Status) ||
       !timestamp(v.createdAt) || !timestamp(v.updatedAt) || v.updatedAt < v.createdAt) return false;
   if ((v.submittedAt === undefined) !== (v.validation === undefined) || v.submittedAt !== undefined && (!timestamp(v.submittedAt) || !validSummary(v.validation))) return false;
+  // Submissions without a registered preview are image-free. A declared
+  // preview is registered when the archive enters pending and stays bound to
+  // this submission through review/withdrawal; Release is unchanged. A
+  // declaration with no registration (a Worker without previews took the
+  // archive) is read as image-free too: every reader asks for the descriptor,
+  // and refusing the whole state would take the catalog down with it.
+  if (v.preview !== undefined && (v.submittedAt === undefined || !validPreview(v.preview, v.metadata))) return false;
   if (v.review !== undefined && (!record(v.review) || !timestamp(v.review.at) || !['approve', 'reject'].includes(v.review.decision as string) || !text(v.review.reason, 2000))) return false;
   if (v.withdrawal !== undefined && (!record(v.withdrawal) || !timestamp(v.withdrawal.at) || !text(v.withdrawal.reason, 2000))) return false;
   if (v.status === 'draft') return v.submittedAt === undefined && v.review === undefined && v.withdrawal === undefined;
@@ -199,7 +206,7 @@ export function catalog(state: State, features: { uploads: boolean; companion: b
   const entries = state.current.map(sid => submissions.get(sid)!).filter(s => (features.companion || s.metadata.kind !== 'companion') && (!onlyCompanions || s.metadata.kind === 'companion'))
     .map(s => {
       const { rightsConfirmed: _, ...meta } = s.metadata;
-      return { ...meta, url: assetUrl(s.metadata), blockedVersions: state.withdrawn.filter(w => identity(w) === identity(meta)).map(w => w.version).sort() };
+      return { ...meta, ...(s.preview ? { preview: { ...s.preview } } : {}), url: assetUrl(s.metadata), blockedVersions: state.withdrawn.filter(w => identity(w) === identity(meta)).map(w => w.version).sort() };
     }).sort((a, b) => identity(a).localeCompare(identity(b)));
   return { schema: 1, generatedAt: state.updatedAt, features, entries, withdrawn: state.withdrawn.filter(w => !onlyCompanions || w.kind === 'companion') };
 }

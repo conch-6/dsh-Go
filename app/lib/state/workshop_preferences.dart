@@ -50,7 +50,32 @@ abstract interface class WorkshopPreferences {
   Future<void> clearPendingSubmission(String scope, String expectedRequestId);
 }
 
-class PrefsWorkshopPreferences implements WorkshopPreferences {
+enum WorkshopPendingAbandonRange { currentAccount, allLocalAccounts }
+
+/// A storage-owned version token. It exposes only the warning's scope, never
+/// raw damaged preference data or a path that a caller could try to delete.
+abstract interface class WorkshopPendingRecoverySnapshot {
+  WorkshopPendingAbandonRange get range;
+}
+
+/// Optional for custom preference implementations. Recovery must use the same
+/// backing store as the ordinary journal, not an unrelated fallback instance.
+abstract interface class WorkshopPendingRecoveryStore {
+  Future<WorkshopPendingRecoverySnapshot> pendingRecovery(String scope);
+  Future<void> abandonPendingRecovery(WorkshopPendingRecoverySnapshot snapshot);
+}
+
+class _PrefsPendingRecoverySnapshot implements WorkshopPendingRecoverySnapshot {
+  const _PrefsPendingRecoverySnapshot(this.scope, this.version, this.range,
+    {this.hadRecord = false, this.remaining});
+  final String scope, version;
+  @override
+  final WorkshopPendingAbandonRange range;
+  final bool hadRecord;
+  final String? remaining;
+}
+
+class PrefsWorkshopPreferences implements WorkshopPreferences, WorkshopPendingRecoveryStore {
   const PrefsWorkshopPreferences();
 
   static const _disclosuresKey = 'workshop.disclosures.v1';
@@ -189,6 +214,83 @@ class PrefsWorkshopPreferences implements WorkshopPreferences {
       if (!await prefs.setString(_pendingKey, jsonEncode(all))) workshopInvalid('workshop_preferences');
     });
   }
+
+  // Type tags distinguish an absent key, stored null, and the supported
+  // SharedPreferences value types. Strings retain their exact stored value;
+  // string lists have an unambiguous JSON representation. No digest collision
+  // assumption is needed for the version comparison.
+  static String _pendingVersion(SharedPreferences prefs) {
+    if (!prefs.containsKey(_pendingKey)) return 'absent';
+    final raw = prefs.get(_pendingKey);
+    if (raw == null) return 'null';
+    if (raw is String) return 'string:$raw';
+    if (raw is bool) return 'bool:$raw';
+    if (raw is int) return 'int:$raw';
+    if (raw is double) return 'double:$raw';
+    if (raw is List && raw.every((value) => value is String)) return 'strings:${jsonEncode(raw)}';
+    workshopInvalid('workshop_preferences');
+  }
+
+  /// A malformed entry is still removable without parsing it. A malformed
+  /// container cannot be represented as a current-account-only operation.
+  static Map<String, Object?>? _recoveryContainer(SharedPreferences prefs) {
+    if (!prefs.containsKey(_pendingKey)) return {};
+    final raw = prefs.get(_pendingKey);
+    if (raw is! String) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map<String, Object?> ? decoded : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  @override
+  Future<WorkshopPendingRecoverySnapshot> pendingRecovery(String scope) {
+    _fingerprint(scope);
+    return _exclusive((prefs) async {
+      final version = _pendingVersion(prefs);
+      final all = _recoveryContainer(prefs);
+      if (all == null) {
+        return _PrefsPendingRecoverySnapshot(scope, version, WorkshopPendingAbandonRange.allLocalAccounts);
+      }
+      final hadRecord = all.containsKey(scope);
+      final remaining = hadRecord ? jsonEncode({...all}..remove(scope)) : null;
+      return _PrefsPendingRecoverySnapshot(scope, version, WorkshopPendingAbandonRange.currentAccount,
+        hadRecord: hadRecord, remaining: remaining);
+    });
+  }
+
+  @override
+  Future<void> abandonPendingRecovery(WorkshopPendingRecoverySnapshot snapshot) {
+    if (snapshot is! _PrefsPendingRecoverySnapshot) workshopInvalid('workshop_confirmation_stale');
+    return _exclusive((prefs) async {
+      if (_pendingVersion(prefs) != snapshot.version) {
+        // A platform setter may have persisted and then reported failure.
+        // Absence needs no write; a different live record is never removed.
+        if (snapshot.range == WorkshopPendingAbandonRange.currentAccount) {
+          final all = _recoveryContainer(prefs);
+          if (all != null && !all.containsKey(snapshot.scope)) return;
+        } else if (!prefs.containsKey(_pendingKey)) {
+          return;
+        }
+        workshopInvalid('workshop_confirmation_stale');
+      }
+      if (snapshot.range == WorkshopPendingAbandonRange.allLocalAccounts) {
+        if (!await prefs.remove(_pendingKey)) workshopInvalid('workshop_preferences');
+      } else if (snapshot.hadRecord) {
+        if (!await prefs.setString(_pendingKey, snapshot.remaining!)) workshopInvalid('workshop_preferences');
+      }
+    });
+  }
 }
 
 final workshopPreferencesProvider = Provider<WorkshopPreferences>((ref) => const PrefsWorkshopPreferences());
+
+final workshopPendingRecoveryProvider = Provider<WorkshopPendingRecoveryStore?>((ref) {
+  final preferences = ref.watch(workshopPreferencesProvider);
+  return switch (preferences) {
+    final WorkshopPendingRecoveryStore recovery => recovery,
+    _ => null,
+  };
+});

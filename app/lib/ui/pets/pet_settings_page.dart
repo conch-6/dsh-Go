@@ -17,6 +17,7 @@ import '../common/expand_reveal.dart';
 import '../settings/settings_widgets.dart';
 import '../theme/app_icons.dart';
 import '../shell/page_frame.dart';
+import '../workshop/workshop_screen.dart';
 import 'overlay_settings_tile.dart';
 import 'pet_picker.dart';
 
@@ -64,6 +65,21 @@ class PetSettingsPage extends ConsumerWidget {
           footer: Text(_source(l10n, prefs.packId, ref.watch(petPackProvider(prefs.packId)).value)),
           children: const [PetPicker(importable: true)],
         ),
+        // 创意工坊: pets other people made. Only where this build has one to open.
+        if (ref.watch(workshopAvailableProvider))
+          SettingsSection(
+            children: [
+              SettingsTile(
+                icon: AppIcons.workshop,
+                tinted: false,
+                title: l10n.workshopTitle,
+                subtitle: l10n.workshopEntrySubtitle,
+                onTap: () => unawaited(
+                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const WorkshopScreen())),
+                ),
+              ),
+            ],
+          ),
         ExpandReveal(
           open: prefs.enabled,
           child: Column(

@@ -7,11 +7,14 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.system.ErrnoException
 import android.system.Os
+import io.github.ccch1mneyyy.dsh_app.files.GuestFiles
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneGuest
 import java.io.File
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.InetAddress
+import java.nio.file.Files
+import java.nio.file.LinkOption
 
 /** Small files inside the rootfs that must reflect the device before each start. */
 object GuestSetup {
@@ -110,7 +113,12 @@ object GuestSetup {
     ) {
         try {
             val file = File(rootfs, "root/.dsh/AGENTS.md")
-            if (file.exists() && !file.readText().startsWith(AGENTS_MARKER)) return
+            val source = file.takeIf { it.isFile } ?: GuestFiles.resolve(
+                rootfs, "/root/.dsh/AGENTS.md", phoneRoot = PhoneStorage.GUEST_PATH,
+            )
+            val existing = source?.readText()
+            if (Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS) &&
+                existing?.startsWith(AGENTS_MARKER) != true) return
             val environment = if (directEngine) {
                 // l10n:keep agent prompt
                 AGENTS_MD.replace("Ubuntu 24.04 环境里（proot，免 Root）", "Ubuntu 24.04 运行环境里（引擎直接启动，bash/git/python/apt 工具仍经 proot）")
@@ -134,7 +142,8 @@ object GuestSetup {
                     else "\$DSH_HOME/dsh-app/diagnostics.md",
                 )
             file.parentFile?.mkdirs()
-            if (!file.exists() || file.readText() != text) SafeMode.writeAtomic(file.canonicalFile, text)
+            // Resolve tawc tokens for reading only; atomic replacement keeps backups unchanged.
+            if (existing != text) SafeMode.writeAtomic(file.canonicalFile, text)
         } catch (_: Exception) {
         }
     }

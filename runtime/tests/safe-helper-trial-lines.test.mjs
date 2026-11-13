@@ -90,3 +90,55 @@ test('trial still fails when no login line arrives', t => {
   assert.equal(run.status, 1);
   assert.match(run.stdout, /FAIL:/);
 });
+
+for (const stream of ['stdout', 'stderr']) {
+  for (const split of ['name', 'value']) {
+    test(`trial masks a ${split} split across ${stream} chunks before failure`, t => {
+      const run = trial(t);
+      const value = 'SYNTHETIC_TRIAL_VALUE';
+      const prefix = 'http://127.0.0.1:12345/?';
+      const parts = split === 'name' ? [prefix + 'to', 'ken=' + value] : [prefix + 'token=', value];
+      for (const part of parts) run.child[stream].write(part);
+      run.exit();
+      assert.equal(run.status, 1);
+      assert.equal(run.stdout.includes(value), false, 'the captured credential must not reach the failure tail');
+      assert.equal(run.stdout.includes('token=***'), true, 'the unfinished line is flushed after masking');
+    });
+  }
+}
+
+test('trial masks split warning output after a healthy hold', t => {
+  const run = trial(t);
+  run.child.stdout.write('warning: http://127.0.0.1:12345/?token=');
+  run.child.stdout.write('SYNTHETIC_TRIAL_VALUE\n');
+  run.tick();
+  run.exit();
+  assert.equal(run.status, 0);
+  assert.equal(run.stdout.includes('SYNTHETIC_TRIAL_VALUE'), false);
+  assert.equal(run.stdout.includes('warning: http://127.0.0.1:12345/?token=***'), true);
+});
+
+test('trial keeps bounded line prefixes without losing a later login marker', t => {
+  const run = trial(t);
+  run.child.stdout.write('warning: ' + 'x'.repeat(200_000));
+  run.child.stdout.write('token=fixture-only');
+  run.tick();
+  assert.deepEqual(run.kills, ['SIGTERM']);
+  run.exit();
+  assert.equal(run.status, 0);
+  assert.equal(run.stdout.includes('warning: '), true);
+  assert.equal(run.stdout.includes('…'), true);
+  assert.equal(run.stdout.includes('fixture-only'), false);
+  assert.ok(run.stdout.length < 3000, 'a single unterminated line must not grow the failure tail');
+});
+
+test('trial keeps a UTF-8 character whole across pipe buffers', t => {
+  const run = trial(t);
+  const bytes = Buffer.from('ordinary 中 output\n');
+  const boundary = Buffer.byteLength('ordinary ') + 1;
+  run.child.stderr.write(bytes.subarray(0, boundary));
+  run.child.stderr.write(bytes.subarray(boundary));
+  run.exit();
+  assert.equal(run.status, 1);
+  assert.equal(run.stdout.includes('ordinary 中 output'), true);
+});

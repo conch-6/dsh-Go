@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../l10n/l10n.dart';
 import '../../state/sessions_state.dart';
 import '../../state/ui_mode_state.dart';
+import '../modes/mode_switch.dart';
 import '../shell/home_shell.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
@@ -58,11 +59,14 @@ class _ModeHomeState extends ConsumerState<ModeHome> {
             child: widget.web?.call(_handoff) ?? WebHome(initial: _handoff),
           )
         : KeyedSubtree(key: const ValueKey(UiMode.native), child: widget.native ?? const HomeShell());
-    return AnimatedSwitcher(
-      duration: AppMotion.of(context, AppMotion.page),
-      switchInCurve: AppMotion.enter,
-      switchOutCurve: AppMotion.exit,
-      child: home,
+    // A launch into 伙伴 or 酒馆 opens that page over the home first.
+    return ModeLaunch(
+      child: AnimatedSwitcher(
+        duration: AppMotion.of(context, AppMotion.page),
+        switchInCurve: AppMotion.enter,
+        switchOutCurve: AppMotion.exit,
+        child: home,
+      ),
     );
   }
 }

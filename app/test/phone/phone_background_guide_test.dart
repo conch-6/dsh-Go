@@ -35,7 +35,7 @@ void main() {
     final h = await pumpPhone(
       tester,
       const PhoneControlScreen(),
-      native: FakePhoneNative(status: {...phoneStatus(), 'confirmationNotifications': false}),
+      native: FakePhoneNative(status: {...phoneStatus(a11y: true), 'confirmationNotifications': false}),
     );
     expect(find.text('请允许手机操控通知的弹出提醒'), findsOneWidget);
     final row = find.ancestor(of: find.text('通知'), matching: find.byType(PhoneStepRow));
@@ -43,9 +43,9 @@ void main() {
     await tester.tap(find.descendant(of: row, matching: find.text('去开启')));
     await tester.pump();
     expect(h.native!.callsOf('openAppDetails'), hasLength(1));
-    h.native!.push({...phoneStatus(), 'confirmationNotifications': true});
+    h.native!.push({...phoneStatus(a11y: true), 'confirmationNotifications': true});
     await settlePhone(tester);
-    expect(find.descendant(of: row, matching: find.byType(DoneMark)), findsOneWidget);
+    expect(find.text('通知'), findsNothing);
   });
 
   testWidgets('the help remains scrollable on a narrow screen with large text', (tester) async {

@@ -44,7 +44,6 @@ internal object BackgroundRecoveryProtocol {
             get(Proto.RECOVERY_PEER) != record.birth.peer || get(Proto.OWNER) != record.owner) return false
         val kind = get(Proto.RECOVERY_KIND)
         if (kind != "previousBoot" && kind != "deadPeerEmpty") return false
-        if (kind == "deadPeerEmpty" && (record.displayId == null || !record.birth.pidNsAvailable)) return false
         return if (record.displayId == null) !contains(Proto.DISPLAY_ID)
         else contains(Proto.DISPLAY_ID) && (get(Proto.DISPLAY_ID) as? Int) == record.displayId
     }

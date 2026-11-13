@@ -72,7 +72,6 @@ class WorkshopReportController extends Notifier<WorkshopReportState> {
     final session = current.session, metadata = entry.metadata;
     final attempt = WorkshopReportAttempt._(kind: metadata.kind, id: metadata.id,
       version: metadata.version, reason: reason);
-    var dispatched = false;
     state = WorkshopReportState(session: session, phase: WorkshopReportPhase.sending, attempt: attempt);
     try {
       if (!metadata.supported) {
@@ -85,7 +84,6 @@ class WorkshopReportController extends Notifier<WorkshopReportState> {
       if (!_current(session) || !identical(authorization.session, session)) {
         workshopInvalid('workshop_cancelled');
       }
-      dispatched = true;
       final id = await authorization.client.report(kind: attempt.kind, id: attempt.id,
         version: attempt.version, reason: attempt.reason, credential: authorization.credential);
       if (_current(session)) {
@@ -94,7 +92,8 @@ class WorkshopReportController extends Notifier<WorkshopReportState> {
       }
     } on Object catch (error) {
       if (_current(session)) {
-        final failure = workshopTransportError(error, mutation: dispatched);
+        // The Client distinguishes its read-only preflight from the report POST.
+        final failure = workshopTransportError(error);
         state = WorkshopReportState(session: session,
           phase: failure.resultUnknown ? WorkshopReportPhase.unknown : WorkshopReportPhase.failed,
           attempt: attempt, error: failure);

@@ -35,6 +35,7 @@ class PrivilegedCallsTest {
         val previewEntered = CountDownLatch(1)
         val releasePreview = CountDownLatch(1)
         val agentStarted = CountDownLatch(1)
+        val agentFinished = CountDownLatch(1)
         val executor = Executors.newFixedThreadPool(2)
         val agentDispatched = AtomicBoolean(false)
         try {
@@ -43,11 +44,14 @@ class PrivilegedCallsTest {
             }
             assertTrue(previewEntered.await(5, TimeUnit.SECONDS))
             val agent = executor.submit {
-                agentStarted.countDown()
-                calls.execute { agentDispatched.set(true) }
+                try {
+                    agentStarted.countDown()
+                    calls.execute { agentDispatched.set(true) }
+                } finally { agentFinished.countDown() }
             }
             assertTrue(agentStarted.await(5, TimeUnit.SECONDS))
-            agent.cancel(true)
+            assertTrue(agent.cancel(true))
+            assertTrue(agentFinished.await(5, TimeUnit.SECONDS))
             releasePreview.countDown()
             assertEquals("complete response", preview.get(5, TimeUnit.SECONDS))
             assertFalse(agentDispatched.get())

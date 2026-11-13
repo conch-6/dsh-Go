@@ -66,6 +66,7 @@ void main() {
   testWidgets('the row opens a disclosure; opening never grants, explicit tap does', (tester) async {
     final n = native();
     await pumpPhone(tester, const PhoneControlScreen(), native: n);
+    await openPhoneFold(tester, 'phone-more-options');
     final row = find.byKey(const Key('phone-a11y-restore'));
     await tester.ensureVisible(row);
     await tester.tap(row);

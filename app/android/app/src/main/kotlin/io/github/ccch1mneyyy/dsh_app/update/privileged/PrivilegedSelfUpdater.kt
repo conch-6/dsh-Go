@@ -163,7 +163,11 @@ class PrivilegedSelfUpdater(context: Context) {
         synchronized(globalGuard) {
             val latest = pendingMap()
             if (installing || reservation != null || latest["state"] != "unknown") return latest
-            if (!preferences.edit().clear().commit()) return latest + mapOf("errorCode" to "persistenceFailed")
+            if (!preferences.edit().putString("state", "none").commit()) {
+                // commit changes memory even on failure. Keep the receipt for an explicit retry.
+                preferences.edit().putString("state", "unknown").commit()
+                return latest + mapOf("errorCode" to "persistenceFailed")
+            }
             runCatching { cleanupSnapshots() }
         }
         return mapOf("state" to "none", "canAcknowledge" to false)

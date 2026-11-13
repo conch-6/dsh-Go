@@ -82,11 +82,21 @@ class CompanionStageEvents {
 }
 
 class CompanionStage extends StatefulWidget {
-  const CompanionStage({super.key, required this.store, required this.controller, required this.events});
+  const CompanionStage({
+    super.key,
+    required this.store,
+    required this.controller,
+    required this.events,
+    this.bare = false,
+  });
 
   final CompanionPackStore store;
   final CompanionStageController controller;
   final CompanionStageEvents events;
+
+  /// The model alone on a see-through page, without her room around it (the
+  /// tavern's visual novel draws its own scene behind).
+  final bool bare;
 
   @override
   State<CompanionStage> createState() => _CompanionStageState();
@@ -161,7 +171,7 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
       final small = device.totalMem > 0 && device.totalMem < _bigTextureFromBytes;
       final web = WebViewController(onPermissionRequest: (request) => unawaited(request.deny()));
       await web.setJavaScriptMode(JavaScriptMode.unrestricted);
-      await web.setBackgroundColor(const Color(0xFF0D2F55));
+      await web.setBackgroundColor(widget.bare ? const Color(0x00000000) : const Color(0xFF0D2F55));
       await web.setNavigationDelegate(
         NavigationDelegate(
           onNavigationRequest: (request) =>
@@ -198,7 +208,9 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
       });
       _timeout = Timer(_readyTimeout, () => _fail('timeout'));
       await web.loadRequest(
-        server.pageUrl(query: {if (small) 'maxTexture': '2048', if (reduceMotion) 'reduceMotion': '1'}),
+        server.pageUrl(
+          query: {if (small) 'maxTexture': '2048', if (reduceMotion) 'reduceMotion': '1', if (widget.bare) 'bare': '1'},
+        ),
       );
     } on Object catch (error) {
       if (generation == _generation) _fail('$error');

@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="background_gate_retest">The previous settings probe needs a fresh check. Choose the channel again explicitly after cleanup.</string>
-    <string name="background_gate_cleanup_pending">The previous probe cleanup is not confirmed. New background resources remain blocked; retry cleanup of the original probe only.</string>
-    <string name="background_gate_peer_unsupported">This channel runs an older background service and cannot confirm safe cleanup. Restart the phone or install the latest version, then retry; no new probe was sent to the old service.</string>
-    <string name="background_gate_cleanup_stale">This cleanup request no longer identifies the current pending probe. Refresh the status.</string>
-    <string name="background_gate_checking">Preparing or checking the selected channel. New background resources wait until this check and its cleanup finish.</string>
+    <string name="background_gate_retest">Reconnect to check the background screen.</string>
+    <string name="background_gate_cleanup_pending">The background screen has not been released. Retry cleanup.</string>
+    <string name="background_gate_peer_unsupported">The service did not provide the required background capabilities. Update the app and reconnect.</string>
+    <string name="background_gate_cleanup_stale">Cleanup status changed. Refresh to continue.</string>
+    <string name="background_gate_checking">Connecting and checking the background screen…</string>
+    <string name="background_setup_task_query_failed">The system task query failed. The background screen could not be checked.</string>
+    <string name="background_setup_recovery_failed">The background service identity is unavailable. No screen was created.</string>
+    <string name="background_setup_display_failed">The system could not create a usable background screen.</string>
+    <string name="background_setup_locked">Unlock the phone before connecting the background screen.</string>
+    <string name="background_setup_history_full">The service task history is full. Turn the channel off, then reconnect.</string>
+    <string name="background_setup_bind_timeout">Shizuku connection timed out. Check that it is running and reconnect.</string>
+    <string name="background_setup_unbind_wait">The old connection is still closing. Reconnect shortly.</string>
+    <string name="background_setup_unbind_failed">The old connection could not be released. Restart the DSH Go service in Shizuku.</string>
+    <string name="background_setup_bind_failed">Could not connect to the Shizuku background service. Reconnect.</string>
 </resources>

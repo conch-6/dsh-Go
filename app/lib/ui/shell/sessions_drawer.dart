@@ -32,6 +32,7 @@ import '../common/smooth_size.dart';
 import '../common/read_list_status.dart';
 import '../common/status_dot.dart';
 import '../onboarding/local_install.dart';
+import '../modes/mode_switch.dart';
 import '../remote/host_status.dart';
 import '../remote/host_switcher.dart' show showHostSheet;
 import '../remote/network_details_sheet.dart' show showRemoteNetworkDetails;
@@ -153,21 +154,30 @@ class SessionsDrawer extends ConsumerWidget {
                 // button's edge with the search bar's and the rows'
                 // edges (10).
                 padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
-                child: Row(
-                  children: [
-                    // On a narrow drawer with large text the lockup gives
-                    // way a little rather than the keys.
-                    const Expanded(
-                      child: Align(
-                        alignment: AlignmentDirectional.centerStart,
-                        child: FittedBox(fit: BoxFit.scaleDown, child: BrandLockup(height: 19)),
+                child: LayoutBuilder(
+                  builder: (context, box) => Row(
+                    children: [
+                      // On a narrow drawer with large text the lockup gives
+                      // way a little rather than the keys.
+                      const Expanded(
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: FittedBox(fit: BoxFit.scaleDown, child: BrandLockup(height: 19)),
+                        ),
                       ),
-                    ),
-                    // 网页模式, quietly: the one solid element stays 新对话.
-                    const WebModeKey(tier: GlassTier.pill),
-                    const SizedBox(width: 8),
-                    NewChatButton(onTap: newChat),
-                  ],
+                      // 模式 and 网页模式, quietly: the one solid element stays 新对话.
+                      const ModeKey(),
+                      const SizedBox(width: 8),
+                      const WebModeKey(tier: GlassTier.pill),
+                      const SizedBox(width: 8),
+                      // When even the lockup's room is not enough, 新对话
+                      // keeps its glyph and lets its words go.
+                      NewChatButton(
+                        onTap: newChat,
+                        compact: NewChatButton.widthOf(context) > box.maxWidth - (36 + 8 + 36 + 8),
+                      ),
+                    ],
+                  ),
                 ),
               ),
       ),
@@ -327,9 +337,25 @@ class _RenderReportHeight extends RenderProxyBox {
 
 /// "新对话": the drawer's one solid primary element, a 36dp pill.
 class NewChatButton extends StatelessWidget {
-  const NewChatButton({super.key, required this.onTap});
+  const NewChatButton({super.key, required this.onTap, this.compact = false});
 
   final VoidCallback onTap;
+
+  /// Only the glyph, in a 36dp circle: for a row too narrow for the words.
+  final bool compact;
+
+  /// How wide the pill with its words is, in [context]'s text size.
+  static double widthOf(BuildContext context) {
+    final label = TextPainter(
+      text: TextSpan(text: context.l10n.commonNewChat, style: Theme.of(context).textTheme.labelLarge),
+      textScaler: MediaQuery.textScalerOf(context),
+      textDirection: Directionality.of(context),
+      maxLines: 1,
+    )..layout();
+    final width = 12 + 20 + 4 + label.width + 15;
+    label.dispose();
+    return width;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -349,20 +375,29 @@ class NewChatButton extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 36),
-              child: Padding(
-                // The glyph carries ~3dp of its own air on the left: 12 + 3
-                // reads as the 15 on the right.
-                padding: const EdgeInsets.fromLTRB(12, 0, 15, 0),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(AppIcons.newChat, size: 20, color: scheme.onPrimary),
-                    const SizedBox(width: 4),
-                    Text(l10n.commonNewChat, style: theme.textTheme.labelLarge?.copyWith(color: scheme.onPrimary)),
-                  ],
-                ),
-              ),
+              constraints: const BoxConstraints(minHeight: 36, minWidth: 36),
+              child: compact
+                  ? Center(
+                      widthFactor: 1,
+                      heightFactor: 1,
+                      child: Icon(AppIcons.newChat, size: 20, color: scheme.onPrimary),
+                    )
+                  : Padding(
+                      // The glyph carries ~3dp of its own air on the left: 12 + 3
+                      // reads as the 15 on the right.
+                      padding: const EdgeInsets.fromLTRB(12, 0, 15, 0),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(AppIcons.newChat, size: 20, color: scheme.onPrimary),
+                          const SizedBox(width: 4),
+                          Text(
+                            l10n.commonNewChat,
+                            style: theme.textTheme.labelLarge?.copyWith(color: scheme.onPrimary),
+                          ),
+                        ],
+                      ),
+                    ),
             ),
           ),
         ),

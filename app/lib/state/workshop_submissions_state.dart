@@ -243,7 +243,7 @@ class WorkshopSubmissionsController extends Notifier<WorkshopSubmissionsState> {
       return false;
     }
     final session = current.session;
-    var dispatched = false;
+    var receivedResponse = false;
     state = current.copyWith(operation: WorkshopSubmissionsOperation.withdraw,
       operationSubmissionId: id, withdrawal: WorkshopWithdrawalState(
         phase: WorkshopWithdrawalPhase.sending, submissionId: id));
@@ -255,8 +255,8 @@ class WorkshopSubmissionsController extends Notifier<WorkshopSubmissionsState> {
       if (!_current(session) || !identical(authorization.session, session)) {
         return true;
       }
-      dispatched = true;
       final item = await authorization.client.withdraw(id, reason, credential: authorization.credential);
+      receivedResponse = true;
       if (!_current(session)) {
         return true;
       }
@@ -269,7 +269,9 @@ class WorkshopSubmissionsController extends Notifier<WorkshopSubmissionsState> {
         phase: WorkshopWithdrawalPhase.succeeded, submissionId: id, submission: item));
     } on Object catch (error) {
       if (_current(session)) {
-        final failure = workshopTransportError(error, mutation: dispatched);
+        // Client failures carry their own uncertainty. A returned result can
+        // still fail the id/status/account checks above after a successful POST.
+        final failure = workshopTransportError(error, mutation: receivedResponse);
         state = state.copyWith(withdrawal: WorkshopWithdrawalState(
           phase: failure.resultUnknown ? WorkshopWithdrawalPhase.unknown : WorkshopWithdrawalPhase.failed,
           submissionId: id, error: failure));

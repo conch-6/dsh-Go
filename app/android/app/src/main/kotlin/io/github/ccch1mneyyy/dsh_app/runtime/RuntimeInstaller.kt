@@ -55,7 +55,7 @@ class RuntimeInstaller(
      */
     fun install(dropKept: Boolean = false, onProgress: (Long, Long) -> Unit) {
         // A reset killed halfway finishes first, so what it keeps is in runtime-keep for the restore.
-        settleReset(retiredDir, keepDir, dropKept)
+        settleReset(baseDir, retiredDir, keepDir, dropKept, sync)
         baseDir.mkdirs()
         // The transaction owns its payload outside staging. Finish it before any
         // cleanup, including when a different APK resumes this install.
@@ -142,7 +142,16 @@ class RuntimeInstaller(
 
     /** Deletes the runtime; [keep] (paths under the rootfs) waits in runtime-keep for the next install. */
     fun reset(keep: List<String>) {
-        retireRuntime(baseDir, retiredDir, keepDir, keep)
+        // tawcroot's store goes with the runtime: kept files it linked must become real files first.
+        if (keep.isNotEmpty() && TawcrootLinks.pending(rootfs)) {
+            val result = TawcrootLinks(rootfs, ::syncFilesystems, within = keep).run()
+            if (result is TawcrootLinks.Result.NotEnoughSpace) {
+                throw IllegalStateException("keep: needs ${result.need shr 20} MB free to keep files from the tawcroot launch, ${result.free shr 20} MB free")
+            }
+            // The store goes with the runtime: a kept name we could not convert would be lost.
+            check(!(result as TawcrootLinks.Result.Done).unseen) { "keep: some files from the tawcroot launch could not be read; nothing was reset" }
+        }
+        retireRuntime(baseDir, retiredDir, keepDir, keep, sync)
     }
 
     private fun assetLength(path: String): Long = try {
@@ -293,8 +302,8 @@ class KeepFailed(rel: String) : IllegalStateException("keep: could not move $rel
  * killed at any point is finished by the next one or by the next install ([settleReset]). Nothing is
  * deleted before what is kept has moved.
  */
-internal fun retireRuntime(base: File, retired: File, keep: File, paths: List<String>) {
-    settleReset(retired, keep)
+internal fun retireRuntime(base: File, retired: File, keep: File, paths: List<String>, sync: () -> Unit = ::syncFilesystems) {
+    settleReset(base, retired, keep, sync = sync)
     if (!base.exists()) {
         // Nothing to take from; the choice still applies to what an earlier reset kept.
         pruneKept(keep, paths)
@@ -306,7 +315,7 @@ internal fun retireRuntime(base: File, retired: File, keep: File, paths: List<St
         list.delete()
         throw IllegalStateException("could not retire the runtime")
     }
-    settleReset(retired, keep)
+    settleReset(base, retired, keep, sync = sync)
 }
 
 /**
@@ -316,7 +325,7 @@ internal fun retireRuntime(base: File, retired: File, keep: File, paths: List<St
  * runtime stays as it is and the next attempt picks up from there; with [dropFailed] it is deleted
  * with whatever could not move.
  */
-internal fun settleReset(retired: File, keep: File, dropFailed: Boolean = false) {
+internal fun settleReset(base: File, retired: File, keep: File, dropFailed: Boolean = false, sync: () -> Unit = ::syncFilesystems) {
     if (!retired.present()) return
     val list = File(retired, KEEP_LIST)
     val listed = readKeepList(list)
@@ -328,6 +337,14 @@ internal fun settleReset(retired: File, keep: File, dropFailed: Boolean = false)
         val from = File(home, rel.removePrefix("root/"))
         val to = File(keep, rel)
         if (!from.present() || to.present()) continue
+        // PRoot names still address the original rootfs even after retirement or
+        // home.carry. Materialize this item before deleting its shared .l2s store.
+        try {
+            L2sMigration(File(base, "rootfs"), sync, within = from, relocatedStore = File(home, ".l2s")).run()
+        } catch (_: Exception) {
+            if (!dropFailed) throw KeepFailed(rel)
+            // Still move this item: a failed conversion must not discard its ordinary files.
+        }
         to.parentFile?.mkdirs()
         if (!from.renameTo(to) && !dropFailed) throw KeepFailed(rel)
     }

@@ -10,7 +10,6 @@ import 'package:dsh_app/state/phone_state.dart';
 import 'package:dsh_app/ui/common/app_sheet.dart';
 import 'package:dsh_app/ui/common/list_page_row.dart';
 import 'package:dsh_app/ui/common/risk_notice.dart';
-import 'package:dsh_app/ui/engine_settings/field_row.dart' show FieldBadge;
 import 'package:dsh_app/ui/phone/dnd_mode_page.dart';
 import 'package:dsh_app/ui/phone/phone_widgets.dart';
 import 'package:flutter/material.dart';
@@ -36,10 +35,7 @@ const _acting = {'setBackgroundMode', 'prepareRoot', 'requestShizukuPermission',
 
 Iterable<String> acting(FakePhoneNative native) => native.methods.where(_acting.contains);
 
-Future<void> open(WidgetTester tester, String title) async {
-  await tester.tap(find.text(title));
-  await tester.pumpAndSettle();
-}
+Future<void> open(WidgetTester tester, String title) => openPhoneChannel(tester, title);
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -47,9 +43,13 @@ void main() {
   Map<String, Object?> previewStatus(int revision) {
     final status = privilegedStatus(mode: 'shizuku', ready: true, provider: 'shizuku', running: true, granted: true);
     return {
-      ...status, 'statusRevision': revision, 'task': {'id': 7, 'active': true},
-      'background': {...(status['background'] as Map).cast<String, Object?>(),
-        'preview': {'v': 1, 'enabled': true}},
+      ...status,
+      'statusRevision': revision,
+      'task': {'id': 7, 'active': true},
+      'background': {
+        ...(status['background'] as Map).cast<String, Object?>(),
+        'preview': {'v': 1, 'enabled': true},
+      },
     };
   }
 
@@ -99,9 +99,18 @@ void main() {
     const events = EventChannel('dsh/phone/preview');
     final calls = <String>[];
     final arguments = <Object?>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockStreamHandler(events,
-      MockStreamHandler.inline(onListen: (args, sink) { calls.add('listen'); arguments.add(args); },
-        onCancel: (_) { calls.add('cancel'); }));
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockStreamHandler(
+      events,
+      MockStreamHandler.inline(
+        onListen: (args, sink) {
+          calls.add('listen');
+          arguments.add(args);
+        },
+        onCancel: (_) {
+          calls.add('cancel');
+        },
+      ),
+    );
     void resume() {
       if (tester.binding.lifecycleState == AppLifecycleState.paused) {
         tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
@@ -111,6 +120,7 @@ void main() {
       }
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     }
+
     resume();
     try {
       final native = FakePhoneNative(status: previewStatus(1));
@@ -118,18 +128,28 @@ void main() {
       await tester.tap(find.text(appL10n.phonePreviewOpen));
       await tester.pumpAndSettle();
       expect(calls, ['listen']);
-      expect(arguments, [{'taskId': 7}]);
+      expect(arguments, [
+        {'taskId': 7},
+      ]);
       native.onStatus = () async => throw PlatformException(code: 'offline');
       expect(await containerOf(tester).read(phoneProvider.notifier).refreshStatus(), isFalse);
       await tester.pumpAndSettle();
       expect(calls, ['listen', 'cancel']);
       expect(find.byType(PhoneBackgroundPreviewDialog), findsOneWidget);
       native.onStatus = null;
-      native.push({...previewStatus(2), 'task': {'id': 8, 'active': true}});
+      native.push({
+        ...previewStatus(2),
+        'task': {'id': 8, 'active': true},
+      });
       await tester.pumpAndSettle();
       expect(calls, ['listen', 'cancel', 'listen']);
-      expect(arguments, [{'taskId': 7}, {'taskId': 7}]);
-      await tester.tap(find.descendant(of: find.byType(PhoneBackgroundPreviewDialog), matching: find.text(appL10n.commonClose)));
+      expect(arguments, [
+        {'taskId': 7},
+        {'taskId': 7},
+      ]);
+      await tester.tap(
+        find.descendant(of: find.byType(PhoneBackgroundPreviewDialog), matching: find.text(appL10n.commonClose)),
+      );
       await tester.pumpAndSettle();
       expect(calls, ['listen', 'cancel', 'listen', 'cancel']);
     } finally {
@@ -140,7 +160,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the five-way block lists four channels, each with who it is for and where it stands', (tester) async {
+  testWidgets('common connections are concise and expanding never chooses a channel', (tester) async {
     final h = await pumpPhone(
       tester,
       const PhoneDndPage(),
@@ -151,42 +171,31 @@ void main() {
           provider: 'shizuku',
           running: true,
           granted: true,
-          wirelessDebugging: true,
-          paired: true,
         ),
       ),
     );
-    expect(inRow('Shizuku', '可以用'), findsOneWidget);
-    expect(inRow('Shizuku', '装了 Shizuku App 的手机'), findsOneWidget);
-    expect(inRow('Sui', '未检测到'), findsOneWidget);
-    expect(inRow('Root', '尚未检查'), findsOneWidget);
-    expect(inRow('自连 ADB', '已配对'), findsOneWidget);
-    // Off is the 关闭 of the card above, not a channel; nothing is in use yet.
-    expect(find.textContaining('正在使用'), findsNothing);
-
-    // The suggestion is a quiet tag on its row, and picks nothing.
-    expect(find.descendant(of: channel('Shizuku'), matching: find.byType(FieldBadge)), findsOneWidget);
-    expect(find.byType(FieldBadge), findsOneWidget);
+    expect(channel('Shizuku'), findsOneWidget);
+    expect(channel('自连 ADB'), findsOneWidget);
+    expect(find.text('Root'), findsNothing);
+    expect(find.text('Sui'), findsNothing);
+    expect(find.text('装了 Shizuku App 的手机'), findsNothing);
     expect(acting(h.native!), isEmpty);
-
-    // Unfolding is not choosing either: only the button inside is.
     await open(tester, 'Shizuku');
-    expect(find.text('Shizuku 这边准备好了。'), findsOneWidget);
+    expect(find.text('Shizuku 已启动并授权，接下来连接后台屏。'), findsOneWidget);
     expect(acting(h.native!), isEmpty);
     await tester.tap(find.text('用 Shizuku 开启'));
     await tester.pumpAndSettle();
     expect(h.native!.callsOf('setBackgroundMode').single.arguments, {'mode': 'shizuku'});
     expect(find.text('正在使用：Shizuku'), findsOneWidget);
-    expect(inRow('Shizuku', '使用中'), findsOneWidget);
-    // Working, so folded: the common case is one glance.
-    expect(find.text('Shizuku 这边准备好了。'), findsNothing);
+    expect(find.text('Shizuku 已启动并授权，接下来连接后台屏。'), findsNothing);
+    expect(find.text('自连 ADB'), findsNothing);
   });
 
   testWidgets('root not tried yet is 尚未检查, and opening or refreshing never runs su', (tester) async {
     final h = await pumpPhone(tester, const PhoneDndPage(), native: FakePhoneNative(status: privilegedStatus()));
     expect(PhoneStatus.fromMap(h.native!.status).background.root.available, isNull);
-    expect(inRow('Root', '尚未检查'), findsOneWidget);
-    expect(inRow('Root', '未连接'), findsNothing);
+    expect(find.text('Root'), findsNothing);
+    expect(find.text('未连接'), findsNothing);
     expect(find.byType(PhoneNote), findsNothing);
 
     h.native!.push(privilegedStatus(recommended: 'adb', paired: true));
@@ -259,7 +268,7 @@ void main() {
     // Unfolded on its own to the one fix, which is asked for, not taken.
     expect(find.text('重新申请 root 授权'), findsOneWidget);
     // A working Shizuku is not slipped in instead.
-    expect(inRow('Shizuku', '可以用'), findsOneWidget);
+    expect(find.text('Shizuku'), findsNothing);
     expect(acting(h.native!), isEmpty);
 
     // A refused choice shows the native reason too, once.
@@ -280,16 +289,15 @@ void main() {
         status: privilegedStatus(recommended: 'sui', provider: 'sui', shizukuApp: true, running: true),
       ),
     );
-    expect(inRow('Shizuku', '由 Sui 提供'), findsOneWidget);
-    expect(inRow('Sui', '待授权'), findsOneWidget);
-    expect(find.descendant(of: channel('Sui'), matching: find.byType(FieldBadge)), findsOneWidget);
+    expect(find.text('Sui'), findsNothing);
 
     await open(tester, 'Shizuku');
     expect(find.text('这台手机的 Shizuku 接口由 Sui 提供，请改用 Sui。'), findsOneWidget);
     expect(find.text('用 Shizuku 开启'), findsNothing);
 
     await open(tester, 'Sui');
-    expect(find.text('Sui 接口可用'), findsOneWidget);
+    expect(find.text('Sui 接口可用'), findsNothing);
+    expect(find.text('授权给 DSH Go'), findsOneWidget);
     await tester.tap(find.text('授权给 DSH Go'));
     await tester.pumpAndSettle();
     expect(h.native!.callsOf('requestShizukuPermission').single.arguments, {'provider': 'sui'});
@@ -298,8 +306,8 @@ void main() {
 
   testWidgets('neither installed and Sui missing read differently', (tester) async {
     await pumpPhone(tester, const PhoneDndPage(), native: FakePhoneNative(status: privilegedStatus()));
-    expect(inRow('Shizuku', '未安装'), findsOneWidget);
-    expect(inRow('Sui', '未检测到'), findsOneWidget);
+    expect(find.text('Root'), findsNothing);
+    expect(find.text('Sui'), findsNothing);
     await open(tester, 'Sui');
     expect(find.textContaining('没有检测到 Sui'), findsOneWidget);
     expect(find.text('授权给 DSH Go'), findsNothing);
@@ -319,7 +327,6 @@ void main() {
     expect(channel('自连 ADB'), findsOneWidget);
     expect(find.text('Sui'), findsNothing);
     expect(find.text('Root'), findsNothing);
-    expect(find.byType(FieldBadge), findsNothing);
     await open(tester, 'Shizuku');
     await tester.tap(find.text('用 Shizuku 开启'));
     await tester.pumpAndSettle();
@@ -355,6 +362,8 @@ void main() {
       status: privilegedStatus(mode: 'root', ready: true, root: {'checked': true, 'connected': true}),
     );
     await pumpPhone(tester, const PhoneDndPage(), native: native);
+    expect(find.text('保持 root 通道'), findsNothing);
+    await openPhoneFold(tester, 'phone-dnd-options');
     final keep = find.widgetWithText(ListPageRow, '保持 root 通道');
     expect(find.descendant(of: keep, matching: find.textContaining('给不给仍由管理器决定')), findsOneWidget);
     expect(tester.widget<Switch>(find.descendant(of: keep, matching: find.byType(Switch))).value, isFalse);
@@ -380,8 +389,9 @@ void main() {
         ),
       ),
     );
+    expect(find.widgetWithText(PhoneNote, '等连上 Wi‑Fi 后再连'), findsOneWidget);
+    await openPhoneFold(tester, 'phone-dnd-options');
     final keep = find.widgetWithText(ListPageRow, '保持自连 ADB 通道');
-    expect(find.descendant(of: keep, matching: find.text('等连上 Wi‑Fi 后再连')), findsOneWidget);
     expect(tester.widget<Switch>(find.descendant(of: keep, matching: find.byType(Switch))).value, isTrue);
   });
 

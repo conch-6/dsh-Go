@@ -62,34 +62,31 @@ class DshService : Service() {
                     installSink = sink
                     controller.addSink(sink)
                 }
-                return START_NOT_STICKY
             }
             ACTION_INSTALL_DONE -> {
                 installSink?.let { controller.removeSink(it) }
                 installSink = null
                 if (controller.phase != RuntimeController.Phase.STARTING && controller.phase != RuntimeController.Phase.RUNNING) {
+                    running = false
                     stopForegroundCompat()
-                    stopSelf(startId)
                 }
                 postInstallAlert(this, intent.getBooleanExtra(EXTRA_INSTALL_OK, true))
-                return START_NOT_STICKY
             }
             ACTION_PHONE_STOP -> {
                 // 「停止操作」 on the notification: stop the task it was shown for, keep the engine.
                 val taskId = intent.data?.takeIf { it.scheme == PHONE_TASK_SCHEME }?.schemeSpecificPart?.toLongOrNull()
                 // l10n:keep agent stop reason
                 if (taskId != null) PhoneControl.get(this).stopShownTask("用户在通知里停止", taskId)
-                return START_NOT_STICKY
             }
             ACTION_STOP -> {
-                if (controller.phase == RuntimeController.Phase.INSTALLING) return START_NOT_STICKY
-                val expected = if (intent.hasExtra(EXTRA_STOP_GENERATION))
-                    intent.getIntExtra(EXTRA_STOP_GENERATION, -1) else null
-                if (!controller.stopProcess(expected)) return START_NOT_STICKY
-                running = false
-                stopForegroundCompat()
-                stopSelf()
-                return START_NOT_STICKY
+                if (controller.phase != RuntimeController.Phase.INSTALLING) {
+                    val expected = if (intent.hasExtra(EXTRA_STOP_GENERATION))
+                        intent.getIntExtra(EXTRA_STOP_GENERATION, -1) else null
+                    if (controller.stopProcess(expected)) {
+                        running = false
+                        stopForegroundCompat()
+                    }
+                }
             }
             else -> {
                 ensureChannel(this)
@@ -102,6 +99,8 @@ class DshService : Service() {
                 controller.startProcess()
             }
         }
+        // A newer accepted command may still be waiting for onStartCommand, including a no-op stop.
+        if (!running && installSink == null) stopSelf(startId)
         return START_NOT_STICKY
     }
 

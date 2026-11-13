@@ -3,10 +3,52 @@ import 'package:flutter/services.dart';
 
 import '../../l10n/l10n.dart';
 import '../common/list_page_row.dart';
+import '../common/expand_reveal.dart';
+import '../common/row_marks.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 
 enum NoteTone { info, warn, danger }
+
+/// Low-frequency settings stay discoverable without crowding the main page.
+class PhoneOptionsFold extends StatefulWidget {
+  const PhoneOptionsFold({super.key, required this.title, required this.children, this.initiallyOpen = false});
+
+  final String title;
+  final List<Widget> children;
+  final bool initiallyOpen;
+
+  @override
+  State<PhoneOptionsFold> createState() => _PhoneOptionsFoldState();
+}
+
+class _PhoneOptionsFoldState extends State<PhoneOptionsFold> {
+  late bool _open = widget.initiallyOpen;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      ListPageCard(
+        children: [
+          Semantics(
+            expanded: _open,
+            child: ListPageRow(
+              title: widget.title,
+              titleMaxLines: 3,
+              trailing: RowExpandArrow(open: _open),
+              onTap: () => setState(() => _open = !_open),
+            ),
+          ),
+        ],
+      ),
+      ExpandReveal(
+        open: _open,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: widget.children),
+      ),
+    ],
+  );
+}
 
 /// A tinted callout: why something can't work, or what to know first.
 class PhoneNote extends StatelessWidget {

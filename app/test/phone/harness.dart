@@ -5,6 +5,8 @@ import 'package:dsh_app/runtime/runtime_bridge.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/phone_state.dart';
+import 'package:dsh_app/ui/common/list_page_row.dart';
+import 'package:dsh_app/ui/common/row_marks.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
@@ -81,6 +83,31 @@ Future<void> leaveAndResume(WidgetTester tester) async {
     tester.binding.handleAppLifecycleStateChanged(s);
   }
   await settlePhone(tester);
+}
+
+Future<void> openPhoneFold(WidgetTester tester, String key) async {
+  final fold = find.byKey(ValueKey(key));
+  await tester.scrollUntilVisible(fold, 200, scrollable: find.byType(Scrollable).first);
+  final arrow = find.descendant(of: fold, matching: find.byType(RowExpandArrow)).first;
+  if (tester.widget<RowExpandArrow>(arrow).open) return;
+  final header = find.descendant(of: fold, matching: find.byType(ListPageRow)).first;
+  await Scrollable.ensureVisible(tester.element(header), alignment: 0.5);
+  await tester.pumpAndSettle();
+  expect(header.hitTestable(), findsOneWidget);
+  await tester.tap(header);
+  await tester.pumpAndSettle();
+}
+
+Future<void> openPhoneChannel(WidgetTester tester, String title) async {
+  if (find.text(title).evaluate().isEmpty && find.byKey(const ValueKey('phone-dnd-channels')).evaluate().isNotEmpty) {
+    await openPhoneFold(tester, 'phone-dnd-channels');
+  }
+  if (find.text(title).evaluate().isEmpty && (title == 'Root' || title == 'Sui')) {
+    await openPhoneFold(tester, 'phone-dnd-more-channels');
+  }
+  await tester.ensureVisible(find.text(title));
+  await tester.tap(find.text(title));
+  await tester.pumpAndSettle();
 }
 
 ProviderContainer containerOf(WidgetTester tester) =>

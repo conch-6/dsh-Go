@@ -9,6 +9,8 @@ Map<String, Object?> shellStatus({
   bool enabled = false,
   String backend = 'shizuku',
   bool ready = false,
+  bool shizukuGranted = false,
+  bool adbPaired = false,
   int? uid,
   String? reasonCode = 'disabled',
 }) => {
@@ -18,8 +20,8 @@ Map<String, Object?> shellStatus({
   'ready': ready,
   'uid': uid,
   'reasonCode': reasonCode,
-  'shizuku': {'installed': true, 'running': true, 'granted': false},
-  'adb': {'paired': false, 'connected': false},
+  'shizuku': {'installed': true, 'running': true, 'granted': shizukuGranted},
+  'adb': {'paired': adbPaired, 'connected': false},
   'limits': {'defaultTimeoutMs': 10000, 'maxTimeoutMs': 30000, 'maxOutputBytes': 65536, 'maxCommandBytes': 2048},
 };
 
@@ -52,7 +54,13 @@ class ShellNative {
         return {'ok': true};
       case 'androidShellRequestPermission':
         return true;
-      case 'androidShellStartPairing' || 'androidShellPair' || 'androidShellConnect':
+      case 'androidShellPair':
+        status = {
+          ...status,
+          'adb': {'paired': true, 'connected': false},
+        };
+        return {'ok': true};
+      case 'androidShellStartPairing' || 'androidShellConnect':
         return {'ok': true};
       case 'androidShellStop':
         return true;

@@ -155,6 +155,14 @@ if ((beta)); then
     "$beta_file" >"$beta_json")
 fi
 
+# libtawcroot.so for the opt-in tawcroot launch method, from the pinned tawc commit.
+# Release builds must carry it; other builds go on without it (the option shows unavailable).
+if ! python3 -I "$ROOT/runtime/tawcroot/build.py"; then
+  [[ $mode == release ]] && die "tawcroot: libtawcroot.so did not build"
+  rm -rf "$ROOT/runtime/out-tawcroot" # never package an older build's library
+  echo "build-apk: building without libtawcroot.so; the tawcroot launch option will be unavailable" >&2
+fi
+
 # aapt2 to read back what was built (optional).
 aapt2=$(command -v aapt2 || true)
 if [[ -z $aapt2 ]]; then

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dsh_app/state/phone_state.dart';
+import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/ui/phone/phone_control_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,14 +10,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'harness.dart';
 import 'support.dart';
 
-Widget policyProbe() => Consumer(builder: (context, ref, child) {
-  ref.watch(phoneProvider);
-  return const Scaffold();
-});
-
-FakePhoneNative ocrNative() => FakePhoneNative(
-  policies: {...defaultPolicies(), 'localOcrEnabled': true},
+Widget policyProbe() => Consumer(
+  builder: (context, ref, child) {
+    ref.watch(phoneProvider);
+    return const Scaffold();
+  },
 );
+
+FakePhoneNative ocrNative() => FakePhoneNative(policies: {...defaultPolicies(), 'localOcrEnabled': true});
 
 void main() {
   test('OCR accepts only Boolean wire values and stays out of ordinary writes', () {
@@ -66,8 +67,10 @@ void main() {
     native.onSetPolicies = (_) => write.future;
     native.onGetPolicies = () => read.future;
     var completed = false;
-    final result = containerOf(tester).read(phoneProvider.notifier).setLocalOcrEnabled(false)
-        .then((value) { completed = true; return value; });
+    final result = containerOf(tester).read(phoneProvider.notifier).setLocalOcrEnabled(false).then((value) {
+      completed = true;
+      return value;
+    });
     await settlePhone(tester);
     expect(native.methods, ['setPolicies']);
     expect(completed, isFalse);
@@ -98,6 +101,7 @@ void main() {
   testWidgets('OCR switch stays disabled until readback and shows its value', (tester) async {
     final native = ocrNative();
     await pumpPhone(tester, const PhoneControlScreen(), native: native);
+    await openPhoneFold(tester, 'phone-more-options');
     final key = find.byKey(const ValueKey('phone-local-ocr-switch'));
     await tester.scrollUntilVisible(key, 200, scrollable: find.byType(Scrollable).first);
     final write = Completer<bool>();
@@ -118,8 +122,27 @@ void main() {
     expect(native.callsOf('setPolicies').single.arguments, {'localOcrEnabled': false});
   });
 
+  testWidgets('OCR is concise and complete privacy disclosure opens without changing the setting', (tester) async {
+    final native = ocrNative();
+    await pumpPhone(tester, const PhoneControlScreen(), native: native);
+    await openPhoneFold(tester, 'phone-more-options');
+    expect(find.text(appL10n.phoneLocalOcrTitle), findsOneWidget);
+    expect(find.text(appL10n.phoneLocalOcrSummary), findsOneWidget);
+    expect(find.text(appL10n.phoneLocalOcrDisclosure), findsNothing);
+    expect(find.text(appL10n.phoneLocalOcrDetails), findsNothing);
+    native.calls.clear();
+    final privacy = find.byKey(const ValueKey('phone-local-ocr-privacy'));
+    await tester.ensureVisible(privacy);
+    await tester.tap(privacy);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.text('${appL10n.phoneLocalOcrDisclosure}\n\n${appL10n.phoneLocalOcrDetails}'), findsOneWidget);
+    expect(native.callsOf('setPolicies'), isEmpty);
+  });
+
   testWidgets('unknown OCR has explanatory text and no false OFF switch', (tester) async {
     await pumpPhone(tester, const PhoneControlScreen(), native: FakePhoneNative(status: phoneStatus(a11y: true)));
+    await openPhoneFold(tester, 'phone-more-options');
     expect(find.byKey(const ValueKey('phone-local-ocr-switch')), findsNothing);
     final text = find.text('暂时无法读取本机文字识别设置，请刷新后再试。');
     await tester.scrollUntilVisible(text, 200, scrollable: find.byType(Scrollable).first);

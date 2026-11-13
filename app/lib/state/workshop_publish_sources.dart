@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../companion/companion_float.dart' show companionFloatStoreProvider;
 import '../pets/pet_library.dart';
 import '../workshop/workshop_models.dart';
+import '../workshop/workshop_preview.dart';
 import '../workshop/workshop_repository.dart';
 import 'workshop_dependencies.dart';
 import 'workshop_preferences.dart';
@@ -13,9 +14,14 @@ import 'workshop_publication.dart';
 
 class WorkshopPublishSource {
   const WorkshopPublishSource({required this.kind, required this.localId,
-    this.name, this.author, this.license, this.source});
+    this.name, this.author, this.license, this.source, this.preview});
   final String kind, localId;
   final String? name, author, license, source;
+  final WorkshopPreviewInput? preview;
+  String? get previewSource => preview?.source;
+
+  WorkshopPublishSource withPreview(WorkshopPreviewInput? value) => WorkshopPublishSource(
+    kind: kind, localId: localId, name: name, author: author, license: license, source: source, preview: value);
 
   WorkshopPublicationInput initialInput() {
     final candidate = kind == 'pet' && localId.startsWith(userPetPrefix)
@@ -150,6 +156,10 @@ final workshopPrepareDraftProvider = Provider<WorkshopPrepareDraft>((ref) {
   return (source, publication) async {
     Directory? owned;
     try {
+      if (source.previewSource != publication.previewSource ||
+          source.previewSource != null && source.previewSource != workshopPreviewSources[source.kind]) {
+        workshopInvalid('workshop_bad_metadata');
+      }
       final repo = await repository;
       final root = Directory('${(await directory()).path}/exports');
       await root.create(recursive: true);
@@ -161,7 +171,7 @@ final workshopPrepareDraftProvider = Provider<WorkshopPrepareDraft>((ref) {
         upload = await repo.preparePet(pets, source.localId, file, publication);
       } else if (source.kind == 'companion' && source.localId == 'companion') {
         // No personal name, persona, runtime, or private preference is passed.
-        upload = await repo.prepareCompanion(await companion(), file, publication);
+        upload = await repo.prepareCompanion(await companion(), file, publication, preview: source.preview);
       } else {
         throw const WorkshopException('workshop_unsupported_kind');
       }

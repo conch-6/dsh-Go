@@ -57,8 +57,10 @@ export async function admin(request: Request, env: Env): Promise<void> {
   let different = 0; for (let n = 0; n < a.length; n++) different |= a.charCodeAt(n) ^ b.charCodeAt(n);
   need(different === 0, 'admin_auth_required', 401);
 }
-export async function limitBurst(request: Request, env: Env, write: boolean): Promise<void> {
-  need(await burstAllowed(write ? env.UPLOAD_BURST : env.READ_LIMIT, `workshop:${clientKey(request)}`), 'rate_limited', 429);
+/// [scope] gives a kind of request its own count per client, so a page of
+/// pictures cannot use up what the catalog and package downloads need.
+export async function limitBurst(request: Request, env: Env, write: boolean, scope = 'workshop'): Promise<void> {
+  need(await burstAllowed(write ? env.UPLOAD_BURST : env.READ_LIMIT, `${scope}:${clientKey(request)}`), 'rate_limited', 429);
 }
 export async function quota(request: Request, env: Env, owner: Owner, action: string, count: number): Promise<void> {
   await limitBurst(request, env, true);

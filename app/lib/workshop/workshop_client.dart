@@ -57,6 +57,9 @@ class WorkshopClient {
     : origin = workshopOrigin(origin), http = http ?? IoWorkshopHttp(origin), _clock = clock ?? DateTime.now;
   final Uri origin;
   final File cacheFile;
+  /// No request or credential is involved. Entry parsing already checked the
+  /// exact path; the same normalized origin is used for package downloads.
+  Uri? publicPreviewUri(WorkshopEntry entry) => entry.preview == null ? null : origin.resolve(entry.preview!.path);
   final WorkshopHttp http;
   final DateTime Function() _clock;
   // Provider replacement does not make the previous client's pending disk
@@ -123,7 +126,10 @@ class WorkshopClient {
           (map['etag'] is! String || (map['etag'] as String).length > 512 || RegExp(r'[\r\n]').hasMatch(map['etag'] as String))) {
         workshopInvalid('workshop_cache_invalid');
       }
-      state.copy = _CatalogCopy(WorkshopCatalog.fromJson(map['catalog']), workshopTime(map['fetchedAt']), map['etag'] as String?);
+      // Older writers dropped unknown preview fields but kept the new ETag.
+      // Retain their text for offline browsing, then require a complete 200.
+      final etag = map['previewSchema'] == 1 ? map['etag'] as String? : null;
+      state.copy = _CatalogCopy(WorkshopCatalog.fromJson(map['catalog']), workshopTime(map['fetchedAt']), etag);
       state.issue = null;
     } on FileSystemException {
       state.loaded = false;
@@ -137,7 +143,7 @@ class WorkshopClient {
     final temporary = File('${cacheFile.path}.part');
     try {
       await cacheFile.parent.create(recursive: true);
-      await temporary.writeAsString(jsonEncode({'schema': 1, 'origin': origin.toString(), 'etag': copy.etag,
+      await temporary.writeAsString(jsonEncode({'schema': 1, 'previewSchema': 1, 'origin': origin.toString(), 'etag': copy.etag,
         'fetchedAt': copy.fetchedAt.toUtc().toIso8601String(), 'catalog': copy.catalog.toJson()}), flush: true);
       await temporary.rename(cacheFile.path);
       state.issue = null;
@@ -158,7 +164,7 @@ class WorkshopClient {
       String? etag;
       if (response.status == 304) {
         await response.discard();
-        if (state.copy == null) workshopInvalid('workshop_bad_catalog');
+        if (state.copy?.etag == null) workshopInvalid('workshop_bad_catalog');
         catalog = state.copy!.catalog;
         etag = state.copy!.etag;
       } else {
@@ -229,16 +235,31 @@ class WorkshopClient {
   }
 
   Future<WorkshopSubmission> createSubmission(WorkshopMetadata metadata, {required String requestId, required bool rightsConfirmed, required WorkshopCredential credential}) async {
-    if (!rightsConfirmed) workshopInvalid('workshop_rights_required');
-    if (!RegExp(r'^[A-Za-z0-9_-]{16,128}$').hasMatch(requestId)) workshopInvalid('workshop_bad_request_id');
-    final caps = await capabilities();
-    if (!caps.features.uploads) workshopInvalid('workshop_upload_disabled');
-    if (metadata.kind == 'companion' && !caps.features.companion) workshopInvalid('workshop_companion_disabled');
-    if (!caps.kinds.contains(metadata.kind) || !metadata.supported) workshopInvalid('workshop_unsupported_kind');
-    if (!caps.licenses.contains(metadata.license) || metadata.size > caps.archiveBytes) workshopInvalid('workshop_bad_metadata');
-    final result = await _json('POST', '/api/workshop/v1/submissions', headers: await _identity(credential, capabilities: caps),
+    final Map<String, String> headers;
+    try {
+      if (!rightsConfirmed) workshopInvalid('workshop_rights_required');
+      if (!RegExp(r'^[A-Za-z0-9_-]{16,128}$').hasMatch(requestId)) workshopInvalid('workshop_bad_request_id');
+      final caps = await capabilities();
+      if (!caps.features.uploads) workshopInvalid('workshop_upload_disabled');
+      if (metadata.kind == 'companion' && !caps.features.companion) workshopInvalid('workshop_companion_disabled');
+      if (!caps.kinds.contains(metadata.kind) || !metadata.supported) workshopInvalid('workshop_unsupported_kind');
+      if (!caps.licenses.contains(metadata.license) || metadata.size > caps.archiveBytes) workshopInvalid('workshop_bad_metadata');
+      if (metadata.previewSource case final source?) {
+        if (!(caps.preview?.sources.contains(source) ?? false)) workshopInvalid('workshop_preview_unsupported');
+      }
+      headers = await _identity(credential, capabilities: caps);
+    } on Object catch (error) {
+      final failure = workshopTransportError(error);
+      throw WorkshopException(failure.code, status: failure.status, retryAfter: failure.retryAfter,
+        mutationNotSent: true);
+    }
+    final result = await _json('POST', '/api/workshop/v1/submissions', headers: headers,
       body: {'requestId': requestId, ...metadata.toJson()});
-    return _mutationResult(() => _submission(result, credential));
+    return _mutationResult(() {
+      final submission = _submission(result, credential);
+      if (submission.metadata.previewSource != metadata.previewSource) workshopInvalid();
+      return submission;
+    });
   }
 
   Future<WorkshopSubmission> submission(String id, {required WorkshopCredential credential}) async {

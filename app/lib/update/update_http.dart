@@ -66,36 +66,41 @@ String updaterUserAgent({String? version, int? build, String? abi}) {
 
 /// The real thing, on `dart:io`.
 class IoUpdateHttp implements UpdateHttp {
-  IoUpdateHttp()
-    : _client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 10)
-        ..idleTimeout = const Duration(seconds: 5)
-        ..userAgent = updaterAgent;
-
-  final HttpClient _client;
-
   @override
   Future<UpdateHttpResponse> get(
     Uri url, {
     Map<String, String> headers = const {},
     Duration timeout = const Duration(seconds: 15),
   }) async {
-    final request = await _client.getUrl(url).timeout(timeout);
-    headers.forEach(request.headers.set);
-    final response = await request.close().timeout(
-      timeout,
-      onTimeout: () {
-        request.abort();
-        throw TimeoutException('Update response headers timed out', timeout);
-      },
-    );
-    final names = <String, String>{};
-    response.headers.forEach((name, values) => names[name.toLowerCase()] = values.join(', '));
-    return UpdateHttpResponse(
-      status: response.statusCode,
-      headers: names,
-      contentLength: response.contentLength >= 0 ? response.contentLength : null,
-      body: response,
-    );
+    // Own the complete redirect chain independently of concurrent GETs.
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10)
+      ..idleTimeout = const Duration(seconds: 5)
+      ..userAgent = updaterAgent;
+    try {
+      final request = await client.getUrl(url).timeout(timeout);
+      headers.forEach(request.headers.set);
+      final response = await request.close().timeout(
+        timeout,
+        onTimeout: () {
+          request.abort();
+          throw TimeoutException('Update response headers timed out', timeout);
+        },
+      );
+      final names = <String, String>{};
+      response.headers.forEach((name, values) => names[name.toLowerCase()] = values.join(', '));
+      // Stop reuse; the final response body still owns its active connection.
+      client.close();
+      return UpdateHttpResponse(
+        status: response.statusCode,
+        headers: names,
+        contentLength: response.contentLength >= 0 ? response.contentLength : null,
+        body: response,
+      );
+    } catch (_) {
+      // Includes hidden redirect requests and a getUrl still connecting.
+      client.close(force: true);
+      rethrow;
+    }
   }
 }

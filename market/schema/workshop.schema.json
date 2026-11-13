@@ -17,15 +17,32 @@
     "id": {"type": "string", "maxLength": 40, "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "not": {"pattern": "[\\r\\n]"}},
     "version": {"type": "string", "maxLength": 80, "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$", "not": {"pattern": "[\\r\\n]"}},
     "text": {"type": "string", "minLength": 1, "not": {"pattern": "[\u0000-\u001f]"}},
+    "preview": {
+      "type": "object", "additionalProperties": false, "required": ["path", "sha256", "size", "width", "height"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^/market/workshop/(pet|companion)/[^/]+/[^/]+/[a-f0-9]{64}/preview/[a-f0-9]{64}\\.png$"},
+        "sha256": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[a-f0-9]{64}$"},
+        "size": {"type": "integer", "minimum": 1, "maximum": 2097152},
+        "width": {"type": "integer", "minimum": 1, "maximum": 512},
+        "height": {"type": "integer", "minimum": 1, "maximum": 512}
+      }
+    },
     "entry": {
       "type": "object", "additionalProperties": false,
       "required": ["kind", "id", "version", "minApp", "title", "author", "license", "source", "url", "sha256", "size", "blockedVersions"],
+      "dependentRequired": {"preview": ["previewSource"]},
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "pet"}}}, "then": {"properties": {"previewSource": {"const": "pet-idle"}}}},
+        {"if": {"properties": {"kind": {"const": "companion"}}}, "then": {"properties": {"previewSource": {"const": "companion-preview"}}}}
+      ],
       "properties": {
         "kind": {"$ref": "#/$defs/kind"}, "id": {"$ref": "#/$defs/id"}, "version": {"$ref": "#/$defs/version"}, "minApp": {"$ref": "#/$defs/version"},
         "title": {"type": "object", "additionalProperties": false, "required": ["zh", "en"], "properties": {"zh": {"$ref": "#/$defs/text", "maxLength": 120}, "en": {"$ref": "#/$defs/text", "maxLength": 120}}},
         "author": {"$ref": "#/$defs/text", "maxLength": 256},
         "description": {"type": "string", "maxLength": 512, "anyOf": [{"const": ""}, {"$ref": "#/$defs/text", "not": {"pattern": "^[\\s\\u0085]*$"}}]},
         "tags": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"$ref": "#/$defs/text", "maxLength": 32, "not": {"pattern": "^[\\s\\u0085]*$"}}},
+        "previewSource": {"enum": ["pet-idle", "companion-preview"]},
+        "preview": {"$ref": "#/$defs/preview"},
         "license": {"enum": ["CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0", "MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "LicenseRef-Author-Permission"]},
         "source": {"type": "string", "format": "uri", "maxLength": 2048, "pattern": "^[hH][tT][tT][pP][sS]://"},
         "url": {"type": "string", "pattern": "^/market/workshop/(pet|companion)/[^/]+/[^/]+/[a-f0-9]{64}\\.zip$"},
@@ -39,5 +56,5 @@
       "properties": {"kind": {"$ref": "#/$defs/kind"}, "id": {"$ref": "#/$defs/id"}, "version": {"$ref": "#/$defs/version"}, "reason": {"$ref": "#/$defs/text", "maxLength": 2000}, "at": {"type": "string", "format": "date-time"}}
     }
   },
-  "$comment": "Worker validation additionally enforces exact URL/id/version/SHA binding, HTTPS with no credentials, Unicode scalar/control checks, per-kind identity uniqueness, permanent blocked-version history, and nonblank text. JSON Schema alone is not publication authority."
+  "$comment": "Worker validation additionally enforces exact URL/id/version/SHA binding (including preview path and archive SHA), matching kind/previewSource, static PNG and 262144 preview pixels, HTTPS with no credentials, Unicode scalar/control checks, per-kind identity uniqueness, permanent blocked-version history, and nonblank text. JSON Schema alone is not publication authority."
 }

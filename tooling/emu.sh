@@ -16,7 +16,13 @@ case "${1:-}" in
   install) adb install -r -g "$2" ;;
   launch) adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null ;;
   stop) adb shell am force-stop "$PKG" ;;
-  shot) mkdir -p "$SHOTS"; adb exec-out screencap -p > "$SHOTS/$2.png"; echo "$SHOTS/$2.png" ;;
+  shot)
+    mkdir -p "$SHOTS"
+    shot_tmp=$(mktemp "$SHOTS/.shot.XXXXXX")
+    trap 'rm -f -- "$shot_tmp"' EXIT
+    adb exec-out screencap -p > "$shot_tmp"
+    mv -- "$shot_tmp" "$SHOTS/$2.png"
+    echo "$SHOTS/$2.png" ;;
   log) adb logcat -d -v time | grep -E "flutter|DshService|dsh|AndroidRuntime|$PKG" | tail -n "${2:-200}" ;;
   tap) adb shell input tap "$2" "$3" ;;
   text) adb shell input text "'$(printf '%s' "$2" | sed "s/'/'\\\\''/g; s/ /%s/g")'" ;;

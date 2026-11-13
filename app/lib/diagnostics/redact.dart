@@ -178,7 +178,13 @@ String _redactAssignments(String text) {
         at++;
       }
       final markedEnd = _maskedEnd(text, valueStart);
-      if (markedEnd > valueStart && _assignmentAt(text, markedEnd)) {
+      final queryToken =
+          name.toLowerCase() == 'token' && match.start > 0 && '?&#'.contains(text[match.start - 1]);
+      if (markedEnd > valueStart &&
+          (_assignmentAt(text, markedEnd) ||
+              (queryToken &&
+                  markedEnd < at &&
+                  (text[markedEnd] == '#' || (text[markedEnd] == ')' && markedEnd + 1 == at))))) {
         at = markedEnd;
       }
     }

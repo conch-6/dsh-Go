@@ -82,6 +82,7 @@ void main() {
         );
         await tester.tap(find.text('自连 ADB'));
         await tester.pumpAndSettle();
+        await openPhoneFold(tester, 'phone-adb-pairing-help');
         expect(find.textContaining('USB 调试（安全设置）'), manufacturer == 'Xiaomi' ? findsOneWidget : findsNothing);
       });
     }
@@ -109,6 +110,8 @@ void main() {
         ),
       );
       expect(find.text('这台手机用不了：需要 Android 14 及以上。'), findsOneWidget);
+      expect(find.textContaining('保持亮屏、解锁'), findsNothing);
+      await openPhoneFold(tester, 'phone-dnd-options');
       expect(find.textContaining('保持亮屏、解锁'), findsOneWidget);
       expect(find.textContaining('重启手机后重新激活'), findsOneWidget);
       expect(find.textContaining('保持无线调试开启'), findsOneWidget);
@@ -136,7 +139,7 @@ void main() {
 
       h.native!.push(phoneStatus(shizukuInstalled: true, shizukuRunning: true, shizukuGranted: true));
       await settlePhone(tester);
-      expect(find.text('Shizuku 这边准备好了。'), findsOneWidget);
+      expect(find.text('Shizuku 已启动并授权，接下来连接后台屏。'), findsOneWidget);
       await tester.tap(find.text('用 Shizuku 开启'));
       await tester.pumpAndSettle();
       expect(h.native!.callsOf('setBackgroundMode').single.arguments, {'mode': 'shizuku'});
@@ -155,7 +158,7 @@ void main() {
         const PhoneDndPage(),
         native: FakePhoneNative(status: privilegedStatus(provider: 'sui', running: true)),
       );
-      await tester.tap(find.text('Sui'));
+      await openPhoneChannel(tester, 'Sui');
       await tester.pumpAndSettle();
       expect(find.text('打开 Shizuku 官网'), findsNothing);
       expect(find.text('用 Sui 开启'), findsNothing);
@@ -165,7 +168,7 @@ void main() {
 
       h.native!.push(privilegedStatus(provider: 'sui', running: true, granted: true));
       await settlePhone(tester);
-      expect(find.text('Sui 这边准备好了。'), findsOneWidget);
+      expect(find.text('Sui 已启动并授权，接下来连接后台屏。'), findsOneWidget);
       await tester.tap(find.text('用 Sui 开启'));
       await tester.pumpAndSettle();
       expect(h.native!.callsOf('setBackgroundMode').single.arguments, {'mode': 'sui'});
@@ -177,7 +180,7 @@ void main() {
         const PhoneDndPage(),
         native: FakePhoneNative(status: privilegedStatus(provider: 'sui', running: true, granted: true)),
       );
-      await tester.tap(find.text('Sui'));
+      await openPhoneChannel(tester, 'Sui');
       await tester.pumpAndSettle();
       expect(find.text('用 Sui 开启'), findsOneWidget);
       h.native!.push(privilegedStatus(provider: 'sui', granted: true));
@@ -207,12 +210,14 @@ void main() {
       );
       await tester.tap(find.text('自连 ADB'));
       await tester.pumpAndSettle();
+      expect(find.textContaining('连点「版本号」7 次'), findsNothing);
+      await openPhoneFold(tester, 'phone-adb-pairing-help');
       expect(find.textContaining('使用配对码配对设备'), findsWidgets);
       expect(find.textContaining('连点「版本号」7 次'), findsOneWidget);
-      // Android 17 hides the ADB setting from apps: say so instead of guessing.
-      expect(find.text('不确定'), findsOneWidget);
+      // Unknown wireless-debugging state is not presented as a failed check.
+      expect(find.text('不确定'), findsNothing);
       expect(find.textContaining('恶意软件'), findsNothing);
-      expect(button(tester, '连接').onPressed, isNull);
+      expect(find.text('连接'), findsNothing);
 
       await tester.tap(find.text('开始配对'));
       await tester.pumpAndSettle();
@@ -253,6 +258,7 @@ void main() {
       );
       await tester.tap(find.text('自连 ADB'));
       await tester.pumpAndSettle();
+      await openPhoneFold(tester, 'phone-adb-connect-help');
       await tester.tap(find.text('按端口连接'));
       await tester.pumpAndSettle();
       final connect = find.descendant(of: find.byType(AlertDialog), matching: find.widgetWithText(FilledButton, '连接'));

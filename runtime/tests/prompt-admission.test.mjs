@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, writeFileSync, symlinkSync, rmSync } from 'n
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createDeletionSeam } from '../session-deletion/core.mjs';
 if (!process.env.DSH_PREFIX) throw Error('Set DSH_PREFIX to a private patched candidate');
 const prefix = resolve(process.env.DSH_PREFIX);
 const base = join(prefix, 'node_modules/@deepseek-ai');
@@ -22,9 +23,12 @@ async function expose(name, exports) {
 const { Context } = await load('cordis');
 const { Session } = await load('dsh-session');
 const { AttachmentStore } = await load('dsh-attachment');
+const { createUserMessage } = await load('dsh-llm');
 const { SessionProjectionRegistry } = await load('dsh-session-projection');
-const { ReactLoopInbox, ReactLoopAgent, inboxProjectionDefinition, RuntimeContextProjection, SystemPromptProjection } = await expose('dsh-agent-loop', 'ReactLoopInbox, ReactLoopAgent, inboxProjectionDefinition, RuntimeContextProjection, SystemPromptProjection');
+const { AgentLoop, ReactLoopInbox, ReactLoopAgent, inboxProjectionDefinition, RuntimeContextProjection, SystemPromptProjection } = await expose('dsh-agent-loop', 'ReactLoopInbox, ReactLoopAgent, inboxProjectionDefinition, RuntimeContextProjection, SystemPromptProjection');
 const { SessionCommandController, ApiSessionAgentController } = await expose('dsh-api-session-controller', 'SessionCommandController, ApiSessionAgentController');
+symlinkSync(join(base, 'dsh-session-persistence-jsonl/lib/dsh-go-deletion.mjs'), join(temporary, 'dsh-go-deletion.mjs'));
+const { SessionWriteLease } = await expose('dsh-session-persistence-jsonl', 'SessionWriteLease');
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4//8/AAX+Av6nNYGEAAAAAElFTkSuQmCC';
 function deferred() {
   let resolve;
@@ -108,7 +112,7 @@ async function fixture(t, { failFirst = false } = {}) {
     }
     return session.snapshotEvents().filter(event => event.type === 'user/message' && event.data.source.kind === 'user');
   }
-  return { overlap, submit, inbox, session, counts, commitPending };
+  return { overlap, submit, inbox, session, counts, commitPending, agent, host, controller };
 }
 for (const mode of ['followup', 'steer']) test(`overlapping ${mode} image retries commit one business input`, async t => {
   const f = await fixture(t);
@@ -140,4 +144,54 @@ test('failed first storage admission does not suppress a queued same-ID retry', 
   assert.equal(f.counts.bindings, 1);
   assert.equal(f.inbox.nextTurn.length, 1);
   assert.equal((await f.commitPending()).length, 1);
+});
+
+test('a refused deletion cannot drop a queued prompt moved to steering', async t => {
+  const f = await fixture(t);
+  const root = mkdtempSync(join(temporary, 'queue-deletion-'));
+  const entered = deferred(), release = deferred();
+  const acquired = [];
+  const storage = {
+    root, tracker: { writers: new Map() },
+    ctx: { get: name => name === 'sessions' ? { list: () => [f.session] } : undefined },
+    async list() { entered.resolve(); await release.promise; return [{ header: f.session.header }]; },
+  };
+  const seam = createDeletionSeam(storage, {
+    acquire: async (dir, id) => {
+      const lease = await SessionWriteLease.acquire(dir, id);
+      acquired.push({ dir, id });
+      return lease;
+    },
+    parseGeneration: () => undefined,
+    notFound: id => Object.assign(new Error(`fenced ${id}`), { code: 'not-found' }),
+  });
+  storage.dshGoDeletion = seam;
+  f.host.get = f.agent.loopCtx.get = name => name === 'sessionPersistence' ? storage : undefined;
+  f.agent.phase = { kind: 'running', abort: new AbortController() };
+  const message = createUserMessage({ content: [{ type: 'text', text: 'synthetic queued input' }], source: { kind: 'user' } });
+  f.inbox.append('next-turn', message);
+  const before = f.session.snapshotEvents();
+  const deleting = seam.delete(f.agent.id, {
+    dispose: (id, options) => AgentLoop.prototype.dshGoDisposeForDeletion.call({ runtime: { ctx: f.host } }, id, options),
+  });
+  const refused = assert.rejects(deleting, { code: 'session-active' });
+  await entered.promise;
+  const move = () => f.controller.updateQueue({ sessionId: f.agent.id, itemId: message.id, action: { kind: 'steer' } });
+  try {
+    assert.equal(acquired.length, 1, 'deletion owns its operation lease before listing');
+    await assert.rejects(move(), { code: 'not-found' });
+    assert.deepEqual(f.inbox.nextTurn.map(item => item.id), [message.id]);
+    assert.deepEqual(f.inbox.nextStep, []);
+    assert.deepEqual(f.session.snapshotEvents(), before, 'refused move must not append a cancellation');
+  } finally {
+    release.resolve();
+    await refused;
+  }
+  assert.equal(seam.pending.size, 0);
+  assert.equal(seam.deleted(f.agent.id), false);
+  const released = await SessionWriteLease.acquire(acquired[0].dir, acquired[0].id);
+  await released.release();
+  assert.deepEqual(await move(), { accepted: true });
+  assert.deepEqual(f.inbox.nextTurn, []);
+  assert.deepEqual(f.inbox.nextStep.map(item => item.id), [message.id]);
 });

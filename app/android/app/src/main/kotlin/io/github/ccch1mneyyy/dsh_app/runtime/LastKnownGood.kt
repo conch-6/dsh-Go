@@ -87,10 +87,15 @@ object LastKnownGood {
     /** The main profile as it is now; null before DSH has created it. */
     fun read(rootfs: File): ProfileSnapshot? {
         val dir = webDir(rootfs)
-        val pkg = File(dir, "package.json")
-        if (!pkg.isFile) return null
-        return parse(JSONObject(pkg.readText()), dir)
+        val pkg = profileSource(rootfs, "package.json") ?: return null
+        return parse(JSONObject(pkg.readText()), dir, rootfs)
     }
+
+    // Capture happens before a PRoot start materializes tawc names. Resolve only for reads;
+    // locks, replacements and deletions still belong to the original profile name.
+    private fun profileSource(rootfs: File, name: String): File? =
+        File(webDir(rootfs), name).takeIf { it.isFile }
+            ?: io.github.ccch1mneyyy.dsh_app.files.GuestFiles.resolve(rootfs, "/root/.dsh/profiles/web/$name", PhoneStorage.GUEST_PATH)
 
     /**
      * What a normal run booted with, fixed when it reports ready: [atLaunch], or on a first boot
@@ -113,7 +118,7 @@ object LastKnownGood {
         return true
     }
 
-    private fun parse(json: JSONObject, dir: File): ProfileSnapshot {
+    private fun parse(json: JSONObject, dir: File, rootfs: File): ProfileSnapshot {
         val bundles = json.optJSONObject("dsh")?.optJSONObject("profile")?.optJSONArray("bundles").strings()
         val depsJson = json.optJSONObject("dependencies")
         val deps = LinkedHashSet<String>()
@@ -121,14 +126,16 @@ object LastKnownGood {
         val versions = LinkedHashMap<String, String>()
         for (name in deps) {
             val version = try {
-                JSONObject(File(dir, "node_modules/$name/package.json").readText()).optString("version")
+                val text = io.github.ccch1mneyyy.dsh_app.files.GuestFiles.resolve(
+                    rootfs, "/root/.dsh/profiles/web/node_modules/$name/package.json", PhoneStorage.GUEST_PATH,
+                )?.readText() ?: continue
+                JSONObject(text).optString("version")
             } catch (_: Exception) {
                 null
             }
             if (!version.isNullOrEmpty()) versions[name] = version
         }
-        val patchFile = File(dir, "cordis.patch.yml")
-        val patch = if (patchFile.isFile) patchFile.readText() else null
+        val patch = profileSource(rootfs, "cordis.patch.yml")?.readText()
         return ProfileSnapshot(bundles, deps, versions, patch)
     }
 
@@ -177,10 +184,11 @@ object LastKnownGood {
     ): LkgPlan {
         val dir = webDir(rootfs)
         val pkg = File(dir, "package.json")
-        if (!pkg.isFile) throw IllegalStateException(missingConfig)
+        if (profileSource(rootfs, "package.json") == null) throw IllegalStateException(missingConfig)
         return withLock(pkg, busyConfig) {
-            val json = JSONObject(pkg.readText())
-            val plan = LkgPlan.of(lkg, parse(json, dir))
+            val source = profileSource(rootfs, "package.json") ?: throw IllegalStateException(missingConfig)
+            val json = JSONObject(source.readText())
+            val plan = LkgPlan.of(lkg, parse(json, dir, rootfs))
             if (plan.bundlesChanged) {
                 val dsh = json.optJSONObject("dsh") ?: JSONObject().also { json.put("dsh", it) }
                 val profile = dsh.optJSONObject("profile") ?: JSONObject().also { dsh.put("profile", it) }
@@ -190,7 +198,7 @@ object LastKnownGood {
             }
             if (plan.patchChanged) {
                 val patchFile = File(dir, "cordis.patch.yml")
-                if (patchFile.isFile) patchFile.copyTo(File(dir, "cordis.patch.yml.bak-$stamp"), overwrite = true)
+                profileSource(rootfs, "cordis.patch.yml")?.copyTo(File(dir, "cordis.patch.yml.bak-$stamp"), overwrite = true)
                 val text = lkg.patch
                 if (text != null) SafeMode.writeAtomic(patchFile, text) else Files.deleteIfExists(patchFile.toPath())
             }

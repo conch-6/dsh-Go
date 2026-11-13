@@ -184,7 +184,7 @@ jobs:
       - *checkout
       - *flutter
       - run: |
-          for pkg in packages/dsh_client packages/dsh_remote; do
+          for pkg in packages/dsh_client packages/dsh_remote packages/dsh_tavern; do
             (cd "$pkg" && dart pub get --enforce-lockfile && dart analyze && dart test)
           done
       - name: Install OpenSSH for transport interoperability tests

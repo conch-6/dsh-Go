@@ -442,6 +442,68 @@ os.replace(sys.argv[1], sys.argv[2])
         self.assertNotIn("--offline", events[0]["args"])
         self.assertTrue((lockdir / "package-lock.json").is_file())
 
+    def assert_first_lock_retries(self, kind, fault):
+        entry, env, lockdir, _ = self.npm_fixture(kind, locked=False)
+        expected = (self.root / "fixture-lock.json").read_bytes()
+        self.assertGreater(len(expected), 256)
+        entry = 'PY=(python3 -I "$LOCK_TEST_RTBUILD")\n' + entry
+        env.update(LOCK_TEST_RTBUILD=str(SCRIPT.parent / "lib/rtbuild.py"),
+                   LOCK_TEST_DIR=str(lockdir), LOCK_TEST_FAULT=fault,
+                   LOCK_TEST_CP=shutil.which("cp"), LOCK_TEST_MV=shutil.which("mv"))
+        copy = self.bin / "cp"
+        copy.write_text('''#!/usr/bin/env python3
+import os, resource, signal, sys
+from pathlib import Path
+target = Path(sys.argv[-1])
+directory = Path(os.environ["LOCK_TEST_DIR"])
+if os.environ.get("LOCK_TEST_FAULT") == "copy" and (target == directory or target.parent == directory):
+    # Only the real cp child is limited; npm has already produced complete inputs.
+    resource.setrlimit(resource.RLIMIT_FSIZE, (256, 256))
+    signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+os.execv(os.environ["LOCK_TEST_CP"], ["cp", *sys.argv[1:]])
+''')
+        copy.chmod(0o755)
+        move = self.bin / "mv"
+        move.write_text('''#!/usr/bin/env python3
+import os, sys
+from pathlib import Path
+if os.environ.get("LOCK_TEST_FAULT") == "rename" and Path(sys.argv[-1]).parent == Path(os.environ["LOCK_TEST_DIR"]):
+    sys.exit(23)  # Rename failure boundary; no real disk-full claim.
+os.execv(os.environ["LOCK_TEST_MV"], ["mv", *sys.argv[1:]])
+''')
+        move.chmod(0o755)
+        before = len(self.npm_events())
+        lock = lockdir / "package-lock.json"
+        pending = lockdir / "package-lock.json.tmp"
+        first = self.run_shell(entry, env)
+        self.assertNotEqual(first.returncode, 0, first.stderr)
+        self.assertFalse(lock.exists(), "a failed first copy must not select npm ci on retry")
+        if fault == "copy":
+            self.assertEqual(pending.stat().st_size, 256)
+        else:
+            self.assertEqual(first.returncode, 23)
+            self.assertEqual(pending.read_bytes(), expected)
+        env["LOCK_TEST_FAULT"] = ""
+        retry = self.run_shell(entry, env)
+        self.assertEqual(retry.returncode, 0, retry.stderr)
+        self.assertEqual(lock.read_bytes(), expected)
+        self.assertFalse(pending.exists())
+        cached = self.run_shell(entry, env)
+        self.assertEqual(cached.returncode, 0, cached.stderr)
+        self.assertEqual(lock.read_bytes(), expected)
+        events = self.npm_events()[before:]
+        self.assertEqual([event["args"][0] for event in events], ["install", "install", "ci"])
+
+    def test_first_lock_short_copy_can_retry_then_reuse_the_committed_pin(self):
+        for kind in ("dsh", "pnpm"):
+            with self.subTest(kind=kind):
+                self.assert_first_lock_retries(kind, "copy")
+
+    def test_first_lock_rename_failure_can_retry_then_reuse_the_committed_pin(self):
+        for kind in ("dsh", "pnpm"):
+            with self.subTest(kind=kind):
+                self.assert_first_lock_retries(kind, "rename")
+
     def test_existing_locks_use_fixed_basename_for_both_architectures(self):
         for arch, mirror in (("amd64", "https://mirrors.tuna.tsinghua.edu.cn/ubuntu"),
                              ("arm64", "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports")):

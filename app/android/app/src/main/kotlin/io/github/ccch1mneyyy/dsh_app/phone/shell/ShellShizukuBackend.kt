@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import io.github.ccch1mneyyy.dsh_app.phone.background.ShizukuCleanup
+import io.github.ccch1mneyyy.dsh_app.phone.background.shizukuUnbind
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import rikka.shizuku.Shizuku
@@ -15,6 +17,9 @@ import rikka.sui.Sui
 internal class ShellShizukuBackend(private val context: Context, private val onChanged: () -> Unit) {
     private val guard = Any()
     private val main = Handler(Looper.getMainLooper())
+    // Replacing the APK must also replace the service that captured its child-process classpath.
+    @Suppress("DEPRECATION")
+    private val serviceVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionCode
     private var current: Binding? = null
     @Volatile private var channel: ShellLink? = null
 
@@ -24,6 +29,7 @@ internal class ShellShizukuBackend(private val context: Context, private val onC
         var worker = true
         var bound = false
         var cleaning = false
+        var cleanup: ShizukuCleanup? = null
         var binder: IBinder? = null
         lateinit var listener: ServiceConnection
     }
@@ -58,12 +64,30 @@ internal class ShellShizukuBackend(private val context: Context, private val onC
             !running() -> "shizukuStopped"
             else -> "permissionRequired"
         })
+        val previous = synchronized(guard) {
+            if (!wanted()) return ShellConnection(errorCode = "cancelled")
+            channel?.takeIf { it.alive() }?.let { return ShellConnection(it) }
+            // Main must remain free to run the old unbind and the new bind.
+            if (Looper.myLooper() == main.looper) return ShellConnection(errorCode = "connectFailed")
+            current?.let {
+                if (it.worker) return ShellConnection(errorCode = "busy")
+                retire(it)
+                it.cleanup
+            }
+        }
+        try {
+            previous?.await(15, TimeUnit.SECONDS)?.let { return ShellConnection(errorCode = "cleanupFailed") }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return ShellConnection(errorCode = "cancelled")
+        }
         val binding = synchronized(guard) {
             if (!wanted()) return ShellConnection(errorCode = "cancelled")
             channel?.takeIf { it.alive() }?.let { return ShellConnection(it) }
-            current?.let { retire(it); return ShellConnection(errorCode = "busy") }
+            // A concurrent caller may have acquired the fixed tag while we waited.
+            if (current != null) return ShellConnection(errorCode = "busy")
             Binding(wanted, Shizuku.UserServiceArgs(ComponentName(context, AndroidShellService::class.java))
-                .tag(ShellProtocol.TAG).processNameSuffix("android_shell").version(1).daemon(false)).also { current = it }
+                .tag(ShellProtocol.TAG).processNameSuffix("android_shell").version(serviceVersion).daemon(false)).also { current = it }
         }
         binding.listener = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -77,16 +101,16 @@ internal class ShellShizukuBackend(private val context: Context, private val onC
                 onChanged()
             }
         }
-        main.post {
-            synchronized(guard) {
-                if (!binding.valid || !binding.wanted()) { binding.latch.countDown(); return@post }
-                binding.bound = true
-            }
-            runCatching { Shizuku.bindUserService(binding.args, binding.listener) }
-                .onFailure { binding.latch.countDown() }
-        }
         var candidate: ShellLink? = null
         return try {
+            if (!main.post {
+                synchronized(guard) {
+                    if (!binding.valid || !binding.wanted()) { binding.latch.countDown(); return@post }
+                    binding.bound = true
+                }
+                runCatching { Shizuku.bindUserService(binding.args, binding.listener) }
+                    .onFailure { binding.latch.countDown() }
+            }) return ShellConnection(errorCode = "connectFailed")
             if (!binding.latch.await(15, TimeUnit.SECONDS)) return ShellConnection(errorCode = "connectFailed")
             val binder = synchronized(guard) {
                 if (!binding.valid || !wanted()) return ShellConnection(errorCode = "cancelled")
@@ -102,7 +126,10 @@ internal class ShellShizukuBackend(private val context: Context, private val onC
                 channel = candidate
                 ShellConnection(candidate)
             }
-        } catch (_: Exception) { ShellConnection(errorCode = "connectFailed") }
+        } catch (error: Exception) {
+            if (error is InterruptedException) Thread.currentThread().interrupt()
+            ShellConnection(errorCode = if (error is InterruptedException) "cancelled" else "connectFailed")
+        }
         finally {
             synchronized(guard) {
                 binding.worker = false
@@ -120,16 +147,22 @@ internal class ShellShizukuBackend(private val context: Context, private val onC
         channel?.close(); channel = null
         if (binding.worker || binding.cleaning) return
         binding.cleaning = true
-        main.post {
-            var detached = true
-            if (binding.bound) {
-                detached = runCatching { Shizuku.unbindUserService(binding.args, binding.listener, false) }.isSuccess
-                runCatching { Shizuku.unbindUserService(binding.args, binding.listener, true) }
-            }
+        val cleanup = ShizukuCleanup().also { binding.cleanup = it }
+        if (!main.post {
+            // Detach the API callback cache, then remove the service before reusing its tag.
+            val failure = if (binding.bound) shizukuUnbind(
+                detach = { Shizuku.unbindUserService(binding.args, binding.listener, false) },
+                remove = { Shizuku.unbindUserService(binding.args, binding.listener, true) },
+            ) else null
             synchronized(guard) {
-                if (detached && current === binding) current = null else binding.cleaning = false
+                if (failure == null && current === binding) current = null
+                else binding.cleaning = false // a later explicit connect may retry teardown
+                cleanup.complete(failure)
             }
             onChanged()
+        }) {
+            binding.cleaning = false
+            cleanup.complete("unbindDispatchFailed")
         }
     }
 

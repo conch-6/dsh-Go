@@ -55,9 +55,13 @@ class ThinkingPill extends StatefulWidget {
     this.active = false,
     this.streaming = false,
     this.growIn = false,
+    this.meta,
   });
 
   final String reasoning;
+
+  /// Shown after the label, as a role-play shows how long it has thought.
+  final Widget? meta;
 
   /// 模型此刻还在思考(流式中且正文还没开始)。
   final bool active;
@@ -150,6 +154,7 @@ class _ThinkingPillState extends State<ThinkingPill> {
         const SizedBox(width: StreamRow.gap),
         // 标签直接换字,不做淡入淡出:两个词叠在同一个位置上闪一下更难看。
         ThinkingLabel(active ? l10n.chatThinkingActive : l10n.chatThinking, active: active),
+        ?widget.meta,
         if (preview.isNotEmpty) ...[
           const StreamDot(),
           Expanded(

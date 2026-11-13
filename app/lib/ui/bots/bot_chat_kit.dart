@@ -46,6 +46,7 @@ class BotChatHeader extends StatelessWidget {
     required this.tone,
     required this.onDetails,
     this.scrolledUnder,
+    this.action,
   });
 
   final Widget face;
@@ -54,6 +55,10 @@ class BotChatHeader extends StatelessWidget {
   final StatusTone tone;
   final VoidCallback onDetails;
   final ValueNotifier<double>? scrolledUnder;
+
+  /// The round key on the right, in place of ⓘ (which repeats the title's
+  /// tap): its icon, label and what it does.
+  final (IconData, String, VoidCallback)? action;
 
   static const barHeight = 56.0;
   static const key44 = 44.0;
@@ -173,12 +178,15 @@ class BotChatHeader extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  _RoundKey(
-                    key: const ValueKey('bot-details'),
-                    icon: AppIcons.info,
-                    tooltip: l10n.commonDetails,
-                    onTap: onDetails,
-                  ),
+                  if (action case (final icon, final label, final onTap))
+                    _RoundKey(key: const ValueKey('bot-action'), icon: icon, tooltip: label, onTap: onTap)
+                  else
+                    _RoundKey(
+                      key: const ValueKey('bot-details'),
+                      icon: AppIcons.info,
+                      tooltip: l10n.commonDetails,
+                      onTap: onDetails,
+                    ),
                 ],
               ),
             ),
@@ -221,20 +229,38 @@ class _RoundKey extends StatelessWidget {
 /// The page: the transcript fills the space between the header (floating
 /// over it) and the bottom column (cards, error, composer).
 class BotChatFrame extends StatelessWidget {
-  const BotChatFrame({super.key, required this.header, required this.body, required this.bottom});
+  const BotChatFrame({
+    super.key,
+    required this.header,
+    required this.body,
+    required this.bottom,
+    this.backdrop,
+    this.endDrawer,
+    this.scaffoldKey,
+  });
 
   final Widget header;
   final Widget body;
   final List<Widget> bottom;
 
+  /// What the page stands on, around [child]; null: the usual gradient ([AppBackdrop]).
+  final Widget Function(Widget child)? backdrop;
+
+  /// A panel that slides in from the right edge (opened through [scaffoldKey]).
+  final Widget? endDrawer;
+  final GlobalKey<ScaffoldState>? scaffoldKey;
+
   @override
   Widget build(BuildContext context) {
+    final backdrop = this.backdrop ?? (child) => AppBackdrop(child: child);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: dshSystemOverlay(Theme.of(context).brightness),
-      child: AppBackdrop(
-        child: Scaffold(
+      child: backdrop(
+        Scaffold(
+          key: scaffoldKey,
           backgroundColor: Colors.transparent,
           resizeToAvoidBottomInset: true,
+          endDrawer: endDrawer,
           // A phone on its side: clear of the cutout on both sides.
           body: SideSafeArea(
             child: Column(

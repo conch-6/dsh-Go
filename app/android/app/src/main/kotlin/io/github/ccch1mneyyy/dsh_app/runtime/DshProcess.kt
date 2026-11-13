@@ -19,8 +19,9 @@ import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
- * Runs `dsh web` through proot or the optional direct glibc planner, using the
- * same composed manifest configuration. Reports ready after the token and socket.
+ * Runs `dsh web` through proot, the optional direct glibc planner or the optional
+ * tawcroot launcher, using the same composed manifest configuration. Reports ready
+ * after the token and socket.
  */
 class DshProcess(
     private val context: Context,
@@ -69,6 +70,10 @@ class DshProcess(
     var direct: Boolean = false
         private set
 
+    /** This process runs under tawcroot ([TawcrootLaunch]); fixed before it can be spawned. */
+    var tawc: Boolean = false
+        private set
+
     val launchDiagnostics = LaunchDiagnostics()
     val executionMode: String? get() = launchDiagnostics.currentMode(process?.isAlive == true)
 
@@ -79,17 +84,28 @@ class DshProcess(
      * [binds] are extra proot `-b host:guest` mounts, inserted before the guest command.
      * [safe] boots the rescue profile instead of `web` (see [SafeMode.profileArg]).
      */
-    fun start(guestEnv: Map<String, String>, binds: List<String> = emptyList(), safe: Boolean = false, phone: Boolean = false, directEngine: Boolean = false, directFailed: Boolean = false, searchOverlay: Boolean = false, authOverlay: Boolean = false, speechOverlay: Boolean = false, onLaunchMethod: ((Boolean) -> Unit)? = null) {
+    fun start(guestEnv: Map<String, String>, binds: List<String> = emptyList(), safe: Boolean = false, phone: Boolean = false, directEngine: Boolean = false, directFailed: Boolean = false, searchOverlay: Boolean = false, authOverlay: Boolean = false, speechOverlay: Boolean = false, tawcEngine: Boolean = false, tawcFailed: Boolean = false, onLaunchMethod: ((Boolean) -> Unit)? = null) {
         check(process == null) { "already started" }
-        var selection = DirectLaunch.select(rootfs, directEngine, safe, directFailed)
-        // Only PRoot's fake hard links stand in Direct's way: tidy them once no runtime process is left.
+        // tawcroot wins over Direct when both are on; like Direct it needs PRoot's fake hard links gone.
+        val tawcWanted = tawcEngine && !safe
+        val tawcMissing = if (tawcWanted) TawcrootLaunch.unavailable(context.applicationInfo.nativeLibraryDir, android.os.Build.VERSION.SDK_INT) else null
+        val tawcReady = tawcWanted && !tawcFailed && tawcMissing == null
+        var selection = if (tawcReady) DirectLaunch.select(rootfs, requested = true, safe = false)
+            else DirectLaunch.select(rootfs, directEngine, safe, directFailed)
+        // Only PRoot's fake hard links stand in the way: tidy them once no runtime process is left.
         val tidy = selection.fallbackReason == DirectLaunch.INCOMPATIBLE
         val cleanup = reapStrays(allowObservationGap = !selection.direct && !tidy)
         if (tidy && cleanup.complete) selection = tidyLinks(binds)
-        directFallbackReason = selection.fallbackReason ?: if (directEngine && safe) "safeRecovery" else null
-        launchDiagnostics.selected(selection.direct, directFallbackReason)
-        direct = selection.direct
-        check(cleanup.complete || (!direct && !cleanup.ownedRemaining)) { "runtime cleanup incomplete; stop the engine and retry" }
+        tawc = tawcReady && selection.direct
+        direct = selection.direct && !tawcReady
+        directFallbackReason = selection.fallbackReason ?: when {
+            tawcWanted && tawcFailed -> TawcrootLaunch.FAILED
+            tawcMissing != null -> tawcMissing
+            (directEngine || tawcEngine) && safe -> "safeRecovery"
+            else -> null
+        }
+        launchDiagnostics.selected(if (tawc) "tawcroot" else if (direct) "direct" else "proot", directFallbackReason)
+        check(cleanup.complete || (!direct && !tawc && !cleanup.ownedRemaining)) { "runtime cleanup incomplete; stop the engine and retry" }
         if (!cleanup.complete) listener.onLog("[dsh-app] starting proot with incomplete process observation; no captured runtime identities remain", "system")
         val pidFile = File(rootfs, "tmp/dsh-web.pid")
         pidFile.delete() // also removes a stale/dangling symlink; never reuse a previous run's PID
@@ -164,17 +180,38 @@ class DshProcess(
         env["PROOT_TMP_DIR"] = tmp.absolutePath
         manifest.launchEnv.forEach { (k, v) -> env[k] = expand(v) }
         if (!guestEnvPlaced) env.putAll(effectiveGuestEnv)
+        val tawcPlan = if (!tawc) null else try {
+            TawcrootLaunch.prepare(rootfs.canonicalPath, context.applicationInfo.nativeLibraryDir, argv, env.toMap())
+        } catch (e: TawcrootLaunch.Unsupported) {
+            listener.onLog("[dsh-app] tawcroot fallback: ${e.message}; compatible launch this time", "system")
+            tawc = false
+            directFallbackReason = TawcrootLaunch.UNSUPPORTED
+            launchDiagnostics.selected("proot", directFallbackReason)
+            null
+        }
+        // tawcroot's stored hard links are only readable under tawcroot: make them files first.
+        if (!tawc && TawcrootLinks.pending(rootfs)) {
+            check(cleanup.complete) { "runtime cleanup incomplete; stop the engine and retry" }
+            untangleTawcroot()
+        }
         if (direct) {
             val plan = DirectLaunch.prepare(rootfs, manifest.abi, argv, env.toMap())
             builder.command(plan.argv).directory(plan.cwd)
             env.clear()
             env.putAll(plan.environment)
         }
+        if (tawcPlan != null) {
+            TawcrootLaunch.writeDevView(tawcPlan.devView)
+            builder.command(tawcPlan.argv).directory(File(tawcPlan.cwd))
+            env.clear()
+            env.putAll(tawcPlan.environment)
+        }
 
         readyReported = false
         if (directFallbackReason == DirectLaunch.INCOMPATIBLE) listener.onLog("[dsh-app] direct fallback: proot hard-link backing files need compatible launch; user preference and data retained", "system")
         if (directFallbackReason == DirectLaunch.FAILED) listener.onLog("[dsh-app] direct fallback: direct launch failed before with this runtime; turn Direct on again to retry", "system")
-        listener.onLog("[dsh-app] launch method: ${if (direct) "direct-glibc" else "proot"}${if (directEngine && safe) " (safe recovery)" else ""}", "system")
+        if (directFallbackReason == TawcrootLaunch.FAILED) listener.onLog("[dsh-app] tawcroot fallback: tawcroot failed to start before with this runtime; turn tawcroot on again to retry", "system")
+        listener.onLog("[dsh-app] launch method: ${if (tawc) "tawcroot" else if (direct) "direct-glibc" else "proot"}${if ((directEngine || tawcEngine) && safe) " (safe recovery)" else ""}", "system")
         listener.onLog("[dsh-app] launching ${builder.command().joinToString(" ") { redact(it) }}", "system")
         // stop() came in while this was being prepared: don't launch at all.
         if (stopping) {
@@ -250,6 +287,25 @@ class DshProcess(
         return DirectLaunch.Selection(reason == null, reason)
     }
 
+    /**
+     * PRoot or Direct is next and tawcroot left emulated hard links: turn them into
+     * files ([TawcrootLinks]). Without room this start fails with what to do; nothing
+     * is lost, tawcroot can still read every name.
+     */
+    private fun untangleTawcroot() {
+        val started = System.nanoTime()
+        val result = try {
+            TawcrootLinks(rootfs, ::syncFilesystems).run(onSlow = { listener.onTidying(true) })
+        } finally {
+            listener.onTidying(false)
+        }
+        if (result is TawcrootLinks.Result.NotEnoughSpace) {
+            throw IllegalStateException("files from the tawcroot launch need ${result.need shr 20} MB plus " +
+                "${L2sMigration.MARGIN shr 20} MB spare to switch back, ${result.free shr 20} MB free; free up space or turn tawcroot on again")
+        }
+        listener.onLog("[dsh-app] tawcroot: turned ${(result as TawcrootLinks.Result.Done).names} linked names into files in ${(System.nanoTime() - started) / 1_000_000} ms", "system")
+    }
+
     /** Waits for cleanup and exit reporting; zero waits until completion. */
     fun awaitExit(millis: Long = 0): Boolean {
         // The waiter joins the stopper before reporting exit. Startup can fail
@@ -286,11 +342,12 @@ class DshProcess(
         stopper = thread(name = "dsh-stop", isDaemon = true) {
             try {
                 val node = if (p.isAlive) guestRecord() else null
-                val proot = if (direct) null else node?.let { child -> processSnapshot().records.firstOrNull { it.pid == child.parent && it.proot } }
+                val proot = if (direct || tawc) null else node?.let { child -> processSnapshot().records.firstOrNull { it.pid == child.parent && it.proot } }
                 if (node != null) signalOwned(node, OsConstants.SIGTERM)
-                else if (direct && p.isAlive) p.destroy() // loader/preload may fail before writing its pid file
+                else if ((direct || tawc) && p.isAlive) p.destroy() // loader/preload may fail before writing its pid file
                 if (!waitExit(p, 5000) && proot != null) signalOwned(proot, OsConstants.SIGQUIT)
-                waitExit(p, 2000)
+                // Tawcroot needs no extra QUIT grace; retain PRoot and Direct's existing wait.
+                if (!tawc) waitExit(p, 2000)
             } finally {
                 try {
                     if (p.isAlive) p.destroyForcibly()

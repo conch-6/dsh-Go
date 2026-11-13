@@ -93,7 +93,7 @@ class ApkInstaller(private val context: Context) {
         val sessionId = try {
             installer.createSession(params)
         } catch (e: Exception) {
-            return onResult(result("failure", e.message))
+            return onResult(result(failureStatus(e), e.message))
         }
         try {
             installer.openSession(sessionId).use { session ->
@@ -118,8 +118,7 @@ class ApkInstaller(private val context: Context) {
             }
         } catch (e: Exception) {
             runCatching { installer.abandonSession(sessionId) }
-            val storage = e is java.io.IOException && e.message?.contains("ENOSPC") == true
-            onResult(result(if (storage) "storage" else "failure", e.message))
+            onResult(result(failureStatus(e), e.message))
         }
     }
 
@@ -215,6 +214,14 @@ class ApkInstaller(private val context: Context) {
             }
 
         private fun result(status: String, message: String?) = mapOf("status" to status, "message" to message)
+
+        internal fun failureStatus(error: Exception): String {
+            if (error !is java.io.IOException) return "failure"
+            val message = error.message.orEmpty()
+            // AOSP can reject the default INTERNAL_ONLY session before it has a status callback.
+            return if (message.contains("ENOSPC") || message == "Requested internal only, but not enough space")
+                "storage" else "failure"
+        }
 
         /**
          * PackageInstaller status → the Dart `InstallStatus` name. A signature mismatch

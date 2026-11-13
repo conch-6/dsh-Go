@@ -76,7 +76,13 @@ def find_aapt2() -> str | None:
     if props.is_file():
         match = re.search(r"^sdk\.dir=(.+)$", props.read_text(encoding="utf-8"), re.MULTILINE)
         if match:
-            sdks.append(match.group(1).strip())
+            # local.properties uses Java escapes; environment paths do not.
+            sdks.append(re.sub(
+                r"(?:\\u[0-9a-fA-F]{4})+|\\([\\: =#!])",
+                lambda escaped: escaped[1] if escaped[1] is not None else
+                    bytes.fromhex(escaped[0].replace(r"\u", "")).decode("utf-16-be", "surrogatepass"),
+                match.group(1).strip(),
+            ))
     for sdk in filter(None, sdks):
         tools = sorted(
             pathlib.Path(sdk).glob("build-tools/*/aapt2" + (".exe" if sys.platform == "win32" else "")),

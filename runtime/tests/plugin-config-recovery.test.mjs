@@ -83,7 +83,7 @@ function fixture(t, recovery = 'complete') {
     await api.handle({ method, input, headers: { 'content-type': 'application/json' } }, response, `${base}/${id}`);
     return response;
   }
-  return { request, held, release, queued, path: editor.documentPath,
+  return { request, held, release, queued, editor, path: editor.documentPath,
     bytes: () => readFileSync(editor.documentPath),
     edit: (id, revision, field, value) => request(id, 'POST', {
       revision, ops: [{ op: 'set', path: [field], value }],
@@ -119,6 +119,42 @@ test('an isolated failed edit with complete recovery still reports apply-failed'
   assert.equal(result.status, 409);
   assert.equal(result.body.error.code, 'apply-failed');
   assert.deepEqual(f.bytes(), bytes);
+});
+
+for (const code of ['ENOSPC', 'EFBIG']) {
+  test(`a pre-change ${code} is unavailable and can retry after storage recovers`, async (t) => {
+    const f = fixture(t), before = await f.request('subject'), bytes = f.bytes();
+    const edit = f.editor.edit;
+    // The real editor writes its profile lock before entering change(). These
+    // filesystem failures reach the handler without accepting a new config.
+    f.editor.edit = async () => { throw Object.assign(new Error('private storage failure'), { code }); };
+    const failed = await f.edit('subject', before.body.revision, 'count', 1);
+    assert.equal(failed.status, 503);
+    assert.equal(failed.body.error.code, 'host-unavailable');
+    assert.equal(JSON.stringify(failed).includes('private storage failure'), false);
+    assert.deepEqual(f.bytes(), bytes);
+    const after = await f.request('subject');
+    assert.deepEqual(after.body.value, before.body.value);
+    assert.equal(after.body.revision, before.body.revision);
+
+    f.editor.edit = edit;
+    const retry = await f.edit('subject', before.body.revision, 'count', 1);
+    assert.equal(retry.status, 200);
+    assert.equal(retry.body.value.count, 1);
+  });
+}
+
+test('storage failure after change still verifies incomplete recovery', async (t) => {
+  const f = fixture(t, 'file'), before = await f.request('subject'), bytes = f.bytes();
+  const edit = f.editor.edit;
+  f.editor.edit = async function (...args) {
+    try { return await edit.apply(this, args); }
+    catch (error) { error.code = 'ENOSPC'; throw error; }
+  };
+  const result = await f.edit('subject', before.body.revision, 'fail', true);
+  assert.equal(result.status, 500);
+  assert.equal(result.body.error.code, 'recovery-failed');
+  assert.equal(f.bytes().equals(bytes), false);
 });
 
 for (const recovery of ['file', 'entry']) {

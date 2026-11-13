@@ -7,8 +7,8 @@ import '../../runtime/runtime_state.dart';
 import '../common/brief_notice.dart';
 import 'settings_widgets.dart';
 
-/// Direct launch, on by default; a change applies only after a deliberate
-/// engine stop/start.
+/// Direct launch and tawcroot launch, both off by default and at most one on; a
+/// change applies only after a deliberate engine stop/start.
 class DirectEngineSettings extends ConsumerStatefulWidget {
   const DirectEngineSettings({super.key});
 
@@ -32,7 +32,27 @@ class _DirectEngineSettingsState extends ConsumerState<DirectEngineSettings> {
     // user turns it on again (a new try).
     final fallback = status.directEngineFallbackReason;
     final directFailed = fallback == 'directFailed';
-    final runtimeNeedsCompatible = fallback != null && fallback != 'safeRecovery' && !directFailed;
+    // A tawcroot start's fallback is the tawcroot switch's to explain.
+    final runtimeNeedsCompatible =
+        !status.tawcEngineEnabled &&
+        fallback != null &&
+        fallback != 'safeRecovery' &&
+        !directFailed &&
+        !fallback.startsWith('tawcroot');
+    final tawcFailed = fallback == 'tawcrootFailed';
+    final tawcEnabled =
+        runtime.loaded && stopped && !_saving && (status.tawcEngineAvailable || status.tawcEngineEnabled);
+    final tawcHint = !status.tawcEngineAvailable
+        ? l10n.phoneTawcUnavailable
+        : tawcFailed && !status.tawcEngineEnabled
+        ? l10n.phoneTawcFailedHint
+        : status.tawcEngineEnabled && fallback != null && fallback != 'safeRecovery'
+        ? l10n.phoneDirectCompatibleHint
+        : !stopped
+        ? l10n.phoneDirectStopFirst
+        : status.inSafeMode
+        ? l10n.phoneDirectSafeHint
+        : l10n.phoneTawcHint;
     final hint = !status.directEngineAvailable
         ? l10n.phoneDirectNeedsRuntime
         : directFailed && !status.directEngineEnabled
@@ -62,8 +82,25 @@ class _DirectEngineSettingsState extends ConsumerState<DirectEngineSettings> {
           value: status.directEngineEnabled,
           onChanged: enabled ? _change : null,
         ),
+        SettingsSwitchTile(
+          title: l10n.phoneTawcEngine,
+          subtitle: tawcHint,
+          value: status.tawcEngineEnabled,
+          onChanged: tawcEnabled ? _changeTawc : null,
+        ),
       ],
     );
+  }
+
+  Future<void> _changeTawc(bool value) async {
+    setState(() => _saving = true);
+    try {
+      await ref.read(runtimeBridgeProvider).setTawcEngine(value);
+    } catch (_) {
+      if (mounted) showBriefNotice(context, context.l10n.phoneDirectChangeFailed);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Future<void> _change(bool value) async {

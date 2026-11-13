@@ -37,9 +37,11 @@ class PhoneAndroidShellTest {
             capturedTimeout = timeoutMs
             capturedLive = stillWanted
             beforeConfirm()
-            val allowed = confirm(backend, uid)
+            val decision = confirm(backend, uid)
             afterConfirm()
-            if (!allowed || !stillWanted()) PhoneAndroidShell.failure("cancelled")
+            val error = PhoneAndroidShell.confirmationError(decision)
+            if (!stillWanted()) PhoneAndroidShell.failure("cancelled")
+            else if (error != null) PhoneAndroidShell.failure(error)
             else { dispatches++; result }
         }
         val env = object : PhoneEnv {
@@ -193,6 +195,31 @@ class PhoneAndroidShellTest {
             assertEquals("unsupported", (Json.parse(out.text) as Map<*, *>)["errorCode"])
             assertEquals(0, f.executorCalls)
         }
+    }
+
+    @Test fun unavailableConfirmationIsNotReportedAsAUserDenial() {
+        for (available in listOf(false, true)) Fixture().use { f ->
+            f.gateAvailable = available
+            f.decision = Decision.UNAVAILABLE
+            val out = f.call()
+            assertTrue(out.isError)
+            assertEquals("confirmationUnavailable", (Json.parse(out.text) as Map<*, *>)["errorCode"])
+            assertEquals(0, f.dispatches)
+        }
+        Fixture().use { f ->
+            f.decision = Decision.DENY
+            val out = f.call()
+            assertEquals("confirmationDenied", (Json.parse(out.text) as Map<*, *>)["errorCode"])
+            assertEquals(0, f.dispatches)
+        }
+    }
+
+    @Test fun shellStillRejectsEveryTaskWideWaiver() {
+        for (decision in listOf(Decision.ALLOW_APP_FOR_TASK, Decision.ALLOW_ALL_FOR_TASK, Decision.ALLOW_VISUAL_FOR_TASK)) {
+            assertEquals("confirmationDenied", PhoneAndroidShell.confirmationError(decision))
+        }
+        assertNull(PhoneAndroidShell.confirmationError(Decision.ALLOW_ONCE))
+        assertEquals("cancelled", PhoneAndroidShell.confirmationError(Decision.STOP))
     }
 
     @Test fun backendAndActualUidMustBeRecognizedBeforeAsking() {

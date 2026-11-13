@@ -190,6 +190,13 @@ packages:
       relative: true
     source: path
     version: "0.1.0"
+  dsh_tavern:
+    dependency: "direct main"
+    description:
+      path: "../packages/dsh_tavern"
+      relative: true
+    source: path
+    version: "0.1.0"
   equatable:
     dependency: transitive
     description:
@@ -418,6 +425,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.6.3"
+  glob:
+    dependency: transitive
+    description:
+      name: glob
+      sha256: "218aeb56050c714f62a3182775320dfa04602b55074873e24e31bbd39bda96fb"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.0"
   gpt_markdown:
     dependency: "direct main"
     description:
@@ -666,6 +681,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.5.0"
+  native_toolchain_c:
+    dependency: transitive
+    description:
+      name: native_toolchain_c
+      sha256: "90eaad8059ebc2004a63810a4696ea9acdb02473e47ed3b6b3bafb100ac77e31"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.19.5"
   nm:
     dependency: transitive
     description:
@@ -802,6 +825,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.5.4"
+  process:
+    dependency: transitive
+    description:
+      name: process
+      sha256: "4242ba3508d37e01808bdf71ad1d5bb93a8d671bf2e7450e6b1b353fb0808891"
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.0.6"
   pub_semver:
     dependency: transitive
     description:
@@ -935,6 +966,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.10.2"
+  sqlite3:
+    dependency: transitive
+    description:
+      name: sqlite3
+      sha256: "8765980411f9b6733534efe9d014fad0750fa649590598772c04692deb34886b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.9.1"
   stack_trace:
     dependency: transitive
     description:

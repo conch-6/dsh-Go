@@ -22,7 +22,13 @@ Map<String, Object?> parallelStatus({int configured = 1, int effective = 1, int 
     'background': {
       ...(base['background'] as Map),
       'androidOk': true,
-      'parallelism': {'v': 1, 'configuredLimit': configured, 'effectiveLimit': effective, 'heldSlots': held, 'reason': reason},
+      'parallelism': {
+        'v': 1,
+        'configuredLimit': configured,
+        'effectiveLimit': effective,
+        'heldSlots': held,
+        'reason': reason,
+      },
     },
   };
 }
@@ -31,6 +37,7 @@ void main() {
   testWidgets('modern read failure preserves trusted task facts but hides capacity writes', (tester) async {
     final native = FakePhoneNative(status: {...parallelStatus(), 'statusRevision': 1});
     await pumpPhone(tester, const PhoneDndPage(), native: native);
+    await openPhoneFold(tester, 'phone-dnd-options');
     final selector = find.byKey(const ValueKey('phone-background-limit-2'));
     await tester.scrollUntilVisible(selector, 200, scrollable: find.byType(Scrollable).first);
     final oldTap = tester.widget<ListPageRow>(selector).onTap!;
@@ -44,14 +51,18 @@ void main() {
     expect(phoneOf(tester).status.statusRevision, 1);
     expect(phoneOf(tester).status.tasks.single.id, 8);
     expect(phoneOf(tester).status.tasks.single.backgroundSlot, isTrue);
-    expect(phoneOf(tester).status.background.parallelism!.configuredLimit, 1,
-        reason: 'This is retained last-known data, not a successful fresh read.');
+    expect(
+      phoneOf(tester).status.background.parallelism!.configuredLimit,
+      1,
+      reason: 'This is retained last-known data, not a successful fresh read.',
+    );
     expect(selector, findsNothing);
     oldTap();
     await settlePhone(tester);
     expect(native.methods, ['setBackgroundParallelLimit', 'status']);
     native.push({...parallelStatus(configured: 2), 'statusRevision': 2});
     await settlePhone(tester);
+    await openPhoneFold(tester, 'phone-dnd-options');
     await tester.scrollUntilVisible(selector, 200, scrollable: find.byType(Scrollable).first);
     expect(phoneOf(tester).status.ready, isTrue);
     expect(tester.widget<ListPageRow>(selector).onTap, isNull);
@@ -61,6 +72,7 @@ void main() {
   testWidgets('a newer push wins over the setters older read without changing its receipt', (tester) async {
     final native = FakePhoneNative(status: {...parallelStatus(), 'statusRevision': 1});
     await pumpPhone(tester, const PhoneDndPage(), native: native);
+    await openPhoneFold(tester, 'phone-dnd-options');
     expect(native.methods, ['status', 'getPolicies', 'actionLog']);
     native.calls.clear();
     final read = Completer<Map<String, Object?>>();
@@ -89,7 +101,9 @@ void main() {
     expect(status.background.parallelism!.configuredLimit, 1);
     expect(status.parallelLimit, 1);
     expect(status.tasks.single.backgroundSlot, isTrue);
-    final unavailable = PhoneStatus.fromMap(parallelStatus(configured: 3, effective: 0, held: 3, reason: 'connectionRequired'));
+    final unavailable = PhoneStatus.fromMap(
+      parallelStatus(configured: 3, effective: 0, held: 3, reason: 'connectionRequired'),
+    );
     expect(unavailable.background.parallelism!.effectiveLimit, 0);
     expect(PhoneTaskStatus.fromMap({}).backgroundSlot, isNull);
     expect(PhoneTaskStatus.fromMap({'backgroundSlot': 1}).backgroundSlot, isFalse);
@@ -99,29 +113,57 @@ void main() {
   test('unknown or contradictory native capacity never fabricates available slots', () {
     final valid = <String, Object?>{'v': 1, 'configuredLimit': 3, 'effectiveLimit': 2, 'heldSlots': 1, 'reason': null};
     for (final bad in <Object?>[
-      null, false, '1', {},
-      {...valid, 'v': 1.0}, {...valid, 'v': 2},
-      {...valid, 'configuredLimit': '3'}, {...valid, 'configuredLimit': 2.0},
-      {...valid, 'configuredLimit': 0}, {...valid, 'configuredLimit': 4},
+      null,
+      false,
+      '1',
+      {},
+      {...valid, 'v': 1.0},
+      {...valid, 'v': 2},
+      {...valid, 'configuredLimit': '3'},
+      {...valid, 'configuredLimit': 2.0},
+      {...valid, 'configuredLimit': 0},
+      {...valid, 'configuredLimit': 4},
       {...valid, 'configuredLimit': 1},
-      {...valid, 'effectiveLimit': 1.0}, {...valid, 'effectiveLimit': -1}, {...valid, 'effectiveLimit': 4},
-      {...valid, 'effectiveLimit': 0}, {...valid, 'reason': 'invented'}, {...valid, 'reason': true},
-      {...valid, 'heldSlots': 0.0}, {...valid, 'heldSlots': -1}, {...valid, 'heldSlots': 4},
+      {...valid, 'effectiveLimit': 1.0},
+      {...valid, 'effectiveLimit': -1},
+      {...valid, 'effectiveLimit': 4},
+      {...valid, 'effectiveLimit': 0},
+      {...valid, 'reason': 'invented'},
+      {...valid, 'reason': true},
+      {...valid, 'heldSlots': 0.0},
+      {...valid, 'heldSlots': -1},
+      {...valid, 'heldSlots': 4},
     ]) {
       expect(BackgroundParallelism.parse(bad), isNull, reason: '$bad');
     }
-    for (final reason in ['off', 'unsupported', 'connectionRequired', 'busy', 'resourceRecovery', 'peerUnsupported', 'transportSerial']) {
+    for (final reason in [
+      'off',
+      'unsupported',
+      'connectionRequired',
+      'busy',
+      'resourceRecovery',
+      'peerUnsupported',
+      'transportSerial',
+    ]) {
       expect(BackgroundParallelism.parse({...valid, 'effectiveLimit': 0, 'reason': reason}), isNotNull);
     }
   });
 
   testWidgets('explicit capacity selection saves and refreshes without connecting or operating a task', (tester) async {
-    final h = await pumpPhone(tester, const PhoneDndPage(), native: FakePhoneNative(status: parallelStatus(effective: 0, reason: 'off')));
+    final h = await pumpPhone(
+      tester,
+      const PhoneDndPage(),
+      native: FakePhoneNative(status: parallelStatus(effective: 0, reason: 'off')),
+    );
+    await openPhoneFold(tester, 'phone-dnd-options');
     expect(h.native!.methods, ['status', 'getPolicies', 'actionLog']);
     h.native!.calls.clear();
     expect(h.native!.callsOf('setBackgroundParallelLimit'), isEmpty);
-    await tester.scrollUntilVisible(find.byKey(const ValueKey('phone-background-limit-3')), 200,
-        scrollable: find.byType(Scrollable).first);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('phone-background-limit-3')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.byKey(const ValueKey('phone-background-limit-3')));
     await settlePhone(tester);
     expect(h.native!.callsOf('setBackgroundParallelLimit').single.arguments, {'limit': 3});
@@ -136,10 +178,14 @@ void main() {
     final native = FakePhoneNative(status: parallelStatus())
       ..results['setBackgroundParallelLimit'] = {'ok': false, 'reason': 'Capacity save refused'};
     await pumpPhone(tester, const PhoneDndPage(), native: native);
+    await openPhoneFold(tester, 'phone-dnd-options');
     expect(native.methods, ['status', 'getPolicies', 'actionLog']);
     native.calls.clear();
-    await tester.scrollUntilVisible(find.byKey(const ValueKey('phone-background-limit-2')), 200,
-        scrollable: find.byType(Scrollable).first);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('phone-background-limit-2')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.byKey(const ValueKey('phone-background-limit-2')));
     await settlePhone(tester);
     expect(native.callsOf('setBackgroundParallelLimit'), hasLength(1));
@@ -151,6 +197,7 @@ void main() {
   testWidgets('old native or invalid capacity hides selectors and sends no setter', (tester) async {
     final native = FakePhoneNative(status: phoneStatus(a11y: true));
     await pumpPhone(tester, const PhoneDndPage(), native: native);
+    await openPhoneFold(tester, 'phone-dnd-options');
     for (final limit in [1, 2, 3]) {
       expect(find.byKey(ValueKey('phone-background-limit-$limit')), findsNothing);
     }
@@ -163,21 +210,32 @@ void main() {
   });
 
   testWidgets('lower configured limit keeps native occupied count and task slot visible', (tester) async {
-    final h = await pumpPhone(tester, const PhoneDndPage(), native: FakePhoneNative(status: parallelStatus(configured: 3, effective: 3, held: 3)));
+    final h = await pumpPhone(
+      tester,
+      const PhoneDndPage(),
+      native: FakePhoneNative(status: parallelStatus(configured: 3, effective: 3, held: 3)),
+    );
+    await openPhoneFold(tester, 'phone-dnd-options');
     expect(h.native!.methods, ['status', 'getPolicies', 'actionLog']);
     h.native!.calls.clear();
-    await tester.scrollUntilVisible(find.byKey(const ValueKey('phone-background-limit-1')), 200,
-        scrollable: find.byType(Scrollable).first);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('phone-background-limit-1')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.byKey(const ValueKey('phone-background-limit-1')));
     await settlePhone(tester);
     final capacity = phoneOf(tester).status.background.parallelism!;
-    expect(capacity.configuredLimit, 1); expect(capacity.effectiveLimit, 1); expect(capacity.heldSlots, 3);
+    expect(capacity.configuredLimit, 1);
+    expect(capacity.effectiveLimit, 1);
+    expect(capacity.heldSlots, 3);
     expect(phoneOf(tester).status.tasks.single.backgroundSlot, isTrue);
     expect(h.native!.methods, ['setBackgroundParallelLimit', 'status']);
   });
   testWidgets('capacity stays busy through the write ACK and its fresh status read', (tester) async {
     final native = FakePhoneNative(status: parallelStatus());
     await pumpPhone(tester, const PhoneDndPage(), native: native);
+    await openPhoneFold(tester, 'phone-dnd-options');
     expect(native.methods, ['status', 'getPolicies', 'actionLog']);
     native.calls.clear();
     final written = Completer<Map<String, Object?>>();
@@ -185,8 +243,11 @@ void main() {
     native.onSetBackgroundParallelLimit = (_) => written.future;
     native.onStatus = () => read.future;
     try {
-      await tester.scrollUntilVisible(find.byKey(const ValueKey('phone-background-limit-3')), 200,
-          scrollable: find.byType(Scrollable).first);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('phone-background-limit-3')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.byKey(const ValueKey('phone-background-limit-3')));
       await tester.pump();
       expect(native.methods, ['setBackgroundParallelLimit']);
@@ -214,6 +275,7 @@ void main() {
   testWidgets('a current limit is not written again', (tester) async {
     final native = FakePhoneNative(status: parallelStatus());
     await pumpPhone(tester, const PhoneDndPage(), native: native);
+    await openPhoneFold(tester, 'phone-dnd-options');
     expect(native.methods, ['status', 'getPolicies', 'actionLog']);
     native.calls.clear();
     expect(tester.widget<ListPageRow>(find.byKey(const ValueKey('phone-background-limit-1'))).onTap, isNull);
@@ -225,6 +287,7 @@ void main() {
       final native = FakePhoneNative(status: parallelStatus())
         ..results['setBackgroundParallelLimit'] = {'ok': false, 'reason': 'Capacity save refused'};
       await pumpPhone(tester, const PhoneDndPage(), native: native);
+      await openPhoneFold(tester, 'phone-dnd-options');
       expect(native.methods, ['status', 'getPolicies', 'actionLog']);
       native.calls.clear();
       native.onStatus = () async {
@@ -237,8 +300,11 @@ void main() {
         }
         return null;
       };
-      await tester.scrollUntilVisible(find.byKey(const ValueKey('phone-background-limit-2')), 200,
-          scrollable: find.byType(Scrollable).first);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('phone-background-limit-2')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.byKey(const ValueKey('phone-background-limit-2')));
       await settlePhone(tester);
       expect(phoneOf(tester).status.background.parallelism, isNull);
@@ -258,6 +324,7 @@ void main() {
   testWidgets('successful write keeps its result when the fresh read is unavailable', (tester) async {
     final native = FakePhoneNative(status: parallelStatus());
     await pumpPhone(tester, const PhoneDndPage(), native: native);
+    await openPhoneFold(tester, 'phone-dnd-options');
     expect(native.methods, ['status', 'getPolicies', 'actionLog']);
     native.calls.clear();
     native.onStatus = () async => null;
@@ -272,6 +339,7 @@ void main() {
   testWidgets('a disposed provider does not start a readback after the write reply', (tester) async {
     final native = FakePhoneNative(status: parallelStatus());
     await pumpPhone(tester, const PhoneDndPage(), native: native);
+    await openPhoneFold(tester, 'phone-dnd-options');
     expect(native.methods, ['status', 'getPolicies', 'actionLog']);
     native.calls.clear();
     final write = Completer<Map<String, Object?>>();

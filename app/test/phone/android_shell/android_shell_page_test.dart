@@ -12,7 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../shell/golden_harness.dart';
-import '../harness.dart' show leaveAndResume, pumpPhone, settlePhone;
+import '../harness.dart' show leaveAndResume, openPhoneFold, pumpPhone, settlePhone;
 import '../support.dart' show FakePhoneNative, phoneStatus;
 import 'support.dart';
 
@@ -51,7 +51,9 @@ Future<ShellNative> _pump(WidgetTester tester, {ShellNative? native, bool phoneE
 
 Future<void> _tap(WidgetTester tester, String key) async {
   final finder = find.byKey(ValueKey(key));
-  await tester.ensureVisible(finder);
+  await Scrollable.ensureVisible(tester.element(finder), alignment: 0.5);
+  await tester.pumpAndSettle();
+  expect(finder.hitTestable(), findsOneWidget);
   await tester.tap(finder);
   await tester.pumpAndSettle();
 }
@@ -60,6 +62,69 @@ Switch _switch(WidgetTester tester) => tester.widget(find.byKey(const ValueKey('
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('default page keeps technical details collapsed on a phone screen', (tester) async {
+    final native = await _pump(
+      tester,
+      native: ShellNative(
+        status: shellStatus(enabled: true, ready: true, shizukuGranted: true, uid: 2000, reasonCode: null),
+      ),
+    );
+    tester.view.physicalSize = const Size(390 * 2, 844 * 2);
+    await tester.pumpAndSettle();
+    expect(find.text(appL10n.androidShellReady), findsOneWidget);
+    expect(find.text(appL10n.androidShellSubtitle), findsNothing);
+    expect(find.text(appL10n.androidShellEnableHint), findsNothing);
+    expect(find.text(appL10n.androidShellShizukuHint), findsNothing);
+    expect(find.text(appL10n.androidShellAdbHint), findsNothing);
+    expect(find.byKey(const ValueKey('android-shell-uid')), findsNothing);
+    expect(find.text(appL10n.androidShellLimits(30, 65536)), findsNothing);
+    expect(find.byKey(const ValueKey('android-shell-authorize')), findsNothing);
+    expect(find.byKey(const ValueKey('android-shell-connect-shizuku')), findsNothing);
+    expect(find.byKey(const ValueKey('android-shell-stop')).hitTestable(), findsOneWidget);
+    await openPhoneFold(tester, 'android-shell-details');
+    expect(find.text('2000'), findsOneWidget);
+    expect(find.text(appL10n.androidShellLimits(30, 65536)), findsOneWidget);
+    expect(find.text(appL10n.androidShellShizukuHint), findsOneWidget);
+    expect(find.text(appL10n.androidShellAdbHint), findsNothing);
+    expect(native.calls.map((call) => call.method), ['androidShellStatus']);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('only the needed authorization or connection step is shown', (tester) async {
+    final native = await _pump(tester);
+    expect(find.byKey(const ValueKey('android-shell-authorize')), findsOneWidget);
+    expect(find.byKey(const ValueKey('android-shell-connect-shizuku')), findsNothing);
+    native.status = shellStatus(enabled: true, shizukuGranted: true, reasonCode: 'notConnected');
+    await tester.tap(find.text(appL10n.androidShellRefresh));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('android-shell-authorize')), findsNothing);
+    expect(find.byKey(const ValueKey('android-shell-connect-shizuku')), findsOneWidget);
+    native.status = shellStatus(enabled: true, backend: 'adb', adbPaired: true, reasonCode: 'notConnected');
+    await tester.tap(find.text(appL10n.androidShellRefresh));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('android-shell-pair')), findsNothing);
+    expect(find.byKey(const ValueKey('android-shell-connect')), findsOneWidget);
+    await openPhoneFold(tester, 'android-shell-details');
+    expect(find.byKey(const ValueKey('android-shell-pair')), findsOneWidget);
+  });
+
+  testWidgets('stop failure and unknown outcome remain visible with recovery actions', (tester) async {
+    final native = ShellNative(status: shellStatus(enabled: false, reasonCode: 'transportLost'))
+      ..replies['androidShellStop'] = false;
+    await _pump(tester, native: native);
+    expect(find.text(appL10n.androidShellErrorTransportLost), findsOneWidget);
+    await _tap(tester, 'android-shell-stop');
+    expect(find.text(appL10n.androidShellErrorStopFailed), findsOneWidget);
+    expect(find.byKey(const ValueKey('android-shell-operation-error')), findsOneWidget);
+    expect(tester.widget<ListPageRow>(find.byKey(const ValueKey('android-shell-stop'))).onTap, isNotNull);
+    expect(find.text(appL10n.androidShellRefresh), findsOneWidget);
+    expect(find.byKey(const ValueKey('android-shell-uid')), findsNothing);
+    native.replies['androidShellStop'] = true;
+    await _tap(tester, 'android-shell-stop');
+    expect(native.callsOf('androidShellStop'), hasLength(2));
+    expect(find.byKey(const ValueKey('android-shell-operation-error')), findsNothing);
+  });
 
   testWidgets('opening, refreshing and resuming only read standalone status', (tester) async {
     final native = await _pump(tester);
@@ -96,6 +161,9 @@ void main() {
       final notice = tester.widget<RiskNoticeSheet>(find.byType(RiskNoticeSheet)).notice;
       expect(notice.id, 'phone.android-shell.enable');
       expect(notice.level, RiskLevel.high);
+      expect(notice.title, appL10n.androidShellRiskTitle);
+      expect(notice.body, appL10n.androidShellRiskBody);
+      expect(notice.action, appL10n.androidShellRiskAction);
       expect(find.byKey(const ValueKey('risk-silence')), findsNothing);
       expect(native.callsOf('configureAndroidShell'), hasLength(attempt == 0 ? 0 : 2));
       await _tap(tester, 'risk-confirm');
@@ -120,7 +188,7 @@ void main() {
   testWidgets('Shizuku connect is explicit and does not use display methods', (tester) async {
     final native = await _pump(
       tester,
-      native: ShellNative(status: shellStatus(enabled: true, reasonCode: 'notConnected')),
+      native: ShellNative(status: shellStatus(enabled: true, shizukuGranted: true, reasonCode: 'notConnected')),
     );
     expect(native.calls.map((call) => call.method), ['androidShellStatus']);
     await _tap(tester, 'android-shell-connect-shizuku');
@@ -154,6 +222,7 @@ void main() {
     await tester.enterText(portField, '42123');
     await _tap(tester, 'android-shell-adb-submit');
     expect(native.callsOf('androidShellConnect').single.arguments, {'port': 42123});
+    await openPhoneFold(tester, 'android-shell-details');
     await _tap(tester, 'android-shell-pair');
     expect(tester.widget<TextField>(codeField).controller!.text, isEmpty);
     expect(tester.widget<TextField>(find.byKey(const ValueKey('android-shell-pair-port'))).controller!.text, isEmpty);
@@ -212,7 +281,7 @@ void main() {
   testWidgets('stop remains usable during connect and ignores its late reply', (tester) async {
     final pending = Completer<Object?>();
     final native = ShellNative(
-      status: shellStatus(enabled: true, backend: 'adb', reasonCode: 'notConnected'),
+      status: shellStatus(enabled: true, backend: 'adb', adbPaired: true, reasonCode: 'notConnected'),
     );
     await _pump(tester, native: native);
     native.onCall = (call) {
@@ -243,6 +312,8 @@ void main() {
     expect(find.byKey(const ValueKey('android-shell-authorize')), findsOneWidget);
     expect(_switch(tester).value, isFalse);
     expect(find.text(appL10n.androidShellErrorIdentityChanged), findsOneWidget);
+    expect(find.textContaining('identityChanged'), findsNothing);
+    await openPhoneFold(tester, 'android-shell-details');
     expect(find.textContaining('identityChanged'), findsOneWidget);
     expect(find.textContaining('654321'), findsNothing);
   });
@@ -253,7 +324,7 @@ void main() {
       phoneEnabled: false,
       native: ShellNative(status: shellStatus(enabled: true, ready: true, uid: 2000, reasonCode: null)),
     );
-    expect(find.text('2000'), findsOneWidget);
+    expect(find.text('2000'), findsNothing);
     expect(_switch(tester).onChanged, isNotNull);
     await _tap(tester, 'android-shell-enable');
     expect(native.callsOf('configureAndroidShell').single.arguments, {'enabled': false, 'backend': 'shizuku'});
@@ -268,6 +339,7 @@ void main() {
       native: FakePhoneNative(status: phoneStatus(enabled: false)),
       size: const Size(390, 844),
     );
+    await openPhoneFold(tester, 'phone-more-options');
     await tester.scrollUntilVisible(find.byKey(const ValueKey('android-shell-entry')), 400);
     await _tap(tester, 'android-shell-entry');
     expect(find.byType(AndroidShellPage), findsOneWidget);

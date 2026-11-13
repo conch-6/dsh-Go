@@ -21,6 +21,17 @@ class CrashClassifierTest {
         }
     }
 
+    @Test fun repeatedTokenQualifiersAtTheLogLineLimit() {
+        val count = "min".repeat(664) + "token=xy"
+        assertEquals(2000, count.length)
+        assertEquals(count, CrashClassifier.redact(count))
+        assertEquals(count, LogRedactor.redact(count))
+        val credential = "min".repeat(660) + "access_token=xy"
+        val expected = credential.substringBefore('=') + "=•••"
+        assertEquals(expected, CrashClassifier.redact(credential))
+        assertEquals(expected, LogRedactor.redact(credential))
+    }
+
     private val fatal = listOf("dsh: startup failed: required row missing")
 
     @Test fun classifiesAllFiveFailureKinds() {

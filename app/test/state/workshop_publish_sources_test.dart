@@ -11,10 +11,12 @@ import 'package:dsh_app/state/workshop_preferences.dart';
 import 'package:dsh_app/state/workshop_publication.dart';
 import 'package:dsh_app/state/workshop_publish_sources.dart';
 import 'package:dsh_app/workshop/workshop_models.dart';
+import 'package:dsh_app/workshop/workshop_preview.dart';
 import 'package:dsh_app/workshop/workshop_repository.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../workshop/support.dart' show workshopPng;
 import 'workshop_state_support.dart' show StateClient, StatePackages, stateSettled, stateSignal;
 
 const _source = WorkshopPublishSource(kind: 'pet', localId: 'user-cat', name: 'Cat');
@@ -48,6 +50,7 @@ class _Repository extends WorkshopRepository {
     downloadDirectory: Directory('unused-source-downloads'), appVersion: '1.0.0');
   bool fail = false;
   String? selected, name, persona;
+  WorkshopPreviewInput? preview;
   Future<WorkshopPreparedUpload> _write(File destination, WorkshopPublication publication) async {
     await destination.writeAsBytes([1, 2, 3, 4]);
     if (fail) throw const WorkshopException('workshop_no_space');
@@ -63,10 +66,11 @@ class _Repository extends WorkshopRepository {
   }
   @override
   Future<WorkshopPreparedUpload> prepareCompanion(CompanionPackStore store, File destination,
-    WorkshopPublication publication, {String? name, String? persona}) async {
+    WorkshopPublication publication, {String? name, String? persona, WorkshopPreviewInput? preview}) async {
     selected = 'companion';
     this.name = name;
     this.persona = persona;
+    this.preview = preview;
     return _write(destination, publication);
   }
 }
@@ -226,8 +230,56 @@ void main() {
       expect(repository.selected, 'companion');
       expect(repository.name, isNull);
       expect(repository.persona, isNull);
+      expect(repository.preview, isNull);
       await draft.dispose();
     } finally { container.dispose(); await root.delete(recursive: true); }
+  });
+
+  test('explicit companion PNG and mode reach the same preparation call', () async {
+    final root = await Directory.systemTemp.createTemp('workshop-preview-source-test-');
+    final repository = _Repository();
+    final container = ProviderContainer(overrides: [
+      workshopRepositoryProvider.overrideWith((ref) async => repository),
+      workshopDirectoryProvider.overrideWithValue(() async => root),
+      petLibraryProvider.overrideWithValue(_Pets()),
+      companionFloatStoreProvider.overrideWithValue(() async => _Companion()),
+    ]);
+    try {
+      final preview = WorkshopPreviewInput.companionPng(workshopPng(2, 1));
+      final source = const WorkshopPublishSource(kind: 'companion', localId: 'companion').withPreview(preview);
+      final draft = await container.read(workshopPrepareDraftProvider)(source,
+        _input().publication('companion', previewSource: source.previewSource));
+      expect(repository.preview, same(preview));
+      expect(draft.upload.metadata.previewSource, 'companion-preview');
+      expect(repository.name, isNull);
+      expect(repository.persona, isNull);
+      await draft.dispose();
+    } finally { container.dispose(); await root.delete(recursive: true); }
+  });
+
+  test('source mode mismatch is rejected before owning a draft directory', () async {
+    var directoryReads = 0;
+    final repository = _Repository();
+    final container = ProviderContainer(overrides: [
+      workshopRepositoryProvider.overrideWith((ref) async => repository),
+      workshopDirectoryProvider.overrideWithValue(() async {
+        directoryReads++;
+        throw StateError('A mismatched source must not request storage');
+      }),
+      petLibraryProvider.overrideWithValue(_Pets()),
+      companionFloatStoreProvider.overrideWithValue(() async => _Companion()),
+    ]);
+    try {
+      final prepare = container.read(workshopPrepareDraftProvider);
+      await expectLater(prepare(_source.withPreview(const WorkshopPreviewInput.petIdle()), _input().publication('pet')),
+        throwsA(isA<WorkshopException>().having((error) => error.code, 'code', 'workshop_bad_metadata')));
+      final wrongKind = const WorkshopPublishSource(kind: 'companion', localId: 'companion',
+        preview: WorkshopPreviewInput.petIdle());
+      await expectLater(prepare(wrongKind, _input().publication('companion')),
+        throwsA(isA<WorkshopException>().having((error) => error.code, 'code', 'workshop_bad_metadata')));
+      expect(repository.selected, isNull);
+      expect(directoryReads, 0);
+    } finally { container.dispose(); }
   });
 
   test('failed preparation removes its own partial output and keeps the original stable error', () async {

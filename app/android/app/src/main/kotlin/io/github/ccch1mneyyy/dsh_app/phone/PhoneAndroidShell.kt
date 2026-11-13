@@ -3,7 +3,7 @@ package io.github.ccch1mneyyy.dsh_app.phone
 /** The native backend is selected only by App settings, never by model arguments. */
 fun interface PhoneShellExecutor {
     fun execute(ownerId: Long, command: String, timeoutMs: Long, stillWanted: () -> Boolean,
-                confirm: (String, Int) -> Boolean): Map<String, Any?>
+                confirm: (String, Int) -> Decision): Map<String, Any?>
 }
 
 /** A separate one-command grant: UI app/task waivers deliberately have no effect here. */
@@ -35,6 +35,14 @@ object PhoneAndroidShell {
         "truncated" to false, "errorCode" to code,
     )
 
+    /** Shell grants are one command only; unavailable UI is not a user denial. */
+    fun confirmationError(decision: Decision): String? = when (decision) {
+        Decision.ALLOW_ONCE -> null
+        Decision.UNAVAILABLE -> "confirmationUnavailable"
+        Decision.STOP -> "cancelled"
+        else -> "confirmationDenied"
+    }
+
     fun run(request: Request, owner: PhoneTasks.Owner, tasks: PhoneTasks, scope: SerialWorker.Scope,
             executor: PhoneShellExecutor?, enabled: () -> Boolean, locked: () -> Boolean,
             gate: () -> UserGate?, ui: PhoneUiText): Map<String, Any?> {
@@ -44,7 +52,8 @@ object PhoneAndroidShell {
         if (!live()) return failure("cancelled")
         if (executor == null) return failure("unsupported")
         return executor.execute(owner.taskId, request.command, request.timeoutMs, ::live) { backend, uid ->
-            if (!live() || !(backend == "adb" && uid == 2000 || backend == "shizuku" && uid in setOf(0, 2000))) false
+            if (!live()) Decision.STOP
+            else if (!(backend == "adb" && uid == 2000 || backend == "shizuku" && uid in setOf(0, 2000))) Decision.DENY
             else {
                 val prompt = ConfirmRequest(
                     ui.get("phone_shell_confirm",
@@ -55,7 +64,7 @@ object PhoneAndroidShell {
                 )
                 val decision = scope.userWait { if (live()) gate()?.confirm(prompt) ?: Decision.UNAVAILABLE else Decision.STOP }
                 if (decision == Decision.STOP) tasks.stopIfCurrent(owner, "Android Shell 已停止") // l10n:keep agent stop reason
-                decision == Decision.ALLOW_ONCE && live()
+                if (live()) decision else Decision.STOP
             }
         }
     }

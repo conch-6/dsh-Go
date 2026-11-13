@@ -54,8 +54,13 @@ void dndGolden(
 }
 
 Future<void> Function(WidgetTester) tapText(String text) => (tester) async {
-  await tester.tap(find.text(text));
-  await tester.pumpAndSettle();
+  if (text == 'Root' || text == 'Sui' || text == '自连 ADB') {
+    await openPhoneChannel(tester, text);
+  } else {
+    await tester.ensureVisible(find.text(text));
+    await tester.tap(find.text(text));
+    await tester.pumpAndSettle();
+  }
 };
 
 Map<String, Object?> firstVisit() => privilegedStatus();

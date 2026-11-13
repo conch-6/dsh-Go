@@ -197,6 +197,7 @@ void main() {
       }
       final issue = missing ? 'workshop_storage' : 'workshop_pet_bad_pack';
       final rows = await checkQueries(issue, trusted: true);
+      expect(workshopPackageValidationCodes.contains(rows.cat.issue), !missing);
       final withdrawn = WorkshopCatalog.fromJson(workshopCatalogJson(entries: [
         workshopEntryJson(metadata: workshopMeta(id: 'dog')),
       ], withdrawn: [

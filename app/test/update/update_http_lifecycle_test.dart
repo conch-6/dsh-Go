@@ -71,11 +71,16 @@ class _ObservedClient implements HttpClient {
   set userAgent(String? value) => inner.userAgent = value;
 
   @override
+  void close({bool force = false}) => inner.close(force: force);
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => throw UnsupportedError('${invocation.memberName}');
 }
 
 class _ObservedHttp extends HttpOverrides {
   final clients = <_ObservedClient>[];
+
+  List<_ObservedRequest> get requests => [for (final client in clients) ...client.requests];
 
   @override
   HttpClient createHttpClient(SecurityContext? context) {
@@ -123,7 +128,7 @@ void main() {
           final http = IoUpdateHttp();
           final pending = http.get(Uri.parse('http://127.0.0.1:${server.port}/slow'), timeout: _budget);
           await received.future;
-          final observed = overrides.clients.single.requests.single;
+          final observed = overrides.requests.single;
           expect(observed.completed, isFalse);
           // getUrl completed; only the wait for response headers remains.
           expect(deadlines.where((timer) => timer.isActive), hasLength(1));
@@ -135,7 +140,7 @@ void main() {
           final next = await http.get(Uri.parse('http://127.0.0.1:${server.port}/next'), timeout: _budget);
           expect(next.status, HttpStatus.ok);
           expect(await next.text(), 'next mirror');
-          expect(overrides.clients.single.requests, hasLength(2));
+          expect(overrides.requests, hasLength(2));
         }),
         overrides,
       );
@@ -165,7 +170,7 @@ void main() {
           expect(response.status, HttpStatus.notFound);
           expect(await response.text(), 'missing release');
           expect(deadlines.where((timer) => timer.isActive), isEmpty);
-          final observed = overrides.clients.single.requests.single;
+          final observed = overrides.requests.single;
           expect(observed.completed, isTrue);
           expect(observed.failure, isNull);
         }),

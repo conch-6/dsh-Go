@@ -41,6 +41,8 @@ const adminLogic = (() => {
         filesCursor: p.filesCursor === null || p.filesCursor === undefined ? null : index(p.filesCursor) });
     } else if (operation === 'preview') {
       path = '/submissions/' + checkedId(p.id) + '/preview' + query({ file: index(p.file) });
+    } else if (operation === 'publicPreview') {
+      path = '/submissions/' + checkedId(p.id) + '/public-preview';
     } else if (operation === 'report') {
       path = '/reports/' + checkedId(p.id);
     } else if (operation === 'audit') {
@@ -62,7 +64,8 @@ const adminLogic = (() => {
         path = '/releases/withdraw'; body = { kind: p.kind, id: p.releaseId, version: p.version, reason: p.reason };
       } else fail('console_invalid_action');
     }
-    const headers = { 'X-Admin-Key': key, Accept: operation === 'preview' ? 'image/png, image/jpeg, image/webp' : 'application/json' };
+    const headers = { 'X-Admin-Key': key, Accept: operation === 'preview' ? 'image/png, image/jpeg, image/webp'
+      : operation === 'publicPreview' ? 'image/png' : 'application/json' };
     if (body) headers['Content-Type'] = 'application/json';
     return { path: base + path, options: { method: body ? 'POST' : 'GET', headers,
       credentials: 'omit', cache: 'no-store', redirect: 'error', ...(body ? { body: JSON.stringify(body) } : {}) } };
@@ -72,6 +75,17 @@ const adminLogic = (() => {
         !object(value.owner) || typeof value.owner.username !== 'string' ||
         !object(value.metadata) || !kinds.includes(value.metadata.kind) ||
         !object(value.metadata.title) || typeof value.metadata.title.zh !== 'string' || typeof value.metadata.title.en !== 'string') fail();
+    if (value.preview !== undefined) {
+      const p = value.preview, m = value.metadata;
+      if (!object(p) || typeof p.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(p.sha256) ||
+          !Number.isSafeInteger(p.size) || p.size < 1 || p.size > 2097152 ||
+          !Number.isSafeInteger(p.width) || !Number.isSafeInteger(p.height) || p.width < 1 || p.height < 1 ||
+          p.width > 512 || p.height > 512 || p.width * p.height > 262144 ||
+          typeof m.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(m.id) ||
+          typeof m.version !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$/.test(m.version) ||
+          typeof m.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(m.sha256) ||
+          p.path !== '/market/workshop/' + m.kind + '/' + m.id + '/' + m.version + '/' + m.sha256 + '/preview/' + p.sha256 + '.png') fail();
+    }
     return value;
   }
   function report(value) {
@@ -201,6 +215,7 @@ const adminLogic = (() => {
   let pages = initialPages(), selectedSubmission = null, submissionDetail = null, submissionTicket = null;
   let submissionLoading = false, submissionError = null, selectedReport = null, reportDetail = null, reportTicket = null;
   let reportLoading = false, reportError = null, imageUrl = null, imageTarget = null, focusBeforeConfirmation = null;
+  let publicImageUrl = null, publicImageTarget = null, publicImageLoading = false, publicImageReady = false;
   const controllers = new Map(), writes = new Map();
   function initialPages() {
     return { submissions: L.emptyPage({ status: 'pending', kind: '' }),
@@ -240,6 +255,9 @@ const adminLogic = (() => {
       console_timeout: '请求已超时，请手动刷新具体对象核对状态。',
       console_preview_type: '这份响应不是允许的 PNG、JPEG 或 WebP 图片，未显示。',
       console_preview_size: '图片超过 8 MiB 预览上限，未显示。',
+      console_public_preview_type: '公开预览必须为 PNG，未显示这份响应。',
+      console_public_preview_integrity: '公开预览的字节数或摘要与本次投稿登记不符，未显示。请重新读取投稿核对。',
+      console_public_preview_dimensions: '公开预览 PNG 头的像素尺寸与本次投稿登记不符，未显示。',
       console_confirmation_stale: '确认时展示的对象已变化，请重新读取并再次确认。',
       workshop_admin_auth_required: '管理密钥未通过校验，请重新输入。',
       workshop_admin_unavailable: '服务器尚未正确配置管理密钥，请检查部署设置。',
@@ -283,6 +301,45 @@ const adminLogic = (() => {
         if (!L.previewBytes(bytes, type)) throw { code: 'console_preview_type', unknown: false };
         return new Blob([bytes], { type });
       }
+      if (operation === 'publicPreview') {
+        const descriptor = params.preview;
+        const type = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        if (type !== 'image/png') { controller.abort(); throw { code: 'console_public_preview_type', unknown: false }; }
+        const length = response.headers.get('content-length');
+        if (length !== null && (!/^(0|[1-9][0-9]*)$/.test(length) || Number(length) !== descriptor.size)) {
+          controller.abort(); throw { code: 'console_public_preview_integrity', unknown: false };
+        }
+        if (!response.body || typeof response.body.getReader !== 'function') throw { code: 'console_bad_response', unknown: false };
+        const reader = response.body.getReader(), chunks = []; let size = 0;
+        try {
+          for (;;) {
+            const chunk = await reader.read(); if (chunk.done) break;
+            size += chunk.value.length;
+            if (size > descriptor.size || size > 2097152) {
+              await reader.cancel(); throw { code: 'console_public_preview_integrity', unknown: false };
+            }
+            chunks.push(chunk.value);
+          }
+        } finally { reader.releaseLock(); }
+        if (size !== descriptor.size) throw { code: 'console_public_preview_integrity', unknown: false };
+        const bytes = new Uint8Array(size); let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+        if (!L.previewBytes(bytes, type)) throw { code: 'console_public_preview_type', unknown: false };
+        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+        const hash = Array.from(digest, value => value.toString(16).padStart(2, '0')).join('');
+        if (hash !== descriptor.sha256) throw { code: 'console_public_preview_integrity', unknown: false };
+        // Descriptor dimensions are PNG IHDR pixels. Browser natural dimensions
+        // may be orientation/density corrected; they are not this byte contract.
+        if (bytes.length < 33) throw { code: 'console_public_preview_type', unknown: false };
+        const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        if (header.getUint32(8) !== 13 || String.fromCharCode(...bytes.subarray(12, 16)) !== 'IHDR') {
+          throw { code: 'console_public_preview_type', unknown: false };
+        }
+        if (header.getUint32(16) !== descriptor.width || header.getUint32(20) !== descriptor.height) {
+          throw { code: 'console_public_preview_dimensions', unknown: false };
+        }
+        return new Blob([bytes], { type });
+      }
       try { return await response.json(); }
       catch (_) { throw { code: 'console_bad_response', unknown: isWrite }; }
     } catch (error) {
@@ -304,13 +361,21 @@ const adminLogic = (() => {
     if (imageUrl) { URL.revokeObjectURL(imageUrl); imageUrl = null; }
     byId('preview').hidden = true; notice('preview-status', '');
   }
+  function clearPublicPreview() {
+    next('publicPreview', null); publicImageTarget = null; publicImageLoading = false; publicImageReady = false;
+    const image = byId('public-preview-image'); image.onload = null; image.onerror = null;
+    image.removeAttribute('src'); image.hidden = true;
+    if (publicImageUrl) { URL.revokeObjectURL(publicImageUrl); publicImageUrl = null; }
+    byId('public-preview').hidden = true; byId('public-preview-retry').hidden = true;
+    L.text(byId('public-preview-caption'), ''); notice('public-preview-status', '');
+  }
   function closeConfirmation() {
     offered = null; byId('confirm').hidden = true;
     if (focusBeforeConfirmation && focusBeforeConfirmation.isConnected) focusBeforeConfirmation.focus();
     focusBeforeConfirmation = null;
   }
   function clearSubmission() {
-    next('submission', null); clearPreview(); selectedSubmission = null; submissionDetail = null;
+    next('submission', null); clearPreview(); clearPublicPreview(); selectedSubmission = null; submissionDetail = null;
     submissionTicket = null; submissionError = null; submissionLoading = false;
     byId('review-reason').value = ''; byId('submission-detail').hidden = true;
   }
@@ -369,7 +434,9 @@ const adminLogic = (() => {
     const subBlocked = !!mutation || submissionLoading || !!submissionError || !submissionDetail ||
       !!(writes.get('submission:' + selectedSubmission) || {}).requiresRead;
     const status = submissionDetail && submissionDetail.submission.status;
-    byId('approve').disabled = subBlocked || status !== 'pending' || submissionDetail.inspection.status !== 'valid';
+    byId('approve').disabled = subBlocked || status !== 'pending' || submissionDetail.inspection.status !== 'valid' ||
+      !!submissionDetail.submission.preview && !publicImageReady;
+    byId('public-preview-retry').disabled = !!mutation || submissionLoading || !!submissionError || publicImageLoading;
     byId('reject').disabled = subBlocked || status !== 'pending';
     byId('withdraw').disabled = subBlocked || status !== 'approved';
     byId('approve').hidden = status !== 'pending'; byId('reject').hidden = status !== 'pending';
@@ -464,6 +531,7 @@ const adminLogic = (() => {
     const previous = same ? submissionDetail : null;
     const cursor = appendFiles && previous ? previous.inspection.nextFileCursor : null;
     if (appendFiles && !cursor) return;
+    clearPublicPreview();
     selectedSubmission = id; submissionLoading = true; submissionError = null;
     const ticket = next('submission', id); renderSubmission();
     try {
@@ -483,7 +551,10 @@ const adminLogic = (() => {
       if (!current(ticket, selectedSubmission) || authFailure(error)) return;
       submissionLoading = false; submissionError = error;
     }
-    if (current(ticket, selectedSubmission)) renderSubmission();
+    if (current(ticket, selectedSubmission)) {
+      renderSubmission();
+      if (!submissionError) await openPublicPreview(id, afterWrite);
+    }
   }
   function renderSubmission() {
     byId('submission-detail').hidden = !selectedSubmission;
@@ -560,6 +631,47 @@ const adminLogic = (() => {
       notice('preview-status', errorText(error), true);
     }
   }
+  async function openPublicPreview(id, afterWrite) {
+    if (!connected || mutation && !afterWrite || submissionLoading || submissionError || selectedSubmission !== id || !submissionDetail) return;
+    closeConfirmation(); clearPublicPreview();
+    const descriptor = submissionDetail.submission.preview, readTicket = submissionTicket;
+    byId('public-preview').hidden = false;
+    if (!descriptor) {
+      L.text(byId('public-preview-caption'), '本次没有已登记的公开预览图；通过后不会借用其他投稿或旧版本的图片。');
+      updateControls(); return;
+    }
+    publicImageTarget = id + ':' + descriptor.sha256;
+    const target = publicImageTarget, ticket = next('publicPreview', target);
+    const matches = () => current(ticket, publicImageTarget) && selectedSubmission === id && submissionTicket === readTicket;
+    publicImageLoading = true; byId('public-preview-retry').hidden = false;
+    L.text(byId('public-preview-caption'), '这是本次投稿通过后展示的图片。' + '\n' + descriptor.width + ' × ' + descriptor.height +
+      '；' + L.size(descriptor.size) + '\nSHA-256：' + descriptor.sha256);
+    notice('public-preview-status', '正在读取本次公开预览；图片显示成功前不能通过审核。'); updateControls();
+    try {
+      const blob = await request('publicPreview', { id, preview: descriptor }, 'publicPreview');
+      if (!matches()) return;
+      const url = URL.createObjectURL(blob);
+      if (!matches()) { URL.revokeObjectURL(url); return; }
+      publicImageUrl = url; const image = byId('public-preview-image');
+      const decodeFailure = (message) => {
+        if (!matches() || publicImageUrl !== url) return;
+        image.onload = null; image.onerror = null; image.hidden = true; image.removeAttribute('src');
+        URL.revokeObjectURL(url); publicImageUrl = null; publicImageReady = false;
+        notice('public-preview-status', message + '\n可手动重新读取图片；元数据、文件清单和拒绝操作仍可使用。', true); updateControls();
+      };
+      image.onload = () => {
+        if (!matches() || publicImageUrl !== url) return;
+        publicImageReady = true; image.hidden = false; notice('public-preview-status', '已核对本次登记的图片摘要与 PNG 像素尺寸，图片已载入，请查看内容后再决定。'); updateControls();
+      };
+      image.onerror = () => decodeFailure('浏览器未能解码这张公开预览图。');
+      image.src = url;
+    } catch (error) {
+      if (!matches() || authFailure(error)) return;
+      notice('public-preview-status', errorText(error) + '\n可以手动重新读取图片。', true);
+    } finally {
+      if (matches()) { publicImageLoading = false; updateControls(); }
+    }
+  }
   async function openReport(id, afterWrite) {
     if (!connected || mutation && !afterWrite) return;
     closeConfirmation();
@@ -609,13 +721,15 @@ const adminLogic = (() => {
     if (operation === 'review' || operation === 'withdraw') {
       if (activeView !== 'submissions' || !submissionDetail || submissionLoading || submissionError) return;
       const item = submissionDetail.submission;
-      if (operation === 'review' && (item.status !== 'pending' || decision === 'approve' && submissionDetail.inspection.status !== 'valid') ||
+      if (operation === 'review' && (item.status !== 'pending' || decision === 'approve' &&
+          (submissionDetail.inspection.status !== 'valid' || !!item.preview && !publicImageReady)) ||
           operation === 'withdraw' && item.status !== 'approved') return;
       id = item.submissionId; target = 'submission:' + id; view = 'submissions'; readTicket = submissionTicket;
       params = { id, ...(decision ? { decision } : {}), reason: byId('review-reason').value };
       title = item.metadata.title.zh + ' · ' + item.metadata.kind + ' / ' + item.metadata.id + ' / ' + item.metadata.version + '\n投稿 ' + id;
       impact = operation === 'withdraw' ? '撤回此版本的全部已批准记录，停止公开分发；不会自动回退到旧版本。'
-        : decision === 'approve' ? '通过审核并将这个版本设为当前发布指向；公开可用性仍受功能开关影响。请确认元数据、许可与文件检查结果。' : '拒绝这条待审核投稿，并记录下面的理由。';
+        : decision === 'approve' ? '通过审核并将这个版本设为当前发布指向；公开可用性仍受功能开关影响。请确认元数据、许可、文件检查结果与本次公开预览。' +
+          (item.preview ? '\n本次图片 SHA-256：' + item.preview.sha256 : '\n本次不发布公开预览图。') : '拒绝这条待审核投稿，并记录下面的理由。';
     } else {
       if (activeView !== 'reports' || !reportDetail || reportLoading || reportError) return;
       const item = reportDetail.report;
@@ -637,7 +751,8 @@ const adminLogic = (() => {
   }
   async function confirmAction() {
     const command = offered;
-    if (!L.canConfirm(command, tickets, displayedTarget(), !!mutation)) {
+    if (!L.canConfirm(command, tickets, displayedTarget(), !!mutation) || command && command.operation === 'review' &&
+        command.params.decision === 'approve' && submissionDetail && submissionDetail.submission.preview && !publicImageReady) {
       closeConfirmation(); notice('global-notice', errorText({ code: 'console_confirmation_stale' }), true); return;
     }
     closeConfirmation(); mutation = command; const ticket = next('mutation', command.target);
@@ -687,6 +802,7 @@ const adminLogic = (() => {
   byId('submission-refresh').addEventListener('click', () => { if (selectedSubmission) return openSubmission(selectedSubmission); });
   byId('files-more').addEventListener('click', () => { if (selectedSubmission) return openSubmission(selectedSubmission, true); });
   byId('preview-clear').addEventListener('click', clearPreview);
+  byId('public-preview-retry').addEventListener('click', () => { if (selectedSubmission) return openPublicPreview(selectedSubmission); });
   byId('report-refresh').addEventListener('click', () => { if (selectedReport) return openReport(selectedReport); });
   byId('approve').addEventListener('click', () => offerAction('review', 'approve'));
   byId('reject').addEventListener('click', () => offerAction('review', 'reject'));
@@ -740,6 +856,7 @@ input,select,textarea{width:100%;min-height:48px;border:1px solid #aebac9;border
 <div class="stack spaced"><button id="submissions-prev" type="button">上一页</button><button id="submissions-next" type="button">下一页</button></div><p class="muted">每页 20 条，按服务器标识排序。分页是实时视图，不保证跨页快照。</p></div>
 <section id="submission-detail" class="card" hidden><h2>投稿详情</h2><button id="submission-refresh" type="button">刷新此投稿</button><p id="submission-status-text" class="notice" role="status" hidden></p><div id="submission-summary"></div>
 <h3>逐项校验</h3><div id="submission-checks"></div><p class="muted">结构校验不证明授权、版权或模型运行效果。审核通过仍需人工判断元数据和许可。</p>
+<section id="public-preview" class="preview" hidden><h3>本次公开预览</h3><p id="public-preview-caption" class="preview-caption"></p><p id="public-preview-status" class="notice" role="status" hidden></p><img id="public-preview-image" alt="本次投稿通过后公开展示的预览图" decoding="async" hidden><button id="public-preview-retry" type="button" hidden>重新读取本次公开预览</button></section>
 <details><summary>完整元数据</summary><pre id="submission-metadata"></pre></details><h3 class="spaced">包内文件</h3><p id="files-status" class="muted"></p><ul id="submission-files" class="files"></ul><button id="files-more" type="button" hidden>继续加载文件</button>
 <section id="preview" class="preview" hidden><h3>图片预览</h3><p id="preview-caption" class="preview-caption"></p><p id="preview-status" class="notice" role="status" hidden></p><img id="preview-image" alt="所选包内图片的静态预览" decoding="async" hidden><button id="preview-clear" type="button">关闭预览</button></section>
 <hr><label for="review-reason">操作理由（必填，原文写入审计）</label><textarea id="review-reason" rows="3" maxlength="4000" placeholder="请填写通过、拒绝或撤回的理由"></textarea>

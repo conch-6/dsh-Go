@@ -20,6 +20,7 @@ const _expected = <String, String>{
   'ds-harness-remote': 'Copyright (c) 2026 DSH Remote contributors',
   'DSHA': 'Copyright (c) 2026 qiannianhuanxiang',
   'Shizuku-API': 'Copyright (c) 2021 RikkaW',
+  'tawcroot (tawc)': 'Copyright (c) 2026 Sophie Winter',
   'libadb-android': 'Copyright 2021 Muntashir Al-Islam',
   'spake2-android': 'Copyright 2021 Muntashir Al-Islam',
   'Conscrypt': 'Copyright 2016 The Android Open Source Project',

@@ -3,6 +3,10 @@ import { record, validVersion as catalogVersion } from './pet-catalog';
 export const UPLOAD_CAP = 20 * 1024 * 1024;
 export const EXPANDED_CAP = 64 * 1024 * 1024;
 export const MEMBER_CAP = 16 * 1024 * 1024;
+export const PREVIEW_CONTRACT = { schema: 1, sources: ['pet-idle', 'companion-preview'], format: 'png',
+  maxWidth: 512, maxHeight: 512, maxPixels: 262144, maxBytes: 2097152 } as const;
+export type PreviewSource = typeof PREVIEW_CONTRACT.sources[number];
+export interface PublicPreview { path: string; sha256: string; size: number; width: number; height: number }
 export const KINDS = ['pet', 'companion'] as const;
 export type WorkshopKind = typeof KINDS[number];
 export const LICENSES = ['CC0-1.0', 'CC-BY-4.0', 'CC-BY-SA-4.0', 'MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'LicenseRef-Author-Permission'] as const;
@@ -30,7 +34,7 @@ export async function sha256(bytes: Uint8Array | string): Promise<string> {
 export interface SubmissionMeta {
   kind: WorkshopKind; id: string; version: string; minApp: string;
   title: { zh: string; en: string }; author: string; license: string; source: string;
-  description?: string; tags?: string[];
+  description?: string; tags?: string[]; previewSource?: PreviewSource;
   sha256: string; size: number; rightsConfirmed: true;
 }
 export function validMeta(value: unknown): value is SubmissionMeta {
@@ -39,6 +43,7 @@ export function validMeta(value: unknown): value is SubmissionMeta {
     !text(value.author, 256) || typeof value.license !== 'string' || !LICENSES.includes(value.license as typeof LICENSES[number]) ||
     !text(value.source, 2048) || !hash(value.sha256) || !whole(value.size, 1, UPLOAD_CAP) || value.rightsConfirmed !== true ||
     value.description !== undefined && value.description !== '' && !text(value.description, 512) ||
+    value.previewSource !== undefined && value.previewSource !== (value.kind === 'pet' ? 'pet-idle' : 'companion-preview') ||
     value.tags !== undefined && (!Array.isArray(value.tags) || value.tags.length > 8 ||
       !value.tags.every(tag => text(tag, 32)) || new Set(value.tags).size !== value.tags.length)) return false;
   try {
@@ -51,9 +56,22 @@ export function metadata(value: unknown): SubmissionMeta {
   return { kind: value.kind, id: value.id, version: value.version, minApp: value.minApp,
     title: { zh: value.title.zh, en: value.title.en }, author: value.author, license: value.license,
     source: value.source, sha256: value.sha256, size: value.size, rightsConfirmed: true,
-    ...(value.description ? { description: value.description } : {}), ...(value.tags?.length ? { tags: [...value.tags] } : {}) };
+    ...(value.description ? { description: value.description } : {}), ...(value.tags?.length ? { tags: [...value.tags] } : {}),
+    ...(value.previewSource === undefined ? {} : { previewSource: value.previewSource }) };
 }
 export function blobKey(sha: string): string { return `workshop/blobs/${sha}.zip`; }
 export function assetUrl(value: SubmissionMeta): string { return `/market/workshop/${value.kind}/${value.id}/${value.version}/${value.sha256}.zip`; }
+export function previewKey(sha: string): string { return `workshop/previews/${sha}.png`; }
+export function previewUrl(value: SubmissionMeta, sha: string): string {
+  return `/market/workshop/${value.kind}/${value.id}/${value.version}/${value.sha256}/preview/${sha}.png`;
+}
+export function previewDimensions(width: unknown, height: unknown): boolean {
+  return whole(width, 1, PREVIEW_CONTRACT.maxWidth) && whole(height, 1, PREVIEW_CONTRACT.maxHeight) && width * height <= PREVIEW_CONTRACT.maxPixels;
+}
+export function validPreview(value: unknown, meta: SubmissionMeta): value is PublicPreview {
+  return record(value) && meta.previewSource !== undefined && hash(value.sha256) && whole(value.size, 1, PREVIEW_CONTRACT.maxBytes) &&
+    previewDimensions(value.width, value.height) && value.path === previewUrl(meta, value.sha256) &&
+    Object.keys(value).every(key => ['path', 'sha256', 'size', 'width', 'height'].includes(key));
+}
 export const identity = (value: { kind: WorkshopKind; id: string }) => `${value.kind}/${value.id}`;
 export const releaseId = (value: { kind: WorkshopKind; id: string; version: string }) => `${identity(value)}/${value.version}`;

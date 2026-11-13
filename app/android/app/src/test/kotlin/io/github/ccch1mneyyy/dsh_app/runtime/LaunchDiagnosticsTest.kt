@@ -7,7 +7,7 @@ class LaunchDiagnosticsTest {
     @Test fun selectionIsNotRunningUntilSpawnedAndAlive() {
         val run = LaunchDiagnostics()
         assertNull(run.currentMode(true))
-        run.selected(true, null)
+        run.selected("direct", null)
         assertNull(run.currentMode(true))
         run.failed("startFailed")
         assertEquals("direct", run.selectedMode)
@@ -18,7 +18,7 @@ class LaunchDiagnosticsTest {
 
     @Test fun exitRetainsAttemptButNeverReportsRunning() {
         val run = LaunchDiagnostics()
-        run.selected(true, null)
+        run.selected("direct", null)
         run.spawned()
         assertEquals("direct", run.currentMode(true))
         run.failed("exit:1")
@@ -29,10 +29,10 @@ class LaunchDiagnosticsTest {
 
     @Test fun newAttemptCannotInheritPreviousFailureOrFallback() {
         val previous = LaunchDiagnostics()
-        previous.selected(false, "incompatibleFiles")
+        previous.selected("proot", "incompatibleFiles")
         previous.failed("startFailed")
         val next = LaunchDiagnostics()
-        next.selected(true, null)
+        next.selected("direct", null)
         next.spawned()
         assertNull(next.fallbackReason)
         assertNull(next.failureReason)
@@ -42,7 +42,7 @@ class LaunchDiagnosticsTest {
     @Test fun compatibleSelectionIsIndependentOfSavedDirectPreference() {
         for (reason in listOf("incompatibleFiles", "safeRecovery")) {
             val run = LaunchDiagnostics()
-            run.selected(false, reason)
+            run.selected("proot", reason)
             run.spawned()
             assertEquals("proot", run.currentMode(true))
             assertEquals(reason, run.fallbackReason)

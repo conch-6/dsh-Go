@@ -3,6 +3,7 @@ package io.github.ccch1mneyyy.dsh_app.runtime
 import io.github.ccch1mneyyy.dsh_app.phone.Json
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Paths
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -21,6 +22,17 @@ class ManagedSkillInstallerTest {
     private fun dir(root: File, name: String = "dsh-go-ui") = File(root, "root/.dsh/skills/$name")
     private fun noTemps(root: File) = assertFalse(root.walkTopDown().any { it.name.endsWith(".dsh-go-tmp") })
     private inline fun withRoot(test: (File) -> Unit) { val root = root(); try { test(root) } finally { root.deleteRecursively() } }
+
+    /** Completed tawc NEW: both names point to the same sibling-store regular object. */
+    private fun tawcBackup(root: File, file: File, token: String): File {
+        val obj = File(root.parentFile, "tawcroot/link/$token").apply { parentFile!!.mkdirs() }
+        Files.move(file.toPath(), obj.toPath())
+        File(obj.parentFile, "$token.cnt").writeText("0000000002\n")
+        val target = Paths.get("tawcroot:link:$token")
+        Files.createSymbolicLink(file.toPath(), target)
+        Files.createSymbolicLink(File(root, "root/backup-$token").toPath(), target)
+        return obj
+    }
 
     @Test fun firstInstallWritesExactUtf8AndCurrentInstallDoesNotWrite() = withRoot { root ->
         val request = request(root)
@@ -77,6 +89,54 @@ class ManagedSkillInstallerTest {
         File(dir(root), "nested/data.txt").writeText("mine")
         assertEquals("userOwned", ManagedSkillInstaller.install(root, request(root)) { true }.result)
         assertEquals("mine", File(dir(root), "nested/data.txt").readText())
+    }
+
+    @Test fun tawcUserOwnedMarkerLeavesTheSkillAndOtherFilesUntouched() = withRoot { base ->
+        val root = File(base, "rootfs").apply { File(this, "root/.dsh").mkdirs() }
+        ManagedSkillInstaller.install(root, request(root)) { true }
+        val file = File(dir(root), "SKILL.md")
+        val userText = skill.replace("# dsh-go:managed", "# user-owned")
+        file.writeText(userText)
+        File(dir(root), "nested/data.txt").writeText("mine")
+        val obj = tawcBackup(root, file, "123")
+        assertFalse(file.exists()) // Android cannot follow tawc's opaque token.
+
+        assertEquals("userOwned", ManagedSkillInstaller.install(root, request(root)) { true }.result)
+        assertEquals("tawcroot:link:123", Files.readSymbolicLink(file.toPath()).toString())
+        assertEquals("tawcroot:link:123", Files.readSymbolicLink(File(root, "root/backup-123").toPath()).toString())
+        assertEquals(userText, obj.readText())
+        assertEquals("mine", File(dir(root), "nested/data.txt").readText())
+        noTemps(root)
+    }
+
+    @Test fun tawcManagedFilesSkipIdenticalBytesAndReplaceOnlyTheUpdatedName() = withRoot { base ->
+        val root = File(base, "rootfs").apply { File(this, "root/.dsh").mkdirs() }
+        ManagedSkillInstaller.install(root, request(root)) { true }
+        val skillFile = File(dir(root), "SKILL.md")
+        val dataFile = File(dir(root), "nested/data.txt")
+        val skillObject = tawcBackup(root, skillFile, "123")
+        val dataObject = tawcBackup(root, dataFile, "456-2")
+        assertTrue(skillObject.setLastModified(1_234_567_000L))
+        assertTrue(dataObject.setLastModified(1_234_567_000L))
+        val times = listOf(skillObject.lastModified(), dataObject.lastModified())
+
+        assertEquals("unchanged", ManagedSkillInstaller.install(root, request(root)) { true }.result)
+        assertTrue(Files.isSymbolicLink(skillFile.toPath()))
+        assertTrue(Files.isSymbolicLink(dataFile.toPath()))
+        assertEquals(times, listOf(skillObject.lastModified(), dataObject.lastModified()))
+
+        val updated = files("new value") + ("SKILL.md" to "${skill}updated\n")
+        assertEquals("updated", ManagedSkillInstaller.install(root, request(root, files = updated)) { true }.result)
+        assertEquals(updated.getValue("SKILL.md"), skillFile.readText())
+        assertEquals("new value", dataFile.readText())
+        assertFalse(Files.isSymbolicLink(skillFile.toPath()))
+        assertFalse(Files.isSymbolicLink(dataFile.toPath()))
+        assertEquals(skill, skillObject.readText())
+        assertEquals("value", dataObject.readText())
+        for (token in listOf("123", "456-2")) {
+            assertEquals("tawcroot:link:$token", Files.readSymbolicLink(File(root, "root/backup-$token").toPath()).toString())
+        }
+        noTemps(root)
     }
 
     @Test fun markerOutsideFrontmatterDoesNotAuthorizeOverwrite() = withRoot { root ->

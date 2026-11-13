@@ -40,6 +40,21 @@ final Map<String, HtmlTag?> _htmlTags = {
   'summary': const HtmlTag.block(),
 };
 
+/// Inline patterns a part of the app lays over every [MarkdownBody] below it
+/// (the tavern colours its story's dialogue). Keep [patterns] one list per
+/// look: its identity is part of the parse cache's key.
+class MarkdownPatterns extends InheritedWidget {
+  const MarkdownPatterns({super.key, required this.patterns, required super.child});
+
+  final List<InlinePattern> patterns;
+
+  static List<InlinePattern>? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<MarkdownPatterns>()?.patterns;
+
+  @override
+  bool updateShouldNotify(MarkdownPatterns old) => !identical(old.patterns, patterns);
+}
+
 /// 助手正文的 Markdown 渲染。
 ///
 /// - 正文样式与用户气泡同源([AppType.chatBody]),流式与完成态不跳字号;
@@ -219,6 +234,9 @@ class MarkdownBody extends StatefulWidget {
   }
 
   static final _streamingPatterns = [_cursorPattern];
+
+  /// The cursor with a [MarkdownPatterns] list, one list per list.
+  static final _streamingWith = Expando<List<InlinePattern>>('streamingWith');
 
   // Builders stay static. gpt_markdown 1.4.0's config.isSame ignores
   // onLinkTap identity; its cached spans may retain this context-only callback.
@@ -648,7 +666,12 @@ class _MarkdownBodyState extends State<MarkdownBody> {
       blockAnimation: widget.reveal ? GptMarkdownBlockAnimation.fadeIn : GptMarkdownBlockAnimation.none,
       charactersPerSecond: MarkdownBody._revealPace,
       revealFadeSeconds: MarkdownBody._revealFade,
-      inlinePatterns: widget.streaming && !widget.reveal ? MarkdownBody._streamingPatterns : null,
+      inlinePatterns: switch ((widget.streaming && !widget.reveal, MarkdownPatterns.maybeOf(context))) {
+        (true, null) => MarkdownBody._streamingPatterns,
+        (false, null) => null,
+        (true, final extra?) => MarkdownBody._streamingWith[extra] ??= [...MarkdownBody._streamingPatterns, ...extra],
+        (false, final extra?) => extra,
+      },
       onLinkTap: (url, title) => MarkdownBody._onLinkTap(context, url, title),
       codeBuilder: MarkdownBody._codeBuilder,
       inlineCodeBuilder: MarkdownBody._inlineCodeBuilder,

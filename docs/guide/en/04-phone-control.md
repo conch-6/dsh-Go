@@ -19,7 +19,7 @@ During a task, text on the screen is sent to the model you chose; with a vision 
 <!-- nav: commonSettings,hubSettingsPhoneControl,a11yRestoreTitle -->
 `Settings › Phone control › Restore accessibility automatically`
 
-Open this row under **Setup**, read the explanation and tap **Authorize and enable**. A connected Shizuku, Sui, root or self-ADB channel can grant permission (the page says which one it will use). If neither is available, follow the setup page or copy the displayed command and run it once on your computer. Restoration requires both the in-app phone-control switch and the system permission.
+Expand **More settings** and open this row, read the explanation and tap **Authorize and enable**. A connected Shizuku, Sui, root or self-ADB channel can grant permission (the page says which one it will use). If neither is available, follow the setup page or copy the displayed command and run it once on your computer. Restoration requires both the in-app phone-control switch and the system permission.
 
 When authorizing through Shizuku (including Sui) or self-ADB, the app checks whether the permission was actually granted. It distinguishes an authorization request that could not be completed through the channel, an explicit system denial, and an acknowledged request that still left the permission ungranted. An explicit denial is not reported as an ADB disconnection. A temporary Shizuku or self-ADB authorization connection may close normally afterward; that alone does not mean the attempt failed. If the system denies permission, using the computer command is not guaranteed to succeed.
 
@@ -61,7 +61,7 @@ When a task starts, a floating bar appears at the top of the screen. It takes th
 
 When DSH needs your approval, the capsule says "Waiting for you below" and the approval card appears at the bottom of the screen.
 
-Adjust it under **Floating bar** on the phone control page (shown once phone control is on):
+Expand **More settings** on the phone control page, then adjust it under **Floating bar** (shown once phone control is on):
 
 - **Idle opacity**: how far the capsule or the ball fades after 3 seconds untouched, 30% to 100%, 70% by default. A touch brings it back; the card and anything waiting for you stay solid. With **Collapse when idle** on, the capsule shrinks to a ball instead of fading, and the ball fades.
 - **Collapse when idle**: off by default. When on, the capsule shrinks to a ball after a few idle seconds, and opens by itself when you need to approve something.
@@ -95,7 +95,7 @@ An approval card left for 30 seconds counts as **Decline**. In every mode, syste
 <!-- nav: commonSettings,hubSettingsPhoneControl,phoneBackgroundGuideTitle -->
 `Settings › Phone control › Confirmations and return`
 
-Once phone control is on, this row is under **Advanced** on the phone control page; tap it to read the guidance again. **Open system settings** opens DSH Go's system App info page.
+Once phone control is on, this row is under **More settings** on the phone control page; tap it to read the guidance again. **Open system settings** opens DSH Go's system App info page.
 
 When a step needs your decision, DSH Go shows a card. If the card is unavailable, it tries a notification or returns to the app. Allow phone-control notifications and pop-up alerts in system settings. Some phones also offer a permission to display pop-up windows while running in the background; allowing it can help the app return. Menu names vary by system version.
 
@@ -129,12 +129,20 @@ Disclaimer:
 - Turn it on only when you need it, and off when you're done.
 - We advise against turning it on for a device that holds payment or banking details.
 
-## Action log and advanced
+## Action log and more settings
 
-**Recent actions** logs every step, without screen contents. Tap **All actions** to see them. The log lasts until the app closes.
+Expand **More settings**. **Recent actions** logs every step, without screen contents. Tap **All actions** to see them. The log lasts until the app closes.
 
-Under **Advanced**:
+**Non-disruptive mode** is directly available on the main page. **More settings** holds the floating bar, accessibility restoration, background running, Check phone control, text recognition, phone skills, Android Shell and recent actions.
 
-- **Non-disruptive mode**: works on a hidden screen while you use your phone. Needs Android 14 or later. Pick one under **Channel**: Shizuku if the Shizuku app is installed; Sui if Magisk or KernelSU has the Sui module; Root on a rooted phone (your root manager asks when you tap "Turn on with Root", and su never runs before that); Direct ADB otherwise. Open a channel to see its checklist, finish the setup, then tap "Turn on with …"; the page marks the suggested one but never picks it for you. Shizuku and Direct ADB need Wi-Fi with wireless debugging on, and the screen must still stay on and unlocked. Once it is on, a "Keep … channel" switch sits under "Using …", off by default: with it on, DSH Go reconnects the channel by itself after a disconnect, reopening the app or restarting your phone, so you don't pick it again; with it off, the mode must be reactivated after a restart. "Keep root channel" means DSH Go asks your root manager again by itself, and the manager still decides; Shizuku and Sui only use the permission they already gave and wait for their service, and Direct ADB only uses its existing pairing. An app you force-stopped in system settings doesn't come back on its own after a restart; open DSH Go once.
+**Check phone control** opens a separate page showing only status and start or cancel/cleanup controls. B, C1 and C2 profiles, coverage, individual results, refresh and report export are under **Technical details**. This is a partial check: untested items never count as passed. Opening the page does not start a check.
+
+**Text recognition** shows a switch and a short data notice. Recognition is on-device, results may go to your configured model, and the SDK collects usage statistics. **Privacy details** contains the full Google SDK disclosure, what turning it off does, and the separate shared-SDK use by Remote pairing. Turning it off does not uninstall the SDK or promise to erase or stop sending accumulated statistics.
+
+**Non-disruptive mode**:
+
+Requires Android 14 or later. Only Shizuku and Direct ADB appear initially; Root / Sui are under **More connections (Root / Sui)**. Open one connection to see only the next setup step. Opening the page or expanding an option never authorizes or switches a connection. Direct ADB instructions and manual pairing are under **Pairing help / manual entry**; after pairing, **Cannot connect?** offers manual connection-port entry. Once enabled, only the current connection is shown; expand **Change connection** to switch. Root still requires the risk notice and root-manager authorization; su never runs before that. Connection errors remain visible when options are collapsed.
+
+Keep the screen on and unlocked; Shizuku and Direct ADB also need Wi-Fi and wireless debugging. This page’s **More settings** holds connection keeping, background capacity, screen orientation and requirements. “Keep … channel” is off by default: without it, re-enable the mode after restarting the app or phone. Only turning it on allows DSH Go to try restoring this connection after disconnection, reopening the app or restarting the phone. Root requests authorization again; Shizuku / Sui use existing permission and wait for their service; Direct ADB uses existing pairing. After a system force-stop, open DSH Go yourself. Folding options changes none of these permissions or keeping settings.
 - **Background running**: prevents Android from turning off accessibility; opens the phone settings guide.
 - **Confirmations and return**: see confirmations and task results in time; see Confirmations and return above.

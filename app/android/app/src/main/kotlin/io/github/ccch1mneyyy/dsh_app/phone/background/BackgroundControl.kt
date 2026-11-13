@@ -510,7 +510,7 @@ class BackgroundControl private constructor(context: Context) {
         return when {
             cached.connectionError != null -> AppStrings.get(app, cached.connectionError)
             cached.trustedDisplayOk == false -> Reasons.withDetail(UNSUPPORTED, cached.gateDetail)
-            cached.injectOk == false -> Reasons.withDetail(inputFailureReason(
+            cached.injectOk != true && cached.injectError != null -> Reasons.withDetail(inputFailureReason(
                 BackgroundGateState.InjectFailure.fromWire(cached.injectError)), cached.gateDetail)
             else -> null
         }
@@ -533,6 +533,24 @@ class BackgroundControl private constructor(context: Context) {
         BackgroundGateState.InjectFailure.CANCELLED -> R.string.background_input_cancelled
         BackgroundGateState.InjectFailure.OTHER -> R.string.background_injection_denied
     })
+
+    private fun setupFailureResource(code: String?, fallback: Int = R.string.background_not_ready): Int = when (code) {
+        "releaseQueryFailed" -> R.string.background_setup_task_query_failed
+        "recoveryUnavailable" -> R.string.background_setup_recovery_failed
+        "displayUnsupported", "displayTargetChanged", "displayMissing" -> R.string.background_setup_display_failed
+        "systemOperationDenied" -> R.string.background_input_permission_denied
+        "locked" -> R.string.background_setup_locked
+        "scopeHistoryFull" -> R.string.background_setup_history_full
+        "bindTimeout" -> R.string.background_setup_bind_timeout
+        "unbindTimeout", "bindingBusy" -> R.string.background_setup_unbind_wait
+        "unbindFailed", "unbindDispatchFailed" -> R.string.background_setup_unbind_failed
+        "bindFailed", "bindDispatchFailed", "noBinder", "probeFailed", "mainThread" -> R.string.background_setup_bind_failed
+        "protocolMismatch", "probeRejected", "muxFailed" -> R.string.background_gate_peer_unsupported
+        "serviceUnavailable" -> R.string.background_shizuku_stopped
+        "permissionDenied" -> R.string.background_shizuku_permission
+        "cancelled", "interrupted" -> R.string.background_selection_cancelled
+        else -> fallback
+    }
 
     private fun rootReason(): String? {
         val status = root.status()
@@ -571,7 +589,9 @@ class BackgroundControl private constructor(context: Context) {
             resourceAdmission() != null -> "resourceRecovery"
             selfCheckBorrow != null || gateCall != null || gate.needsRetest || selectingResource ||
                 interruptRequested || selectionChange != null || restoring?.isDone == false -> "busy"
-            gateFacts.trustedDisplayOk == false || gateFacts.injectOk == false -> "unsupported"
+            gateFacts.connectionError != null -> "connectionRequired"
+            gateFacts.trustedDisplayOk == false || gateFacts.injectOk == false ||
+                gateFacts.injectOk != true && gateFacts.injectError != null -> "unsupported"
             peer == null -> "connectionRequired"
             hardLimit == 0 -> "peerUnsupported"
             else -> null
@@ -894,7 +914,7 @@ class BackgroundControl private constructor(context: Context) {
     internal fun prepareForTask(owner: PhoneTasks.Owner, currentOwner: () -> Boolean): String? {
         if (!currentOwner()) return AppStrings.get(app, R.string.background_selection_cancelled)
         resourceAdmission()?.let { return it }
-        if (mode == "off" || !androidOk()) return AppStrings.get(app, R.string.background_not_ready)
+        if (mode == "off" || !androidOk()) return readiness() ?: AppStrings.get(app, R.string.background_not_ready)
         synchronized(this) {
             // Reuse does not create a slot or replace a peer. Other WSS users must not revoke it.
             if (taskResource.find(owner) != null) return null
@@ -906,7 +926,7 @@ class BackgroundControl private constructor(context: Context) {
             } catch (_: Exception) { return AppStrings.get(app, R.string.background_not_ready) }
         }
         if (activeChannel(currentOwner) == null || parallelism().effectiveLimit == 0)
-            return AppStrings.get(app, R.string.background_not_ready)
+            return readiness() ?: AppStrings.get(app, R.string.background_not_ready)
         return null
     }
 
@@ -1135,15 +1155,26 @@ class BackgroundControl private constructor(context: Context) {
 
     /** Settings owns one outer transport use. The original resource survives a cancelled UI. */
     private fun runGateProbe(selection: PrivilegedKeepState.Ticket, mayStart: () -> Boolean): String? {
+        fun rejectedBeforeAllocation(reason: Int): String {
+            val probe = gate.begin(mayStart) ?: return AppStrings.get(app, R.string.background_selection_cancelled)
+            gate.failed(probe, reason)
+            gate.concludedWithoutAllocation(probe)
+            notifyChanged()
+            return AppStrings.get(app, reason)
+        }
         val starterReason = when (mode) {
             "shizuku", "sui" -> shizuku.reason()
             "root" -> rootReason()
             "adb" -> adb.reason()
             else -> AppStrings.get(app, R.string.background_off)
         }
-        if (starterReason != null) return starterReason
+        if (starterReason != null) {
+            rejectedBeforeAllocation(R.string.background_not_ready)
+            return starterReason
+        }
         var peer = activeChannel(mayStart, explicit = true, transportReserved = true)
-            ?: return AppStrings.get(app, R.string.background_not_ready)
+            ?: return rejectedBeforeAllocation(setupFailureResource(
+                if (selection.mode == "shizuku" || selection.mode == "sui") shizuku.connectReasonCode else null))
         if (recoverResourceRecords(peer, selection, mayStart, settingsUse = true) != null)
             return AppStrings.get(app, R.string.background_resource_recovery_pending)
         if (!peer.alive()) {
@@ -1177,8 +1208,6 @@ class BackgroundControl private constructor(context: Context) {
         }
         notifyChanged()
         var accepted: BackgroundGateState.Update.Accepted? = null
-        // A rejected capability handshake happens before any allocation or cleanup mandate.
-        var preAllocationReject = false
         var reason: String? = null
         var released = false
         var published = false
@@ -1188,22 +1217,24 @@ class BackgroundControl private constructor(context: Context) {
                 val cap = peer.execute(Bundle().apply { putString(Proto.OP, Proto.OP_PROBE) })
                 if ((cap.get(Proto.OK) as? Boolean) != true ||
                     !OwnerScopeProtocol.supported(cap) || (cap.get(Proto.SELF_CHECK_PROBE_VERSION) as? Int) != 1 ||
-                    (cap.get(Proto.RELEASE_RECEIPT) as? Int) != 1) {
-                    preAllocationReject = true
-                    reason = failed(R.string.background_gate_peer_unsupported, peer)
+                    backgroundRequestLimit(cap::get, cap::containsKey, false) == 0) {
+                    reason = failed(setupFailureResource(cap.getString(Proto.ERROR), R.string.background_gate_peer_unsupported), peer)
                     return@call
                 }
                 val birth = BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey)
                 if (birth == null) {
-                    preAllocationReject = true
-                    reason = failed(R.string.background_gate_peer_unsupported, peer)
+                    reason = failed(R.string.background_setup_recovery_failed, peer)
                     return@call
                 }
                 if (!call.resource.begin(birth)) { reason = AppStrings.get(app, R.string.background_resource_recovery_pending); return@call }
                 val allocation = OwnerScopeProtocol.first(call.io, peer,
                     BackgroundRecoveryProtocol.allocate(call.io.owner, "probe", null)) { commit -> gate.admit(probe, commit) }
                 val actualId = BackgroundRecoveryProtocol.allocationId(allocation::get)
-                if (actualId == null || !call.resource.allocated(actualId) { gate.current(probe) && !call.io.previewClosed() }) {
+                if (actualId == null) {
+                    reason = failed(setupFailureResource(allocation.getString(Proto.ERROR), R.string.background_setup_display_failed), peer)
+                    return@call
+                }
+                if (!call.resource.allocated(actualId) { gate.current(probe) && !call.io.previewClosed() }) {
                     reason = AppStrings.get(app, R.string.background_resource_recovery_pending)
                     return@call
                 }
@@ -1238,12 +1269,11 @@ class BackgroundControl private constructor(context: Context) {
             released = finishGateCall(call, physical) {
                 val receipt = accepted?.receipt
                 if (receipt != null && !Thread.currentThread().isInterrupted) {
-                    published = if (receipt.trustedDisplayOk && receipt.injectOk == true)
-                        gate.completedWithCleanup(probe) else gate.current(probe)
-                } else if (preAllocationReject && !Thread.currentThread().isInterrupted) {
-                    // Nothing was allocated here: refusing an unusable channel is a definitive
-                    // outcome, so the retest barrier must not deadlock every later task.
-                    gate.concludedWithoutAllocation(probe)
+                    // Cleanup completion and capability success are separate facts. Failed
+                    // checks keep their real error, not a permanent "check again" barrier.
+                    published = gate.completedWithCleanup(probe)
+                } else if (gate.snapshot.connectionError != null && !Thread.currentThread().isInterrupted) {
+                    gate.completedWithCleanup(probe)
                 }
             }
         }

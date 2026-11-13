@@ -1,8 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, createConnection } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { EventEmitter, once } from 'node:events';
 import { WsConnection, encodeFrame } from '../bridge/dsh-go-bridge/lib/native/ws.js';
+import { NativeCore } from '../bridge/dsh-go-bridge/lib/native/core.js';
+import { LIMITS } from '../bridge/dsh-go-bridge/lib/native/limits.js';
+import { createNativeRoutes } from '../bridge/dsh-go-bridge/lib/native/routes.js';
 
 function timers(t) {
   t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -73,3 +77,54 @@ for (const initiator of ['server', 'client', 'tcp-fin']) test(`ws ${initiator} l
   assert.equal(destroyed, 1);
   assert.equal(tracked.active.size, 0);
 });
+
+for (const before of ['peer-fin', 'peer-reset', 'live']) {
+  test(`ws upgrade after guard wait with ${before} preserves connection ownership`, {timeout: 5000}, async t => {
+    const core = new NativeCore({get: name => name === 'loader' ? {entries: () => []} : undefined,
+      logger: {warn() {}}}, LIMITS, 'test');
+    const routes = createNativeRoutes(core), arrived = Promise.withResolvers(), sockets = [];
+    const server = createHttpServer();
+    t.after(async () => {
+      routes.dispose(); core.dispose();
+      for (const socket of sockets) socket.destroy();
+      await new Promise(resolve => server.close(resolve));
+    });
+    // Peer for the awaited Connection guard. HTTP parsing, FIN/RST, socket
+    // terminal state, native upgrade and connection accounting are real.
+    server.on('upgrade', (req, socket, head) => {
+      sockets.push(socket);
+      socket.on('error', () => socket.destroy()); // Existing WebServer ownership.
+      arrived.resolve({req, socket, head});
+    });
+    server.listen(0, '127.0.0.1'); await once(server, 'listening');
+    const client = createConnection(server.address().port, '127.0.0.1'); sockets.push(client);
+    const received = [];
+    client.on('data', chunk => received.push(chunk)); client.on('error', () => {});
+    await once(client, 'connect');
+    client.write('GET /dsh-go/v1/stream HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n');
+    const {req, socket, head} = await arrived.promise;
+    assert.equal(req.complete, true, 'a normal upgrade already has complete HTTP headers');
+    if (before === 'peer-fin') {
+      const ended = once(socket, 'end'); client.end(); await ended;
+      assert.equal(socket.readableEnded, true); assert.equal(socket.destroyed, false);
+      assert.equal(req.aborted, false, 'HTTP aborted does not describe an upgraded socket');
+    } else if (before === 'peer-reset') {
+      const closed = new Promise(resolve => socket.once('close', resolve));
+      client.resetAndDestroy(); await closed;
+      assert.equal(socket.destroyed, true);
+    } else {
+      assert.equal(socket.readableEnded, false); assert.equal(socket.destroyed, false);
+    }
+    routes.upgrade(req, socket, head);
+    if (before === 'live') {
+      assert.equal(routes.connections(), 1);
+      const closed = once(socket, 'close'), ended = once(client, 'end');
+      client.end(); await closed; await ended;
+      assert.match(Buffer.concat(received).toString(), /^HTTP\/1\.1 101 Switching Protocols\r\n/);
+      assert.equal(routes.connections(), 0, 'post-upgrade FIN still releases the existing owner');
+    } else {
+      assert.equal(routes.connections(), 0, 'a terminal socket must not occupy a slot until the heartbeat');
+      assert.equal(socket.destroyed, true, 'the pre-upgrade half-open socket is closed now');
+    }
+  });
+}

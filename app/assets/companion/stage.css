@@ -356,6 +356,19 @@ html[data-paused='1'] .whale {
   animation-play-state: paused;
 }
 
+/* A bare stage (bare.js): only the model, the page behind it showing through.
+   Her room stays laid out, unseen, so nothing that measures it moves. */
+html[data-bare='1'],
+html[data-bare='1'] body {
+  background: transparent;
+}
+
+html[data-bare='1'] .scene,
+html[data-bare='1'] .props,
+html[data-bare='1'] .vignette {
+  visibility: hidden;
+}
+
 /* Native float mode owns gestures and crops a fixed viewport to alpha bounds. */
 html[data-mode='float'],
 html[data-mode='float'] body {

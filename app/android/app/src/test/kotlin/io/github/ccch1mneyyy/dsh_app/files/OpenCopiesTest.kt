@@ -1,6 +1,7 @@
 package io.github.ccch1mneyyy.dsh_app.files
 
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import org.junit.Assert.*
 import org.junit.Test
@@ -46,6 +47,33 @@ class OpenCopiesTest {
         assertEquals(cache.canonicalFile, first.parentFile!!.parentFile!!.canonicalFile)
         assertEquals("content", second.readText())
         assertEquals(1, cache.listFiles()!!.size)
+    }
+
+    @Test fun failedReplacementKeepsPublishedCopyAndRetryUsesTheSamePath() = withDirectory { dir ->
+        val source = source(dir, "a/report.pdf", "before")
+        val cache = File(dir, "cache")
+        val published = FilesPlugin.copyForOpen(source, cache, "report.pdf")
+        source.writeText("after: complete new contents")
+        val failure = IOException("injected copy failure after a prefix")
+        try {
+            FilesPlugin.copyForOpen(source, cache, "report.pdf") { from, temporary ->
+                from.inputStream().use { input ->
+                    temporary.outputStream().use { output -> output.write(input.read()) }
+                }
+                throw failure
+            }
+            fail("copy should fail")
+        } catch (error: IOException) {
+            assertSame(failure, error)
+        }
+        assertEquals("before", published.readText())
+        assertEquals("after: complete new contents", source.readText())
+        assertEquals(listOf(published), published.parentFile!!.listFiles()!!.toList())
+
+        val retried = FilesPlugin.copyForOpen(source, cache, "report.pdf")
+        assertEquals(published, retried)
+        assertEquals("after: complete new contents", published.readText())
+        assertEquals(listOf(published), published.parentFile!!.listFiles()!!.toList())
     }
 
     private fun source(root: File, path: String, value: String): File = File(root, path).apply {

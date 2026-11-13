@@ -169,7 +169,11 @@ class LogRedactor {
                     while (at < text.length && text[at] !in SPACE && text[at] !in "\"',;&" &&
                         (!jsonValue || text[at] !in "}]")) at++
                     val markedEnd = maskedEnd(text, valueStart)
-                    if (markedEnd > valueStart && assignmentAt(text, markedEnd)) {
+                    val queryToken = name.equals("token", true) && match.range.first > 0 &&
+                        text[match.range.first - 1] in "?&#"
+                    if (markedEnd > valueStart && (assignmentAt(text, markedEnd) ||
+                        (queryToken && markedEnd < at && (text[markedEnd] == '#' ||
+                            (text[markedEnd] == ')' && markedEnd + 1 == at))))) {
                         at = markedEnd
                     }
                 }

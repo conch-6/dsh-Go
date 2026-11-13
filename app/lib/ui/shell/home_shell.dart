@@ -35,6 +35,7 @@ import '../session/session_detail_page.dart';
 import '../settings/search/settings_search_page.dart';
 import '../settings/settings_screen.dart';
 import '../share_code/share_code_host.dart';
+import '../tavern/tavern_intake.dart';
 import '../star/star_prompt_host.dart';
 import '../theme/theme.dart';
 import '../update/update_launch_check.dart';
@@ -348,6 +349,8 @@ class _HomeShellState extends ConsumerState<HomeShell> with TickerProviderStateM
                       const LinkHost(),
                       // Share codes (分享码): registers its links and files with the router.
                       const ShareCodeHost(),
+                      // Character cards opened with the app: into 酒馆.
+                      const TavernIntakeHost(),
                       // Share sheet, launcher shortcuts, the tile: into the chat (draws nothing).
                       SystemEntryHost(onReveal: _revealChat),
                       // Forum links (sign-in return, topics): registers them with the router.

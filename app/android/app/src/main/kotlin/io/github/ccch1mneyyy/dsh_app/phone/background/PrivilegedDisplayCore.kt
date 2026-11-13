@@ -117,6 +117,7 @@ class PrivilegedDisplayCore internal constructor(
     private var releasingDisplayId: Int? = null
     private var displayCreationAttempted = false
     private var displayApiReleased = false
+    private var probeDisplay = false
     private var lastReleasedOwner: String? = null
     private var lastReleaseNeverCreated = false
     private val taskManager by lazy { Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null) }
@@ -125,11 +126,26 @@ class PrivilegedDisplayCore internal constructor(
     }
     private val rootTaskInfoType by lazy { Class.forName("android.app.ActivityTaskManager\$RootTaskInfo") }
 
-    internal fun rootTasksEmpty(displayId: Int): Boolean {
-        val result = rootTasksMethod.invoke(taskManager, displayId) as? List<*> ?: throw Fault("releaseQueryFailed")
+    private fun rootTaskInfos(displayId: Int): List<Any> {
+        val result = try {
+            rootTasksMethod.invoke(taskManager, displayId) as? List<*> ?: throw Fault("releaseQueryFailed")
+        } catch (error: InvocationTargetException) {
+            // A released virtual display can already be unknown to ATMS. That is an empty task
+            // scope, not a failed query. Transport/permission failures still stay visible.
+            if (error.cause is IllegalArgumentException) return emptyList()
+            throw Fault("releaseQueryFailed")
+        } catch (_: IllegalArgumentException) {
+            return emptyList()
+        }
         if (result.any { !rootTaskInfoType.isInstance(it) }) throw Fault("releaseQueryFailed")
-        return result.isEmpty()
+        return result.map { it as Any }
     }
+
+    internal fun rootTasksEmpty(displayId: Int): Boolean = rootTaskInfos(displayId).isEmpty()
+
+    /** Probe displays belong to this app only; their own task is not a user task screen. */
+    private fun releaseTasksGone(displayId: Int): Boolean =
+        rootTaskInfos(displayId).isEmpty() || probeDisplay || selfCheckOwner
 
     private class Fault(val code: String) : Exception()
 
@@ -167,7 +183,7 @@ class PrivilegedDisplayCore internal constructor(
                         response.putInt(Proto.SELF_CHECK_TARGET_VERSION, 1)
                         response.putInt(Proto.SELF_CHECK_TARGET_C2_VERSION, 1)
                     }
-                }
+                } else response.putString(Proto.ERROR, "releaseQueryFailed")
                 return response
             }
             if (op == Proto.OP_COLLECT_SYSTEM_IME) {
@@ -850,6 +866,7 @@ class PrivilegedDisplayCore internal constructor(
             // Presentation requires this flag for the gate's inert receiver. Actual tasks keep
             // their existing display flags; this tests delivery, not every target app's policy.
             displayCreationAttempted = true
+            probeDisplay = probe
             val vd = displays.createVirtualDisplay(if (hosted?.recovery == true) ResourceRecovery.tag(checkNotNull(owner)) else "dsh-background", w, h, 320, ir.surface,
                 flags or if (probe) DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION else 0)
             display = vd; reader = ir; pendingReader = null
@@ -971,8 +988,11 @@ class PrivilegedDisplayCore internal constructor(
         stopPreview()
         preview.invalidate()
         selfCheckWindow?.let { window ->
-            window.close()
+            // A probe that did not detach within its own timeout must not turn a completed
+            // physical release into releasePending. Clear the handle first and let the
+            // activity's 8s self-expiry / finishAndRemoveTask finish its task.
             selfCheckWindow = null
+            runCatching { window.close() }
         }
         val neverCreated = !displayCreationAttempted
         if (neverCreated) {
@@ -987,7 +1007,7 @@ class PrivilegedDisplayCore internal constructor(
             }
             closeReaders()
             val deadline = SystemClock.uptimeMillis() + 1_000
-            while (!rootTasksEmpty(displayId)) {
+            while (!releaseTasksGone(displayId)) {
                 val remaining = deadline - SystemClock.uptimeMillis()
                 if (remaining <= 0) throw Fault("releasePending")
                 Thread.sleep(minOf(50L, remaining))
@@ -1000,7 +1020,7 @@ class PrivilegedDisplayCore internal constructor(
         display = null; owner = null; strictOwner = false; selfCheckOwner = false
         targetIdentity.clear()
         targetSequence = null; targetSnapshot = null; targetMain = null
-        releasingDisplayId = null; displayCreationAttempted = false; displayApiReleased = false
+        releasingDisplayId = null; displayCreationAttempted = false; displayApiReleased = false; probeDisplay = false
         allocationReady = false
     }
 

@@ -32,8 +32,24 @@ const catalogPageLinks = <String>{'schedules', 'cordis', 'agent-team', 'forum', 
 /// 伙伴小屋: the home-screen widget opens it (android companion/CompanionWidget.kt).
 const companionPageLink = 'companion';
 
+/// 酒馆 (role play): main.dart registers its page ([registerPageLink]).
+const tavernPageLink = 'tavern';
+
+/// Pages the entry point adds, by id: pages under ui/ that this file may not
+/// import itself (docs/architecture.md, 目录).
+final _registeredPages = <String, Widget Function()>{};
+
+/// Lets a link open [page] as [id]; main.dart calls it at startup, as it
+/// registers the licences.
+void registerPageLink(String id, Widget Function() page) => _registeredPages[id] = page;
+
 /// Every page a link may name.
-Set<String> get pageLinkIds => {...SettingsIndex.linkIds, ...catalogPageLinks, companionPageLink};
+Set<String> get pageLinkIds => {
+  ...SettingsIndex.linkIds,
+  ...catalogPageLinks,
+  companionPageLink,
+  ..._registeredPages.keys,
+};
 
 /// The page id [uri] names: exactly `dshgo://open/<id>` (a trailing slash is
 /// fine) with an id from [pageLinkIds]; null otherwise.
@@ -51,6 +67,7 @@ String? pageLinkId(Uri uri) {
 Widget? pageForId(String id, String? sessionId) {
   if (settingsPageForLink(id, sessionId: sessionId) case final page?) return page;
   if (id == companionPageLink) return const CompanionPage();
+  if (_registeredPages[id] case final page?) return page();
   if (!catalogPageLinks.contains(id)) return null;
   for (final section in featureSections) {
     for (final item in section.items) {

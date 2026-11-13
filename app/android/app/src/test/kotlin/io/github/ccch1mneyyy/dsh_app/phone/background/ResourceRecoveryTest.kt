@@ -47,20 +47,47 @@ class ResourceRecoveryTest {
         assertNull(checkNotNull(ResourceRecovery.check(noId.keys, noId::get)).displayId)
     }
 
-    @Test fun unavailableNamespaceOnEitherSideNeverReadsPidDisplayOrTasks() {
+    @Test fun oneSidedNamespaceLossNeverReadsPidDisplayOrTasks() {
         val unavailable = current.copy(nsDev = 0L, nsIno = 0L, nsAvailable = false)
-        for (now in listOf(current, unavailable)) {
-            for (before in listOf(old(), old().copy(birth = unavailable.copy(pid = 99)))) {
-                if (now.nsAvailable && before.birth.nsAvailable) continue
-                failure("recoveryUnknown") {
-                    ResourceRecovery.verify(now, before, { error("namespace unknown: no PID query") },
-                        { error("no display query") }, { error("no task query") })
-                }
+        for ((now, before) in listOf(
+            current to old().copy(birth = unavailable.copy(pid = 99)),
+            unavailable to old(),
+        )) {
+            failure("recoveryUnknown") {
+                ResourceRecovery.verify(now, before, { error("namespace unknown: no PID query") },
+                    { error("no display query") }, { error("no task query") })
             }
         }
+    }
+
+    @Test fun bothSidesWithoutNamespaceStillProveDeadPeerEmpty() {
+        val unavailable = current.copy(nsDev = 0L, nsIno = 0L, nsAvailable = false)
+        val original = old().copy(birth = unavailable.copy(pid = 99))
+        val order = mutableListOf<String>()
+        assertEquals("deadPeerEmpty", ResourceRecovery.verify(unavailable, original,
+            { order += "pid:$it"; true },
+            { order += "displays"; listOf(ResourceRecovery.DisplayFact(0, "main", 1000, false)) },
+            { order += "tasks:$it"; true }))
+        assertEquals(listOf("pid:99", "displays", "tasks:12"), order)
+        val calls = mutableListOf<Int>()
         failure("recoveryUnknown") {
-            ResourceRecovery.verify(current.copy(nsIno = 0L), old(), { error("invalid namespace") },
+            ResourceRecovery.verify(unavailable, original, { calls += it; false },
+                { error("live PID: no display") }, { error("live PID: no tasks") })
+        }
+        assertEquals(listOf(99), calls)
+    }
+
+    @Test fun recordWithoutNamespaceStillRefusesALiveProcessOrSurvivingDisplay() {
+        val unavailable = current.copy(nsDev = 0L, nsIno = 0L, nsAvailable = false)
+        val before = old().copy(birth = unavailable.copy(pid = 99))
+        failure("recoveryUnknown") {
+            ResourceRecovery.verify(unavailable, before, { false },
                 { error("no display query") }, { error("no task query") })
+        }
+        failure("recoveryPresent") {
+            ResourceRecovery.verify(unavailable, before, { true },
+                { listOf(ResourceRecovery.DisplayFact(27, ResourceRecovery.tag(owner), 2000, true)) },
+                { error("no task query") })
         }
     }
 
@@ -142,12 +169,28 @@ class ResourceRecoveryTest {
         assertEquals(listOf(99), calls)
     }
 
-    @Test fun sameBootMissingIdAndPrivateVisibilityGapStayUnknown() {
-        for (original in listOf(old(null), old(uid = 0))) {
-            failure("recoveryUnknown") {
-                ResourceRecovery.verify(current, original, { true },
-                    { error("no complete target visibility or no original ID") }, { error("no task query") })
-            }
+    @Test fun recordWithoutDisplayIdResolvesOnlyWhenPeerIsGoneAndNoTaggedDisplayRemains() {
+        val calls = mutableListOf<String>()
+        assertEquals("deadPeerEmpty", ResourceRecovery.verify(current, old(null),
+            { calls += "pid:$it"; true },
+            { calls += "displays"; listOf(ResourceRecovery.DisplayFact(0, "main", 1000, false)) },
+            { error("no task scope without an id") }))
+        assertEquals(listOf("pid:99", "displays"), calls)
+        failure("recoveryUnknown") {
+            ResourceRecovery.verify(current, old(null), { false },
+                { error("live PID: no display query") }, { error("live PID: no task query") })
+        }
+        failure("recoveryPresent") {
+            ResourceRecovery.verify(current, old(null), { true },
+                { listOf(ResourceRecovery.DisplayFact(27, ResourceRecovery.tag(owner), 2000, true)) },
+                { error("tagged display: no task query") })
+        }
+    }
+
+    @Test fun privateVisibilityGapStillStaysUnknown() {
+        failure("recoveryUnknown") {
+            ResourceRecovery.verify(current, old(uid = 0), { true },
+                { error("uid check precedes display visibility") }, { error("no task query") })
         }
     }
 

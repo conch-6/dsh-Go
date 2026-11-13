@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="background_gate_retest">上次设置探针需要重新检查。清理完成后，请再次明确选择通道进行测试。</string>
-    <string name="background_gate_cleanup_pending">上次探针的清理尚未确认，新后台资源仍被阻止。只能重试原探针的清理。</string>
-    <string name="background_gate_peer_unsupported">此通道运行的是旧版后台服务，无法确认安全收尾。请重启手机或安装最新版本后重试；没有向旧服务发送新探针。</string>
-    <string name="background_gate_cleanup_stale">此清理请求已不对应当前待清理探针，请刷新状态。</string>
-    <string name="background_gate_checking">正在准备或检查所选通道；此次检查与清理结束前，不启用新的后台资源。</string>
+    <string name="background_gate_retest">请重新连接并检查后台屏。</string>
+    <string name="background_gate_cleanup_pending">后台屏尚未释放，请重试清理。</string>
+    <string name="background_gate_peer_unsupported">服务未提供所需的后台能力。请更新 App 后重新连接。</string>
+    <string name="background_gate_cleanup_stale">清理状态已变化，请刷新。</string>
+    <string name="background_gate_checking">正在连接并检查后台屏…</string>
+    <string name="background_setup_task_query_failed">无法查询系统任务，后台屏检查失败。</string>
+    <string name="background_setup_recovery_failed">无法读取后台服务身份，未创建后台屏。</string>
+    <string name="background_setup_display_failed">系统未能创建可用的后台屏。</string>
+    <string name="background_setup_locked">请先解锁手机，再连接后台屏。</string>
+    <string name="background_setup_history_full">后台服务已达任务记录上限，请关闭通道后重新连接。</string>
+    <string name="background_setup_bind_timeout">连接 Shizuku 服务超时，请确认它正在运行后重连。</string>
+    <string name="background_setup_unbind_wait">旧连接尚未释放，请稍后重连。</string>
+    <string name="background_setup_unbind_failed">无法释放旧连接，请在 Shizuku 中重启 DSH Go 服务。</string>
+    <string name="background_setup_bind_failed">无法连接 Shizuku 的后台服务，请重连。</string>
 </resources>

@@ -6,11 +6,20 @@ import 'package:flutter/material.dart';
 /// 筛选胶囊:未选是很淡的底,选中是墨色实心(筛选不是主操作,不用品牌色)。
 /// 放在横向滚动的一行里,彼此间距 8。
 class CapsuleChoiceChip extends StatelessWidget {
-  const CapsuleChoiceChip({super.key, required this.label, required this.selected, required this.onSelected});
+  const CapsuleChoiceChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+    this.icon,
+  });
 
   final String label;
   final bool selected;
   final VoidCallback onSelected;
+
+  /// A small mark before the label, for a capsule of another kind in the row.
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -23,6 +32,7 @@ class CapsuleChoiceChip extends StatelessWidget {
       data: dark ? theme.copyWith(canvasColor: Colors.transparent) : theme,
       child: ChoiceChip(
         label: Text(label),
+        avatar: icon == null ? null : Icon(icon, size: 14, color: selected ? scheme.surface : scheme.primary),
         selected: selected,
         showCheckmark: false,
         onSelected: (_) => onSelected(),

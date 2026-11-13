@@ -84,6 +84,39 @@ class BackgroundGateStrictReceiptTest {
         assertFalse(state.needsRetest)
     }
 
+    @Test fun failedInputCheckCanFinishCleanupWithoutBecomingSuccessful() {
+        state.requireRetest()
+        val probe = state.begin { true }!!
+        assertTrue(accept(probe, ok = false, inject = null, error = "inputWindowNotReady")
+            is BackgroundGateState.Update.Accepted)
+        assertTrue(state.needsRetest)
+        assertTrue(state.completedWithCleanup(probe))
+        assertFalse(state.needsRetest)
+        assertEquals(true, state.snapshot.trustedDisplayOk)
+        assertNull(state.snapshot.injectOk)
+        assertEquals("inputWindowNotReady", state.snapshot.injectError)
+    }
+
+    @Test fun failedConnectionBeforeAllocationKeepsItsErrorButNotTheRetestBarrier() {
+        state.requireRetest()
+        val probe = state.begin { true }!!
+        assertTrue(state.failed(probe, 42))
+        assertTrue(state.concludedWithoutAllocation(probe))
+        assertFalse(state.needsRetest)
+        assertEquals(42, state.snapshot.connectionError)
+        assertNull(state.snapshot.trustedDisplayOk)
+        assertNull(state.snapshot.injectOk)
+    }
+
+    @Test fun failedAllocationCanFinishCleanupWithoutErasingItsError() {
+        state.requireRetest()
+        val probe = state.begin { true }!!
+        assertTrue(state.failed(probe, 43, Any()))
+        assertTrue(state.completedWithCleanup(probe))
+        assertFalse(state.needsRetest)
+        assertEquals(43, state.snapshot.connectionError)
+    }
+
     @Test fun acceptedProbeDoesNotClearRetestUntilItsActualCleanupConsumerCompletes() {
         val old = state.begin { true }!!
         state.requireRetest()

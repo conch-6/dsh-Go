@@ -9,6 +9,7 @@ plugin-manager-active-run-guard.diff
 plugin-manager-cancel-tree-confirmation.diff
 preset-legacy-delegation.diff
 route-guard.diff
+client-hmr-closed-response.diff
 schemastery-json-context.diff
 session-title-word-prefix.diff
 str-editor-view-prefix.diff
@@ -105,6 +106,8 @@ zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-search-snippet-window.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-workspace-capture-recovery.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fs-parent-kind.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fs-line-style.diff
+fs-create-link-denial.diff
+fs-publication-short-names.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fs-patch-equal-width.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-instruction-encoding-reuse.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-str-editor-bom.diff
@@ -112,6 +115,7 @@ zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-sqlite-document-count.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-session-lifecycle-enumeration.diff
 jsonl-materialize-rename.diff
 jsonl-migration-link-fallback.diff
+attachment-link-fallback.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-session-cold-hint-stat.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-session-preset-resume-errors.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-loader-entry-lifecycle.diff
@@ -121,6 +125,7 @@ zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-storage-json-postpublish.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-credentials-record-own-key.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-piai-credential-wait-cancel.diff
 piai-discovery-response-cancel.diff
+attachment-direct-boundary.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-companion-recall-gates.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-phone-caller.diff
 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-companion-signals.diff
@@ -131,3 +136,5 @@ zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-phone-run-end-live-retry.diff
 terminal-job-cancel.diff
 provider-discovery-headers.diff
 session-format-error.diff
+session-queue-steer-deletion.diff
+webserver-resource-abort.diff

@@ -26,6 +26,9 @@ import io.flutter.plugin.common.PluginRegistry
 import io.github.ccch1mneyyy.dsh_app.runtime.PhoneStorage
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.security.MessageDigest
 import kotlin.concurrent.thread
 
@@ -357,12 +360,27 @@ class FilesPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         }
 
         /** Stable per-source copies: another source cannot replace an already shared URI. */
-        internal fun copyForOpen(file: File, root: File, name: String): File {
+        internal fun copyForOpen(
+            file: File,
+            root: File,
+            name: String,
+            copy: (File, File) -> Unit = { from, to -> from.copyTo(to, overwrite = true) },
+        ): File {
             val source = file.canonicalFile
             val key = MessageDigest.getInstance("SHA-256")
                 .digest(source.path.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
             val target = File(File(root, key), safeName(name))
-            return source.copyTo(target, overwrite = true)
+            val directory = target.parentFile!!
+            directory.mkdirs()
+            val temporary = File.createTempFile(".open-", ".part", directory)
+            try {
+                copy(source, temporary)
+                // An older URI stays readable until its complete replacement is ready.
+                Files.move(temporary.toPath(), target.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
+                return target
+            } finally {
+                temporary.delete()
+            }
         }
 
         /** [name] in [dir], or `name (2).ext`, `name (3).ext`… when taken. */
