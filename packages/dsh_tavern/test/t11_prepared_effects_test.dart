@@ -370,6 +370,7 @@ class _RecordingModel extends TavernModelClient {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) {
     bodies.add(_map(body));
     return Stream<ModelDelta>.fromIterable([const ModelText('R'), const ModelFinished('stop')]);

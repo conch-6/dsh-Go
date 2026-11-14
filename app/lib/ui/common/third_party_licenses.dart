@@ -18,6 +18,8 @@ void registerThirdPartyLicenses() {
       LicenseEntryWithLineBreaks(<String>['DS Bot'], _dsBotNotice + _apache2),
       LicenseEntryWithLineBreaks(<String>['ds-harness-remote'], _dshRemoteMit),
       LicenseEntryWithLineBreaks(<String>['DSHA'], _dshaMit),
+      LicenseEntryWithLineBreaks(<String>['Libraries.dev'], _librariesDevMit),
+      LicenseEntryWithLineBreaks(<String>['Paper Shaders'], _paperShadersNotice + _apache2),
       // Libraries bundled by Gradle.
       LicenseEntryWithLineBreaks(<String>['Google ML Kit Text Recognition (Chinese)'], _mlkitNotice),
       LicenseEntryWithLineBreaks(<String>['Shizuku-API'], _shizukuMit),
@@ -27,6 +29,10 @@ void registerThirdPartyLicenses() {
       LicenseEntryWithLineBreaks(<String>['Bouncy Castle'], _bouncyCastle),
       LicenseEntryWithLineBreaks(<String>['XZ for Java'], _xzForJava0bsd),
       LicenseEntryWithLineBreaks(<String>['AndroidX WebKit'], _androidxWebkitNotice + _apache2),
+      LicenseEntryWithLineBreaks(<String>['ONNX Runtime'], _onnxRuntimeMit),
+      // Speech models bundled as assets (app/android/app/src/main/assets/speech).
+      LicenseEntryWithLineBreaks(<String>['Silero VAD'], _sileroMit),
+      LicenseEntryWithLineBreaks(<String>['smart-turn'], _smartTurnBsd2),
       // Native launcher built from source (runtime/tawcroot/build.py).
       LicenseEntryWithLineBreaks(<String>['tawcroot (tawc)'], _tawcMit),
       // flutter_webrtc's own MIT licence comes with its pub package; these are its NOTICE and
@@ -47,6 +53,18 @@ void registerThirdPartyLicenses() {
     yield LicenseEntryWithLineBreaks(<String>['WebRTC'], '$_webrtcBsd\n$bundledNotices');
     final unicodeNotice = await rootBundle.loadString('assets/licenses/unicode-15.0.txt');
     yield LicenseEntryWithLineBreaks(<String>['Unicode Character Database (15.0.0)'], unicodeNotice);
+    // The libraries a card's scripts find on the tavern's canvas page, as 酒馆助手's pages
+    // give them; each package's own LICENSE file, verbatim.
+    yield LicenseEntryWithLineBreaks(<String>[
+      'jQuery',
+    ], await rootBundle.loadString('assets/licenses/jquery-3.7.1-LICENSE.txt'));
+    yield LicenseEntryWithLineBreaks(<String>[
+      'Lodash',
+    ], await rootBundle.loadString('assets/licenses/lodash-4.17.21-LICENSE.txt'));
+    // The streaming recognizer's model, downloaded on demand (語音 › 实时识别).
+    yield LicenseEntryWithLineBreaks(<String>[
+      'Streaming Zipformer zh-en (sherpa-onnx)',
+    ], await rootBundle.loadString('assets/licenses/streaming-asr-model-APACHE-2.0.txt'));
   });
 }
 
@@ -124,6 +142,71 @@ MIT License
 Copyright (c) 2026 qiannianhuanxiang
 
 $_mitTerms''';
+
+/// ONNX Runtime for Android (`com.microsoft.onnxruntime:onnxruntime-android`), 1.23.2.
+const _onnxRuntimeMit = '''
+MIT License
+
+Copyright (c) Microsoft Corporation
+
+$_mitTerms''';
+
+/// Silero VAD v6.2 (`silero_vad.onnx`).
+const _sileroMit = '''
+MIT License
+
+Copyright (c) 2020-present Silero Team
+
+$_mitTerms''';
+
+/// smart-turn v3.2 (`smart-turn-v3.2-cpu.onnx`), Pipecat.
+const _smartTurnBsd2 = r'''
+BSD 2-Clause License
+
+Copyright (c) 2024–2025, Daily
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.''';
+/// Libraries.dev (UI effects in lib/ui/fx), commit 387b049.
+const _librariesDevMit = '''
+MIT License
+
+Copyright (c) 2026 Jakub Antalik
+
+$_mitTerms''';
+
+/// Paper Shaders' liquidMetal stage, by way of Libraries.dev metal-fx (its NOTICE, verbatim but for the path).
+const _paperShadersNotice = '''
+This product includes software developed by Paper Design, Inc.
+
+  Paper Shaders (https://github.com/paper-design/shaders)
+  Copyright (c) Paper Design, Inc.
+  Licensed under the Apache License, Version 2.0
+  http://www.apache.org/licenses/LICENSE-2.0
+
+The liquid-metal material in app/shaders/fx/metal_liquid.frag is the
+`liquidMetal` fragment stage of @paper-design/shaders 0.0.80, as used by
+Libraries.dev metal-fx, translated to Flutter GLSL.
+
+''';
 
 /// Shizuku-API (`dev.rikka.shizuku:api`, `provider`).
 /// tawc's tawcroot launcher (libtawcroot.so), commit a49a4075; everything outside tawc's deps/ is MIT.

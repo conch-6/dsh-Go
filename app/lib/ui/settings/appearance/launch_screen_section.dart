@@ -7,6 +7,7 @@
 //          ╰──────╯    ╰──────╯      in use ringed in the accent
 //            默认         自定义
 //   适配方式                    ( 填满 | 居中 )     ┐
+//   调整位置                               ›     │
 //   背景色                        ◐ ● ○ ●         │ only while the custom one is in use
 //   更换图片或视频                         ›     ┘
 //   预览                                     ›
@@ -29,6 +30,7 @@ import '../../../state/launch_screen_state.dart';
 import '../../common/brief_notice.dart';
 import '../../common/expand_reveal.dart';
 import '../../common/pressable.dart';
+import '../../launch/launch_editor_page.dart';
 import '../../launch/launch_overlay.dart';
 import '../../launch/launch_preview_page.dart';
 import '../../theme/app_icons.dart';
@@ -88,7 +90,13 @@ class _LaunchScreenSectionState extends ConsumerState<LaunchScreenSection> {
           custom: custom,
           busy: _busy,
           onDefault: () => unawaited(notifier.use(false)),
-          onCustom: custom == null ? () => unawaited(_choose()) : () => unawaited(notifier.use(true)),
+          onCustom: custom == null
+              ? () => unawaited(_choose())
+              : !custom.on
+              ? () => unawaited(notifier.use(true))
+              : custom.fit == LaunchFit.fill
+              ? () => unawaited(showLaunchEditor(context, custom))
+              : () {},
         ),
         ExpandReveal(
           open: on,
@@ -106,6 +114,12 @@ class _LaunchScreenSectionState extends ConsumerState<LaunchScreenSection> {
                 selected: custom?.fit ?? LaunchFit.fill,
                 onChanged: (fit) => unawaited(notifier.setFit(fit)),
               ),
+              if ((custom?.fit ?? LaunchFit.fill) == LaunchFit.fill)
+                SettingsTile(
+                  key: const ValueKey('launch-frame'),
+                  title: l10n.launchFrame,
+                  onTap: custom == null ? null : () => unawaited(showLaunchEditor(context, custom)),
+                ),
               SettingsTile(
                 title: l10n.launchBackground,
                 value: LaunchBackdropSwatches(custom: custom, onChanged: (b) => unawaited(notifier.setBackdrop(b))),

@@ -1,7 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum VoiceMode { auto, system, engine }
+/// How 语音输入 listens. [deepseek]: DeepSeek's recognizer (the signed-in account or
+/// the API key); [cloud]: an OpenAI-compatible service set up in 设置 › 语音; auto
+/// uses DeepSeek's when someone can pay for it, else as before.
+enum VoiceMode { auto, deepseek, system, engine, cloud }
 
 class VoiceSettingsController extends Notifier<VoiceMode> {
   static const preferenceKey = 'voice_recognition_mode';

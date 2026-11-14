@@ -145,6 +145,9 @@ List<String> tavernParagraphPages(String paragraph) {
   return pages.where((p) => p.isNotEmpty).toList();
 }
 
+/// One of a group's cast, as the stage shows them: name, picture, sprites.
+typedef TavernVnCast = ({String name, String? avatarPath, Map<String, String> sprites});
+
 class TavernVisualNovelView extends StatefulWidget {
   const TavernVisualNovelView({
     super.key,
@@ -159,9 +162,14 @@ class TavernVisualNovelView extends StatefulWidget {
     this.onPage,
     this.onReadingBack,
     this.revealRate,
+    this.castFor,
   });
 
   final List<TavernPage> pages;
+
+  /// A group (engine P2): who a member is, by their card's ID; the stage
+  /// shows whoever spoke last, in their own picture and sprites.
+  final TavernVnCast? Function(String characterId)? castFor;
 
   /// The character on stage.
   final String name;
@@ -197,20 +205,40 @@ class _TavernVisualNovelViewState extends State<TavernVisualNovelView> with Sing
   /// The sprite for page [at]: by her words on it, or on her page before
   /// yours; her neutral one before she has said anything.
   String? _spriteAt(int at) {
-    if (widget.sprites.isEmpty) return null;
+    final sprites = _castAt(at).sprites;
+    if (sprites.isEmpty) return null;
     for (var i = at; i >= 0 && i < widget.pages.length; i--) {
       final page = widget.pages[i];
       if (page.message.role == TavernRole.character) {
-        return tavernSpriteFor(widget.sprites, page.text, marker: page.marker);
+        return tavernSpriteFor(sprites, page.text, marker: page.marker);
       }
     }
-    return tavernSpriteFor(widget.sprites, '');
+    return tavernSpriteFor(sprites, '');
   }
 
-  Widget _face() => AspectRatio(
-    key: const ValueKey('tavern-vn-face'),
-    aspectRatio: 2 / 3,
-    child: TavernPortrait(name: widget.name, path: widget.avatarPath, radius: AppShape.xl, initialSize: 96),
+  /// Who stands on the stage at page [at]: the speaker of the nearest
+  /// character page at or before it, in a group; else the chat's character.
+  TavernVnCast _castAt(int at) {
+    final own = (name: widget.name, avatarPath: widget.avatarPath, sprites: widget.sprites);
+    final castFor = widget.castFor;
+    if (castFor == null) return own;
+    for (var i = at; i >= 0 && i < widget.pages.length; i--) {
+      final message = widget.pages[i].message;
+      if (message.role != TavernRole.character) continue;
+      final id = message.speakerCharacterId;
+      return (id == null ? null : castFor(id)) ?? own;
+    }
+    return own;
+  }
+
+  /// [cast]'s picture; keyed by who it is, so a new speaker cross-fades in.
+  Widget _face(TavernVnCast cast) => KeyedSubtree(
+    key: ValueKey(('tavern-vn-cast', cast.name)),
+    child: AspectRatio(
+      key: const ValueKey('tavern-vn-face'),
+      aspectRatio: 2 / 3,
+      child: TavernPortrait(name: cast.name, path: cast.avatarPath, radius: AppShape.xl, initialSize: 96),
+    ),
   );
 
   /// The page shown; null follows the newest.
@@ -400,6 +428,7 @@ class _TavernVisualNovelViewState extends State<TavernVisualNovelView> with Sing
     _schedule(page, at);
     final stage = widget.stage;
     final sprite = stage == null ? _spriteAt(at) : null;
+    final cast = _castAt(at);
     return Stack(
       children: [
         Positioned.fill(
@@ -445,10 +474,10 @@ class _TavernVisualNovelViewState extends State<TavernVisualNovelView> with Sing
                             File(sprite),
                             fit: BoxFit.contain,
                             alignment: Alignment.bottomCenter,
-                            errorBuilder: (_, _, _) => Center(child: _face()),
+                            errorBuilder: (_, _, _) => Center(child: _face(cast)),
                           ),
                         )
-                      : _face(),
+                      : _face(cast),
                 ),
               ),
             ),
@@ -590,7 +619,7 @@ class _TavernVisualNovelViewState extends State<TavernVisualNovelView> with Sing
                           if (page.message.role == TavernRole.user)
                             CompanionLogEntry.you(_plain(page.text))
                           else
-                            CompanionLogEntry.her(_plain(page.text)),
+                            _logLine(context, page.message, _plain(page.text), lead: widget.name),
                       ],
                       name: widget.name,
                       onClose: () => setState(() => _log = false),
@@ -682,3 +711,16 @@ class _BoxKey extends StatelessWidget {
 
 /// A page as the backlog shows it: plain text, Markdown emphasis dropped.
 String _plain(String text) => text.replaceAll(RegExp(r'(\*\*|\*|__)'), '');
+
+/// A line not yours in the backlog, under whoever says it: in a group each
+/// member (the name over the story is the group's), the narrator as 旁白;
+/// named and coloured as in the chat.
+CompanionLogEntry _logLine(BuildContext context, TavernMessage message, String text, {required String lead}) {
+  final who = tavernSpeaker(context, message);
+  if (who.isEmpty || who == lead) return CompanionLogEntry.her(text);
+  return CompanionLogEntry.her(
+    text,
+    who: who,
+    tone: tavernNameColor(context, who, lead: lead),
+  );
+}

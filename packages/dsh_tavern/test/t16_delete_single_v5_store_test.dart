@@ -412,6 +412,7 @@ void main() {
       }
       final token = store.softDeleteFrom(chat, child);
       final before = raw(child);
+      expect(before['extra'], jsonEncode(ownedExtra));
       final beforeLeaf = raw(leaf);
       store.deleteMessage(
         chat,
@@ -427,16 +428,22 @@ void main() {
         },
       );
       final after = raw(child);
-      for (final key in before.keys.where((key) => !{'parent_id', 'depth', 'extra'}.contains(key))) {
-        expect(after[key], before[key], reason: key);
-      }
       final expectedExtra = jsonDecode(jsonEncode(ownedExtra)) as Map<String, Object?>;
       (expectedExtra['dshgo']! as Map<String, Object?>)['tavernState'] = {
         'variables': {'n': 4},
         'stChatIdHash': 0,
         'captured': true,
       };
-      expect(extra(child), expectedExtra);
+      expect(after['extra'], jsonEncode(expectedExtra));
+      expect(
+        after['display_context'],
+        jsonEncode({
+          'dshgo': {'tavernState': (expectedExtra['dshgo']! as Map<String, Object?>)['tavernState'], 'chatJsonl': null},
+        }),
+      );
+      for (final key in before.keys.where((key) => !{'parent_id', 'depth', 'extra', 'display_context'}.contains(key))) {
+        expect(after[key], before[key], reason: key);
+      }
       expect(raw(leaf), {...beforeLeaf, 'depth': (beforeLeaf['depth']! as int) - 1});
       expect(after['deleted_by'], token);
       expect(after['reported_usage'], isNotNull);

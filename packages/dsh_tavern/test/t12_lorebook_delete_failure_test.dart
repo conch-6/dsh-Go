@@ -79,11 +79,25 @@ void main() {
     final saved = await h.importA();
     final failedDelete = PathNotFoundException(saved.file.path, const OSError('Delete lookup lost access', 2));
     final fault = _DeleteFault(saved.file, deleteError: failedDelete);
-    await _expectRejected(h, saved, fault, failedDelete);
+    final failure = await _expectRejected(h, saved, fault, failedDelete, adoptionUnconfirmed: true);
     expect(fault.closedHandles, 1);
     expect(fault.deletes, 1);
     expect(fault.handlesAtDelete, [0]);
-    await h.recover(saved);
+    final receipt = (failure as TavernAuthoringException).receipt!;
+    final operation = await h.engine.readAuthoringOperation(receipt.operationId, domainId: receipt.domainId);
+    expect(operation!.state, TavernAuthoringOperationState.unconfirmed);
+    expect(operation.committed, isNull);
+    await expectLater(
+      h.engine.deleteLorebook(saved.id),
+      throwsA(
+        isA<TavernAuthoringException>()
+            .having((error) => error.code, 'code', 'pending_operation')
+            .having((error) => error.receipt, 'no new operation', isNull)
+            .having((error) => error.blockedOperationId, 'blocked operation', receipt.operationId)
+            .having((error) => error.blockedDomainId, 'blocked domain', receipt.domainId),
+      ),
+    );
+    expect(await saved.file.readAsBytes(), orderedEquals(saved.bytes));
   });
 
   test('a failed probe close retains the lorebook and the next deletion remains usable', () async {
@@ -96,7 +110,7 @@ void main() {
     await h.recover(saved);
   });
 
-  test('a known regular file is deleted without acquiring an extra read permission', () async {
+  test('a managed regular file requires a readable source before deletion', () async {
     // Cover both the original exists=true route and a file revealed by the
     // follow-up type lookup after exists had returned false.
     for (final hiddenExists in [false, true]) {
@@ -106,13 +120,14 @@ void main() {
         OSError('Opening this book would be denied', Platform.isWindows ? 5 : 13),
       );
       final fault = _DeleteFault(saved.file, hideExists: hiddenExists, hideType: false, openError: denied);
-      await fault.run(() => h.engine.deleteLorebook(saved.id));
-      await h.expectAbsent(saved.id);
+      await _expectRejected(h, saved, fault, denied);
       expect(fault.opens, 0);
-      expect(fault.deletes, 1);
+      expect(fault.byteReads, 1);
+      expect(fault.deletes, 0);
       expect(fault.followLinks, hiddenExists ? [true] : isEmpty);
-      expect(fault.handlesAtDelete, [0]);
+      expect(fault.handlesAtDelete, isEmpty);
       expect(fault.cleanupCloses, 0);
+      await h.recover(saved);
     }
   });
 
@@ -158,7 +173,13 @@ void main() {
   });
 }
 
-Future<void> _expectRejected(_Harness h, _SavedBook saved, _DeleteFault fault, Object expectedError) async {
+Future<Object> _expectRejected(
+  _Harness h,
+  _SavedBook saved,
+  _DeleteFault fault,
+  Object expectedError, {
+  bool adoptionUnconfirmed = false,
+}) async {
   Object? failure;
   late Map<String, Object?> whileFaulted;
   await fault.run(() async {
@@ -183,13 +204,25 @@ Future<void> _expectRejected(_Harness h, _SavedBook saved, _DeleteFault fault, O
     {'deleteAcknowledged': false, 'reopenedName': 'A'},
     reason: 'Failure: $failure; IO: ${fault.log.join(' -> ')}',
   );
-  expect(failure, same(expectedError));
+  if (adoptionUnconfirmed) {
+    expect(
+      failure,
+      isA<TavernAuthoringException>()
+          .having((error) => error.code, 'code', 'resource_write_failed')
+          .having((error) => error.cause, 'original failure', same(expectedError))
+          .having((error) => error.receipt?.state, 'state', TavernAuthoringOperationState.unconfirmed)
+          .having((error) => error.receipt?.committed, 'committed', isNull),
+    );
+  } else {
+    expect(failure, same(expectedError));
+  }
   expect(sourceAfter, orderedEquals(saved.bytes));
   expect(whileFaulted, saved.view);
   expect(await h.snapshot(saved.id), saved.view);
   expect(jsonDecode(await h.engine.exportLorebook(saved.id)), saved.raw);
   expect(fault.existsCalls, greaterThan(0));
   expect(fault.cleanupCloses, 0, reason: 'Product code must close every successfully opened probe handle.');
+  return failure!;
 }
 
 Future<void> _deleteActuallyMissing(_Harness h, File file, String id) async {
@@ -366,6 +399,7 @@ class _DeleteFault {
   final handles = <_ProbeHandle>[];
   var existsCalls = 0;
   var opens = 0;
+  var byteReads = 0;
   var deletes = 0;
   var liveHandles = 0;
   var closedHandles = 0;
@@ -432,6 +466,13 @@ class _BookFile implements File {
 
   @override
   Future<String> readAsString({Encoding encoding = utf8}) => real.readAsString(encoding: encoding);
+  @override
+  Future<Uint8List> readAsBytes() async {
+    fault.byteReads++;
+    if (fault.openError case final error?) throw error;
+    return real.readAsBytes();
+  }
+
   @override
   Future<FileSystemEntity> delete({bool recursive = false}) async {
     fault.deletes++;

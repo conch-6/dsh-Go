@@ -86,6 +86,8 @@ android {
         // nativeLibraryDir so they can be executed.
         jniLibs {
             useLegacyPackaging = true
+            // sherpa_onnx_android 1.12.36 and ORT Android 1.23.2 ship identical ORT binaries.
+            pickFirsts += "**/libonnxruntime.so"
             // Keep the Termux binaries byte-identical to runtime/out (their hashes are in the manifest).
             keepDebugSymbols += listOf("**/libproot.so", "**/libproot-loader.so", "**/libtalloc.so", "**/libandroid-shmem.so", "**/libtawcroot.so")
         }
@@ -142,7 +144,14 @@ flutter {
     source = "../.."
 }
 
+// Local JVM tests need the desktop JNI library, not Android's classes.jar.
+configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
+    exclude(group = "com.microsoft.onnxruntime", module = "onnxruntime-android")
+}
+
 dependencies {
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2") // MIT
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.23.2")
     // Bundled Chinese OCR. SDK statistics disclosed separately; initialization is opt-in per use.
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
     testImplementation("junit:junit:4.13.2")

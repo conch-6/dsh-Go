@@ -53,9 +53,43 @@ Map<String, Object?>? _cardEventSnapshot(
 }
 
 void _prepareCardEventTurn(TavernEngine engine, _Turn turn, Map<String, Object?> data) {
-  if (turn.kind == _TurnKind.impersonate) return;
+  final prepared = _prepareCardEventCapability(turn, data);
+  if (prepared == null) {
+    return;
+  }
+  final events = prepared.output!.events;
+  for (var index = 0; index < events.length; index++) {
+    final id = '${prepared.stored.id}:event:$index';
+    final proposal = engine._store.agentRunById(turn.chat.id, id);
+    _prepareCardEventProposal(turn, prepared.stored, index, events[index], proposal);
+  }
+}
+
+void _prepareCardEventTurnFromFacts(_Turn turn, Map<String, Object?> data, Map<String, StoredAgentRun> proposals) {
+  final prepared = _prepareCardEventCapability(turn, data);
+  if (prepared == null) {
+    return;
+  }
+  final events = prepared.output!.events;
+  for (var index = 0; index < events.length; index++) {
+    _prepareCardEventProposal(
+      turn,
+      prepared.stored,
+      index,
+      events[index],
+      proposals['${prepared.stored.id}:event:$index'],
+    );
+  }
+}
+
+_DirectorPrepared? _prepareCardEventCapability(_Turn turn, Map<String, Object?> data) {
+  if (turn.kind == _TurnKind.impersonate) {
+    return null;
+  }
   final definition = _cardEventDefinition(data);
-  if (!definition.defined && !turn.state.containsKey(_cardEventRuntimeKey)) return;
+  if (!definition.defined && !turn.state.containsKey(_cardEventRuntimeKey)) {
+    return null;
+  }
   turn.cardEventDefinition = definition;
   final snapshot = definition.inspect(
     runtimeExists: turn.state.containsKey(_cardEventRuntimeKey),
@@ -63,7 +97,9 @@ void _prepareCardEventTurn(TavernEngine engine, _Turn turn, Map<String, Object?>
   );
   turn.cardEventPreparationIssues.addAll(snapshot.issues);
   final prepared = turn.directorPrepared;
-  if (prepared == null || !prepared.eligible || prepared.output == null) return;
+  if (prepared == null || !prepared.eligible || prepared.output == null) {
+    return null;
+  }
   final stored = prepared.stored;
   final capability = stored.result['eventCapability'];
   final state = _stateDefinition(data);
@@ -76,7 +112,7 @@ void _prepareCardEventTurn(TavernEngine engine, _Turn turn, Map<String, Object?>
       capability['stateDefinitionFingerprint'] != (state.hasSchema ? state.fingerprint : null) ||
       !_stateJsonEqual(capability['handlerIds'], definition.handlerIds)) {
     turn.cardEventPreparationIssues.add(_directorIssue('director_event_capability_unavailable', id: stored.id));
-    return;
+    return null;
   }
   turn.cardEventAuthorizedHandlers.addAll(definition.handlerIds);
   turn.cardEventSource = {
@@ -86,35 +122,40 @@ void _prepareCardEventTurn(TavernEngine engine, _Turn turn, Map<String, Object?>
     'sourceFingerprint': stored.result['sourceFingerprint'],
     'capability': _copy(capability),
   };
-  final events = prepared.output!.events;
-  for (var index = 0; index < events.length; index++) {
-    final event = events[index];
-    final id = '${stored.id}:event:$index';
-    final proposal = engine._store.agentRunById(turn.chat.id, id);
-    final raw = proposal?.result;
-    final decoded = proposal == null ? null : engine._directors._event(proposal);
-    // The original durable proposal is authority. Never synthesize it from
-    // the output alone or substitute a newer run found during asynchronous IO.
-    if (proposal == null ||
-        proposal.kind != 'director.event' ||
-        decoded == null ||
-        !decoded.available ||
-        raw == null ||
-        raw['outputIndex'] != index ||
-        decoded.runId != stored.id ||
-        decoded.sourceKind != stored.result['sourceKind'] ||
-        decoded.sourceNodeId != stored.result['sourceNodeId'] ||
-        decoded.sourceFingerprint != stored.result['sourceFingerprint'] ||
-        raw['createdAt'] != stored.result['finishedAt'] ||
-        decoded.name != event['name'] ||
-        decoded.data != event['data']) {
-      turn.cardEventPreparationIssues.add(_directorIssue('director_event_proposal_unavailable', id: id));
-      continue;
-    }
-    turn.cardEventProposals.add(
-      state_core.CardEventProposal(eventId: id, runId: stored.id, name: decoded.name!, data: decoded.data!),
-    );
+  return prepared;
+}
+
+void _prepareCardEventProposal(
+  _Turn turn,
+  StoredAgentRun stored,
+  int index,
+  Map<String, Object?> event,
+  StoredAgentRun? proposal,
+) {
+  final id = '${stored.id}:event:$index';
+  final raw = proposal?.result;
+  final decoded = proposal == null ? null : _directorEvent(proposal);
+  // The original durable proposal is authority. Never synthesize it from
+  // the output alone or substitute a newer run found during asynchronous IO.
+  if (proposal == null ||
+      proposal.kind != 'director.event' ||
+      decoded == null ||
+      !decoded.available ||
+      raw == null ||
+      raw['outputIndex'] != index ||
+      decoded.runId != stored.id ||
+      decoded.sourceKind != stored.result['sourceKind'] ||
+      decoded.sourceNodeId != stored.result['sourceNodeId'] ||
+      decoded.sourceFingerprint != stored.result['sourceFingerprint'] ||
+      raw['createdAt'] != stored.result['finishedAt'] ||
+      decoded.name != event['name'] ||
+      decoded.data != event['data']) {
+    turn.cardEventPreparationIssues.add(_directorIssue('director_event_proposal_unavailable', id: id));
+    return;
   }
+  turn.cardEventProposals.add(
+    state_core.CardEventProposal(eventId: id, runId: stored.id, name: decoded.name!, data: decoded.data!),
+  );
 }
 
 List<PromptInjection> _cardEventTurnInjections(_Turn turn) {

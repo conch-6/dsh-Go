@@ -15,6 +15,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../l10n/l10n.dart';
 import '../../tavern/tavern_cache_break.dart';
 import '../../tavern/tavern_provider.dart';
+import '../../tavern/tavern_session_usage.dart';
+import '../../tavern/tavern_usage_summary.dart';
 import '../bots/bot_format.dart' show shortTime;
 import '../common/smooth_size.dart';
 import '../features/feature_kit.dart';
@@ -22,6 +24,7 @@ import '../settings/settings_widgets.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import 'tavern_widgets.dart';
 
 class TavernInspectorPage extends ConsumerStatefulWidget {
   const TavernInspectorPage({super.key, required this.chatId, this.nodeId});
@@ -41,32 +44,45 @@ class TavernInspectorPage extends ConsumerStatefulWidget {
 }
 
 class _TavernInspectorPageState extends ConsumerState<TavernInspectorPage> {
-  late final Future<(TavernTurnInspection?, TavernTurnInspection?)> _records = _read();
+  late final Future<_Records> _records = _read();
 
-  /// This turn's record, and the turn before it to see where the cache broke
-  /// (none when it cannot be found: the page reads the same without it).
-  Future<(TavernTurnInspection?, TavernTurnInspection?)> _read() async {
+  /// This turn's record, the turn before it to see where the cache broke,
+  /// and what its requests reported together when it asked more than once
+  /// (none when they cannot be found: the page reads the same without them).
+  Future<_Records> _read() async {
     final tavern = ref.read(tavernProvider);
     final record = await tavern.inspectTurn(widget.chatId, nodeId: widget.nodeId);
-    if (record?.prompt == null) return (record, null);
+    if (record == null) return (null, null, null);
+    TavernUsageSummary? summary;
+    if (record.logicalTurnId case final id? when id.isNotEmpty) {
+      try {
+        summary = switch (await tavern.readToolTurn(id)) {
+          final turn? => TavernUsageSummary.fromJson(turn.usageSummary),
+          null => null,
+        };
+      } on Object {
+        summary = null;
+      }
+    }
+    if (record.prompt == null) return (record, null, summary);
     try {
-      return (record, await tavernPreviousTurn(tavern, record!));
+      return (record, await tavernPreviousTurn(tavern, record), summary);
     } on Object {
-      return (record, null);
+      return (record, null, summary);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    return FutureBuilder<(TavernTurnInspection?, TavernTurnInspection?)>(
+    return FutureBuilder<_Records>(
       future: _records,
       builder: (context, snapshot) {
         final title = l10n.tavernInspectTitle;
         if (snapshot.connectionState != ConnectionState.done) {
           return AppPage.list(title: title, children: const [QuietSpinner()]);
         }
-        final (record, previous) = snapshot.data ?? (null, null);
+        final (record, previous, summary) = snapshot.data ?? (null, null, null);
         if (snapshot.hasError || record == null) {
           return AppPage.list(
             title: title,
@@ -82,20 +98,42 @@ class _TavernInspectorPageState extends ConsumerState<TavernInspectorPage> {
         }
         return AppPage.list(
           title: title,
-          children: [_Body(record: record, previous: previous)],
+          children: [_Body(record: record, previous: previous, summary: summary)],
         );
       },
     );
   }
 }
 
+typedef _Records = (TavernTurnInspection?, TavernTurnInspection?, TavernUsageSummary?);
+
+/// A field across the turn's requests: its total when every one reported
+/// it, else what was reported and what each request short of it was.
+String _usageLine(L10n l10n, String field, TavernUsageSummary summary, TavernUsageField usage) {
+  if (usage.complete) return l10n.tavernReqUsageLine(field, usage.known);
+  final reported = summary.requests - usage.missing.length - usage.invalid.length - usage.unknown.length;
+  return l10n.tavernReqUsageLine(
+    field,
+    [
+      if (reported > 0) l10n.tavernReqUsageKnown(usage.known),
+      if (usage.unknown.isNotEmpty) l10n.tavernReqUsageUnknown(usage.unknown.length),
+      if (usage.missing.isNotEmpty) l10n.tavernReqUsageMissing(usage.missing.length),
+      if (usage.invalid.isNotEmpty) l10n.tavernReqUsageInvalid(usage.invalid.length),
+    ].join(l10n.tavernReqUsageJoin),
+  );
+}
+
 class _Body extends StatelessWidget {
-  const _Body({required this.record, this.previous});
+  const _Body({required this.record, this.previous, this.summary});
 
   final TavernTurnInspection record;
 
   /// The turn before, to compare prompts with; null when there is none.
   final TavernTurnInspection? previous;
+
+  /// What the turn's requests reported, when it asked the model as a tool
+  /// turn (STAGE1-APP-INTEGRATION §7).
+  final TavernUsageSummary? summary;
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +151,8 @@ class _Body extends StatelessWidget {
     ];
     final tokens = segments.fold(0, (sum, s) => sum + s.tokens);
     final usage = record.reportedUsage;
+    // What the turn cost, for a DeepSeek model, at the hour it was asked.
+    final price = tavernModelPrice(usage?.model);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -137,15 +177,42 @@ class _Body extends StatelessWidget {
                 value: Text('${prompt.remainingBudget} / ${prompt.budget}'),
               ),
             ],
+            // The numbers under the title, not beside it: beside, a long line
+            // of them squeezed the title into a column.
             SettingsTile(
               key: const ValueKey('tavern-inspect-usage'),
               title: l10n.tavernInspectUsage,
-              value: Text(
-                usage == null
-                    ? l10n.tavernInspectNoUsage
-                    : l10n.tavernInspectUsageValue(usage.promptTokens, usage.cacheHitTokens, usage.completionTokens),
-              ),
+              value: switch (summary) {
+                final s? when s.requests > 1 => Text(l10n.tavernInspectRequests(s.requests)),
+                _ => null,
+              },
+              subtitle: switch (summary) {
+                // Short of some request: no total, only what is known.
+                final s? when !s.complete => [
+                  _usageLine(l10n, l10n.tavernReqUsagePrompt, s, s.prompt),
+                  _usageLine(l10n, l10n.tavernReqUsageCache, s, s.cacheHit),
+                  _usageLine(l10n, l10n.tavernReqUsageCompletion, s, s.completion),
+                ].join('\n'),
+                final s? when usage == null => l10n.tavernInspectUsageTotals(
+                  s.prompt.known,
+                  s.cacheHit.known,
+                  s.completion.known,
+                ),
+                _ =>
+                  usage == null
+                      ? l10n.tavernInspectNoUsage
+                      : l10n.tavernInspectUsageValue(usage.promptTokens, usage.cacheHitTokens, usage.completionTokens),
+              },
             ),
+            if (usage != null && price != null)
+              SettingsTile(
+                key: const ValueKey('tavern-inspect-cost'),
+                title: l10n.tavernInspectCost,
+                subtitle: tavernDeepSeekPeak(record.startedAt)
+                    ? l10n.tavernInspectCostPeak
+                    : l10n.tavernInspectCostOffPeak,
+                value: Text(tavernCostLabel(l10n, tavernReplyCost(usage, price, record.startedAt))),
+              ),
             if (before != null && segments.isNotEmpty)
               SettingsTile(
                 key: const ValueKey('tavern-inspect-cache'),
@@ -162,7 +229,9 @@ class _Body extends StatelessWidget {
           SettingsSection(
             title: l10n.tavernInspectSegments(segments.length),
             footer: Text(l10n.tavernInspectSegmentsNote),
-            children: [for (final (i, s) in segments.indexed) _SegmentTile(segment: s, breaksCache: i == breakAt)],
+            children: [
+              for (final (i, s) in segments.indexed) TavernPromptSegmentTile(segment: s, breaksCache: i == breakAt),
+            ],
           ),
         if (hits.isNotEmpty)
           SettingsSection(
@@ -189,8 +258,8 @@ class _Body extends StatelessWidget {
 
 /// One part of the prompt: who says it, where it came from, its tokens; a tap
 /// shows the text (long-press copies it).
-class _SegmentTile extends StatefulWidget {
-  const _SegmentTile({required this.segment, this.breaksCache = false});
+class TavernPromptSegmentTile extends StatefulWidget {
+  const TavernPromptSegmentTile({super.key, required this.segment, this.breaksCache = false});
 
   final PromptSegment segment;
 
@@ -199,10 +268,10 @@ class _SegmentTile extends StatefulWidget {
   final bool breaksCache;
 
   @override
-  State<_SegmentTile> createState() => _SegmentTileState();
+  State<TavernPromptSegmentTile> createState() => _TavernPromptSegmentTileState();
 }
 
-class _SegmentTileState extends State<_SegmentTile> {
+class _TavernPromptSegmentTileState extends State<TavernPromptSegmentTile> {
   bool _open = false;
 
   String get _text => switch (widget.segment.message['content']) {

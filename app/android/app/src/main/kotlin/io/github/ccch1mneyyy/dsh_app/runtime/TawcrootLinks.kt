@@ -97,7 +97,16 @@ class TawcrootLinks(
             })
         }
 
-        val need = names.sumOf { (_, obj) -> if (Files.isSymbolicLink(obj)) 0L else blocks(Files.size(obj)) }
+        val need = names.sumOf { (name, obj) ->
+            val attrs = Files.readAttributes(obj, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+            when {
+                attrs.isSymbolicLink -> 0L
+                attrs.isRegularFile -> blocks(attrs.size())
+                // NEW can store a FIFO after a denied hard link. Files.copy opens it for
+                // reading and waits for a writer; reject before publishing any batch.
+                else -> throw IOException("tawcroot: cannot convert linked special file /${root.relativize(name)}; turn tawcroot on again")
+            }
+        }
         if (need > 0) {
             val free = freeBytes()
             if (free < need + L2sMigration.MARGIN) return Result.NotEnoughSpace(need, free)

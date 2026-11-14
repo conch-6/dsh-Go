@@ -10,6 +10,7 @@ import 'dart:async';
 
 import 'package:dsh_tavern/dsh_tavern.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
@@ -247,7 +248,8 @@ class _TavernBranchesPageState extends ConsumerState<TavernBranchesPage> {
       messenger?.showBriefNotice(l10n.tavernBranchFailed('$e'));
       return;
     }
-    // Back to the story, now on that branch.
+    // Back to the story, now on that branch, felt as a swipe to another reply is.
+    unawaited(HapticFeedback.selectionClick());
     if (mounted) navigator.pop();
     messenger?.showBriefNotice(l10n.tavernBranchSwitched);
   }

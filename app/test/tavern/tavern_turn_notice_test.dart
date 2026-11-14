@@ -14,17 +14,20 @@ import '../support/test_fonts.dart';
 
 /// The preview, its replies ending for [finishReason], or failing as [failure].
 class _Ending extends PreviewTavern {
-  _Ending({this.finishReason, this.failure, this.detail}) : super(tick: Duration.zero);
+  _Ending({this.finishReason, this.failure, this.detail, this.toolCode}) : super(tick: Duration.zero);
 
   final String? finishReason;
   final TavernFailure? failure;
   final String? detail;
+  final String? toolCode;
   final continued = <String>[];
   final regenerated = <String>[];
 
   @override
   Stream<TavernEvent> send(String chatId, String text) {
-    if (failure case final kind?) return Stream.value(TavernTurnFailed(kind, detail: detail));
+    if (failure case final kind?) {
+      return Stream.value(TavernTurnFailed(kind, detail: detail, toolFailureCode: toolCode));
+    }
     return super
         .send(chatId, text)
         .map((e) => e is TavernTurnDone ? TavernTurnDone(e.message, finishReason: finishReason) : e);
@@ -129,5 +132,18 @@ void main() {
     await _sendOneLine(tester, _Ending(failure: TavernFailure.invalidParameters, detail: 'max_tokens too large'));
     expect(_inBanner('参数'), findsOneWidget);
     expect(_inBanner('max_tokens too large'), findsOneWidget);
+  });
+
+  testWidgets("a tool's failure says which", (tester) async {
+    await _sendOneLine(tester, _Ending(failure: TavernFailure.toolFailure, toolCode: 'budget_exhausted'));
+    expect(_inBanner('这一回合用工具的次数用完了'), findsOneWidget);
+  });
+
+  testWidgets("a tool's failure not known here gives its detail", (tester) async {
+    await _sendOneLine(
+      tester,
+      _Ending(failure: TavernFailure.toolFailure, toolCode: 'something_new', detail: 'tool exploded'),
+    );
+    expect(_inBanner('用工具时出错了：tool exploded'), findsOneWidget);
   });
 }

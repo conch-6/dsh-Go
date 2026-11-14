@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,8 +16,11 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// The order the voice page lists them in.
-enum CompanionVoiceSource { system, preset, openai, custom }
+import '../speech/deepseek_speech.dart';
+
+/// The order the voice page lists them in. [deepseek] is DeepSeek's own speech
+/// API, paid by the signed-in account or the API key (deepseek_speech.dart).
+enum CompanionVoiceSource { deepseek, system, preset, openai, custom }
 
 /// Her style, for services that take one, when the person hasn't written their own.
 const companionVoiceStyleDefault = '用自然、温柔、带一点俏皮的少女语气说，像在陪朋友聊天。';
@@ -179,7 +183,9 @@ CompanionVoicePreset companionVoicePreset(String id) =>
 class CompanionVoiceSettings {
   const CompanionVoiceSettings({
     this.on = false,
+    this.follow = false,
     this.source = CompanionVoiceSource.system,
+    this.deepseekVoice = 'stella',
     this.preset = 'mimo',
     this.presetKeys = const {},
     this.presetVoices = const {},
@@ -199,7 +205,14 @@ class CompanionVoiceSettings {
   });
 
   final bool on;
+
+  /// Her voice is whatever 设置 › 语音 › 朗读 uses (speech_settings.dart);
+  /// the rest of these settings wait for when she has her own again.
+  final bool follow;
   final CompanionVoiceSource source;
+
+  /// [deepSeekVoices]: stella (海星) or tide (暗潮).
+  final String deepseekVoice;
 
   /// The chosen [companionVoicePresets] id, and per preset its key (secure
   /// storage) and voice; one style for all that take one ('' for the default).
@@ -250,7 +263,8 @@ class CompanionVoiceSettings {
 
   /// Whether the chosen source has what it needs to be asked at all.
   bool get configured => switch (source) {
-    CompanionVoiceSource.system => true,
+    // Who pays is only known when asking (deepseek_speech.dart).
+    CompanionVoiceSource.deepseek || CompanionVoiceSource.system => true,
     CompanionVoiceSource.preset =>
       presetKey.trim().isNotEmpty && (cloning ? cloneSample.isNotEmpty : presetVoice.trim().isNotEmpty),
     CompanionVoiceSource.openai => openaiBase.trim().isNotEmpty && openaiVoice.trim().isNotEmpty,
@@ -259,7 +273,9 @@ class CompanionVoiceSettings {
 
   CompanionVoiceSettings copyWith({
     bool? on,
+    bool? follow,
     CompanionVoiceSource? source,
+    String? deepseekVoice,
     String? preset,
     Map<String, String>? presetKeys,
     Map<String, String>? presetVoices,
@@ -278,7 +294,9 @@ class CompanionVoiceSettings {
     String? customField,
   }) => CompanionVoiceSettings(
     on: on ?? this.on,
+    follow: follow ?? this.follow,
     source: source ?? this.source,
+    deepseekVoice: deepseekVoice ?? this.deepseekVoice,
     preset: preset ?? this.preset,
     presetKeys: presetKeys ?? this.presetKeys,
     presetVoices: presetVoices ?? this.presetVoices,
@@ -299,7 +317,9 @@ class CompanionVoiceSettings {
 
   /// The part kept in plain preferences: no keys, no headers.
   Map<String, Object?> plain() => {
+    'follow': follow,
     'source': source.name,
+    'deepseekVoice': deepseekVoice,
     'preset': preset,
     'presetVoices': presetVoices,
     'presetStyle': presetStyle,
@@ -314,14 +334,23 @@ class CompanionVoiceSettings {
     'customField': customField,
   };
 
-  static CompanionVoiceSettings fromPlain(Object? json, {bool on = false}) {
-    final map = json is Map ? json : const {};
+  /// Settings as kept; [defaults] for what was never saved. Settings saved
+  /// before [follow] existed keep their own voice.
+  static CompanionVoiceSettings fromPlain(
+    Object? json, {
+    bool on = false,
+    CompanionVoiceSettings defaults = const CompanionVoiceSettings(),
+  }) {
+    if (json is! Map) return defaults.copyWith(on: on);
+    final map = json;
     String text(String key, String fallback) => map[key] is String ? map[key] as String : fallback;
     final voices = map['presetVoices'];
-    const d = CompanionVoiceSettings();
+    final d = defaults;
     return CompanionVoiceSettings(
       on: on,
+      follow: map['follow'] == true,
       source: CompanionVoiceSource.values.asNameMap()[map['source']] ?? d.source,
+      deepseekVoice: deepSeekVoices.contains(map['deepseekVoice']) ? map['deepseekVoice'] as String : d.deepseekVoice,
       preset: text('preset', d.preset),
       presetVoices: {
         if (voices is Map)
@@ -342,20 +371,59 @@ class CompanionVoiceSettings {
   }
 }
 
-const _onKey = 'companion_voice_enabled';
-const _plainKey = 'companion_voice_v1';
-const _openaiKeyKey = 'companion_voice_openai_key';
-const _headersKey = 'companion_voice_custom_headers';
-const _presetKeysKey = 'companion_voice_preset_keys';
+/// Where one set of voice settings is kept: her voice (伙伴小屋) and the
+/// app's 朗读 voice (speech_settings.dart) each have their own.
+class VoiceSettingsKeys {
+  const VoiceSettingsKeys({
+    required this.on,
+    required this.plain,
+    required this.openaiKey,
+    required this.headers,
+    required this.presetKeys,
+  });
 
-/// Her voice settings; null until read (then she stays silent).
-class CompanionVoiceSettingsController extends Notifier<CompanionVoiceSettings?> {
+  final String on;
+  final String plain;
+  final String openaiKey;
+  final String headers;
+  final String presetKeys;
+}
+
+const companionVoiceKeys = VoiceSettingsKeys(
+  on: 'companion_voice_enabled',
+  plain: 'companion_voice_v1',
+  openaiKey: 'companion_voice_openai_key',
+  headers: 'companion_voice_custom_headers',
+  presetKeys: 'companion_voice_preset_keys',
+);
+
+/// One set of voice settings; null until read (then nothing speaks).
+abstract class VoiceOutputSettingsController extends Notifier<CompanionVoiceSettings?> {
   static const _secure = FlutterSecureStorage();
+
+  VoiceSettingsKeys get keys;
+
+  /// What a person who never saved anything gets.
+  CompanionVoiceSettings get defaults;
+
+  String get _onKey => keys.on;
+  String get _plainKey => keys.plain;
+  String get _openaiKeyKey => keys.openaiKey;
+  String get _headersKey => keys.headers;
+  String get _presetKeysKey => keys.presetKeys;
 
   @override
   CompanionVoiceSettings? build() {
-    unawaited(_load());
+    _loaded = _load();
     return null;
+  }
+
+  late Future<void> _loaded;
+
+  /// The settings once they have been read (the defaults when nothing could be).
+  Future<CompanionVoiceSettings> ready() async {
+    await _loaded;
+    return state ?? defaults;
   }
 
   Future<void> _load() async {
@@ -364,7 +432,8 @@ class CompanionVoiceSettingsController extends Notifier<CompanionVoiceSettings?>
       final raw = prefs.getString(_plainKey);
       var settings = CompanionVoiceSettings.fromPlain(
         raw == null ? null : jsonDecode(raw),
-        on: prefs.getBool(_onKey) ?? false,
+        on: prefs.getBool(_onKey) ?? defaults.on,
+        defaults: defaults,
       );
       try {
         final keys = await _secure.read(key: _presetKeysKey);
@@ -383,7 +452,7 @@ class CompanionVoiceSettingsController extends Notifier<CompanionVoiceSettings?>
       }
       if (ref.mounted && state == null) state = settings;
     } on Object {
-      if (ref.mounted && state == null) state = const CompanionVoiceSettings();
+      if (ref.mounted && state == null) state = defaults;
     }
   }
 
@@ -403,6 +472,15 @@ class CompanionVoiceSettingsController extends Notifier<CompanionVoiceSettings?>
       // Kept for this run only.
     }
   }
+}
+
+/// Her voice: off, and the same as 朗读's, until the person says otherwise.
+class CompanionVoiceSettingsController extends VoiceOutputSettingsController {
+  @override
+  VoiceSettingsKeys get keys => companionVoiceKeys;
+
+  @override
+  CompanionVoiceSettings get defaults => const CompanionVoiceSettings(follow: true);
 }
 
 final companionVoiceSettingsProvider = NotifierProvider<CompanionVoiceSettingsController, CompanionVoiceSettings?>(
@@ -449,7 +527,9 @@ Future<CompanionVoiceAudio> fetchCompanionVoice(
   String text,
   http.Client client, {
   Duration timeout = const Duration(seconds: 20),
+  DeepSeekSpeechResolver? deepseek,
 }) async {
+  if (settings.source == CompanionVoiceSource.deepseek) return _deepseek(settings, text, deepseek, timeout);
   if (settings.cloning) {
     final voice = await companionCloneVoice(settings.cloneSample);
     settings = settings.copyWith(presetVoices: {...settings.presetVoices, settings.preset: voice});
@@ -474,6 +554,7 @@ Future<CompanionVoiceAudio> fetchCompanionVoice(
         }),
       ),
       CompanionVoiceSource.custom => _custom(settings, text, client),
+      CompanionVoiceSource.deepseek ||
       CompanionVoiceSource.system ||
       CompanionVoiceSource.preset => throw const CompanionVoiceError('system voice is not fetched'),
     }.timeout(timeout);
@@ -498,6 +579,31 @@ Future<CompanionVoiceAudio> fetchCompanionVoice(
   }
   if (bytes.isEmpty) throw const CompanionVoiceError('empty reply');
   return CompanionVoiceAudio(bytes, kind);
+}
+
+/// One sentence from DeepSeek, as a WAV (her mouth reads its loudness).
+Future<CompanionVoiceAudio> _deepseek(
+  CompanionVoiceSettings settings,
+  String text,
+  DeepSeekSpeechResolver? resolve,
+  Duration timeout,
+) async {
+  final speech = resolve == null ? null : await resolve();
+  if (speech == null) throw const CompanionVoiceError('no-deepseek');
+  try {
+    final pcm = BytesBuilder(copy: false);
+    await for (final chunk in speech.synthesize(text, voice: settings.deepseekVoice).timeout(timeout)) {
+      pcm.add(chunk);
+    }
+    if (pcm.isEmpty) throw const CompanionVoiceError('empty reply');
+    return CompanionVoiceAudio(deepSeekWav(pcm.takeBytes()), 'wav');
+  } on DeepSeekSpeechError catch (error) {
+    throw CompanionVoiceError('deepseek ${error.failure.name}${error.detail.isEmpty ? '' : ' ${error.detail}'}');
+  } on TimeoutException {
+    throw const CompanionVoiceError('timeout');
+  } finally {
+    speech.close();
+  }
 }
 
 Future<http.Response> _custom(CompanionVoiceSettings settings, String text, http.Client client) {

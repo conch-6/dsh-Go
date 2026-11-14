@@ -37,19 +37,19 @@ class OwnerScopesTest {
         assertFalse((enter(table, "A") as OwnerScopes.Entry.Refused<Any, String>).unknown)
     }
 
-    @Test fun all256CompletedOwnersRemainReplayableAndCannotBeRecreated() {
+    @Test fun aLongRunningConnectionKeepsAcceptingTasksAndForgetsOnlyTheOldestReceipts() {
         val table = OwnerScopes<Any, String>()
-        for (i in 0 until 256) {
+        for (i in 0 until 300) {
             table.leave(record(enter(table, "$i")))
             table.leave(record(enter(table, "$i", release = true)), "receipt-$i")
         }
-        assertEquals("scopeHistoryFull", (enter(table, "257") as OwnerScopes.Entry.Refused<Any, String>).code)
-        for (i in 0 until 256) {
+        assertTrue(enter(table, "next") is OwnerScopes.Entry.Acquired) // never "history full"
+        for (i in 44 until 300) {
             assertEquals("identityChanged", (enter(table, "$i") as OwnerScopes.Entry.Refused<Any, String>).code)
             assertEquals("receipt-$i", (enter(table, "$i", release = true) as OwnerScopes.Entry.Completed<Any, String>).receipt)
         }
-        assertNull(table.enterGlobal()) // explicit off/destroy remains possible once truly empty
-        table.leaveGlobal()
+        // A forgotten owner is unknown: its late RELEASE fails, and the App disconnects instead.
+        assertTrue((enter(table, "0", release = true) as OwnerScopes.Entry.Refused<Any, String>).unknown)
     }
 
     @Test fun maintenanceOwnsWholeResourceLifetimeAndGlobalCannotBypassUnknownScope() {

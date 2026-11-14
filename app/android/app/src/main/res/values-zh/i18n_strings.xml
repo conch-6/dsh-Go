@@ -28,7 +28,6 @@
     <string name="background_input_window_not_ready">输入测试窗口未就绪，未发送测试点击</string>
     <string name="background_input_unconfirmed">输入测试未在时限内收到完整的按下和抬起事件</string>
     <string name="background_input_cancelled">输入测试已取消</string>
-    <string name="background_input_probe_busy">后台屏正被任务使用，请在任务结束后重试输入测试</string>
     <string name="background_input_cleanup_failed">未能确认输入测试已清理，请重新连接特权通道后再试</string>
     <string name="background_input_api_unavailable">这个系统没有可用的后台输入接口，请更新 App，或反馈机型和系统版本</string>
     <string name="background_input_permission_denied">系统拒绝了后台输入，请检查通道授权；小米 / 红米需打开「USB 调试(安全设置)」</string>

@@ -187,6 +187,7 @@ Future<TavernBackupInfo> restoreTavernBackup(
   File archive,
   Directory root, {
   required Future<void> Function(Directory staging, int sourceSqliteUserVersion) validateStaging,
+  Future<void> Function(Directory destination)? validateDestination,
 }) async {
   final destination = await _canonicalDirectory(root);
   _requireNamedDirectory(destination);
@@ -203,6 +204,7 @@ Future<TavernBackupInfo> restoreTavernBackup(
     }
     await destination.parent.create(recursive: true);
     await _recover(destination);
+    await validateDestination?.call(destination);
     final journalFile = _journalFile(destination);
     if (await _type(journalFile.path) != FileSystemEntityType.notFound) {
       throw StateError('The previous restore still has cleanup pending: ${journalFile.path}');

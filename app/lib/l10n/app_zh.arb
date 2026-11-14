@@ -5502,6 +5502,7 @@
   "launchFit": "适配方式",
   "launchFitFill": "填满",
   "launchFitCenter": "居中",
+  "launchFrame": "调整位置",
   "launchBackground": "背景色",
   "launchBackdropAuto": "自动",
   "launchBackdropEdge": "取自图片",
@@ -6838,14 +6839,13 @@
   "phoneSelfCheckScope": "使用已选择并连接的通道和临时展示屏。应用启动、文字输入、截图、OCR及主屏受扰情况均未测试。清理通过不代表展示屏创建成功。",
   "phoneSelfCheckStart": "开始检查",
   "phoneSelfCheckCancel": "请求取消",
-  "phoneSelfCheckRetry": "仅重试清理",
   "phoneSelfCheckRefresh": "刷新状态",
   "phoneSelfCheckSave": "保存脱敏报告",
   "phoneSelfCheckSaving": "保存中…",
   "phoneSelfCheckSaved": "报告已存入下载/DSH-Go。",
   "phoneSelfCheckSaveFailed": "报告保存失败。",
   "phoneSelfCheckReportHint": "仅在你点击保存时导出。本机报告只含固定结果，不含截图、识别文字、日志、账户数据或运行标识。",
-  "phoneSelfCheckRunState": "{state, select, idle{尚未开始} running{部分自检进行中} cleaning{正在清理；取消不代表已撤销派发的输入} done{检查已结束，结果见技术详情} cancelled{已取消，已观察到的操作仍保留} cleanup_pending{清理尚未确认，资源仍保留} other{状态不可用}}",
+  "phoneSelfCheckRunState": "{state, select, idle{尚未开始} running{部分自检进行中} cleaning{正在清理；取消不代表已撤销派发的输入} done{检查已结束，结果见技术详情} cancelled{已取消，已观察到的操作仍保留} other{状态不可用}}",
   "@phoneSelfCheckRunState": {
     "placeholders": {
       "state": {
@@ -6982,8 +6982,7 @@
   "phoneBackgroundParallelUnsupported": "此设备当前无法使用后台操作。",
   "phoneBackgroundParallelConnection": "建立连接后才能接纳新的后台任务。",
   "phoneBackgroundParallelBusy": "后台通道正在准备或维护，暂不能接纳新任务。",
-  "phoneBackgroundParallelRecovery": "请先处理未完成的后台资源恢复，再开始新任务。",
-  "phoneBackgroundParallelPeer": "当前连接的服务不支持所需的后台能力。",
+  "phoneGateRetest": "重新检查此通道",
   "phoneBackgroundParallelSerial": "此连接支持一个后台槽位，设置偏好仍会保留。",
   "phoneSkillBundlePublishedUnverified": "文件已发布，但尚未通过完整核验。不要重复保存。",
   "phoneSkillBundleUnknown": "保存结果尚未确认，文件可能已经写入。不要重复保存。",
@@ -7034,12 +7033,6 @@
   "phonePrivilegedSuggested": "建议",
   "phonePrivilegedRootRiskTitle": "给 DSH Go root 权限？",
   "phonePrivilegedRootRiskBody": "root 管理器（Magisk、KernelSU 或 APatch）会弹窗问你。允许后，DSH Go 以 root 运行自己的后台服务；只有打开「保持 root 通道」，断开或重启后才会自己再去申请。",
-  "phoneGateCleanupTitle": "探针清理尚未确认",
-  "phoneGateCleanupUnknown": "新后台资源已被阻止。原通道仍可用时，只能重试原清理，不会重跑探针。",
-  "phoneGateCleanupRunning": "正在等待原探针及清理完成；清理确认前保留原通道。",
-  "phoneGateCleanupRetry": "仅重试清理",
-  "phoneGateCleanupDone": "清理已确认。请再次明确选择通道，重新检查。",
-  "phoneGateRetest": "重新检查此通道",
   "phoneKeepTitle": "{mode, select, shizuku{保持 Shizuku 通道} sui{保持 Sui 通道} root{保持 root 通道} adb{保持自连 ADB 通道} other{保持这个通道}}",
   "@phoneKeepTitle": {
     "placeholders": {
@@ -7058,11 +7051,6 @@
   "phoneKeepWaitingNetwork": "等连上 Wi‑Fi 后再连",
   "phoneKeepNotPaired": "还没有配对，请先完成无线调试配对",
   "phoneKeepFailed": "没连上；下次打开 App 或开始操控时再试",
-  "phoneResourceRecoveryTitle": "后台资源待核验",
-  "phoneResourceRecoveryRunning": "正在核对原资源记录，完成前不能开始新的手机任务。",
-  "phoneResourceRecoveryStorage": "无法读取或保存资源记录。可重试保存或读取；已确认的释放不会重复执行，也不会重放旧操作。",
-  "phoneResourceRecoveryPending": "旧后台资源尚未核验，新的手机任务暂被阻止。请选择原授权通道后重试；仍无法核验时，可重启设备后再次检查。旧操作结果可能已经发生。确认任务中断提示不会清除这些资源。",
-  "phoneResourceRecoveryRetry": "重试资源核验",
   "phoneSkillSectionTitle": "成功任务与技能",
   "phoneSkillAskAfterSuccess": "任务成功后询问是否存成技能",
   "phoneSkillAskAfterSuccessHint": "默认关闭。此页可见时，新完成的任务会询问一次；也可随时手动选择。",
@@ -9298,7 +9286,7 @@
   "remoteImportKeyFile": "从文件导入",
   "remotePrivateKeyPassword": "私钥密码（可选）",
   "remoteStartCommand": "启动命令",
-  "remoteStartCommandHelp": "用 nvm 安装的可以填完整路径；也支持 tmux，需带 -s 会话名（会话名不填会报错），如 tmux new-session -d -s dsh 'dsh web --port 3081 --no-open'",
+  "remoteStartCommandHelp": "用 nvm 安装的可以填完整路径",
   "remoteWorkingDirectory": "工作目录（可选）",
   "remoteWorkingDirectoryHelp": "新对话默认在这里，支持 ~/",
   "remoteHostFingerprint": "主机指纹",
@@ -9819,7 +9807,8 @@
   "searchKwTheme": "外观,配色,颜色,主题色,强调色,图标",
   "searchKwPets": "宠物,小鲸,桌宠,悬浮,鲸鱼",
   "searchKwPerformance": "省电,流畅,卡顿,发热,轻量,完整",
-  "searchKwVoice": "语音识别,麦克风,听写,说话,语音",
+  "searchKwVoice": "语音识别,麦克风,听写,说话,语音,朗读,语音通话,打电话,TTS,声音",
+  "searchKwVoiceReading": "朗读,朗读的声音,TTS,音色,海星,暗潮,声音",
   "searchKwNotifications": "提醒,推送,横幅,消息,铃声",
   "searchKwReplyPrefs": "偏好,关于我,自我介绍,回答风格,称呼,AGENTS.md",
   "searchKwSharedLinks": "分享链接,链接,公开链接,分享",
@@ -10663,6 +10652,112 @@
       }
     }
   },
+  "speechReadAloud": "朗读",
+  "speechReadAloudStop": "停止朗读",
+  "speechReadSection": "朗读",
+  "speechReadFooter": "回复下方的朗读键、伙伴小屋和语音通话都用这个声音。",
+  "speechVoiceTitle": "朗读的声音",
+  "speechVoiceHello": "你好，这是朗读的声音。",
+  "speechVoiceDeepseek": "DeepSeek",
+  "speechVoiceDeepseekHint": "登录的 DeepSeek 账号付费；没登录，或账号不能用于语音时，用设置里的 API Key。不用另外配置",
+  "speechVoiceDeepseekFooter": "按朗读的字数计费，价格见 DeepSeek 开放平台。读出前会去掉代码块、表格和链接地址。",
+  "speechVoiceStella": "海星（女声）",
+  "speechVoiceTide": "暗潮（男声）",
+  "speechVoiceStellaShort": "海星",
+  "speechVoiceTideShort": "暗潮",
+  "speechVoiceFollow": "跟朗读一样",
+  "speechVoiceFollowHint": "用设置 › 语音里朗读的声音",
+  "speechNotSetUp": "朗读的声音还没设置好，去设置 › 语音看看",
+  "speechNoCredential": "要先登录 DeepSeek 账号，或在设置里填 API Key",
+  "speechSignIn": "DeepSeek 账号用不了语音（可能登录过期，或语音只认 API Key）。重新登录，或在设置里填上 API Key",
+  "speechUnauthorized": "DeepSeek API Key 无效，请在设置里检查",
+  "speechBalance": "DeepSeek 余额不足",
+  "speechRateLimited": "请求太频繁，稍后再试",
+  "speechNothingToRead": "这条回复没有可以朗读的文字",
+  "speechNotHeard": "没听清，再说一次",
+  "speechTooLong": "录音太长了，分几段说吧",
+  "speechBusy": "语音服务正忙，稍后再试",
+  "speechNetwork": "连不上语音服务，请检查网络",
+  "speechReadFailed": "朗读失败",
+  "speechListenFailed": "识别失败",
+  "speechCloudNotice": "语音会发给 DeepSeek 识别。想在手机上识别，可以换成语音模型。",
+  "speechCloudNotSetUp": "还没设置云端识别服务",
+  "speechCallTile": "语音通话",
+  "speechCallSection": "语音通话",
+  "speechCallFooter": "通话时说完一句停一下，就会发出去；回答边写边读。",
+  "speechCallBargeIn": "插话打断",
+  "speechCallBargeInHint": "AI 说话时你一开口，它先轻下来；「嗯」「对」它接着说，说别的它就停下听你",
+  "speechCallSpoken": "口语回答",
+  "speechCallSpokenHint": "通话的第一条消息会请 AI 简短、口语化地回答",
+  "speechCallSpeaker": "默认免提",
+  "speechCallSpeakerHint": "接上耳机时总用耳机",
+  "speechCallHint": "（这是语音通话，我说的话由语音识别转成文字。请用简短、口语化的中文回答，不要用 Markdown、列表、表格和代码块。）",
+  "speechCallCutNote": "（你说到「{heard}」时我打断了你，后面的我没听到。）",
+  "@speechCallCutNote": {
+    "placeholders": {
+      "heard": {
+        "type": "String"
+      }
+    }
+  },
+  "speechCallCutEarly": "（你刚开口我就打断了你，这条回答我没听到。）",
+  "speechCallCue": "思考提示音",
+  "speechCallCueHint": "回答一时没出声时，轻响一声表示还在想",
+  "speechLiveSection": "实时字幕",
+  "speechLiveName": "流式识别模型",
+  "speechLiveAbsentNote": "下载后，通话时一边说一边出字，插话也停得更快。约 {mb}，在手机上运行",
+  "@speechLiveAbsentNote": {
+    "placeholders": {
+      "mb": {
+        "type": "String"
+      }
+    }
+  },
+  "speechLiveReadyNote": "已占用 {mb}，通话时自动使用",
+  "@speechLiveReadyNote": {
+    "placeholders": {
+      "mb": {
+        "type": "String"
+      }
+    }
+  },
+  "speechLiveFooter": "字幕和插话判断在手机上完成；发给 AI 的文字仍由上面选的识别方式给出，选了云端识别录音就会上传。",
+  "speechLiveDeleteTitle": "删除流式识别模型？",
+  "speechLiveDeleteBody": "删除后通话不再显示实时字幕，随时可以重新下载。",
+  "speechCallStarting": "正在接通",
+  "speechCallListening": "在听",
+  "speechCallHearing": "你在说",
+  "speechCallThinking": "想一想",
+  "speechCallSpeaking": "正在说，轻点光球可以跳过",
+  "speechCallMuted": "已静音",
+  "speechCallEnded": "通话已结束",
+  "speechCallEndPermission": "没有麦克风权限",
+  "speechCallEndMicrophone": "麦克风被占用或打不开",
+  "speechCallEndNoRecognizer": "通话需要能识别录音的方式：登录 DeepSeek 账号、填 API Key，或下载语音模型",
+  "speechCallEndBackground": "切到后台时通话会结束",
+  "speechCallEndFailed": "录音出错，通话已结束",
+  "speechCallSendFailed": "没发出去，再说一次",
+  "speechCallSkipHint": "跳过这段回答",
+  "speechCallMute": "静音",
+  "speechCallUnmute": "取消静音",
+  "speechCallHangUp": "挂断",
+  "speechCallSpeakerOn": "免提",
+  "speechCallEarpiece": "听筒",
+  "speechBackdropTitle": "通话背景",
+  "speechBackdropSea": "深海",
+  "speechBackdropImage": "我的图片",
+  "speechBackdropImagePick": "选一张图",
+  "speechBackdropCompanion": "伙伴",
+  "speechBackdropHint": "图片会虚化、压暗，字幕看得清。选伙伴时，她会跟着声音说话。",
+  "speechBackdropHintChange": "再点一次「我的图片」可以换一张。选伙伴时，她会跟着声音说话。",
+  "speechBackdropNoCompanion": "先在伙伴小屋里请她住进来，才能把她放进通话里。",
+  "speechBackdropReplace": "换一张图",
+  "speechBackdropPickFailed": "这张图用不了，换一张试试",
+  "speechCallVisual": "光效",
+  "speechCallVisualRing": "光环",
+  "speechCallVisualMono": "细线",
+  "speechCallVisualGlass": "光球",
+  "speechInsecure": "这个云端服务的地址不是 https，Key 不能这样发出去",
   "starPromptTitle": "{hours, plural, =0{本鱼已经在 DSH Go 里陪你半个小时啦⁠~} =1{本鱼已经在 DSH Go 里陪你一个小时啦⁠~} other{本鱼已经在 DSH Go 里陪你 {hours} 个小时啦⁠~}}",
   "@starPromptTitle": {
     "description": "The star prompt's first line. hours is the whole hours of use so far, rounded down; 0 is half an hour (the first ask comes after 30 minutes). The word joiner keeps the ~ on the line of the word before it.",
@@ -11927,6 +12022,9 @@
       }
     }
   },
+  "tavernInspectCost": "估算费用",
+  "tavernInspectCostPeak": "按 DeepSeek 官方价，高峰时段",
+  "tavernInspectCostOffPeak": "按 DeepSeek 官方价，低谷时段（半价）",
   "tavernInspectSegments": "发出去的 {count} 段",
   "@tavernInspectSegments": {
     "placeholders": {
@@ -12198,6 +12296,24 @@
   "tavernSessionUsing": "正在用",
   "tavernSessionLook": "外观",
   "tavernSessionMore": "更多",
+  "tavernAudio": "音乐和音效",
+  "tavernAudioBgm": "背景音乐",
+  "tavernAudioAmbient": "音效",
+  "tavernAudioNothing": "没在放",
+  "tavernAudioPlay": "播放",
+  "tavernAudioPause": "暂停",
+  "tavernAudioMode": "播放方式",
+  "tavernAudioModeOne": "单曲",
+  "tavernAudioModeAll": "列表",
+  "tavernAudioModeShuffle": "随机",
+  "tavernAudioModeOnce": "放一首",
+  "tavernAudioVolume": "音量",
+  "tavernAudioAllow": "让角色卡播放",
+  "tavernAudioAdd": "加一首背景音乐",
+  "tavernAudioAddTitle": "背景音乐的链接",
+  "tavernAudioAddNote": "填音频文件的网址（mp3、ogg 等），加进这段对话的背景音乐列表，和卡放的放在一起。",
+  "tavernAudioAddConfirm": "加入",
+  "tavernAudioAddInvalid": "要以 http:// 或 https:// 开头",
   "tavernStageState": "状态",
   "tavernStageDirector": "导演",
   "tavernStageTurn": "本回合",
@@ -12271,8 +12387,8 @@
   },
   "tavernDeleteFromUndoable": "从这条到最新一条，连同它们的备选回复和分支。删完几秒内可以撤销。",
   "tavernUndoFailed": "没能撤销",
-  "tavernShowUsage": "每条回复下显示用量",
-  "tavernShowUsageSubtitle": "模型报告的输入、输出 token 数；不估算费用",
+  "tavernShowUsage": "每条回复下显示用量和费用",
+  "tavernShowUsageSubtitle": "模型报告的输入、输出 token 数；DeepSeek 的模型另按官方价估个费用，分高峰和低谷时段",
   "tavernUsageLine": "输入 {input} · 输出 {output}",
   "@tavernUsageLine": {
     "placeholders": {
@@ -12300,6 +12416,36 @@
       "output": {
         "type": "int",
         "format": "decimalPattern"
+      }
+    }
+  },
+  "tavernUsageCost": "约 {usd}",
+  "@tavernUsageCost": {
+    "placeholders": {
+      "usd": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernUsageCostUnder": "不到 {usd}",
+  "@tavernUsageCostUnder": {
+    "placeholders": {
+      "usd": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernCostAlert": "单回合费用提醒",
+  "tavernCostAlertSubtitle": "一个回合按 DeepSeek 官方价估的费用超过这条线时，在输入框上方说一声；别的模型不估",
+  "tavernCostAlertOff": "关",
+  "tavernCostAlertNotice": "这一回合{cost}，超过了提醒线 {line}",
+  "@tavernCostAlertNotice": {
+    "placeholders": {
+      "cost": {
+        "type": "String"
+      },
+      "line": {
+        "type": "String"
       }
     }
   },
@@ -12641,6 +12787,22 @@
     }
   },
   "tavernSessionUsageNone": "还没有模型报告过用量",
+  "tavernSessionUsageCost": "约 {usd}，按 DeepSeek 官方价，分高峰和低谷时段算；法定节假日全天是低谷价，那几天这里会算高一点",
+  "@tavernSessionUsageCost": {
+    "placeholders": {
+      "usd": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernSessionUsageUnpriced": "{count} 条回复用的模型不在价目表里，没算进费用",
+  "@tavernSessionUsageUnpriced": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "tavernComposerNoKey": "填好 Key 就能开始",
   "tavernWriteOwn": "自己写一个角色",
   "tavernWriteOwnSubtitle": "从一张空白卡开始，名字、设定和开场白都自己填",
@@ -12655,7 +12817,7 @@
   "tavernBookmarksEmptyMessage": "长按一条消息，选「加书签」",
   "tavernBookmarkGone": "那一条已经不在了，书签去掉了",
   "tavernUsageStats": "用量统计",
-  "tavernUsageStatsSubtitle": "每段对话用了多少 token",
+  "tavernUsageStatsSubtitle": "每段对话用了多少 token、约多少钱",
   "tavernUsageAllNote": "所有对话当前线上的回复合计；换掉的备选不算",
   "tavernUsageChatReplies": "{count} 条回复 · 回复 {completion}",
   "@tavernUsageChatReplies": {
@@ -12803,7 +12965,9 @@
   },
   "tavernStThemeNote": "配色选「ST」时，引号里的话和 *动作* 用它的颜色；太浅或太深看不清的，会调到看得清。",
   "tavernStThemeImport": "导入 ST 主题",
-  "tavernStThemeImportNote": "从 SillyTavern 导出的主题文件里取引号和斜体的颜色。",
+  "tavernStThemeImportNote": "从 SillyTavern 导出的主题文件里取引号和斜体的颜色，和它的自定义 CSS。",
+  "tavernStThemeCss": "用它的自定义 CSS",
+  "tavernStThemeCssSubtitle": "配色选「ST」时加进整页画布，和在 ST 里一样盖过默认样式。版面乱了就关掉，颜色照用。",
   "tavernStThemeRemove": "移除",
   "tavernStThemeImported": "换成了 ST 主题「{name}」的配色",
   "@tavernStThemeImported": {
@@ -12813,7 +12977,7 @@
       }
     }
   },
-  "tavernStThemeNoColors": "「{name}」里没有能用的引号或斜体颜色",
+  "tavernStThemeNoColors": "「{name}」里没有能用的引号、斜体颜色或自定义 CSS",
   "@tavernStThemeNoColors": {
     "placeholders": {
       "name": {
@@ -12917,6 +13081,14 @@
   "tavernRollSuccess": "成功",
   "tavernRollFailure": "失败",
   "tavernGameHere": "这里有一个小游戏，现在还不能在这里玩",
+  "tavernCanvasReplied": "{name}回复了",
+  "@tavernCanvasReplied": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "tavernRegexEdit": "编辑规则",
   "tavernRegexFieldName": "名字",
   "tavernRegexFieldFindHelp": "SillyTavern 的写法：/规则/标志，比如 /(早安|晚安)/gi",
@@ -12950,8 +13122,620 @@
   "tavernRegexTryDraft": "用现在填的试一下",
   "tavernRegexDepthAny": "不限",
   "tavernCanvas": "整页画布（试用）",
-  "tavernCanvasSubtitle": "整段对话放进一张网页，按 SillyTavern 的结构排，卡写给 ST 的样式能跨消息生效。视觉小说不用它；卡里的脚本暂时还不跑。",
+  "tavernCardScriptsHint": "这张卡带了 {count} 个脚本，打开「整页画布（试用）」才会运行",
+  "@tavernCardScriptsHint": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernCardScriptsHintAction": "打开",
+  "tavernRender": "显示方式",
+  "tavernRenderSubtitle": "只管这个角色的单人对话：卡里的状态栏、美化要选网页或画布才显示，脚本只在画布里运行",
+  "tavernRenderText": "文字",
+  "tavernRenderIslands": "消息网页",
+  "tavernRenderCanvas": "整页画布",
+  "tavernCanvasSubtitle": "整段对话放进一张网页，按 SillyTavern 的结构排，卡写给 ST 的样式能跨消息生效。卡里的脚本会运行，不想让它跑就打开「网页里不运行卡的脚本」。视觉小说不用它。",
   "tavernCanvasReloaded": "画面重新加载了",
+  "tavernGroupSpeaking": "{name} 在说",
+  "@tavernGroupSpeaking": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernGroupThen": "接着是 {names}",
+  "@tavernGroupThen": {
+    "placeholders": {
+      "names": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernGroupNoSpeakers": "这一轮没人接话。点上面的名字，让谁来说。",
+  "tavernGroupSpeakNext": "让大家接着说",
+  "tavernGroupNew": "新建群聊",
+  "tavernGroupMembers": "谁在里面",
+  "tavernGroupMembersNote": "按点选的顺序排；第一个是主持，故事共用的状态记在它的卡上。",
+  "tavernGroupHost": "主持",
+  "tavernGroupTitle": "群名",
+  "tavernGroupActivation": "怎么轮流说",
+  "tavernGroupNatural": "自然",
+  "tavernGroupListOrder": "按顺序",
+  "tavernGroupRandom": "随机",
+  "tavernGroupManual": "手动",
+  "tavernGroupDirector": "导演",
+  "tavernGroupNaturalNote": "像 SillyTavern：被点到名的先说，其余看各自的话多话少；每轮最多几个人说在群设置里改。",
+  "tavernGroupListOrderNote": "每轮按名单从头轮一遍（静音的跳过）。",
+  "tavernGroupRandomNote": "每轮随机挑一个这轮还没说过的人。",
+  "tavernGroupManualNote": "谁也不自己开口；点输入框上面的名字，让谁说谁说。",
+  "tavernGroupDirectorNote": "由导演按剧情点名下一位。",
+  "tavernGroupPickTwo": "至少选两个角色",
+  "tavernGroupCreate": "建群（{count} 人）",
+  "@tavernGroupCreate": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernGroupCreateFailed": "没能建群：{reason}",
+  "@tavernGroupCreateFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernGroupTag": "群",
+  "tavernGroupMemberCount": "{count} 人",
+  "@tavernGroupMemberCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernGroupSettings": "群聊设置",
+  "tavernGroupMaxSpeakers": "每轮最多几人说",
+  "tavernGroupSelfResponses": "可以接着自己说",
+  "tavernGroupSelfResponsesNote": "上一句是谁说的，这一轮还能先轮到他。",
+  "tavernGroupHostNote": "主持是「{name}」：故事共用的状态、导演和秘密记在它的卡上；它可以不在发言名单里。",
+  "@tavernGroupHostNote": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernGroupMuted": "静音",
+  "tavernGroupMutedNote": "不会自己开口；点名时照样说。",
+  "tavernGroupTalkativeness": "话多话少",
+  "tavernGroupTalkativenessNote": "「自然」轮流时，越高越容易开口。",
+  "tavernGroupHelperModel": "用辅助模型",
+  "tavernGroupHelperModelNote": "用辅助模型说（自动时 DeepSeek 用 flash 且不思考，其他渠道用主模型），适合配角。",
+  "tavernGroupMoveUp": "往前挪",
+  "tavernGroupMoveDown": "往后挪",
+  "tavernGroupRemove": "移出群聊",
+  "tavernGroupAdd": "加一个角色",
+  "tavernGroupNoOthers": "书架上的角色都在群里了",
+  "tavernGroupUnavailable": "角色卡不在了",
+  "tavernGroupSaveFailed": "没能保存：{reason}",
+  "@tavernGroupSaveFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernGroupErrorNotGroup": "这已经不是群聊了",
+  "tavernGroupErrorCharacterNotFound": "这个角色的卡不在了",
+  "tavernGroupErrorMemberExists": "这个角色已经在群里了",
+  "tavernGroupErrorMemberNotFound": "这个角色已经不在群里了",
+  "tavernGroupErrorInvalidMembers": "成员不能重复，群里至少要有一个角色",
+  "tavernGroupErrorInvalidTalkativeness": "话多程度要在 0 到 1 之间",
+  "tavernGroupErrorInvalidLimit": "每轮至少要有一个人说话",
+  "tavernGroupErrorInvalidOrder": "排的顺序和群里的成员对不上，请重新打开再排",
+  "tavernGroupErrorHostInUse": "这个角色是一个群聊的群主，先删掉那个群聊",
+  "tavernGroupErrorInvalidTitle": "群聊的名字不能只有空白",
+  "tavernToolRollUnsettled": "🎲 {dice}：结果还没确认",
+  "@tavernToolRollUnsettled": {
+    "placeholders": {
+      "dice": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernToolRollNotDone": "🎲 {dice}：没有掷",
+  "@tavernToolRollNotDone": {
+    "placeholders": {
+      "dice": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernToolRollPass": "目标 {target}，成功",
+  "@tavernToolRollPass": {
+    "placeholders": {
+      "target": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernToolRollFail": "目标 {target}，没过",
+  "@tavernToolRollFail": {
+    "placeholders": {
+      "target": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernToolMemory": "想记住：「{text}」",
+  "@tavernToolMemory": {
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernToolMemoryAccept": "记住",
+  "tavernToolMemoryReject": "不用",
+  "tavernToolMemoryStaged": "等这一回合写完再定",
+  "tavernToolMemoryIneligible": "现在不能确认：{reason}",
+  "@tavernToolMemoryIneligible": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernToolMemoryAccepted": "已记住",
+  "tavernToolMemoryAuto": "已按自动设置记住",
+  "tavernToolMemoryRejected": "没有记",
+  "tavernToolMemoryInactive": "这一回合没有正常写完，没有记",
+  "tavernToolMemoryWaiting": "上次的决定还没确认上",
+  "tavernToolMemoryNotApplied": "没记上：{reason}",
+  "@tavernToolMemoryNotApplied": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernToolMemoryFailed": "没确认上：{detail}",
+  "@tavernToolMemoryFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernToolReasonRevision": "它已经变了，刷新后再定",
+  "tavernToolReasonResolved": "已经定过了",
+  "tavernToolReasonContext": "对话已经变了",
+  "tavernToolReasonDeleted": "那条回复被删了",
+  "tavernToolReasonChanged": "那条回复改过了",
+  "tavernToolReasonBranch": "不在现在这条线上",
+  "tavernToolReasonInactive": "已经失效",
+  "tavernToolReasonUnknown": "原因不明",
+  "tavernToolPolicy": "工具",
+  "tavernToolPolicyRoll": "让角色掷骰",
+  "tavernToolPolicyRollSubtitle": "回复里要掷骰时，由酒馆来掷，点数记下来",
+  "tavernToolPolicyRemember": "让角色记事",
+  "tavernToolPolicyRememberSubtitle": "角色觉得值得记住的事，按下面的方式记进记忆",
+  "tavernToolPolicyMode": "记事方式",
+  "tavernToolPolicyModeAsk": "先问我",
+  "tavernToolPolicyModeAuto": "自动",
+  "tavernToolPolicyDiagnostics": "设置里有一部分读不懂，对应的工具先关着",
+  "tavernToolPolicyNote": "只在用 DeepSeek、不开思考时，回复里才会用上这些；改了从下一回合起生效，角色卡也可以关掉它们",
+  "tavernToolPolicyFailed": "没改成：{detail}",
+  "@tavernToolPolicyFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernChatTools": "这局的工具",
+  "tavernChatToolFollow": "跟设置",
+  "tavernChatToolOn": "开",
+  "tavernChatToolOff": "关",
+  "tavernChatToolNow": "这局实际：掷骰{roll}，记事{remember}",
+  "@tavernChatToolNow": {
+    "placeholders": {
+      "roll": {
+        "type": "String"
+      },
+      "remember": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernChatToolHeld": "酒馆设置里关着的，这里打开也不算",
+  "tavernInspectRequests": "{count} 次请求",
+  "@tavernInspectRequests": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernInspectUsageTotals": "输入 {prompt}（缓存 {hit}）· 输出 {completion}",
+  "@tavernInspectUsageTotals": {
+    "placeholders": {
+      "prompt": {
+        "type": "String"
+      },
+      "hit": {
+        "type": "String"
+      },
+      "completion": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernReqUsagePrompt": "输入",
+  "tavernReqUsageCache": "缓存",
+  "tavernReqUsageCompletion": "输出",
+  "tavernReqUsageLine": "{field}：{parts}",
+  "@tavernReqUsageLine": {
+    "placeholders": {
+      "field": {
+        "type": "String"
+      },
+      "parts": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernReqUsageJoin": "，",
+  "tavernReqUsageKnown": "已明确 {known}",
+  "@tavernReqUsageKnown": {
+    "placeholders": {
+      "known": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernReqUsageUnknown": "{count} 个请求未知",
+  "@tavernReqUsageUnknown": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernReqUsageMissing": "{count} 个请求没报告",
+  "@tavernReqUsageMissing": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernReqUsageInvalid": "{count} 个请求报告的数不对",
+  "@tavernReqUsageInvalid": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernToolFailBudget": "这一回合用工具的次数用完了，停在这里；之前已经掷的骰子照样算数",
+  "tavernToolFailBatch": "模型一次要用的工具太多，这一批没有执行",
+  "tavernToolFailProtocol": "模型给的工具调用格式不对，没有执行",
+  "tavernToolFailSnapshot": "这个模型的回复没法接着用工具，停在这里",
+  "tavernToolFailReceipt": "工具的结果没能存好，稍后看看这一回合",
+  "tavernToolFailAnchor": "对话在这一回合中途变了，没有接着写",
+  "tavernToolFail": "用工具时出错了",
+  "tavernToolFailDetail": "用工具时出错了：{detail}",
+  "@tavernToolFailDetail": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernDiceUnsettled": "结果还没确认，可以再查一次",
+  "tavernDicePending": "上次那次掷骰还没确认",
+  "tavernDiceRecheck": "再查一次",
+  "tavernDiceForget": "放弃这次",
+  "tavernDiceBusy": "现在正忙，等这一回合写完再掷",
+  "tavernDiceOff": "酒馆设置里关了掷骰",
+  "tavernDiceFailed": "没掷成：{detail}",
+  "@tavernDiceFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernDiceNotSaved": "没确认上：{detail}",
+  "@tavernDiceNotSaved": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernChannel": "渠道",
+  "tavernChannelDeepSeek": "DeepSeek 官方",
+  "tavernChannelDeepSeekNote": "用 App 里填的 DeepSeek Key",
+  "tavernChannelAdd": "添加渠道",
+  "tavernChannelEdit": "编辑渠道",
+  "tavernChannelsNote": "兼容 OpenAI 接口的服务都能加：中转站、OpenRouter、自己电脑上跑的模型。Key 只存在这台手机的安全存储里。费用估算只认 DeepSeek 官方的价格，其他渠道只显示 token 数。",
+  "tavernChannelName": "名称",
+  "tavernChannelNameHint": "不填就用网址",
+  "tavernChannelBaseUrlInvalid": "要以 http:// 或 https:// 开头",
+  "tavernChannelKeyOptional": "本地服务不需要 Key 可以不填",
+  "tavernChannelKeyKept": "已存了 Key，不填就保持原样",
+  "tavernChannelFetchModels": "获取列表",
+  "tavernChannelFetching": "获取中…",
+  "tavernChannelFetchFailed": "没拿到模型列表（{detail}），直接填模型名也行",
+  "@tavernChannelFetchFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernChannelNoModels": "这个服务没列出模型，直接填模型名就行",
+  "tavernChannelModelHint": "服务商给的模型名",
+  "tavernChannelModelMissing": "填一个模型名",
+  "tavernChannelPickModel": "选模型",
+  "tavernChannelSearchModels": "搜索模型",
+  "tavernChannelDeepSeekApi": "按 DeepSeek 接口发送",
+  "tavernChannelDeepSeekApiNote": "用 DeepSeek 的续写方式和思考开关。只在 DeepSeek 官方或原样转发它的中转上打开。",
+  "tavernChannelDelete": "删除渠道",
+  "tavernChannelDeleteTitle": "删除「{name}」？",
+  "@tavernChannelDeleteTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernChannelDeleteMessage": "它的 Key 也会一起删掉。正在用它的话，换回 DeepSeek 官方。",
+  "tavernChannelCopyFromApp": "从 App 的渠道复制",
+  "tavernModelName": "模型名",
+  "tavernNumberCustom": "自定义",
+  "tavernNumberType": "输入数值",
+  "tavernNumberRange": "填 {min} 到 {max} 之间的数",
+  "@tavernNumberRange": {
+    "placeholders": {
+      "min": {
+        "type": "String"
+      },
+      "max": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernNumberRangeWhole": "填 {min} 到 {max} 之间的整数",
+  "@tavernNumberRangeWhole": {
+    "placeholders": {
+      "min": {
+        "type": "String"
+      },
+      "max": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernTopP": "Top P",
+  "tavernPresencePenalty": "存在惩罚",
+  "tavernFrequencyPenalty": "频率惩罚",
+  "tavernPresetSampling": "采样",
+  "tavernChannelHeaders": "请求头（可选）",
+  "tavernChannelHeadersNote": "每行一个，写成「名称: 值」。和 Key 一样存在这台手机的安全存储里。",
+  "tavernChannelHeadersInvalid": "每行写成「名称: 值」",
+  "tavernAuxiliary": "辅助模型",
+  "tavernAuxiliaryNote": "导演、群聊选人、秘密这些后台请求用它",
+  "tavernAuxiliaryAuto": "自动",
+  "tavernAuxiliaryAutoNote": "跟着主渠道：DeepSeek 用 Flash，其他渠道用同一个模型",
+  "tavernAuxiliaryDeepSeek": "DeepSeek Flash",
+  "tavernChannelKeyClear": "清除",
+  "tavernChannelKeyCleared": "Key 会在保存时清除",
+  "tavernDrafts": "草稿",
+  "tavernDraftsSubtitle": "改动先放在草稿里，挑好再应用到真的卡上",
+  "tavernDraftsForCard": "用 AI 改这张卡",
+  "tavernDraftsForCardSubtitle": "在草稿里改，挑好再应用",
+  "tavernDraftsEmpty": "还没有草稿",
+  "tavernDraftsEmptyOwn": "新建一份草稿，告诉 AI 想怎么改这张卡。",
+  "tavernDraftsEmptyAll": "从角色页开一份草稿，或者从文件起稿：文件先当草稿，不会直接导入。",
+  "tavernDraftNew": "新草稿",
+  "tavernDraftFromFile": "从文件起稿",
+  "tavernDraftSeedUnsupported": "{name} 不是角色卡或世界书，没法起稿",
+  "@tavernDraftSeedUnsupported": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernDraft": "草稿",
+  "tavernDraftSubtitle": "草稿里的改动还没用到真的卡上",
+  "tavernDraftGone": "这份草稿已经不在了",
+  "tavernDraftKindCharacter": "角色卡",
+  "tavernDraftKindPreset": "预设",
+  "tavernDraftNewSource": "{name}（还没存）",
+  "@tavernDraftNewSource": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernDraftGreetings": "备选开场白",
+  "tavernDraftEntry": "第 {n} 条",
+  "@tavernDraftEntry": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernDraftNoChanges": "还没有改动",
+  "tavernDraftNoChangesHint": "在下面告诉 AI 想怎么改",
+  "tavernDraftBefore": "原来",
+  "tavernDraftAfter": "改成",
+  "tavernDraftAbsent": "（没有）",
+  "tavernDraftRemoved": "删掉",
+  "tavernDraftAppliedChange": "已应用",
+  "tavernDraftDependsOn": "要和它前面的 {n} 处改动一起用",
+  "@tavernDraftDependsOn": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernDraftRemoveChange": "从草稿里去掉这处",
+  "tavernDraftApply": "应用 {n} 处",
+  "@tavernDraftApply": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernDraftSaveNew": "另存为新的",
+  "tavernDraftSavedNew": "已另存为新的",
+  "tavernDraftChecked": "检查过，没发现问题",
+  "tavernDraftCannotApply": "正则和预设的草稿暂时只能预览，不能应用",
+  "tavernDraftApplied": "已应用到「{name}」",
+  "@tavernDraftApplied": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernDraftNoChange": "和现在的一样，没有要改的",
+  "tavernDraftNotApplied": "没有应用：{reason}",
+  "@tavernDraftNotApplied": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernDraftUnconfirmed": "写入结果还没确认。先别重复点，过一会儿看历史版本里有没有。",
+  "tavernDraftApplyUnknown": "没收到结果（{reason}），再点一次会接着同一次操作",
+  "@tavernDraftApplyUnknown": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernDraftBehind": "「{name}」在起草之后改过了（也可能是刚应用过）。按现在的版本继续，再看一遍改动。",
+  "@tavernDraftBehind": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernDraftCatchUp": "按现在的版本继续",
+  "tavernDraftChangedMeanwhile": "草稿刚被改过，已刷新",
+  "tavernDraftPending": "上一次写入还没确认，暂时不能再应用",
+  "tavernDraftDelete": "删除草稿",
+  "tavernDraftDeleteTitle": "删除这份草稿？",
+  "tavernDraftDeleteBody": "只删草稿，已经应用到卡上的不受影响。",
+  "tavernDraftAskHint": "想怎么改？比如：开场白冷淡一点",
+  "tavernDraftAiSend": "让 AI 改",
+  "tavernDraftAiStop": "停下",
+  "tavernDraftAiTitle": "AI",
+  "tavernDraftAiRunning": "正在改…",
+  "tavernDraftAiDone": "改好了，改动在上面，挑好再应用",
+  "tavernDraftAiStopped": "已停下",
+  "tavernDraftAiConflict": "草稿在这期间被改过，AI 停下了",
+  "tavernDraftAiBudget": "四次请求用完了，先停在这里",
+  "tavernDraftAiFailed": "出错了",
+  "tavernDraftAiInterrupted": "中断了（App 关过）",
+  "tavernDraftEarlier": "之前问过的",
+  "tavernDraftRunReceipts": "改了 {changes} 次 · {requests} 次请求",
+  "@tavernDraftRunReceipts": {
+    "placeholders": {
+      "changes": {
+        "type": "int"
+      },
+      "requests": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernDraftHistory": "历史版本",
+  "tavernDraftHistoryEmpty": "还没有记下的版本",
+  "tavernDraftHistoryNote": "回到某一版会另存成新的一版，之后的版本都还在；图片和对话不受影响。",
+  "tavernDraftVersion": "第 {n} 版",
+  "@tavernDraftVersion": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernDraftVersionCurrent": "现在",
+  "tavernDraftRestore": "回到这一版",
+  "tavernDraftRestoreTitle": "回到第 {n} 版？",
+  "@tavernDraftRestoreTitle": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernDraftRestoreBody": "会另存成新的一版。",
+  "tavernDraftRestored": "已回到第 {n} 版",
+  "@tavernDraftRestored": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernDraftRestoreMoved": "这期间又改过了，刷新后再试",
+  "tavernDraftPrompt": "用草稿看提示词",
+  "tavernDraftPromptSubtitle": "把勾选的改动放进去，看下一轮会发什么；什么都不发送",
+  "tavernDraftPromptFrom": "接着哪段对话",
+  "tavernDraftPromptFirst": "新对话的第一句",
+  "tavernDraftPromptText": "下一句（可不填）",
+  "tavernDraftPromptTextHint": "你会说的话",
+  "tavernDraftPromptShow": "看提示词",
+  "tavernDraftPromptComplete": "提示词",
+  "tavernDraftPromptUnsupported": "这张卡有些内容在预览里没法照实拼出来",
+  "tavernDraftPromptNote": "卡里的脚本在预览里不运行。",
+  "tavernDraftUsagePartial": "已报告：输入 {prompt} · 输出 {completion}（有请求没报告用量）",
+  "@tavernDraftUsagePartial": {
+    "placeholders": {
+      "prompt": {
+        "type": "String"
+      },
+      "completion": {
+        "type": "String"
+      }
+    }
+  },
+  "tavernDraftTrial": "试玩",
+  "tavernDraftTrialSubtitle": "用草稿在一段临时对话里聊几句，真实对话不受影响",
+  "tavernDraftTrialNote": "会真的请求模型，按实际用量计费；最多四句。",
+  "tavernDraftTrialLine": "第 {n} 句",
+  "@tavernDraftTrialLine": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "tavernDraftTrialMore": "再加一句",
+  "tavernDraftTrialPlay": "开始试玩",
+  "tavernDraftTrialRunning": "正在试…",
+  "tavernDraftTrialDone": "试完了",
+  "tavernDraftTrialUnsupported": "这份草稿暂时没法试玩",
   "updateCheck": "检查更新",
   "updateAutoCheck": "自动检查更新",
   "updateAutoCheckDaily": "每天检查一次",
@@ -14508,11 +15292,11 @@
   "viewUiDialectKindOther": "这部分",
   "viewUiDialectInvalid": "这块内容在网页版查看",
   "viewUiDialectNote": "在网页版查看",
-  "voiceSettingsTitle": "语音输入",
+  "voiceSettingsTitle": "语音",
   "voiceModeAuto": "自动",
   "voiceModeSystem": "系统",
   "voiceModeEngine": "语音模型",
-  "voiceModeAutoHint": "有语音模型时用它，否则用系统识别",
+  "voiceModeAutoHint": "有 DeepSeek 账号或 API Key 时用 DeepSeek，否则用语音模型或系统识别",
   "voiceModeSystemHint": "使用手机设置中的识别服务",
   "voiceModeEngineHint": "用引擎里的语音模型识别",
   "voiceFallbackStarted": "已改用语音模型，请再说一次",
@@ -14647,6 +15431,14 @@
   },
   "voiceModelNoticePreparing": "正在校验语音模型",
   "voiceModelNoticeFailed": "语音模型下载失败，打开 App 重试",
+  "voiceModeDeepseek": "DeepSeek",
+  "voiceModeDeepseekHint": "用 DeepSeek 的语音识别，登录的账号或 API Key 付费",
+  "voiceModeCloud": "其他云端服务",
+  "voiceModeCloudHint": "OpenAI 兼容的语音转写接口，例如 Whisper、硅基流动",
+  "voiceCloudSection": "云端识别服务",
+  "voiceCloudFooter": "录音会发给这个服务识别。Key 只存在这台手机上。",
+  "voiceCloudBaseHelper": "填到 /v1 为止，App 会请求 …/audio/transcriptions",
+  "voiceCloudModelHelper": "例如 whisper-1、FunAudioLLM/SenseVoiceSmall",
   "voiceScribeReadFailed": "没能读取语音设置，请重试。",
   "voiceScribeSavedReadFailed": "已保存，刷新后可查看最新设置。",
   "voiceScribeSaveUnconfirmed": "没能确认保存，请刷新或重试。",

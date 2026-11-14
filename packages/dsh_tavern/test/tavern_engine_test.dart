@@ -293,13 +293,22 @@ void main() {
   test('stop while obtaining a key completes promptly and does not store an empty turn', () async {
     final (_, chatId) = await chat();
     final key = Completer<String?>();
-    engine.configure(TavernModelConfig(apiKey: () => key.future));
+    final keyEntered = Completer<void>();
+    engine.configure(
+      TavernModelConfig(
+        apiKey: () {
+          keyEntered.complete();
+          return key.future;
+        },
+      ),
+    );
     final started = Completer<void>();
     final future = engine.send(chatId, '尚未发出').map((event) {
       if (event is TavernTurnStarted) started.complete();
       return event;
     }).toList();
     await started.future;
+    await keyEntered.future.timeout(const Duration(seconds: 3));
     engine.stop(chatId);
     final events = await future.timeout(const Duration(seconds: 3));
     final failed = events.whereType<TavernTurnFailed>().single;

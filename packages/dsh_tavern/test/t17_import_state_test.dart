@@ -579,6 +579,7 @@ class _NoModel extends TavernModelClient {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) {
     calls++;
     throw StateError('State import inspection must not invoke a model.');

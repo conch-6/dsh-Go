@@ -65,6 +65,9 @@ class CustomLaunch {
     this.fit = LaunchFit.fill,
     this.backdrop = LaunchBackdrop.auto,
     this.edge,
+    this.zoom = 1,
+    this.alignX = 0,
+    this.alignY = 0,
     this.on = true,
     this.bytes,
     this.durationMs,
@@ -75,6 +78,9 @@ class CustomLaunch {
 
   /// Clips over this are refused (the system picker's budget for a launch screen, too).
   static const maxVideoBytes = 30 * 1024 * 1024;
+
+  /// The closest a [LaunchFit.fill] picture zooms in: a fifth of it across the screen.
+  static const maxZoom = 5.0;
 
   static const prefsKey = 'launch_custom';
 
@@ -96,6 +102,14 @@ class CustomLaunch {
   /// The edge colour, ARGB ([LaunchBackdrop.edge]); null when it couldn't be read.
   final int? edge;
 
+  /// 1: the picture just covers the screen ([LaunchFit.fill]); up to [maxZoom].
+  final double zoom;
+
+  /// Where the screen sits in the picture ([LaunchFit.fill]), -1 (left / top edge) to 1, like an
+  /// [Alignment].
+  final double alignX;
+  final double alignY;
+
   /// In use. Off: the default launch screen, with this one kept to switch back to.
   final bool on;
 
@@ -113,7 +127,14 @@ class CustomLaunch {
     _ => dark ? LaunchColors.nightTop : LaunchColors.mistTop,
   };
 
-  CustomLaunch copyWith({LaunchFit? fit, LaunchBackdrop? backdrop, bool? on}) => CustomLaunch(
+  CustomLaunch copyWith({
+    LaunchFit? fit,
+    LaunchBackdrop? backdrop,
+    double? zoom,
+    double? alignX,
+    double? alignY,
+    bool? on,
+  }) => CustomLaunch(
     kind: kind,
     path: path,
     width: width,
@@ -122,6 +143,9 @@ class CustomLaunch {
     fit: fit ?? this.fit,
     backdrop: backdrop ?? this.backdrop,
     edge: edge,
+    zoom: zoom ?? this.zoom,
+    alignX: alignX ?? this.alignX,
+    alignY: alignY ?? this.alignY,
     on: on ?? this.on,
     bytes: bytes,
     durationMs: durationMs,
@@ -136,6 +160,9 @@ class CustomLaunch {
     'fit': fit.name,
     'backdrop': backdrop.name,
     'edge': ?edge,
+    if (zoom != 1) 'zoom': zoom,
+    if (alignX != 0) 'alignX': alignX,
+    if (alignY != 0) 'alignY': alignY,
     'on': on,
     'bytes': ?bytes,
     'durationMs': ?durationMs,
@@ -149,6 +176,8 @@ class CustomLaunch {
     final height = raw['height'];
     if (kind == null || path is! String || path.isEmpty || width is! int || height is! int) return null;
     if (width <= 0 || height <= 0) return null;
+    double unit(Object? v, double fallback, {double lo = 0, double hi = 1}) =>
+        v is num && v.isFinite ? v.toDouble().clamp(lo, hi) : fallback;
     final poster = raw['poster'];
     final edge = raw['edge'];
     return CustomLaunch(
@@ -160,6 +189,9 @@ class CustomLaunch {
       fit: raw['fit'] == LaunchFit.center.name ? LaunchFit.center : LaunchFit.fill,
       backdrop: LaunchBackdrop.byName(raw['backdrop']),
       edge: edge is int ? edge : null,
+      zoom: unit(raw['zoom'], 1, lo: 1, hi: maxZoom),
+      alignX: unit(raw['alignX'], 0, lo: -1, hi: 1),
+      alignY: unit(raw['alignY'], 0, lo: -1, hi: 1),
       on: raw['on'] != false,
       bytes: raw['bytes'] is int ? raw['bytes'] as int : null,
       durationMs: raw['durationMs'] is int ? raw['durationMs'] as int : null,
@@ -201,12 +233,16 @@ class CustomLaunch {
       other.fit == fit &&
       other.backdrop == backdrop &&
       other.edge == edge &&
+      other.zoom == zoom &&
+      other.alignX == alignX &&
+      other.alignY == alignY &&
       other.on == on &&
       other.bytes == bytes &&
       other.durationMs == durationMs;
 
   @override
-  int get hashCode => Object.hash(kind, path, poster, width, height, fit, backdrop, edge, on, bytes, durationMs);
+  int get hashCode =>
+      Object.hash(kind, path, poster, width, height, fit, backdrop, edge, zoom, alignX, alignY, on, bytes, durationMs);
 }
 
 /// The Android launch window's colours (res/values{,-night}/colors.xml `launch_background_*`)

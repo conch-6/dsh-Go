@@ -256,7 +256,9 @@ void main() {
   test('a whole .part (killed before its check) is checked and renamed without the network', () async {
     final part = File('${dir.path}/models/model.onnx.dsh-go.part')..createSync(recursive: true);
     part.writeAsBytesSync(model);
-    await downloadVoiceFiles([job('model.onnx', model, urls: [Uri.parse('http://127.0.0.1:9/unreachable')])], onProgress: (_) {});
+    await downloadVoiceFiles([
+      job('model.onnx', model, urls: [Uri.parse('http://127.0.0.1:9/unreachable')]),
+    ], onProgress: (_) {});
     expect(File('${dir.path}/models/model.onnx').readAsBytesSync(), model);
     expect(part.existsSync(), isFalse);
   });
@@ -311,7 +313,9 @@ void main() {
 
   test('every mirror failing reports the last reason (http status kept)', () async {
     await expectLater(
-      downloadVoiceFiles([job('x.onnx', vad, urls: [server.url('/missing')])], onProgress: (_) {}),
+      downloadVoiceFiles([
+        job('x.onnx', vad, urls: [server.url('/missing')]),
+      ], onProgress: (_) {}),
       throwsA(
         isA<VoiceDownloadException>()
             .having((e) => e.kind, 'kind', VoiceDownloadError.http)
@@ -338,9 +342,13 @@ void main() {
     const stall = Duration(milliseconds: 300);
     // The only source: reported as its status instead of waiting for a body that never comes.
     await expectLater(
-      downloadVoiceFiles([
-        job('model.onnx', model, urls: [server.url('/busy.onnx')]),
-      ], onProgress: (_) {}, stall: stall).timeout(const Duration(seconds: 5)),
+      downloadVoiceFiles(
+        [
+          job('model.onnx', model, urls: [server.url('/busy.onnx')]),
+        ],
+        onProgress: (_) {},
+        stall: stall,
+      ).timeout(const Duration(seconds: 5)),
       throwsA(
         isA<VoiceDownloadException>()
             .having((e) => e.kind, 'kind', VoiceDownloadError.http)
@@ -348,9 +356,13 @@ void main() {
       ),
     );
     // With another source: that one is used.
-    await downloadVoiceFiles([
-      job('model.onnx', model, urls: [server.url('/busy.onnx'), server.url('/model.onnx')]),
-    ], onProgress: (_) {}, stall: stall).timeout(const Duration(seconds: 5));
+    await downloadVoiceFiles(
+      [
+        job('model.onnx', model, urls: [server.url('/busy.onnx'), server.url('/model.onnx')]),
+      ],
+      onProgress: (_) {},
+      stall: stall,
+    ).timeout(const Duration(seconds: 5));
     expect(server.requests.map((r) => r.$1), ['/busy.onnx', '/busy.onnx', '/model.onnx']);
     expect(File('${dir.path}/models/model.onnx').readAsBytesSync(), model);
   });

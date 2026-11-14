@@ -3,7 +3,10 @@
 //
 //   flutter test --update-goldens test/settings/voice_model_card_test.dart
 
+import 'dart:async';
+
 import 'package:dsh_app/l10n/l10n.dart';
+import 'package:dsh_app/state/streaming_asr_model_state.dart';
 import 'package:dsh_app/state/voice_model_state.dart';
 import 'package:dsh_app/ui/settings/voice_settings_page.dart';
 import 'package:flutter/material.dart';
@@ -49,6 +52,14 @@ class FixedVoiceModel extends VoiceModelController {
   Future<void> redownload() async => actions.add('redownload');
 }
 
+/// The streaming recognizer's card, not downloaded (the real one would look for files).
+class _NoStreamingModel extends StreamingAsrModelController {
+  @override
+  StreamingAsrModelState build() => const StreamingAsrModelState(status: StreamingAsrModelStatus.absent);
+}
+
+final _noStreamingModel = streamingAsrModelProvider.overrideWith(_NoStreamingModel.new);
+
 const _total = voiceModelDefaultBytes;
 
 const states = <String, VoiceModelState>{
@@ -62,11 +73,21 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
   tearDown(() => AppLocale.use(AppLocale.zhCN));
 
+  // The card sits below 朗读 and the recognition choices: in view before the picture.
+  Future<void> toCard(WidgetTester tester) async {
+    final card = find.byKey(const ValueKey('voice-model-card'));
+    await tester.scrollUntilVisible(card, 200, scrollable: find.byType(Scrollable).first);
+    unawaited(Scrollable.ensureVisible(tester.element(card), alignment: 0.3));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+  }
+
   for (final MapEntry(key: name, value: state) in states.entries) {
     goldenBoth(
       'voice_model_$name',
       () => const VoiceSettingsPage(),
-      overrides: () => [voiceModelProvider.overrideWith(() => FixedVoiceModel(state))],
+      overrides: () => [voiceModelProvider.overrideWith(() => FixedVoiceModel(state)), _noStreamingModel],
+      before: toCard,
     );
   }
 
@@ -78,11 +99,12 @@ void main() {
       goldenApp(
         home: inEnglish(const VoiceSettingsPage()),
         brightness: Brightness.light,
-        overrides: [voiceModelProvider.overrideWith(() => FixedVoiceModel(states['ready']!))],
+        overrides: [voiceModelProvider.overrideWith(() => FixedVoiceModel(states['ready']!)), _noStreamingModel],
       ),
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
+    await toCard(tester);
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/en_voice_model_ready_light.png'));
   });
 
@@ -110,6 +132,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     final card = find.byKey(const ValueKey('voice-model-card'));
+    // Below 朗读 and the recognition choices: not built until scrolled to.
+    await tester.scrollUntilVisible(card, 200, scrollable: find.byType(Scrollable).first);
     await tester.ensureVisible(card);
     await tester.pumpAndSettle();
     return model;
@@ -155,9 +179,10 @@ void main() {
             expect(rects[1].left - rects[0].right, moreOrLessEquals(VoiceModelCard.buttonGap));
           }
           // No label is cut short.
-          for (final e in find
-              .descendant(of: find.byKey(const ValueKey('voice-model-actions')), matching: find.byType(Text))
-              .evaluate()) {
+          for (final e
+              in find
+                  .descendant(of: find.byKey(const ValueKey('voice-model-actions')), matching: find.byType(Text))
+                  .evaluate()) {
             final paragraph = e.renderObject! as RenderParagraph;
             expect(paragraph.didExceedMaxLines, isFalse, reason: (e.widget as Text).data);
           }
@@ -231,8 +256,16 @@ void main() {
       tester.view.physicalSize = const Size(390, 900);
       addTearDown(tester.view.reset);
       final model = FixedVoiceModel(states['ready']!, deletes: false, stopping: stopping);
-      await tester.pumpWidget(testApp(const VoiceSettingsPage(), overrides: [voiceModelProvider.overrideWith(() => model)]));
+      await tester.pumpWidget(
+        testApp(const VoiceSettingsPage(), overrides: [voiceModelProvider.overrideWith(() => model)]),
+      );
       await tester.pumpAndSettle();
+      // Below 朗读 and the recognition choices: built once scrolled to.
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('voice-model-delete')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.ensureVisible(find.byKey(const ValueKey('voice-model-delete')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('voice-model-delete')));

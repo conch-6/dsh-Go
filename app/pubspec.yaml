@@ -68,6 +68,9 @@ dependencies:
   image_picker: ^1.2.4
   file_picker: ^13.1.0
   crypto: ^3.0.7
+  # C API 1.23.2, identical ORT binaries to A's Android dependency. Keep both exact.
+  sherpa_onnx: 1.12.36
+  sherpa_onnx_android: 1.12.36
   # AES-256-GCM for hosted conversation links (lib/share_hosted), the pure-Dart
   # implementation packages/dsh_remote already uses. Apache-2.0.
   cryptography: ^2.9.0
@@ -117,6 +120,18 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  shaders:
+    # The voice ring's edge lens (lib/ui/fx/voice_ring/refract.dart).
+    - shaders/fx/voice_ring_refract.frag
+    # Libraries.dev Metal's liquid-metal material (lib/ui/fx/metal/).
+    - shaders/fx/metal_liquid.frag
+    # Distortion waves (lib/ui/fx/waves); both include distortion_wave_field.glsl.
+    - shaders/fx/distortion_wave_lens.frag
+    - shaders/fx/distortion_wave_band.frag
+    # Image generation placeholder (lib/ui/fx/image_gen), two passes.
+    - shaders/fx/img_fx_field.frag
+    - shaders/fx/img_fx_mosaic.frag
+
   fonts:
     # App icons: a Phosphor subset made by tool/make_icon_font.py; use AppIcons.
     - family: DshIcons
@@ -133,10 +148,13 @@ flutter:
           weight: 700
 
   assets:
+    - assets/licenses/streaming-asr-model-APACHE-2.0.txt
     # Full upstream WebRTC Android release notices, shown by LicenseRegistry.
     - assets/licenses/webrtc-150.7871.04.md
     # Unicode 15.0 tables used by pet archive filename normalization.
     - assets/licenses/unicode-15.0.txt
+    - assets/licenses/jquery-3.7.1-LICENSE.txt
+    - assets/licenses/lodash-4.17.21-LICENSE.txt
     # Phone layout for the embedded DSH Web (see lib/ui/web/web_view_page.dart).
     - assets/web/
     # Whale-tail activity sprites (lib/ui/chat/widgets/whale_tail.dart),
@@ -166,6 +184,7 @@ flutter:
     - assets/skills/dsh-go-guide/
     - assets/skills/dsh-go-support/
     - assets/skills/companion-adapt/
+
 
   # To add assets to your application, add an assets section, like this:
   # assets:

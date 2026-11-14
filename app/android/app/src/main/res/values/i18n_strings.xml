@@ -29,7 +29,6 @@
     <string name="background_input_window_not_ready">The input test window was not ready. No test tap was sent.</string>
     <string name="background_input_unconfirmed">The input test did not receive both touch events in time.</string>
     <string name="background_input_cancelled">The input test was cancelled.</string>
-    <string name="background_input_probe_busy">The background screen is in use. Retry the input test after the task ends.</string>
     <string name="background_input_cleanup_failed">Input test cleanup was not confirmed. Reconnect the privileged channel before retrying.</string>
     <string name="background_input_api_unavailable">This system has no background input API the App can use. Update the App, or report your device and system version.</string>
     <string name="background_input_permission_denied">The system refused background input. Check the channel’s permission; on Xiaomi/Redmi, turn on “USB debugging (Security settings)”.</string>

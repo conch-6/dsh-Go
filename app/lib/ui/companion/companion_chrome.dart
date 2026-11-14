@@ -194,7 +194,7 @@ class CompanionSpeech extends StatelessWidget {
           style: companionDeepGlass(context),
           borderRadius: BorderRadius.circular(20),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-          child: SizedBox(height: 14, width: 34, child: TypingIndicator(color: theme.colorScheme.onSurfaceVariant)),
+          child: TypingIndicator(color: theme.colorScheme.onSurfaceVariant),
         ),
       );
     } else if (words != null) {

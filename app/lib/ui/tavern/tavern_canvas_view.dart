@@ -8,42 +8,63 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:dsh_tavern/dsh_tavern.dart' show TavernPersona;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../../l10n/l10n.dart';
 import '../../tavern/tavern_canvas.dart';
+import '../../tavern/tavern_canvas_audio.dart';
+import '../../tavern/tavern_canvas_calls.dart';
+import '../../tavern/tavern_card_scripts.dart';
+import '../../tavern/tavern_provider.dart';
 import '../../tavern/tavern_settings.dart';
+import '../../tavern/tavern_st_theme.dart';
 import '../common/brief_notice.dart';
 import '../theme/theme.dart';
 import '../web/web_view_guard.dart';
 import 'tavern_ink.dart';
+import 'tavern_toasts.dart';
 
 /// What the canvas is handed: the shown messages; the reply being written
-/// (its speaker's name and its HTML, null when none) as it changes; and what
-/// to do when a message is held.
+/// (its speaker's name and its HTML, null when none) as it changes; what to
+/// do when a message is held; and who answers the page's dsh.call, and
+/// brings the engine's deliveries back to it, if anyone.
 typedef TavernCanvasBuilder = Widget Function({
   required List<TavernCanvasEntry> entries,
   required ValueListenable<(String, String)?> streaming,
   required void Function(String nodeId) onMenu,
+  TavernCanvasCalls? calls,
 });
+
+/// The libraries card scripts find on the canvas page, as 酒馆助手's pages
+/// give them: jQuery and lodash (bundled; licences in THIRD_PARTY_NOTICES.md).
+final tavernCanvasLibrariesProvider = FutureProvider<List<String>>(
+  (ref) async => [
+    await rootBundle.loadString('assets/tavern/jquery-3.7.1.min.js'),
+    await rootBundle.loadString('assets/tavern/lodash-4.17.21.min.js'),
+  ],
+);
 
 /// Builds the canvas. Tests swap it.
 final tavernCanvasBuilderProvider = Provider<TavernCanvasBuilder>(
   (ref) =>
-      ({required entries, required streaming, required onMenu}) =>
-          TavernCanvasView(entries: entries, streaming: streaming, onMenu: onMenu),
+      ({required entries, required streaming, required onMenu, calls}) =>
+          TavernCanvasView(entries: entries, streaming: streaming, onMenu: onMenu, calls: calls),
 );
 
 class TavernCanvasView extends ConsumerStatefulWidget {
-  const TavernCanvasView({super.key, required this.entries, required this.streaming, required this.onMenu});
+  const TavernCanvasView({super.key, required this.entries, required this.streaming, required this.onMenu, this.calls});
 
   final List<TavernCanvasEntry> entries;
   final ValueListenable<(String, String)?> streaming;
   final void Function(String nodeId) onMenu;
+  final TavernCanvasCalls? calls;
 
   @override
   ConsumerState<TavernCanvasView> createState() => _TavernCanvasViewState();
@@ -57,11 +78,52 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
   String? _rendered;
   Timer? _streamTimer;
   (String, String)? _streamSent;
+  final _toasts = TavernToasts();
 
   @override
   void initState() {
     super.initState();
     widget.streaming.addListener(_onStream);
+    widget.calls?.deliver = _deliver;
+    _audioLifecycle = TavernCanvasAudioLifecycle(_suspendAudio);
+    if (widget.calls?.chatId case final chat?) {
+      final audio = ref.read(tavernCanvasAudioProvider(chat).notifier);
+      audio.attach(_sendAudio);
+      _audio = audio;
+    }
+  }
+
+  /// The chat's player in the app (舞台 › 会话): what this page's players
+  /// are doing goes there, and what the person does there comes here.
+  TavernCanvasAudio? _audio;
+
+  /// The app out of sight: the card's music waits for it to be back.
+  late final TavernCanvasAudioLifecycle _audioLifecycle;
+
+  /// Whether the app is out of sight: a page that comes up meanwhile is told
+  /// so before anything on it plays.
+  bool _hidden = false;
+
+  void _suspendAudio(bool on) {
+    _hidden = on;
+    final controller = _controller;
+    if (!_ready || controller == null) return;
+    unawaited(controller.runJavaScript('window.dsh&&dsh.audioSuspend($on)').catchError((_) {}));
+  }
+
+  Future<void> _sendAudio(Map<String, Object?> command) async {
+    final controller = _controller;
+    if (!mounted || !_ready || controller == null) return;
+    await controller.runJavaScript('window.dsh&&dsh.audioControl(${jsonEncode(command)})');
+  }
+
+  /// The engine's delivery for this page's script context, into its copy;
+  /// not before the page is ready (it takes a snapshot then anyway).
+  Future<bool> _deliver(Map<String, Object?> delivery) async {
+    final controller = _controller;
+    if (!mounted || !_ready || controller == null) return false;
+    await controller.runJavaScript('window.dsh&&dsh.scripts.deliver(${jsonEncode(delivery)})');
+    return true;
   }
 
   @override
@@ -73,12 +135,22 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
   @override
   void didUpdateWidget(TavernCanvasView old) {
     super.didUpdateWidget(old);
+    if (!identical(old.calls, widget.calls)) {
+      if (old.calls?.deliver == _deliver) old.calls?.deliver = null;
+      widget.calls?.deliver = _deliver;
+    }
     if (old.streaming != widget.streaming) {
       old.streaming.removeListener(_onStream);
       widget.streaming.addListener(_onStream);
     }
+    // The chat's character came (its summary loaded) or went (a group): the
+    // page is built again with its card and scripts, or without.
+    if (widget.calls?.characterId() != _character) _open();
     _render();
   }
+
+  /// The character the page was last built for.
+  String? _character;
 
   /// Loads the page, again when its look or its guards change.
   void _open() {
@@ -86,9 +158,47 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
     final dsh = DshColors.of(context);
     final ink = TavernInkScope.maybeOf(context);
     final (noScripts, offline) = ref.read(tavernSettingsProvider.select((s) => (s.islandNoScripts, s.islandOffline)));
+    // An ST theme's custom CSS, with its colours chosen and its CSS kept on.
+    final themeCss = ref.read(tavernSettingsProvider.select((s) => s.palette)) == TavernPalette.st
+        ? ref.read(tavernStThemeProvider)?.canvasCss ?? ''
+        : '';
     final reading = ref.read(tavernSettingsProvider.select((s) => (s.textSize, s.lineHeight)));
     final text = theme.colorScheme.onSurface;
-    final key = (noScripts, offline, theme.brightness, ink?.dialogue, ink?.action, theme.colorScheme.primary, reading);
+    // Card scripts get their libraries first; the page waits for them (and
+    // goes without, should they not load) — not when scripts do not run.
+    final List<String> libraries;
+    // So with the card's own scripts (none for a group, or when they do not run).
+    final List<TavernCardScript> cardScripts;
+    // And the card itself, for the scripts that ask about the character.
+    final Map<String, Object?>? card;
+    final character = widget.calls?.characterId();
+    if (noScripts) {
+      libraries = const [];
+      cardScripts = const [];
+      card = null;
+    } else {
+      final loaded = ref.read(tavernCanvasLibrariesProvider);
+      final scripts = character == null ? null : ref.read(tavernCardScriptsProvider(character));
+      final data = character == null ? null : ref.read(tavernCardDataProvider(character));
+      if (loaded.isLoading || (scripts?.isLoading ?? false) || (data?.isLoading ?? false)) return;
+      libraries = loaded.value ?? const [];
+      cardScripts = scripts?.value ?? const [];
+      card = data?.value;
+    }
+    final key = (
+      noScripts,
+      offline,
+      theme.brightness,
+      ink?.dialogue,
+      ink?.action,
+      theme.colorScheme.primary,
+      reading,
+      themeCss,
+      Object.hashAll(cardScripts),
+      card,
+      character,
+    );
+    _character = character;
     if (key == _loaded) return;
     _loaded = key;
     _ready = false;
@@ -116,9 +226,15 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
         success: context.l10n.tavernRollSuccess,
         failure: context.l10n.tavernRollFailure,
         game: context.l10n.tavernGameHere,
+        replied: context.l10n.tavernCanvasReplied('{name}'),
       ),
       noScripts: noScripts,
       offline: offline,
+      libraries: libraries,
+      themeCss: themeCss,
+      cardScripts: [for (final s in cardScripts) s.toJson()],
+      card: card,
+      characterId: character,
     );
     final controller = _controller ??= WebViewController();
     final textZoom = MediaQuery.textScalerOf(context).scale(100).round().clamp(50, 300);
@@ -130,6 +246,10 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
           controller.setBackgroundColor(Colors.transparent),
           controller.addJavaScriptChannel('DshTavern', onMessageReceived: (m) => _onMessage(m.message)),
           controller.setNavigationDelegate(NavigationDelegate(onNavigationRequest: _onNavigation)),
+          // A card's music starts when its script says, as in a browser tab
+          // the page is already playing in.
+          if (controller.platform case final AndroidWebViewController android)
+            android.setMediaPlaybackRequiresUserGesture(false),
         ].map((f) => f.catchError((_) {})),
       );
       if (!mounted || controller != _controller) return;
@@ -155,10 +275,81 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
         _ready = true;
         _rendered = null;
         _streamSent = null;
+        _avatars.reset();
+        _audio?.report(null);
+        if (_hidden) _suspendAudio(true);
+        _pushPersonas();
+        _pushAudio();
         _render();
         _onStream();
       case 'menu':
         if (data['node'] case final String node when node.isNotEmpty) widget.onMenu(node);
+      case 'call':
+        unawaited(_answer(data));
+      case 'invoked':
+        widget.calls?.invoked(data);
+      case 'ack':
+        widget.calls?.acknowledge(data);
+      case 'toast':
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        if (messenger != null) _toasts.show(messenger, data);
+      case 'toastClear':
+        _toasts.clear(data);
+      case 'audio':
+        if (widget.calls?.chatId case final chat?) unawaited(tavernSaveAudio(chat, data['state']).catchError((_) {}));
+      case 'audioNow':
+        _audio?.report(data['now']);
+    }
+  }
+
+  /// The chat's players as its scripts left them, for the page that just
+  /// came up.
+  Future<void> _pushAudio() async {
+    final controller = _controller;
+    final chat = widget.calls?.chatId;
+    if (controller == null || chat == null) return;
+    final state = await tavernLoadAudio(chat);
+    if (state.isEmpty || !mounted || !identical(controller, _controller)) return;
+    await controller.runJavaScript('window.dsh&&dsh.setAudioState(${jsonEncode(state)})').catchError((_) {});
+  }
+
+  /// A dsh.call from the page, answered to the page that asked (not to one
+  /// built since, after the renderer went).
+  Future<void> _answer(Map<Object?, Object?> request) async {
+    final controller = _controller;
+    final calls = widget.calls;
+    final reply = calls == null
+        ? {
+            'id': request['id'],
+            'ok': false,
+            'error': {'code': 'unsupportedCapability', 'message': 'Nothing answers here.', 'committed': false},
+          }
+        : await calls.handle(request);
+    if (!mounted || controller == null || !identical(controller, _controller)) return;
+    await controller.runJavaScript('window.dsh&&dsh.answer(${jsonEncode(reply)})').catchError((_) {});
+  }
+
+  /// The user's personas and this chat's, for the card scripts that ask
+  /// (getPersona …); once the page is ready, and again as they change.
+  void _pushPersonas() {
+    final controller = _controller;
+    final chat = widget.calls?.chatId;
+    if (!_ready || controller == null || chat == null) return;
+    final personas = ref.read(tavernPersonasProvider).value ?? const <TavernPersona>[];
+    final json = tavernCanvasPersonas(personas, ref.read(tavernPersonaSelectionProvider(chat)).value);
+    unawaited(controller.runJavaScript('window.dsh&&dsh.setPersonas(${jsonEncode(json)})').catchError((_) {}));
+    unawaited(_pushAvatars(controller, personas));
+  }
+
+  /// The personas' pictures the page does not have yet, each as it is read.
+  final _avatars = TavernCanvasPersonaAvatars();
+
+  Future<void> _pushAvatars(WebViewController controller, List<TavernPersona> personas) async {
+    for (final (id, url) in await _avatars.changes(personas)) {
+      if (!mounted || !identical(controller, _controller)) return;
+      await controller
+          .runJavaScript('window.dsh&&dsh.setPersonaAvatar(${jsonEncode(id)},${jsonEncode(url)})')
+          .catchError((_) {});
     }
   }
 
@@ -209,6 +400,10 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
     final old = _guard;
     WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(old.destroy()));
     ScaffoldMessenger.maybeOf(context)?.showBriefNotice(context.l10n.tavernCanvasReloaded);
+    // The handlers the lost page was running will not answer; its music
+    // stopped with it.
+    widget.calls?.pageLost();
+    _audio?.report(null);
     setState(() {
       _guard = WebViewGuard(onGone: _onGone);
       _controller = null;
@@ -219,18 +414,52 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
 
   @override
   void dispose() {
+    if (widget.calls?.deliver == _deliver) {
+      widget.calls?.deliver = null;
+      widget.calls?.pageLost();
+    }
+    if (_audio case final audio?) {
+      final send = _sendAudio;
+      // Not while the tree is being taken down.
+      scheduleMicrotask(() {
+        try {
+          audio.detach(send);
+        } on Object {
+          // The app's state went first: nothing to clear.
+        }
+      });
+    }
+    _audioLifecycle.dispose();
     widget.streaming.removeListener(_onStream);
     _streamTimer?.cancel();
     _guard.dispose();
+    _toasts.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     ref.listen(
-      tavernSettingsProvider.select((s) => (s.islandNoScripts, s.islandOffline, s.textSize, s.lineHeight)),
+      tavernSettingsProvider.select((s) => (s.islandNoScripts, s.islandOffline, s.textSize, s.lineHeight, s.palette)),
       (_, _) => _open(),
     );
+    ref.listen(tavernStThemeProvider, (_, _) => _open());
+    // The user's personas, told to the page as they change (no reload).
+    ref.listen(tavernPersonasProvider, (_, _) => _pushPersonas());
+    if (widget.calls?.chatId case final chat?) {
+      ref.listen(tavernPersonaSelectionProvider(chat), (_, _) => _pushPersonas());
+    }
+    if (widget.calls?.characterId() case final character?) {
+      ref.listen(tavernCardDataProvider(character), (_, next) {
+        if (!next.isLoading) _open();
+      });
+      ref.listen(tavernCardScriptsProvider(character), (_, next) {
+        if (!next.isLoading) _open();
+      });
+    }
+    ref.listen(tavernCanvasLibrariesProvider, (_, next) {
+      if (!next.isLoading) _open();
+    });
     final controller = _controller;
     if (controller == null) return const SizedBox.expand();
     return WebViewWidget(key: const ValueKey('tavern-canvas'), controller: controller);

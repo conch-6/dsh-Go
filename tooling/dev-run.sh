@@ -17,7 +17,8 @@
 #
 # It installs with `adb install -r` and attaches, instead of `flutter run`, because a
 # failed `flutter run` install uninstalls the app and tries again, and that would take
-# the phone's keys and chats with it. Here a failed install stops, and changes nothing.
+# the phone's keys and chats with it. Here a failed install stops without uninstalling;
+# if adb loses the result, the phone may already have updated.
 # That takes the same signing key (app/android/key.properties) and a versionCode that
 # isn't lower: both are how build-apk.sh builds.
 #
@@ -114,7 +115,7 @@ if ((install)); then
   [[ -f $APK ]] || die "no debug APK at $APK: run without --no-build"
   before=$(installed_since)
   if ! phone install -r "$APK"; then
-    die "install failed, and nothing was changed. Is it signed with the phone's key (app/android/key.properties)? Never uninstall to get past this: the app's data goes with it."
+    die "install did not report success; the phone may already have updated. Reconnect and check the installed build before retrying. Is it signed with the phone's key (app/android/key.properties)? Never uninstall to get past this: the app's data goes with it."
   fi
   after=$(installed_since)
   [[ -z $before || $before == "$after" ]] || die "first install time moved ($before -> $after): the app was reinstalled"

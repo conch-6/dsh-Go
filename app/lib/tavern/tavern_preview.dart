@@ -35,6 +35,10 @@ class PreviewTavern implements Tavern, TavernPreview {
 
   String _id(String prefix) => '$prefix-${++_seq}';
 
+  /// Card scripts (P2 B1) are not simulated here: the bridge says so.
+  @override
+  late final TavernScriptBridge scripts = _PreviewScripts();
+
   // Library -------------------------------------------------------------------
 
   /// The list as the engine gives it (T23): the long fields left out, which
@@ -147,6 +151,215 @@ class PreviewTavern implements Tavern, TavernPreview {
   @override
   Future<TavernTurnInspection?> inspectTurn(String chatId, {String? nodeId}) async => null;
 
+  // Stage one's tools: the preview keeps none, and says so rather than
+  // making up a roll, a receipt or a saved setting.
+
+  Future<T> _noTool<T>(String operation, {String? chatId}) => Future<T>.error(
+    TavernToolException(
+      code: TavernToolErrorCode.unsupportedCapability,
+      operation: operation,
+      message: 'The preview keeps no tool executions.',
+      committed: false,
+      chatId: chatId,
+    ),
+  );
+
+  @override
+  Future<TavernToolTurnSnapshot?> readToolTurn(String logicalTurnId) => _noTool('readToolTurn');
+
+  @override
+  Future<TavernToolReceipt?> readToolReceipt(String executionId) => _noTool('readToolReceipt');
+
+  @override
+  Future<List<TavernToolTurnSummary>> recentToolTurns(String chatId, {int limit = 20}) =>
+      _noTool('recentToolTurns', chatId: chatId);
+
+  // 做卡草稿 (stage 2A): the preview keeps none; there is nothing to list or
+  // read, and nothing is made up for a draft that would be written.
+  static Future<T> _noDraft<T>() => Future<T>.error(UnsupportedError('The preview keeps no authoring drafts.'));
+
+  @override
+  Future<List<TavernAuthoringDraftSummary>> listAuthoringDrafts() async => const [];
+
+  @override
+  Future<TavernAuthoringDraft?> readAuthoringDraft(String draftId) async => null;
+
+  @override
+  TavernAuthoringRun startAuthoringRun(
+    TavernAuthoringRunRequest request, {
+    TavernAuthoringPromptHost? promptHost,
+    TavernAuthoringPreviewHost? renderHost,
+  }) => throw UnsupportedError('The preview runs no authoring.');
+
+  @override
+  TavernAuthoringTask<TavernAuthoringPromptPreview> previewAuthoringPrompt(
+    TavernAuthoringPromptRequest request, {
+    TavernAuthoringPromptHost? host,
+  }) => throw UnsupportedError('The preview runs no authoring.');
+
+  @override
+  TavernAuthoringSimulationTask simulateAuthoringDraft(TavernAuthoringSimulationRequest request) =>
+      throw UnsupportedError('The preview runs no authoring.');
+
+  @override
+  TavernAuthoringTask<TavernAuthoringRenderResult> renderAuthoringDraft(
+    TavernAuthoringRenderRequest request, {
+    required TavernAuthoringPreviewHost host,
+  }) => throw UnsupportedError('The preview runs no authoring.');
+
+  @override
+  Future<TavernAuthoringRunSnapshot?> readAuthoringRun(String runId) async => null;
+
+  @override
+  Future<List<TavernAuthoringRunSummary>> listAuthoringRuns({
+    String? draftId,
+    int limit = 30,
+    String? beforeRunId,
+  }) async => const [];
+
+  @override
+  Future<TavernAuthoringToolReceipt?> readAuthoringToolReceipt(String runId, String receiptId) async => null;
+
+  @override
+  Future<void> cancelAuthoringRun(String runId) => _noDraft();
+
+  @override
+  Future<TavernAuthoringDraft> createAuthoringSeed(TavernAuthoringSeedInput input) => _noDraft();
+
+  @override
+  Future<TavernAuthoringSaveAsReceipt> saveAuthoringAsNew(
+    String draftId, {
+    required int draftRevision,
+    required String physicalResourceId,
+    required List<String> changeIds,
+    required String operationId,
+    required TavernAuthoringMediaSelection media,
+    String? domainId,
+  }) => _noDraft();
+
+  @override
+  Future<TavernAuthoringReceipt> applyAuthoringChanges(
+    String draftId, {
+    required int draftRevision,
+    required String physicalResourceId,
+    required List<String> changeIds,
+    required TavernAuthorityRevision expectedAuthorityRevision,
+    required String operationId,
+  }) => _noDraft();
+
+  @override
+  Future<TavernAuthoringOperation?> readAuthoringOperation(String operationId, {required String domainId}) async =>
+      null;
+
+  @override
+  Future<List<TavernAuthoringRevisionSummary>> listAuthoringRevisions(String physicalResourceId) async => const [];
+
+  @override
+  Future<TavernAuthoringReceipt> restoreAuthoringRevision(
+    String physicalResourceId, {
+    required TavernAuthorityRevision revision,
+    required TavernAuthorityRevision expectedAuthorityRevision,
+    required String operationId,
+  }) => _noDraft();
+
+  @override
+  Future<TavernAuthoringDraft> createAuthoringDraft(List<TavernAuthoringTarget> targets) => _noDraft();
+
+  @override
+  Future<TavernAuthoringDraft> editAuthoringDraft(
+    String draftId, {
+    required int draftRevision,
+    required List<TavernAuthoringChange> changes,
+  }) => _noDraft();
+
+  @override
+  Future<TavernAuthoringDraft> rebaseAuthoringDraft(
+    String draftId, {
+    required int draftRevision,
+    required List<TavernAuthoringChange> changes,
+  }) => _noDraft();
+
+  @override
+  Future<void> deleteAuthoringDraft(String draftId, {required int draftRevision}) => _noDraft();
+
+  @override
+  Future<TavernAuthoringPreview> previewAuthoringDraft(
+    String draftId, {
+    required int draftRevision,
+    required List<String> changeIds,
+  }) => _noDraft();
+
+  @override
+  Future<TavernAuthoringRegexTest> testAuthoringRegex(
+    String draftId, {
+    required int draftRevision,
+    required List<String> changeIds,
+    required String physicalResourceId,
+    required String scriptPath,
+    required String text,
+  }) => _noDraft();
+
+  /// The engine sums in one query; the preview adds up its line, a page at
+  /// a time through [path] (as a test's line overrides it), the same way.
+  @override
+  Future<List<TavernPathUsage>> pathUsage(String chatId) async {
+    final buckets = <(String?, int, int), List<int>>{};
+    String? before;
+    while (true) {
+      final page = await path(chatId, limit: 200, beforeNodeId: before);
+      for (final m in page) {
+        final usage = m.reportedUsage;
+        if (m.role != TavernRole.character || usage == null) continue;
+        final at = m.at.toUtc();
+        final sum = buckets[(usage.model, at.weekday, at.hour)] ??= [0, 0, 0, 0];
+        sum[0] += usage.promptTokens;
+        sum[1] += usage.cacheHitTokens;
+        sum[2] += usage.completionTokens;
+        sum[3]++;
+      }
+      if (page.length < 200) break;
+      before = page.first.nodeId;
+    }
+    return [
+      for (final MapEntry(key: (model, weekday, hour), value: sum) in buckets.entries)
+        TavernPathUsage(
+          model: model,
+          utcWeekday: weekday,
+          utcHour: hour,
+          promptTokens: sum[0],
+          cacheHitTokens: sum[1],
+          completionTokens: sum[2],
+          replyCount: sum[3],
+        ),
+    ];
+  }
+
+  @override
+  Future<TavernToolReceipt> rollDice(
+    String chatId, {
+    required String actionId,
+    required String dice,
+    String? label,
+    int? target,
+    String? expectedNodeId,
+  }) => _noTool('rollDice', chatId: chatId);
+
+  @override
+  Future<TavernMemoryDecisionReceipt> resolveMemoryProposal(
+    String proposalId, {
+    required String decisionId,
+    required int expectedVersion,
+    required TavernMemoryDecision decision,
+    required TavernToolContextAnchor expectedContextAnchor,
+  }) => _noTool('resolveMemoryProposal');
+
+  @override
+  Future<TavernToolPolicySnapshot> readToolPolicy({String? chatId}) => _noTool('readToolPolicy', chatId: chatId);
+
+  @override
+  Future<TavernToolPolicyWriteResult> setToolPolicy(Map<String, Object?> patch, {String? chatId}) =>
+      _noTool('setToolPolicy', chatId: chatId);
+
   // Personas ------------------------------------------------------------------
 
   final _personas = <String, TavernPersona>{};
@@ -248,21 +461,387 @@ class PreviewTavern implements Tavern, TavernPreview {
   Stream<List<TavernChatSummary>> watchChats({String? characterId}) => _watch(() {
     final list = [
       for (final chat in _chats.values)
-        if (characterId == null || chat.characterId == characterId) _summary(chat),
+        if (characterId == null ||
+            chat.characterId == characterId ||
+            (_groups[chat.id]?.members.any((m) => m.characterId == characterId) ?? false))
+          _summary(chat),
     ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     return list;
   });
 
   TavernChatSummary _summary(_Chat chat) {
     final path = chat.path();
+    final group = _groups[chat.id];
     return TavernChatSummary(
       id: chat.id,
       characterId: chat.characterId,
-      title: chat.title,
+      title: group?.title ?? chat.title,
       updatedAt: chat.updatedAt,
       lastText: path.isEmpty ? null : path.last.text,
       messageCount: path.length,
+      kind: group == null ? TavernChatKind.single : TavernChatKind.group,
+      memberCharacterIds: [for (final m in group?.members ?? const <TavernGroupMember>[]) m.characterId],
     );
+  }
+
+  // Group chats (engine P2 125), in memory: the roster and its settings, and
+  // a batch that has each planned member reply in turn on the shared path.
+  // The plan is simpler than the engine's: 列表 and 自然 both take the
+  // unmuted members in order (自然 puts one named in your line first), 随机
+  // the next who has not spoken since your line, 手动 no one unless named.
+
+  final _groups = <String, _Group>{};
+
+  _Group _group(String chatId) =>
+      _groups[chatId] ?? (throw TavernGroupException(TavernGroupError.notGroup, chatId: chatId));
+
+  TavernGroupChat _changed(_Group group) {
+    _listChanged.add(null);
+    return group.view();
+  }
+
+  @override
+  Future<String> createGroupChat(
+    List<String> characterIds, {
+    String? hostCharacterId,
+    String? title,
+    TavernGroupActivation activation = TavernGroupActivation.natural,
+    int maxSpeakersPerTurn = 3,
+    bool allowSelfResponses = false,
+    bool addGreetings = true,
+  }) async {
+    final ids = List<String>.of(characterIds);
+    if (ids.toSet().length != ids.length) throw TavernGroupException(TavernGroupError.invalidMembers);
+    for (final id in [...ids, ?hostCharacterId]) {
+      if (!_characters.containsKey(id)) throw TavernGroupException(TavernGroupError.characterNotFound, characterId: id);
+    }
+    final host =
+        hostCharacterId ?? (ids.isEmpty ? throw TavernGroupException(TavernGroupError.invalidMembers) : ids.first);
+    if (maxSpeakersPerTurn < 1) throw TavernGroupException(TavernGroupError.invalidLimit);
+    final now = _clock();
+    final name = title ?? [for (final id in ids) _characters[id]!.name].join('、');
+    final chat = _Chat(_id('chat'), host, name, now);
+    _chats[chat.id] = chat;
+    _groups[chat.id] = _Group(
+      chat.id,
+      name,
+      host,
+      [
+        for (final id in ids)
+          TavernGroupMember(characterId: id, talkativeness: 0.5, muted: false, modelRole: TavernGroupModelRole.main),
+      ],
+      activation,
+      maxSpeakersPerTurn,
+      allowSelfResponses,
+    );
+    if (addGreetings) {
+      String? parent;
+      for (final id in ids) {
+        final c = _characters[id]!;
+        if (c.greetings.isEmpty) continue;
+        final node = _Node(_id('n'), parent, TavernRole.character, c.name, c.greetings.first, now)..speakerId = id;
+        chat.add(node);
+        chat.chosen[parent] = node.id;
+        parent = node.id;
+      }
+    }
+    _listChanged.add(null);
+    return chat.id;
+  }
+
+  @override
+  Future<TavernGroupChat?> groupChat(String chatId) async => _groups[chatId]?.view();
+
+  @override
+  Stream<TavernGroupChat?> watchGroupChat(String chatId) => _watch(() => _groups[chatId]?.view());
+
+  @override
+  Future<TavernGroupChat> addGroupMember(
+    String chatId,
+    String characterId, {
+    double? talkativeness,
+    bool muted = false,
+    TavernGroupModelRole? modelRole,
+  }) async {
+    final group = _group(chatId);
+    if (!_characters.containsKey(characterId)) {
+      throw TavernGroupException(TavernGroupError.characterNotFound, chatId: chatId, characterId: characterId);
+    }
+    if (group.members.any((m) => m.characterId == characterId)) {
+      throw TavernGroupException(TavernGroupError.memberExists, chatId: chatId, characterId: characterId);
+    }
+    if (talkativeness != null && !(talkativeness >= 0 && talkativeness <= 1)) {
+      throw TavernGroupException(TavernGroupError.invalidTalkativeness, chatId: chatId, characterId: characterId);
+    }
+    group.members = [
+      ...group.members,
+      TavernGroupMember(
+        characterId: characterId,
+        talkativeness: talkativeness ?? 0.5,
+        muted: muted,
+        modelRole: modelRole ?? TavernGroupModelRole.main,
+      ),
+    ];
+    return _changed(group);
+  }
+
+  @override
+  Future<TavernGroupChat> updateGroupMember(
+    String chatId,
+    String characterId, {
+    double? talkativeness,
+    bool? muted,
+    TavernGroupModelRole? modelRole,
+  }) async {
+    final group = _group(chatId);
+    final at = group.members.indexWhere((m) => m.characterId == characterId);
+    if (at < 0) throw TavernGroupException(TavernGroupError.memberNotFound, chatId: chatId, characterId: characterId);
+    if (talkativeness != null && !(talkativeness >= 0 && talkativeness <= 1)) {
+      throw TavernGroupException(TavernGroupError.invalidTalkativeness, chatId: chatId, characterId: characterId);
+    }
+    final old = group.members[at];
+    group.members = [
+      for (final (i, m) in group.members.indexed)
+        if (i == at)
+          TavernGroupMember(
+            characterId: old.characterId,
+            talkativeness: talkativeness ?? old.talkativeness,
+            muted: muted ?? old.muted,
+            modelRole: modelRole ?? old.modelRole,
+          )
+        else
+          m,
+    ];
+    return _changed(group);
+  }
+
+  @override
+  Future<TavernGroupChat> removeGroupMember(String chatId, String characterId) async {
+    final group = _group(chatId);
+    if (!group.members.any((m) => m.characterId == characterId)) {
+      throw TavernGroupException(TavernGroupError.memberNotFound, chatId: chatId, characterId: characterId);
+    }
+    group.members = [
+      for (final m in group.members)
+        if (m.characterId != characterId) m,
+    ];
+    return _changed(group);
+  }
+
+  @override
+  Future<TavernGroupChat> reorderGroupMembers(String chatId, List<String> characterIds) async {
+    final group = _group(chatId);
+    final ids = List<String>.of(characterIds);
+    final now = {for (final m in group.members) m.characterId: m};
+    if (ids.length != now.length || !ids.every(now.containsKey) || ids.toSet().length != ids.length) {
+      throw TavernGroupException(TavernGroupError.invalidOrder, chatId: chatId);
+    }
+    group.members = [for (final id in ids) now[id]!];
+    return _changed(group);
+  }
+
+  @override
+  Future<TavernGroupChat> updateGroupChat(
+    String chatId, {
+    String? title,
+    TavernGroupActivation? activation,
+    int? maxSpeakersPerTurn,
+    bool? allowSelfResponses,
+  }) async {
+    final group = _group(chatId);
+    if (maxSpeakersPerTurn != null && maxSpeakersPerTurn < 1) {
+      throw TavernGroupException(TavernGroupError.invalidLimit, chatId: chatId);
+    }
+    group
+      ..title = title ?? group.title
+      ..activation = activation ?? group.activation
+      ..maxSpeakers = maxSpeakersPerTurn ?? group.maxSpeakers
+      ..allowSelf = allowSelfResponses ?? group.allowSelf;
+    return _changed(group);
+  }
+
+  /// Who replies to [text] in [group], in order.
+  List<String> _plan(_Group group, _Chat chat, String text) {
+    final ready = [
+      for (final m in group.members)
+        if (!m.muted && _characters.containsKey(m.characterId)) m.characterId,
+    ];
+    switch (group.activation) {
+      case TavernGroupActivation.manual:
+        return const [];
+      case TavernGroupActivation.randomPool:
+        // The next who has not spoken since your line before this one (the
+        // line just sent is passed over, so the members take turns).
+        final spoken = <String>{};
+        var replies = false;
+        for (final m in chat.path().reversed) {
+          if (m.role == TavernRole.user) {
+            if (replies) break;
+            continue;
+          }
+          replies = true;
+          if (m.speakerCharacterId case final id?) spoken.add(id);
+        }
+        final next = ready.where((id) => !spoken.contains(id)).firstOrNull ?? ready.firstOrNull;
+        return [?next];
+      case TavernGroupActivation.natural:
+        final named = ready.where((id) => text.contains(_characters[id]!.name)).toList();
+        return [...named, ...ready.where((id) => !named.contains(id))].take(group.maxSpeakers).toList();
+      case TavernGroupActivation.listOrder:
+      case TavernGroupActivation.director:
+        return ready.take(group.maxSpeakers).toList();
+    }
+  }
+
+  @override
+  Stream<TavernGroupEvent> sendGroup(String chatId, String text, {String? speakerCharacterId}) {
+    final group = _groups[chatId];
+    if (group == null) return Stream.error(TavernGroupException(TavernGroupError.notGroup, chatId: chatId));
+    final out = StreamController<TavernGroupEvent>();
+    // As the engine: listening admits the batch.
+    out.onListen = () => unawaited(_runGroup(group, text, speakerCharacterId, out));
+    return out.stream;
+  }
+
+  Future<void> _runGroup(_Group group, String text, String? explicit, StreamController<TavernGroupEvent> out) async {
+    final chat = _chats[group.chatId]!;
+    final live = group.live = StreamController<TavernGroupEvent>.broadcast();
+    void emit(TavernGroupEvent event) {
+      if (!out.isClosed) out.add(event);
+      live.add(event);
+    }
+
+    final roundId = _id('round');
+    final startedAt = _clock();
+    var parent = chat.tail()?.id;
+    String? userNode;
+    if (text.trim().isNotEmpty) {
+      final user = _Node(_id('n'), parent, TavernRole.user, 'You', text, startedAt);
+      chat.add(user);
+      chat.chosen[parent] = user.id;
+      parent = userNode = user.id;
+      chat.changes.add(null);
+    }
+    final plan = explicit != null ? [explicit] : _plan(group, chat, text);
+    final done = <String>[];
+    TavernGroupProgress progress(
+      TavernGroupPhase phase, {
+      required List<String> remaining,
+      String? speaker,
+      String? reply,
+      String? generation,
+    }) => group.progress = TavernGroupProgress(
+      chatId: group.chatId,
+      roundId: roundId,
+      startedAt: startedAt,
+      phase: phase,
+      userNodeId: userNode,
+      speakerCharacterId: speaker,
+      replyNodeId: reply,
+      generationId: generation,
+      plannedCharacterIds: plan,
+      remainingCharacterIds: remaining,
+      completedNodeIds: List.of(done),
+    );
+    Future<void> finish(
+      TavernGroupEndReason reason,
+      TavernGroupProgress at, {
+      String? attempted,
+      TavernMessage? partial,
+    }) async {
+      emit(
+        TavernGroupFinished(
+          chatId: group.chatId,
+          reason: reason,
+          progress: at,
+          attemptedCharacterId: attempted,
+          partial: partial,
+        ),
+      );
+      group
+        ..live = null
+        ..progress = null
+        ..current = null;
+      _listChanged.add(null);
+      await live.close();
+      if (!out.isClosed) await out.close();
+    }
+
+    emit(TavernGroupStarted(progress(TavernGroupPhase.preparing, remaining: plan)));
+    if (plan.isEmpty) {
+      await finish(TavernGroupEndReason.noSpeakers, progress(TavernGroupPhase.finished, remaining: const []));
+      return;
+    }
+    emit(TavernGroupProgressChanged(progress(TavernGroupPhase.ready, remaining: plan)));
+    for (var i = 0; i < plan.length; i++) {
+      final actorId = plan[i];
+      final actor = _characters[actorId];
+      final rest = plan.sublist(i + 1);
+      if (actor == null) {
+        await finish(
+          TavernGroupEndReason.failed,
+          progress(TavernGroupPhase.finished, remaining: rest),
+          attempted: actorId,
+        );
+        return;
+      }
+      final node = _Node(_id('n'), parent, TavernRole.character, actor.name, '', _clock())..speakerId = actorId;
+      chat.add(node);
+      chat.chosen[parent] = node.id;
+      group.current = node;
+      final speaking = progress(
+        TavernGroupPhase.speaking,
+        remaining: rest,
+        speaker: actorId,
+        reply: node.id,
+        generation: _id('gen'),
+      );
+      emit(TavernGroupProgressChanged(speaking));
+      TavernEvent? last;
+      await for (final event in _stream(
+        chat,
+        node,
+        i == 0 ? _cannedFor(text) : _canned[(_seq++) % _canned.length],
+        started: true,
+      )) {
+        last = event;
+        emit(TavernGroupMemberEvent(progress: speaking, characterId: actorId, event: event));
+      }
+      if (last is! TavernTurnDone) {
+        await finish(
+          TavernGroupEndReason.cancelled,
+          progress(TavernGroupPhase.finished, remaining: rest),
+          attempted: actorId,
+          partial: chat.message(node),
+        );
+        return;
+      }
+      done.add(node.id);
+      parent = node.id;
+      emit(
+        TavernGroupProgressChanged(
+          progress(TavernGroupPhase.settling, remaining: rest, speaker: actorId, reply: node.id),
+        ),
+      );
+    }
+    await finish(TavernGroupEndReason.completed, progress(TavernGroupPhase.finished, remaining: const []));
+  }
+
+  /// The batch now (with the reply being written) and what follows, taken
+  /// together so nothing falls between; nothing when no batch runs. Never
+  /// starts one.
+  @override
+  Stream<TavernGroupEvent> resumeGroupTurn(String chatId) {
+    final group = _groups[chatId];
+    final live = group?.live;
+    final now = group?.progress;
+    if (group == null || live == null || now == null) return const Stream.empty();
+    final current = group.current;
+    final out = StreamController<TavernGroupEvent>()
+      ..add(TavernGroupSnapshot(progress: now, message: current == null ? null : _chats[chatId]!.message(current)));
+    final following = live.stream.listen(out.add, onDone: out.close);
+    out.onCancel = following.cancel;
+    return out.stream;
   }
 
   @override
@@ -604,6 +1183,7 @@ class PreviewTavern implements Tavern, TavernPreview {
             siblingCount: siblings.length,
             hidden: node.hidden,
             branchName: chat.branchNames[node.id],
+            speakerCharacterId: node.speakerId,
           );
         }(),
     ];
@@ -1195,6 +1775,34 @@ class _Char {
   ];
 }
 
+/// A group chat's roster and settings, and its batch while one runs.
+class _Group {
+  _Group(this.chatId, this.title, this.host, this.members, this.activation, this.maxSpeakers, this.allowSelf);
+  final String chatId;
+  String title;
+  final String host;
+  List<TavernGroupMember> members;
+  TavernGroupActivation activation;
+  int maxSpeakers;
+  bool allowSelf;
+
+  /// The running batch: its events for a page coming back, where it is, and
+  /// the reply being written.
+  StreamController<TavernGroupEvent>? live;
+  TavernGroupProgress? progress;
+  _Node? current;
+
+  TavernGroupChat view() => TavernGroupChat(
+    chatId: chatId,
+    title: title,
+    hostCharacterId: host,
+    members: members,
+    activation: activation,
+    maxSpeakersPerTurn: maxSpeakers,
+    allowSelfResponses: allowSelf,
+  );
+}
+
 class _Node {
   _Node(this.id, this.parent, this.role, this.speaker, this.text, this.at);
   final String id;
@@ -1205,6 +1813,9 @@ class _Node {
   String? reasoning;
   final DateTime at;
   bool hidden = false;
+
+  /// The library card that said it (group chats); null for you and narration.
+  String? speakerId;
 }
 
 /// A deletion's nodes, each with its place in the order, and the chosen path
@@ -1264,6 +1875,7 @@ class _Chat {
       siblingIndex: siblings.indexOf(node),
       siblingCount: siblings.length,
       hidden: node.hidden,
+      speakerCharacterId: node.speakerId,
     );
   }
 
@@ -1285,7 +1897,8 @@ class _Chat {
     for (final child in children(id)) {
       nodes[child.id] = _Node(child.id, node.parent, child.role, child.speaker, child.text, child.at)
         ..reasoning = child.reasoning
-        ..hidden = child.hidden;
+        ..hidden = child.hidden
+        ..speakerId = child.speakerId;
     }
     nodes.remove(id);
     _order.remove(id);
@@ -1413,3 +2026,195 @@ const _samples = [
     greetings: ['「舰桥欢迎你，舰长。航线已经算好，还有三十七个小时抵达。要听个笑话打发时间吗？」'],
   ),
 ];
+
+/// The preview's [Tavern.scripts]: it simulates none of the bridge, and says
+/// so (simulated, no methods, no scopes); every call is refused as such,
+/// and no events come.
+class _PreviewScripts implements TavernScriptBridge {
+  TavernScriptHost? _host;
+
+  Future<T> _no<T>(String operation) => Future.error(
+    TavernScriptException(
+      code: TavernScriptErrorCode.unsupportedCapability,
+      operation: operation,
+      message: 'The preview does not simulate card scripts.',
+    ),
+  );
+
+  @override
+  TavernScriptCapabilities get capabilities => TavernScriptCapabilities(
+    adapterVersion: 'preview',
+    methods: const {},
+    scopes: const {},
+    hostAttached: _host != null,
+    simulated: true,
+  );
+
+  @override
+  void attachHost(TavernScriptHost? host) => _host = host;
+
+  @override
+  Future<TavernScriptContext> openContext(TavernScriptContextSpec spec) => _no('openContext');
+
+  @override
+  Future<TavernScriptSnapshot> snapshot(String contextId) => _no('snapshot');
+
+  @override
+  Future<void> closeContext(String contextId) => _no('closeContext');
+
+  @override
+  Future<void> activateChat(String contextId) => _no('activateChat');
+
+  @override
+  Stream<TavernScriptEvent> watchEvents({String? chatId}) => const Stream.empty();
+
+  @override
+  Future<TavernScriptMessagePage> getChatMessages(
+    String contextId,
+    TavernMessageRange range, {
+    TavernScriptRole? role,
+    TavernHiddenFilter hidden = TavernHiddenFilter.all,
+    bool includeSwipes = false,
+  }) => _no('getChatMessages');
+
+  @override
+  Future<TavernScriptMutation> setChatMessages(
+    String contextId,
+    List<TavernScriptMessagePatch> patches, {
+    TavernScriptWriteOptions options = const TavernScriptWriteOptions(),
+  }) => _no('setChatMessages');
+
+  @override
+  Future<TavernScriptMutation> createChatMessages(
+    String contextId,
+    List<TavernScriptMessageDraft> messages, {
+    int? insertBefore,
+    TavernScriptWriteOptions options = const TavernScriptWriteOptions(),
+  }) => _no('createChatMessages');
+
+  @override
+  Future<TavernScriptMutation> deleteChatMessages(
+    String contextId,
+    List<int> messageIds, {
+    TavernScriptWriteOptions options = const TavernScriptWriteOptions(),
+  }) => _no('deleteChatMessages');
+
+  @override
+  Future<TavernScriptMutation> rotateChatMessages(
+    String contextId,
+    int begin,
+    int middle,
+    int end, {
+    TavernScriptWriteOptions options = const TavernScriptWriteOptions(),
+  }) => _no('rotateChatMessages');
+
+  @override
+  Future<TavernScriptMutation> selectSwipe(
+    String contextId,
+    TavernScriptMessageRef message,
+    int swipeId, {
+    TavernScriptWriteOptions options = const TavernScriptWriteOptions(),
+  }) => _no('selectSwipe');
+
+  @override
+  Future<TavernVariableSnapshot> getVariables(String contextId, TavernVariableTarget target) => _no('getVariables');
+
+  @override
+  Future<TavernVariableSnapshot> replaceVariables(
+    String contextId,
+    TavernVariableTarget target,
+    TavernJsonObject value, {
+    String? expectedVersion,
+  }) => _no('replaceVariables');
+
+  @override
+  Future<TavernVariableSnapshot> updateVariablesWith(
+    String contextId,
+    TavernVariableTarget target,
+    FutureOr<TavernJsonObject> Function(TavernJsonObject value) updater,
+  ) => _no('updateVariablesWith');
+
+  @override
+  Future<TavernVariableMutation> mutateVariables(
+    String contextId,
+    TavernVariableTarget target,
+    List<TavernVariableChange> changes, {
+    String? expectedVersion,
+  }) => _no('mutateVariables');
+
+  @override
+  Future<TavernScriptGeneration> generate(String contextId, TavernScriptGenerateRequest request) => _no('generate');
+
+  @override
+  Future<TavernScriptGeneration> generateRaw(String contextId, TavernScriptRawRequest request) => _no('generateRaw');
+
+  @override
+  bool stopGenerationById(String generationId) => false;
+
+  @override
+  Future<List<TavernScriptRegex>> getTavernRegexes(String contextId, TavernScriptRegexQuery query) =>
+      _no('getTavernRegexes');
+
+  @override
+  Future<TavernDisplayResult> formatAsTavernRegexedString(
+    String contextId,
+    String text, {
+    required int source,
+    required RegexPhase destination,
+    num? depth,
+    String? characterId,
+  }) => _no('formatAsTavernRegexedString');
+
+  @override
+  Future<TavernScriptInjectionLease> injectPrompts(
+    String contextId,
+    List<TavernScriptInjection> prompts, {
+    bool once = false,
+  }) => _no('injectPrompts');
+
+  @override
+  Future<void> uninjectPrompts(String contextId, List<String> ids) => _no('uninjectPrompts');
+
+  @override
+  Future<void> releaseInjectionLease(String leaseId) => _no('releaseInjectionLease');
+
+  @override
+  Future<List<TavernScriptInjectionView>> listInjections(String contextId) => _no('listInjections');
+
+  @override
+  Future<TavernSlashExecution> triggerSlash(
+    String contextId,
+    String source, {
+    String? executionId,
+    String pipe = '',
+    Map<String, String> arguments = const {},
+  }) => _no('triggerSlash');
+
+  @override
+  bool stopScript(String executionId) => false;
+
+  @override
+  Future<String> substituteMacros(String contextId, String text) => _no('substituteMacros');
+
+  @override
+  Future<TavernCharacter> replaceCharacterData(
+    String contextId,
+    String characterId,
+    TavernJsonObject data, {
+    String? expectedVersion,
+  }) => _no('replaceCharacterData');
+
+  @override
+  Future<List<TavernScriptBookBinding>> getContextBooks(String contextId) => _no('getContextBooks');
+
+  @override
+  Future<TavernScriptBookSnapshot> readBook(String contextId, TavernScriptBookRef ref) => _no('readBook');
+
+  @override
+  Future<TavernScriptBookSnapshot> replaceBook(
+    String contextId,
+    TavernScriptBookRef ref,
+    TavernJsonObject book, {
+    String? expectedVersion,
+  }) => _no('replaceBook');
+}

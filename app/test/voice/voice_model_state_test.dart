@@ -171,10 +171,22 @@ class _Engine {
     'pluginManager/setBundleEnabled': (args) {
       if (args['enabled'] == false && disable == 'throws') throw DshHttpException(500, 'plugin manager busy');
       if (args['enabled'] == false && disable == 'failed') {
-        return {'stage': 'enable', 'target': voiceInputBundle, 'enabled': false, 'changed': false, 'application': 'failed'};
+        return {
+          'stage': 'enable',
+          'target': voiceInputBundle,
+          'enabled': false,
+          'changed': false,
+          'application': 'failed',
+        };
       }
       enabled = args['enabled'] == true;
-      return {'stage': 'enable', 'target': voiceInputBundle, 'enabled': enabled, 'changed': true, 'application': 'applied'};
+      return {
+        'stage': 'enable',
+        'target': voiceInputBundle,
+        'enabled': enabled,
+        'changed': true,
+        'application': 'applied',
+      };
     },
     'speech/catalog': (_) {
       if (!enabled) throw DshHttpException(404, 'not served');
@@ -182,7 +194,12 @@ class _Engine {
       if (prepared && afterPrepare.length == 1) preparation = afterPrepare.first;
       return {
         'providers': [
-          {'id': voiceModelProviderId, 'name': 'SenseVoiceSmall (INT8)', 'location': 'host-local', 'preparation': preparation},
+          {
+            'id': voiceModelProviderId,
+            'name': 'SenseVoiceSmall (INT8)',
+            'location': 'host-local',
+            'preparation': preparation,
+          },
         ],
         'selection': {'providerId': selection, 'language': 'auto'},
         'maxAudioBytes': 4194304,
@@ -326,8 +343,20 @@ void main() {
   test('the mirror failing hands the download to the engine, which still gets there', () async {
     platform.failWith = VoiceDownloadError.network;
     engine.afterPrepare = [
-      {'phase': 'downloading', 'resource': 'model.int8.onnx', 'completedBytes': 400, 'totalBytes': 1000, 'step': 'model'},
-      {'phase': 'downloading', 'resource': 'model.int8.onnx', 'completedBytes': 900, 'totalBytes': 1000, 'step': 'model'},
+      {
+        'phase': 'downloading',
+        'resource': 'model.int8.onnx',
+        'completedBytes': 400,
+        'totalBytes': 1000,
+        'step': 'model',
+      },
+      {
+        'phase': 'downloading',
+        'resource': 'model.int8.onnx',
+        'completedBytes': 900,
+        'totalBytes': 1000,
+        'step': 'model',
+      },
       {'phase': 'checking', 'step': 'verify'},
       {'phase': 'ready'},
     ];
@@ -554,7 +583,12 @@ void main() {
       {
         'phase': 'failed',
         'message': 'Unable to prepare model.int8.onnx from https://us.aws.cdn.hf.co: network (UND_ERR_SOCKET)',
-        'download': {'resource': 'model.int8.onnx', 'source': 'https://us.aws.cdn.hf.co', 'reason': 'network', 'code': 'UND_ERR_SOCKET'},
+        'download': {
+          'resource': 'model.int8.onnx',
+          'source': 'https://us.aws.cdn.hf.co',
+          'reason': 'network',
+          'code': 'UND_ERR_SOCKET',
+        },
       },
     ];
     final c = container();

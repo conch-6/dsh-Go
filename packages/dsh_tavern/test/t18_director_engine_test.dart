@@ -1100,6 +1100,7 @@ class _Model extends TavernModelClient {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) {
     final helper = (body['tools'] as List<Object?>? ?? const []).any(
       (tool) => _map(_map(tool)['function'])['name'] == 'direct',

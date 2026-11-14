@@ -52,6 +52,11 @@ void main() {
     store.selectNode(chat, bLeaf);
     store.selectNode(chat, leaf);
     final nodes = _contents(database, [a, leaf]);
+    // Deletion invalidates remembered sources permanently; undo restores the
+    // rows and state but must not revive their previous source epoch.
+    final afterDelete = [
+      for (final node in nodes) {...node, 'source_epoch': (node['source_epoch']! as int) + 1},
+    ];
     final state = store.nodeState(chat, leaf);
     late String token;
     store.transaction(() {
@@ -67,7 +72,7 @@ void main() {
     expect(store.search('lostword', chatId: chat), isEmpty);
     expect(store.searchChat(chat, 'lostword'), isEmpty);
     expect(_fts(database, 'lostword'), [a, leaf]);
-    expect(_contents(database, [a, leaf]), nodes);
+    expect(_contents(database, [a, leaf]), afterDelete);
     for (final read in <void Function()>[
       () {
         store.message(chat, a);
@@ -103,7 +108,7 @@ void main() {
     expect(store.message(chat, b).siblingIndex, 1);
     expect(store.message(chat, b).siblingCount, 2);
     expect(store.nodeState(chat, leaf), state);
-    expect(_contents(database, [a, leaf]), nodes);
+    expect(_contents(database, [a, leaf]), afterDelete);
     expect(store.chat(chat).metadata, {'foreign': 'new metadata'});
     expect(store.undoDeleteFrom(chat, token), isFalse);
     _integrity(database);

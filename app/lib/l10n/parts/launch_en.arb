@@ -5,6 +5,7 @@
   "launchFit": "Fit",
   "launchFitFill": "Fill",
   "launchFitCenter": "Center",
+  "launchFrame": "Reposition",
   "launchBackground": "Background",
   "launchBackdropAuto": "Auto",
   "launchBackdropEdge": "From picture",

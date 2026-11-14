@@ -84,7 +84,7 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
                         val ack = Bundles.unmarshal(process.exchange(Bundles.marshal(MuxProtocol.optIn(peer)), remaining()))
                         MuxProtocol.acknowledge(ack, peer)
                     }
-                    backgroundLimit = backgroundRequestLimit(probe::get, probe::containsKey, negotiated != null)
+                    backgroundLimit = backgroundRequestLimit(probe.get(Proto.OK), negotiated != null)
                     null
                 }
             }
@@ -145,6 +145,17 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
         onChanged()
     }
 
+    /** Ends this exact process (its displays go with it); a newer connection is left alone. */
+    fun disconnectIfCurrent(expected: PrivilegedChannel) {
+        val closing = synchronized(guard) {
+            if (channel !== expected) return
+            state.disconnect()
+            channel.also { channel = null }
+        }
+        closing?.close()
+        onChanged()
+    }
+
     private fun discardDead() {
         val dead = synchronized(guard) {
             channel?.takeIf { !it.alive() }?.also { channel = null; state.disconnect() }
@@ -189,7 +200,7 @@ private class RootChannel(
         val response = if (peer == null) Bundles.unmarshal(process.exchange(Bundles.marshal(request), 30_000))
         else process.exchangeMux(request, peer)
         if (request.get(Proto.OP) == Proto.OP_PROBE)
-            supportedBackgroundLimit = backgroundRequestLimit(response::get, response::containsKey, peer != null)
+            supportedBackgroundLimit = backgroundRequestLimit(response.get(Proto.OK), peer != null)
         response
     } catch (error: Exception) {
         val timeout = error is IOException && error.message == "rootTimeout"

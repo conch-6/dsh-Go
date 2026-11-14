@@ -687,7 +687,11 @@ void _memory(T24Harness h, String id, Json entry, {String? chatId}) =>
     _memoryRaw(h, id, jsonEncode(entry), chatId: chatId);
 void _memoryRaw(T24Harness h, String id, String raw, {String? chatId}) => _db(
   h,
-  (db) => db.execute('INSERT INTO memories(id, chat_id, entry_json) VALUES (?, ?, ?)', [id, chatId ?? h.chatId, raw]),
+  (db) => db.execute("INSERT INTO memories(id, chat_id, entry_json, origin) VALUES (?, ?, ?, 'legacy')", [
+    id,
+    chatId ?? h.chatId,
+    raw,
+  ]),
 );
 
 String _memoryBytes(T24Harness h) => _db(

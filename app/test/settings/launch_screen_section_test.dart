@@ -11,7 +11,10 @@ import 'package:dsh_app/launch/custom_launch.dart';
 import 'package:dsh_app/launch/launch_import.dart';
 import 'package:dsh_app/state/app_icon_state.dart';
 import 'package:dsh_app/state/launch_screen_state.dart';
+import 'package:dsh_app/launch/launch_media.dart';
 import 'package:dsh_app/ui/common/app_sheet.dart';
+import 'package:dsh_app/ui/launch/launch_editor_page.dart';
+import 'package:dsh_app/ui/launch/launch_overlay.dart';
 import 'package:dsh_app/ui/settings/appearance/appearance_page.dart';
 import 'package:dsh_app/ui/settings/appearance/launch_screen_section.dart';
 import 'package:dsh_app/ui/settings/settings_widgets.dart';
@@ -163,6 +166,7 @@ void main() {
       expect(selected(tester, '自定义'), isTrue);
       expect(find.text('启动画面已更换'), findsOneWidget);
       expect(find.text('适配方式'), findsOneWidget);
+      expect(find.text('调整位置'), findsOneWidget);
       expect(find.text('背景色'), findsOneWidget);
       expect(find.text('更换图片或视频'), findsOneWidget);
       // Stored, in use.
@@ -198,8 +202,10 @@ void main() {
         tester,
         stored: CustomLaunch(kind: LaunchMediaKind.image, path: path, width: 540, height: 960, edge: 0xFF2E5C8A),
       );
+      expect(find.byKey(const ValueKey('launch-frame')), findsOneWidget);
       await tester.tap(find.text('居中'));
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('launch-frame')), findsNothing);
       await tester.tap(find.bySemanticsLabel('取自图片'));
       await tester.pumpAndSettle();
       final raw = (await SharedPreferences.getInstance()).getString(CustomLaunch.prefsKey)!;
@@ -207,6 +213,73 @@ void main() {
       expect(raw, contains('"backdrop":"edge"'));
       expect(selected(tester, '取自图片'), isTrue);
       handle.dispose();
+    });
+
+    testWidgets('调整位置: drag and 完成 stores framing; 复原 centres it again', (tester) async {
+      final path = (await tester.runAsync(() => _photo(dir)))!;
+      await pump(
+        tester,
+        stored: CustomLaunch(kind: LaunchMediaKind.image, path: path, width: 540, height: 960),
+      );
+      await tester.tap(find.byKey(const ValueKey('launch-frame')));
+      for (var i = 0; i < 12; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+        await tester.pump(const Duration(milliseconds: 60));
+      }
+      expect(find.byType(LaunchEditorPage), findsOneWidget);
+      await tester.drag(find.byKey(const ValueKey('launch-editor-view')), const Offset(-40, 0));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.byKey(const ValueKey('launch-editor-done')));
+      await tester.pumpAndSettle();
+      expect(find.byType(LaunchEditorPage), findsNothing);
+      final stored = (await CustomLaunch.load())!;
+      expect(stored.alignX, greaterThan(0.3));
+
+      // Tapping the active custom phone in fill mode also opens the editor; 复原 resets framing.
+      await tester.tap(find.byKey(const ValueKey('launch-custom')));
+      for (var i = 0; i < 12; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+        await tester.pump(const Duration(milliseconds: 60));
+      }
+      expect(find.byType(LaunchEditorPage), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('launch-editor-reset')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('launch-editor-done')));
+      await tester.pumpAndSettle();
+      final reset = (await CustomLaunch.load())!;
+      expect((reset.zoom, reset.alignX, reset.alignY), (1.0, 0.0, 0.0));
+    });
+
+    testWidgets('CustomLaunchView applies zoom and alignment in fill mode', (tester) async {
+      usePhoneSurface(tester);
+      final recorder = ui.PictureRecorder();
+      ui.Canvas(recorder).drawRect(const Rect.fromLTWH(0, 0, 540, 960), Paint()..color = const Color(0xFF2E5C8A));
+      final image = (await tester.runAsync(() => recorder.endRecording().toImage(540, 960)))!;
+      addTearDown(image.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CustomLaunchView(
+            custom: const CustomLaunch(
+              kind: LaunchMediaKind.image,
+              path: '/x',
+              width: 540,
+              height: 960,
+              zoom: 2,
+              alignX: -1,
+              alignY: 1,
+            ),
+            media: StillLaunchMedia(image, owned: false),
+            dark: false,
+          ),
+        ),
+      );
+      final rect = tester.getRect(find.byType(RawImage));
+      // 390 × 844 screen, 540 × 960 image: cover is 474.75 × 844; at 2× zoom it is 949.5 × 1688,
+      // aligned to the left (-1 -> left == 0) and bottom (1 -> bottom == 844).
+      expect(rect.width, moreOrLessEquals(949.5, epsilon: 0.05));
+      expect(rect.height, moreOrLessEquals(1688, epsilon: 0.05));
+      expect(rect.left, moreOrLessEquals(0, epsilon: 0.05));
+      expect(rect.bottom, moreOrLessEquals(844, epsilon: 0.05));
     });
 
     testWidgets('without an edge colour there is no 取自图片', (tester) async {

@@ -18,6 +18,7 @@ import '../../tavern/tavern_backgrounds.dart';
 import '../../tavern/tavern_card_sites.dart';
 import '../../tavern/tavern_live2d.dart';
 import '../../tavern/tavern_provider.dart';
+import '../../tavern/tavern_session_usage.dart';
 import '../common/app_dialog.dart';
 import '../common/app_sheet.dart';
 import '../settings/settings_widgets.dart';
@@ -554,3 +555,8 @@ class TavernFigure extends StatelessWidget {
     );
   }
 }
+
+/// [usd], a reply's or a chat's estimated cost, as it reads: about
+/// US$0.0065; under US$0.0001 when four places would show nothing.
+String tavernCostLabel(L10n l10n, double usd) =>
+    usd < 0.0001 ? l10n.tavernUsageCostUnder('US\$0.0001') : l10n.tavernUsageCost('US\$${tavernUsd(usd)}');

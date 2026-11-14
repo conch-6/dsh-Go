@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import '../speech/deepseek_speech.dart';
 import 'companion_voice_source.dart';
 
 enum CompanionVoiceEventType {
@@ -154,13 +155,16 @@ class _Line {
 /// sentence that can't be fetched or played is read in the phone's own voice
 /// when it has one. Events carry the loudness of fetched WAV audio for her mouth.
 class CompanionSpeaker {
-  CompanionSpeaker(this._voice, this._client, this._folder) {
+  CompanionSpeaker(this._voice, this._client, this._folder, [this._deepseek]) {
     _native = _voice.events.listen(_heard);
   }
 
   final CompanionVoice _voice;
   final http.Client Function() _client;
   final Future<Directory> Function() _folder;
+
+  /// Who pays for DeepSeek's voice, asked per sentence (an account may sign in or out).
+  final DeepSeekSpeechResolver? _deepseek;
   late final StreamSubscription<CompanionVoiceEvent> _native;
   final _events = StreamController<CompanionVoiceEvent>.broadcast();
 
@@ -192,6 +196,11 @@ class CompanionSpeaker {
     settings = next;
     if (next.source == CompanionVoiceSource.system) return _phoneReady = await _voice.ready();
     unawaited(_voice.ready().then((ok) => _phoneReady = ok));
+    if (next.source == CompanionVoiceSource.deepseek) {
+      final speech = await _deepseek?.call();
+      speech?.close();
+      return speech != null;
+    }
     return next.configured;
   }
 
@@ -232,7 +241,7 @@ class CompanionSpeaker {
     if (!next.configured) return 'not-set-up';
     final client = _client();
     try {
-      final audio = await fetchCompanionVoice(next, text, client);
+      final audio = await fetchCompanionVoice(next, text, client, deepseek: _deepseek);
       final file = await _write(id, audio);
       _files[id] = file;
       return await _voice.play(id, file.path) ? null : 'cannot play ${audio.ext}';
@@ -246,7 +255,7 @@ class CompanionSpeaker {
   Future<CompanionVoiceAudio?> _fetch(CompanionVoiceSettings settings, String text) async {
     final client = _client();
     try {
-      final audio = await fetchCompanionVoice(settings, text, client);
+      final audio = await fetchCompanionVoice(settings, text, client, deepseek: _deepseek);
       lastError = null;
       return audio;
     } on CompanionVoiceError catch (error) {
@@ -343,6 +352,21 @@ final companionSpeakerProvider = Provider<CompanionSpeaker>((ref) {
     ref.watch(companionVoiceProvider),
     ref.watch(companionVoiceClientProvider),
     ref.watch(companionVoiceFolderProvider),
+    ref.watch(deepSeekSpeechProvider),
+  );
+  ref.onDispose(speaker.dispose);
+  return speaker;
+});
+
+/// The same kind of speaker for 朗读 and 语音通话 when their voice isn't
+/// DeepSeek's (that one streams: speech_out.dart). Its own queue: reading a
+/// reply aloud never cuts into her lines' bookkeeping.
+final speechSpeakerProvider = Provider<CompanionSpeaker>((ref) {
+  final speaker = CompanionSpeaker(
+    ref.watch(companionVoiceProvider),
+    ref.watch(companionVoiceClientProvider),
+    ref.watch(companionVoiceFolderProvider),
+    ref.watch(deepSeekSpeechProvider),
   );
   ref.onDispose(speaker.dispose);
   return speaker;

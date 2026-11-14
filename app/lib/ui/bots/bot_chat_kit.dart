@@ -670,7 +670,7 @@ class BotTypingLine extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 6),
-        SizedBox(height: 14, child: TypingIndicator(color: dsh.textTertiary)),
+        TypingIndicator(color: dsh.textTertiary),
       ],
     );
   }

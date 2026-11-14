@@ -27,7 +27,6 @@ class PhoneTaskSessions(
         if (state.stopped) task.activeWorker?.interruptCurrent(task.tasks)
     },
     private val journal: PhoneTaskJournal? = null,
-    private val recoveryAdmission: () -> String? = { null },
     private val createBackgroundWorker: () -> SerialWorker = { SerialWorker("dsh-phone-background") },
     // Pure in-memory capability/setting snapshot. Never probe a peer or read preferences here.
     private val backgroundCapacity: () -> Int = { 1 },
@@ -262,7 +261,6 @@ class PhoneTaskSessions(
             if (replay != null && (task.sessionId != replay.request.session || task.runId != replay.run))
                 return ToolOutput("路线调用身份与原准备不匹配，未执行。", isError = true) // l10n:keep replay result
             if (remainingMs(admission) <= 0) return deadlineOutput()
-            recoveryAdmission()?.let { return ToolOutput(it, isError = true) }
             journal?.refusal()?.let { return ToolOutput(it, isError = true) }
             if (replay == null) task.core.rejection(name)?.let { return it }
             synchronized(lock) {

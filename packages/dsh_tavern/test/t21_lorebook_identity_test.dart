@@ -65,7 +65,15 @@ void main() {
     final edited = <String, Object?>{...raw, 'name': '新显示名', 'futureRevision': 2};
     final obstruction = Directory('${h.directory.path}/lorebooks/$id.json.writing');
     await obstruction.create();
-    await expectLater(h.engine.putLorebook(id, edited), throwsA(isA<FileSystemException>()));
+    await expectLater(
+      h.engine.putLorebook(id, edited),
+      throwsA(
+        isA<TavernAuthoringException>()
+            .having((error) => error.code, 'code', 'resource_write_failed')
+            .having((error) => error.receipt?.committed, 'committed', false)
+            .having((error) => error.cause, 'cause', isA<FileSystemException>()),
+      ),
+    );
     expect(await h.engine.lorebook(id), raw);
     expect(jsonDecode(await h.engine.exportLorebook(id)), raw);
     await obstruction.delete();
@@ -280,6 +288,7 @@ class _Model extends TavernModelClient {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) async* {
     bodies.add(jsonDecode(jsonEncode(body)) as Map<String, Object?>);
     yield const ModelText('REPLY');

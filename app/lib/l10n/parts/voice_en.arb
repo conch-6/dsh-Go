@@ -1,9 +1,9 @@
 {
-  "voiceSettingsTitle": "Voice input",
+  "voiceSettingsTitle": "Voice",
   "voiceModeAuto": "Automatic",
   "voiceModeSystem": "System",
   "voiceModeEngine": "Voice model",
-  "voiceModeAutoHint": "Uses the voice model when it’s ready, otherwise the phone’s service",
+  "voiceModeAutoHint": "Uses DeepSeek when you’re signed in or have an API key, otherwise the voice model or the phone’s service",
   "voiceModeSystemHint": "Use the recognition service selected on this phone",
   "voiceModeEngineHint": "Recognizes speech with the engine’s voice model",
   "voiceFallbackStarted": "Switched to the voice model. Please speak again.",
@@ -71,5 +71,13 @@
   "voiceModelFailedToast": "Voice model download failed: {reason}",
   "voiceModelNoticeDownloading": "Downloading the voice model {percent}%",
   "voiceModelNoticePreparing": "Checking the voice model",
-  "voiceModelNoticeFailed": "Voice model download failed. Open the app to retry."
+  "voiceModelNoticeFailed": "Voice model download failed. Open the app to retry.",
+  "voiceModeDeepseek": "DeepSeek",
+  "voiceModeDeepseekHint": "DeepSeek’s recognizer, paid by your signed-in account or API key",
+  "voiceModeCloud": "Another cloud service",
+  "voiceModeCloudHint": "An OpenAI-compatible transcription API, such as Whisper or SiliconFlow",
+  "voiceCloudSection": "Cloud recognition service",
+  "voiceCloudFooter": "Recordings are sent to this service. The key stays on this phone.",
+  "voiceCloudBaseHelper": "Up to /v1; the app calls …/audio/transcriptions",
+  "voiceCloudModelHelper": "For example whisper-1 or FunAudioLLM/SenseVoiceSmall"
 }

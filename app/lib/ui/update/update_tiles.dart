@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/update_state.dart';
+import '../fx/metal/metal_badge.dart';
 import '../settings/settings_widgets.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
@@ -80,38 +81,12 @@ class AppUpdateTiles extends ConsumerWidget {
 }
 
 /// The "new version" mark: a dot and a short label on a tinted pill.
+/// 「新版本」: a small pill of liquid metal (Libraries.dev Metal), the one on the page.
 class UpdateBadge extends StatelessWidget {
   const UpdateBadge(this.text, {super.key});
 
   final String text;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final colors = DshColors.of(context);
-    return DecoratedBox(
-      decoration: ShapeDecoration(color: scheme.primaryContainer, shape: const StadiumBorder()),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 3, 10, 3),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DecoratedBox(
-              decoration: ShapeDecoration(color: colors.danger, shape: const CircleBorder()),
-              child: const SizedBox.square(dimension: 6),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              text,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: scheme.onPrimaryContainer,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => MetalBadge(text: text);
 }

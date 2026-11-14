@@ -28,6 +28,7 @@ async function fixture(t, { connection = true } = {}) {
     inject(_deps, fn) { fn(ctx); },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposals.push(dispose); },
     webServer: {
+      tapIndex() { return () => {}; },
       register(route) { routes.push(route); return () => {}; },
       registerUpgrade() { return () => {}; },
     },

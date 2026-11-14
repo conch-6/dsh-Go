@@ -126,7 +126,9 @@ String tavernIslandDocument(
           if (offline) 'media-src data: blob:',
           if (offline) 'font-src data:',
           if (offline) "style-src 'unsafe-inline' data:",
-          if (noScripts) "script-src 'nonce-$nonce'" else "script-src 'unsafe-inline' 'unsafe-eval' 'nonce-$nonce'",
+          // With scripts on, no nonce: next to one, 'unsafe-inline' counts for
+          // nothing and a card's own scripts and handlers would be refused.
+          if (noScripts) "script-src 'nonce-$nonce'" else "script-src 'unsafe-inline' 'unsafe-eval'",
           if (noScripts) "script-src-attr 'none'",
         ].join('; ')
       : null;

@@ -177,6 +177,7 @@ class _ControlledModel extends TavernModelClient {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) {
     if (calls++ != 0) {
       throw StateError('This fixture expects one generation only.');

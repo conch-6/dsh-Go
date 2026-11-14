@@ -398,6 +398,7 @@ class SettingsSegmentTile<T> extends StatelessWidget {
     required this.segments,
     required this.selected,
     required this.onChanged,
+    this.onReselect,
     this.tinted = true,
   }) : assert(title != null || spot != null);
 
@@ -416,6 +417,9 @@ class SettingsSegmentTile<T> extends StatelessWidget {
   final List<PillSegment<T>> segments;
   final T selected;
   final ValueChanged<T>? onChanged;
+
+  /// See [SegmentedPill.onReselect].
+  final ValueChanged<T>? onReselect;
   final bool tinted;
 
   @override
@@ -451,6 +455,7 @@ class SettingsSegmentTile<T> extends StatelessWidget {
               segments: segments,
               selected: selected,
               onChanged: onChanged,
+              onReselect: onReselect,
               expand: !inline,
             );
             final note = switch (subtitle) {

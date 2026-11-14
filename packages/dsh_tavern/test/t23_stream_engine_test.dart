@@ -575,6 +575,7 @@ class _Model extends TavernModelClient {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) {
     if (plans.isEmpty) throw StateError('Unexpected model call');
     return plans.removeFirst()();

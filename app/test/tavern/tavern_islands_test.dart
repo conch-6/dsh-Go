@@ -93,7 +93,8 @@ void main() {
     final offline = page(offline: true);
     expect(offline, contains("default-src 'none'"));
     expect(offline, contains('img-src data: blob:'));
-    expect(offline, contains("script-src 'unsafe-inline' 'unsafe-eval' 'nonce-n0nce'"));
+    expect(offline, contains("script-src 'unsafe-inline' 'unsafe-eval'\">"));
+    expect(offline, isNot(contains("'unsafe-eval' 'nonce-")));
   });
 
   testWidgets("a message's HTML is an island; the words around it stay native", (tester) async {

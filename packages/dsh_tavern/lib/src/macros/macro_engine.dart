@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import '../js_string.dart';
 
 part 'legacy_macro_engine.dart';
+part 'script_macro_adapter.dart';
 
 /// A message on the active chat path. Message ids are indices in this path.
 class MacroMessage {
@@ -31,6 +32,23 @@ class MacroMessage {
   /// currentSwipeId. Ignored when [swipeId] is present, and by [MacroEngine].
   final bool swipeIdIsNull;
   final DateTime? sentAt;
+}
+
+/// Detached history inputs for display. Positions retain the full physical
+/// path's indices; only messages actually read by history macros need bodies.
+class MacroHistorySnapshot {
+  const MacroHistorySnapshot({required this.length, this.last, this.user, this.character, this.previousUser});
+  final int length;
+  final ({int index, MacroMessage message})? last;
+  final ({int index, MacroMessage message})? user;
+  final ({int index, MacroMessage message})? character;
+  final MacroMessage? previousUser;
+
+  ({int index, MacroMessage message})? latest({bool? isUser}) => isUser == null
+      ? last
+      : isUser
+      ? user
+      : character;
 }
 
 /// Explicit environment for a single turn; no globals or I/O are consulted.
@@ -65,6 +83,7 @@ class MacroContext {
     this.mesExamplesOverride,
     this.persona = '',
     this.history = const [],
+    this.historySnapshot,
     this.model = '',
     this.input = '',
     this.maxContext = 0,
@@ -85,11 +104,15 @@ class MacroContext {
     num? chatIdHash,
     this.onChatIdHash,
     this.pickRerollSeed,
+    this.onCharacterDependency,
   }) : localVariables = localVariables ?? <String, Object?>{},
        globalVariables = globalVariables ?? <String, Object?>{},
        charName = charName ?? _cardName(card),
        group = group ?? charName ?? _cardName(card),
        groupNotMuted = groupNotMuted ?? group ?? charName ?? _cardName(card),
+       _charNameFromCard = charName == null,
+       _groupFromCard = group == null && charName == null,
+       _groupNotMutedFromCard = groupNotMuted == null && group == null && charName == null,
        notChar = notChar ?? userName,
        maxPrompt = maxPrompt ?? maxContext - maxResponse,
        now = now ?? DateTime.now(),
@@ -103,6 +126,9 @@ class MacroContext {
   final String charName;
   final String group;
   final String groupNotMuted;
+  final bool _charNameFromCard;
+  final bool _groupFromCard;
+  final bool _groupNotMutedFromCard;
   final String notChar;
   final Map<String, Object?> card;
   final bool replaceCharacterCard;
@@ -114,6 +140,9 @@ class MacroContext {
   final String? mesExamplesOverride;
   final String persona;
   final List<MacroMessage> history;
+  final MacroHistorySnapshot? historySnapshot;
+  int get _historyLength => historySnapshot?.length ?? history.length;
+  MacroMessage? get _historyLast => historySnapshot != null ? historySnapshot!.last?.message : history.lastOrNull;
   final String model;
   final String input;
   final int maxContext;
@@ -144,6 +173,33 @@ class MacroContext {
   /// whether to persist the value and provide it to later contexts.
   final void Function(num)? onChatIdHash;
   final Object? pickRerollSeed;
+
+  /// Observes a character source actually consumed by a macro: `name` or a
+  /// card-field key (`charDepthPrompt` names the nested depth prompt). Supplied
+  /// names, group lists, per-call constants and selected settings overrides do
+  /// not read that source. Legacy eager field preparation alone is not a use;
+  /// macros executed inside a prepared field still report their own reads.
+  /// An observer failure escapes compatibility fallback as its original error.
+  /// Omit this hook to retain ordinary native macro behavior.
+  final void Function(String)? onCharacterDependency;
+
+  void _observeCharacterDependency(String field) {
+    final observer = onCharacterDependency;
+    if (observer == null) return;
+    try {
+      observer(field);
+    } catch (error, stack) {
+      throw _MacroDependencyFailure(error, stack);
+    }
+  }
+}
+
+// Keep a caller's dependency failure distinguishable from an ordinary invalid
+// macro or post-process failure while it crosses compatibility catch blocks.
+class _MacroDependencyFailure implements Exception {
+  const _MacroDependencyFailure(this.error, this.stack);
+  final Object error;
+  final StackTrace stack;
 }
 
 /// Synchronous AST-based new-macro expansion, with lazy conditional branches.
@@ -166,14 +222,20 @@ class MacroEngine {
     Object? Function(Object?)? postProcess,
     bool? replaceCharacterCard,
     String? characterOverride,
-  }) => _Evaluation(
-    context,
-    text,
-    overrides,
-    postProcess: postProcess,
-    replaceCharacterCard: replaceCharacterCard,
-    characterOverride: characterOverride,
-  ).evaluate(text);
+  }) {
+    try {
+      return _Evaluation(
+        context,
+        text,
+        overrides,
+        postProcess: postProcess,
+        replaceCharacterCard: replaceCharacterCard,
+        characterOverride: characterOverride,
+      ).evaluate(text);
+    } on _MacroDependencyFailure catch (failure) {
+      Error.throwWithStackTrace(failure.error, failure.stack);
+    }
+  }
 
   /// ST utils.js getStringHash (cyrb53), including UTF-16 code-unit iteration.
   static int stringHash(String text, [int seed = 0]) {
@@ -604,6 +666,7 @@ class _Evaluation {
     this.characterOverride,
     this.inheritOriginal = true,
     this.postProcess,
+    this.scriptResolver,
   }) : contentHash = MacroEngine.stringHash(original),
        replaceCharacterCard = replaceCharacterCard ?? context.replaceCharacterCard,
        overrides = {for (final entry in overrides.entries) entry.key.toLowerCase(): entry.value};
@@ -615,22 +678,28 @@ class _Evaluation {
   final String? characterOverride;
   final bool inheritOriginal;
   final Object? Function(Object?)? postProcess;
+  final _ScriptMacroResolver? scriptResolver;
   final Map<String, String> _cardFields = {};
   List<String>? _alternateGreetings;
   bool _originalUsed = false;
 
+  String _prepareText(String text) {
+    text = text.replaceAllMapped(_macroTimeUtcAlias, (match) => '{{time::${match[1]}}}');
+    const oldNames = {
+      'user': 'user',
+      'bot': 'char',
+      'char': 'char',
+      'group': 'group',
+      'charifnotgroup': 'charIfNotGroup',
+    };
+    return text.replaceAllMapped(_macroAngleNames, (match) => '{{${oldNames[match[1]!.toLowerCase()]}}}');
+  }
+
+  String _finishText(String text) =>
+      text.replaceAllMapped(_macroEscapedBraces, (m) => m[1]!).replaceAll(_macroTrim, '').replaceAll(_elseMarker, '');
+
   String evaluate(String text, {int offset = 0, bool processors = true, bool scopes = true}) {
-    if (processors) {
-      text = text.replaceAllMapped(_macroTimeUtcAlias, (match) => '{{time::${match[1]}}}');
-      const oldNames = {
-        'user': 'user',
-        'bot': 'char',
-        'char': 'char',
-        'group': 'group',
-        'charifnotgroup': 'charIfNotGroup',
-      };
-      text = text.replaceAllMapped(_macroAngleNames, (match) => '{{${oldNames[match[1]!.toLowerCase()]}}}');
-    }
+    if (processors) text = _prepareText(text);
     final document = _Parser(text).parse(scopes: scopes);
     final output = StringBuffer();
     var cursor = 0;
@@ -641,17 +710,48 @@ class _Evaluation {
       cursor = call.closingEnd ?? call.end;
     }
     output.write(text.substring(cursor));
-    var result = output.toString();
-    if (processors) {
-      result = result
-          .replaceAllMapped(_macroEscapedBraces, (m) => m[1]!)
-          .replaceAll(_macroTrim, '')
-          .replaceAll(_elseMarker, '');
+    final result = output.toString();
+    return processors ? _finishText(result) : result;
+  }
+
+  // Only a real scoped resolver result may introduce a private callable.
+  // Ordinary macro outputs are String and can never be decoded into one.
+  Object evaluateScript(String text) {
+    text = _prepareText(text);
+    final document = _Parser(text).parse();
+    final parts = <Object>[];
+    var output = StringBuffer();
+    void flushText() {
+      final result = _finishText(output.toString());
+      if (result.isNotEmpty) parts.add(result);
+      output = StringBuffer();
     }
-    return result;
+
+    var cursor = 0;
+    for (final call in document.calls) {
+      if (call.start < cursor) continue;
+      output.write(text.substring(cursor, call.start));
+      final result = _evaluateCallValue(document, call, 0);
+      if (result is _ScriptMacroValue) {
+        flushText();
+        parts.add(result.callable!);
+      } else {
+        output.write(result);
+      }
+      cursor = call.closingEnd ?? call.end;
+    }
+    output.write(text.substring(cursor));
+    flushText();
+    if (parts.isEmpty) return '';
+    return parts.length == 1 ? parts.single : parts;
   }
 
   String _evaluateCall(_Document document, _Call call, int offset) {
+    final value = _evaluateCallValue(document, call, offset);
+    return value is _ScriptMacroValue ? value.text : value as String;
+  }
+
+  Object _evaluateCallValue(_Document document, _Call call, int offset) {
     final text = document.text;
     if (call.keepRaw || call.closing) {
       return text.substring(call.start, call.end);
@@ -691,6 +791,8 @@ class _Evaluation {
     raw.write('}}');
     final fallback = raw.toString();
     if (call.name.isEmpty) return fallback;
+    final scripted = scriptResolver?.call(call.name, arguments);
+    if (scripted != null) return scripted.callable == null ? scripted.text : scripted;
     final spec = _spec(name);
     if (name != 'original') {
       final override = overrides[call.name.toLowerCase()];
@@ -715,6 +817,8 @@ class _Evaluation {
     try {
       // MacroCstWalker coerces a hook's nullish result to the empty string.
       return _jsString(callback(result) ?? '');
+    } on _MacroDependencyFailure {
+      rethrow;
     } catch (_) {
       // ST catches postProcess separately from the macro handler. A failed
       // callback keeps the successful, unprocessed result and its effects.
@@ -822,10 +926,19 @@ class _Evaluation {
       case 'user':
         return context.userName;
       case 'char':
+        if (characterOverride == null && context._charNameFromCard) {
+          context._observeCharacterDependency('name');
+        }
         return characterOverride ?? context.charName;
       case 'group':
+        if (characterOverride == null && context._groupFromCard) {
+          context._observeCharacterDependency('name');
+        }
         return characterOverride ?? context.group;
       case 'groupnotmuted':
+        if (characterOverride == null && context._groupNotMutedFromCard) {
+          context._observeCharacterDependency('name');
+        }
         return characterOverride ?? context.groupNotMuted;
       case 'notchar':
         return context.notChar;
@@ -884,9 +997,9 @@ class _Evaluation {
       case 'firstdisplayedmessageid':
         return context.firstDisplayedMessageId?.toString() ?? '';
       case 'lastswipeid':
-        return context.history.isEmpty ? '' : context.history.last.swipeCount?.toString() ?? '';
+        return context._historyLast?.swipeCount?.toString() ?? '';
       case 'currentswipeid':
-        final id = context.history.isEmpty ? null : context.history.last.swipeId;
+        final id = context._historyLast?.swipeId;
         return id == null ? '' : '${id + 1}';
       case 'space':
       case 'newline':
@@ -977,17 +1090,10 @@ class _Evaluation {
   String _cardField(String key) {
     if (!replaceCharacterCard) return '';
     return _cardFields.putIfAbsent(key, () {
-      final card = context.card;
-      if (key == 'character_version') return _stringField(card, key);
       if (key == 'persona') return _baseCardValue(context.persona);
-      if (key == 'charDepthPrompt') {
-        final extensions = card['extensions'];
-        final depth = extensions is Map<String, Object?> ? extensions['depth_prompt'] : null;
-        return _baseCardValue(depth is Map<String, Object?> ? depth['prompt'] : null);
-      }
       if (key == 'system_prompt') {
         if (!context.preferCharacterPrompt) return '';
-        return _baseCardValue(_truthy(context.systemPromptOverride) ? context.systemPromptOverride : card[key]);
+        if (_truthy(context.systemPromptOverride)) return _baseCardValue(context.systemPromptOverride);
       }
       if (key == 'post_history_instructions' && !context.preferCharacterJailbreak) return '';
       if (key == 'scenario' && _truthy(context.scenarioOverride)) {
@@ -996,11 +1102,20 @@ class _Evaluation {
       if (key == 'mes_example' && _truthy(context.mesExamplesOverride)) {
         return _baseCardValue(context.mesExamplesOverride);
       }
+      context._observeCharacterDependency(key);
+      final card = context.card;
+      if (key == 'character_version') return _stringField(card, key);
+      if (key == 'charDepthPrompt') {
+        final extensions = card['extensions'];
+        final depth = extensions is Map<String, Object?> ? extensions['depth_prompt'] : null;
+        return _baseCardValue(depth is Map<String, Object?> ? depth['prompt'] : null);
+      }
       return _baseCardValue(card[key]);
     });
   }
 
   List<String> _resolveGreetings() {
+    context._observeCharacterDependency('alternate_greetings');
     final raw = context.card['alternate_greetings'];
     return raw is List<Object?> ? raw.map(_baseCardValue).toList() : [];
   }
@@ -1037,6 +1152,8 @@ class _Evaluation {
   }
 
   int? _lastMessageIndex({bool? user}) {
+    final snapshot = context.historySnapshot;
+    if (snapshot != null) return snapshot.latest(isUser: user)?.index;
     for (var i = context.history.length - 1; i >= 0; i--) {
       final message = context.history[i];
       if (message.swipeCount != null && message.swipeId != null && message.swipeId! >= message.swipeCount!) continue;
@@ -1046,6 +1163,8 @@ class _Evaluation {
   }
 
   MacroMessage? _lastMessage({bool? user}) {
+    final snapshot = context.historySnapshot;
+    if (snapshot != null) return snapshot.latest(isUser: user)?.message;
     final index = _lastMessageIndex(user: user);
     return index == null ? null : context.history[index];
   }
@@ -1078,6 +1197,11 @@ class _Evaluation {
     final clock = _MacroClock(context.now, context.timeZoneOffset, context.locale);
     switch (name) {
       case 'idleduration':
+        final snapshot = context.historySnapshot;
+        if (snapshot != null) {
+          final sentAt = snapshot.previousUser?.sentAt;
+          return sentAt == null ? 'just now' : clock.humanize(context.now, sentAt);
+        }
         var skip = true;
         for (final message in context.history.reversed) {
           if (message.isSystem) continue;

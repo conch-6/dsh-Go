@@ -40,6 +40,8 @@ import '../../notify/chat_alerts.dart' show CompanionAlertDelivery, companionHos
 import '../../pets/pet_mood.dart' show PetEvent, PetEventKind;
 import '../../pets/pet_signals.dart' show petEventBusProvider;
 import '../../pets/pet_state.dart';
+import '../../speech/speech_settings.dart';
+import '../../speech/voice_cloud.dart';
 import '../../state/app_mode_state.dart';
 import '../../state/chat_state.dart';
 import '../../state/connection_state.dart';
@@ -322,6 +324,8 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       input: _input,
       bridge: ref.read(voiceBridgeProvider),
       mode: () => ref.read(voiceSettingsProvider.notifier).ready(),
+      cloud: (mode) => ref.read(voiceCloudProvider)(mode),
+      cloudLikely: () => ref.read(voiceCloudLikelyProvider)(),
       modelReady: () =>
           mounted &&
           (ref.read(activeConnectionProvider).value?.isLocal ?? false) &&
@@ -334,11 +338,13 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
         });
       },
     );
+    // What dictation has to say (a notice, why it failed) comes in her bubble, not aloud.
+    _voice.onMessage = (message) => _say(message.text, aloud: false);
     _voice.addListener(_voiceChanged);
     _agentEvents = ref.read(petEventBusProvider).events.listen(_onAgentEvent);
     _speaker = ref.read(companionSpeakerProvider);
     _ttsEvents = _speaker.events.listen(_onTts);
-    ref.listenManual(companionVoiceSettingsProvider, (_, settings) {
+    ref.listenManual(companionEffectiveVoiceProvider, (_, settings) {
       if (settings != null) unawaited(_prepareVoice(settings));
     }, fireImmediately: true);
     _focus.addListener(_refreshMood);
@@ -1197,7 +1203,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
 
   // ── Voice ────────────────────────────────────────────────────────────────
 
-  bool get _voiceOn => _ttsReady && (ref.read(companionVoiceSettingsProvider)?.on ?? false);
+  bool get _voiceOn => _ttsReady && (ref.read(companionEffectiveVoiceProvider)?.on ?? false);
 
   /// Ready to speak with [settings] (or silent when they are off).
   Future<void> _prepareVoice(CompanionVoiceSettings settings) async {
@@ -1233,7 +1239,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     if (!mounted || !_ttsPending.containsKey(event.id)) return;
     switch (event.type) {
       case CompanionVoiceEventType.start:
-        final external = ref.read(companionVoiceSettingsProvider)?.source != CompanionVoiceSource.system;
+        final external = ref.read(companionEffectiveVoiceProvider)?.source != CompanionVoiceSource.system;
         if (event.loudness case final levels?) {
           // Fetched WAV: her mouth opens with the voice's own loudness.
           _stage.command('loudness', {'levels': levels, 'frameMs': 40});
@@ -2754,6 +2760,9 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                           tinted: false,
                           title: l10n.companionMenuVoice,
                           value: Text(switch (voice) {
+                            CompanionVoiceSettings(on: true, follow: true) => l10n.speechVoiceFollow,
+                            CompanionVoiceSettings(on: true, source: CompanionVoiceSource.deepseek) =>
+                              l10n.speechVoiceDeepseek,
                             CompanionVoiceSettings(on: true, source: CompanionVoiceSource.system) =>
                               l10n.companionVoiceSystem,
                             CompanionVoiceSettings(on: true, source: CompanionVoiceSource.preset) =>

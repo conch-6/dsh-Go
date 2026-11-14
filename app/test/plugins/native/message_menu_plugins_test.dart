@@ -71,7 +71,8 @@ void main() {
     await openMenu(tester);
     final groups = tester.widgetList<SheetGroup>(find.byType(SheetGroup)).toList();
     expect(groups.map((g) => g.title), [null, '快捷指令', '朗读助手']);
-    expect(find.text('朗读'), findsNWidgets(2));
+    // The app's own 朗读 and each plugin's.
+    expect(find.text('朗读'), findsNWidgets(3));
     expect(find.text('要点'), findsOneWidget);
     // The plugin groups come after 复制.
     expect(tester.getTopLeft(find.text('要点')).dy, greaterThan(tester.getTopLeft(find.text('复制')).dy));
@@ -110,7 +111,8 @@ void main() {
     );
     await pumpReply(tester, bridge);
     await openMenu(tester);
-    await tester.tap(find.text('朗读'));
+    // The plugin's, under its name (after the app's own 朗读).
+    await tester.tap(find.text('朗读').last);
     await tester.pumpAndSettle();
     expect(find.text('「朗读助手」要读取这条回复'), findsOneWidget);
     await tester.tap(find.text('允许'));
@@ -118,7 +120,8 @@ void main() {
     expect(bridge.invocations.single.message, '这是**回复**正文。');
 
     await openMenu(tester);
-    await tester.tap(find.text('朗读'));
+    // The plugin's, under its name (after the app's own 朗读).
+    await tester.tap(find.text('朗读').last);
     await tester.pumpAndSettle();
     expect(find.text('「朗读助手」要读取这条回复'), findsNothing);
     expect(bridge.invocations, hasLength(2));

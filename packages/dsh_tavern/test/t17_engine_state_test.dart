@@ -51,6 +51,7 @@ Future<({String characterId, String chatId})> _stateChat(T24Harness h, {Map<Stri
 }
 
 Map<String, Object?> _map(Object? value) => value! as Map<String, Object?>;
+List<Map<String, Object?>> _maps(Object? value) => (value! as List<Object?>).cast<Map<String, Object?>>();
 num _count(TavernStateSnapshot snapshot) => _map(snapshot.values)['count']! as num;
 
 T _db<T>(T24Harness h, T Function(Database db) action) {
@@ -784,10 +785,12 @@ void main() {
     expect(initial.valueExists, isFalse);
     expect(initial.initialValuesAvailable, isTrue);
     await _reply(h, created.chatId);
-    expect(h.model.allCalls.last.body!.containsKey('tools'), isFalse);
+    expect(_maps(h.model.allCalls.last.body!['tools']).map((tool) => _map(tool['function'])['name']), ['roll']);
     expect(_requestText(h.model.allCalls.last), isNot(contains(_literal)));
     expect((await h.engine.readState(created.chatId)).valueExists, isFalse);
-    expect(await h.engine.readAgentRuns(created.chatId), isEmpty);
+    final disabledRuns = await h.engine.readAgentRuns(created.chatId);
+    expect(disabledRuns.where((run) => run.kind != 'tool.turn'), isEmpty);
+    expect(disabledRuns.where((run) => run.kind == 'tool.turn'), hasLength(1));
     final explicit = await h.engine.setStateValue(created.chatId, '/count', 1);
     expect(explicit.applied, isTrue);
     expect(_count(explicit.snapshot), 1);
@@ -798,7 +801,9 @@ void main() {
     await _reply(h, created.chatId);
     expect(_requestText(h.model.allCalls.last), isNot(contains('OLD-PENDING-')));
     expect(_pending(await _saved(h.engine, created.chatId)), pending);
-    expect(await h.engine.readAgentRuns(created.chatId), hasLength(1));
+    final explicitRuns = await h.engine.readAgentRuns(created.chatId);
+    expect(explicitRuns.where((run) => run.kind != 'tool.turn'), hasLength(1));
+    expect(explicitRuns.where((run) => run.kind == 'tool.turn'), hasLength(2));
   });
 
   for (final outcome in ['null', 'content_filter', 'cancelled', 'network']) {
@@ -926,7 +931,7 @@ void main() {
               {'op': 'set', 'path': '/count', 'value': 4},
             ],
           );
-          expect(h.model.allCalls.last.body!.containsKey('tools'), isFalse);
+          expect(_maps(h.model.allCalls.last.body!['tools']).map((tool) => _map(tool['function'])['name']), ['roll']);
           expect(_count(await h.engine.readState(imported)), 0);
           expect((await h.engine.readState(imported)).effects, isEmpty);
           expect((await _saved(h.engine, imported))['dshgoStateRuntime'], badRuntime.value);
@@ -935,8 +940,10 @@ void main() {
         expect(rejected.applied, isFalse);
         expect((await _saved(h.engine, imported))['dshgoStateRuntime'], badRuntime.value);
         final runs = await h.engine.readAgentRuns(imported);
-        expect(runs, hasLength(3));
-        expect(runs.every((run) => run.result['committed'] == false), isTrue);
+        final stateRuns = runs.where((run) => run.kind != 'tool.turn').toList();
+        expect(stateRuns, hasLength(3));
+        expect(stateRuns.every((run) => run.result['committed'] == false), isTrue);
+        expect(runs.where((run) => run.kind == 'tool.turn'), hasLength(2));
       },
     );
   }

@@ -27,6 +27,8 @@ import '../theme/theme.dart';
 import 'tavern_character_edit_page.dart';
 import 'tavern_character_page.dart';
 import 'tavern_chat_page.dart';
+import 'tavern_drafts_page.dart';
+import 'tavern_group_new_page.dart';
 import 'tavern_lorebooks_page.dart';
 import 'tavern_personas.dart';
 import 'tavern_presets_page.dart';
@@ -337,8 +339,24 @@ class _TavernHomePageState extends ConsumerState<TavernHomePage> {
   /// 对话: every chat, the newest first.
   List<Widget> _chats(List<TavernChatSummary> chats, Map<String, TavernCharacter> byId) {
     final l10n = context.l10n;
+    // 新建群聊: two characters or more on the shelf.
+    final newGroup = SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: OutlinedButton.icon(
+            key: const ValueKey('tavern-group-new'),
+            icon: const Icon(AppIcons.newGroupChat, size: 18),
+            label: Text(l10n.tavernGroupNew),
+            onPressed: byId.length < 2 ? null : () => unawaited(Navigator.of(context).push(TavernGroupNewPage.route())),
+          ),
+        ),
+      ),
+    );
     if (chats.isEmpty) {
       return [
+        newGroup,
         SliverFillRemaining(
           hasScrollBody: false,
           child: EmptyView(
@@ -363,6 +381,7 @@ class _TavernHomePageState extends ConsumerState<TavernHomePage> {
                 chat,
           ];
     return [
+      newGroup,
       if (chats.length >= TavernHomePage.searchFrom)
         SliverToBoxAdapter(
           child: Padding(
@@ -457,6 +476,12 @@ class _TavernHomePageState extends ConsumerState<TavernHomePage> {
             }),
             onTap: () => unawaited(Navigator.of(context).push(TavernQuickRepliesPage.route())),
           ),
+          SettingsTile(
+            key: const ValueKey('tavern-library-drafts'),
+            icon: AppIcons.askAi,
+            title: l10n.tavernDrafts,
+            onTap: () => unawaited(Navigator.of(context).push(TavernDraftsPage.route())),
+          ),
         ],
       ),
     );
@@ -474,7 +499,8 @@ class _ChatRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final dsh = DshColors.of(context);
-    final name = character?.name ?? chat.title;
+    final group = chat.kind == TavernChatKind.group;
+    final name = group ? chat.title : character?.name ?? chat.title;
     return GlassSurface(
       key: ValueKey('tavern-chat-row-${chat.id}'),
       tier: GlassTier.card,
@@ -501,6 +527,15 @@ class _ChatRow extends ConsumerWidget {
               children: [
                 Row(
                   children: [
+                    if (group) ...[
+                      Icon(
+                        AppIcons.groupChat,
+                        key: ValueKey('tavern-chat-group-${chat.id}'),
+                        size: 14,
+                        color: dsh.textTertiary,
+                      ),
+                      const SizedBox(width: 4),
+                    ],
                     Expanded(
                       child: Text(
                         name,
@@ -511,7 +546,11 @@ class _ChatRow extends ConsumerWidget {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      '${context.l10n.tavernMessageCount(chat.messageCount)} · ${shortTime(chat.updatedAt)}',
+                      [
+                        if (group) context.l10n.tavernGroupMemberCount(chat.memberCharacterIds.length),
+                        context.l10n.tavernMessageCount(chat.messageCount),
+                        shortTime(chat.updatedAt),
+                      ].join(' · '),
                       style: AppType.tabular(theme.textTheme.labelSmall!.copyWith(color: dsh.textTertiary)),
                     ),
                   ],
@@ -766,7 +805,7 @@ class _ContinueCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final dsh = DshColors.of(context);
-    final name = character?.name ?? chat.title;
+    final name = chat.kind == TavernChatKind.group ? chat.title : character?.name ?? chat.title;
     return SizedBox(
       width: 236,
       child: GlassSurface(

@@ -108,6 +108,8 @@ class PhoneA11yService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         clock.tick(event?.packageName)
+        // A keyboard coming or going moves the control clear of it.
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) overlay?.onWindowsChanged()
         // Window changes retire both coordinates and screenshot authorization. Only an identified
         // window of this service's controls is exempt; switching to DSH itself is still a transition.
         if (event != null && invalidatesVisual(event.eventType) {

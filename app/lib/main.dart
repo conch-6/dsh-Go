@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -11,6 +12,8 @@ import 'launch/launch_state.dart';
 import 'links/page_links.dart' show registerPageLink, tavernPageLink;
 import 'state/locale_state.dart';
 import 'ui/common/third_party_licenses.dart';
+import 'ui/fx/metal/metal_shader.dart';
+import 'ui/fx/waves/distortion_wave.dart';
 import 'ui/settings/font_licenses.dart';
 import 'ui/tavern/tavern_home_page.dart';
 import 'ui/theme/theme.dart';
@@ -29,6 +32,9 @@ Future<void> _startApp() async {
   registerFontLicenses();
   // dshgo://open/tavern: the page lives in ui/, which links/ does not import.
   registerPageLink(tavernPageLink, () => const TavernHomePage());
+  // The effects' shaders load now, so the first wave or metal word is not a plain fallback.
+  unawaited(DistortionWave.precache());
+  unawaited(MetalShader.load());
   // Edge-to-edge with transparent system bars; pages refine the icon brightness
   // through AnnotatedRegion(dshSystemOverlay(...)).
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);

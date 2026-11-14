@@ -68,6 +68,7 @@ class VoicePlugin :
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        StreamingPcm.disable()
         methods.setMethodCallHandler(null)
         events.setStreamHandler(null)
         releaseAll()
@@ -112,6 +113,20 @@ class VoicePlugin :
             "openSettings" -> result.success(openSettings())
             "startRecognizer" -> startRecognizer(call.argument<String>("language"), call.argument<Number>("sessionId")?.toLong() ?: 0, result)
             "startRecorder" -> startRecorder(call.argument<Int>("maxSeconds") ?: 60, call.argument<Number>("sessionId")?.toLong() ?: 0, result)
+            "streamingPcm" -> {
+                val source = call.argument<String>("source")
+                val id = call.argument<Number>("pcmSession")?.toLong() ?: 0
+                if (source == null) StreamingPcm.disable(id)
+                else if (source == "call" || source == "dictation") {
+                    StreamingPcm.enable(source, id) { tap, bytes, valid -> main.post {
+                        if (StreamingPcm.current(tap) && valid()) sink?.success(mapOf(
+                            "type" to "pcm", "bytes" to bytes, "rate" to 16000,
+                            "source" to tap.source, "pcmSession" to tap.id,
+                        ))
+                    } }
+                } else return result.error("pcm-source", "invalid PCM source", null)
+                result.success(null)
+            }
             "stop" -> stop(result)
             "cancel" -> {
                 releaseAll()
@@ -276,6 +291,7 @@ class VoicePlugin :
         lateinit var r: WavRecorder
         r = WavRecorder(
             maxSeconds = maxSeconds.coerceIn(1, 600),
+            isCurrentCapture = { generation == ownGeneration && recorder === r },
             onLevel = { level -> main.post {
                 if (generation == ownGeneration && recorder === r) emit(sessionId, mapOf("type" to "level", "value" to level))
             } },
@@ -354,6 +370,7 @@ class VoicePlugin :
     }
 
     override fun onCancel(arguments: Any?) {
+        StreamingPcm.disable()
         sink = null
     }
 

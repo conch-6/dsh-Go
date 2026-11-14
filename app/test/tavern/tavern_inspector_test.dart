@@ -16,7 +16,13 @@ import '../support/test_fonts.dart';
 
 /// The preview, with a recorded turn for one reply.
 class _Recorded extends PreviewTavern {
-  _Recorded() : super(tick: const Duration(milliseconds: 1));
+  _Recorded({this.usage = const TavernUsage(promptTokens: 131, cacheHitTokens: 96, completionTokens: 54), this.at})
+    : super(tick: const Duration(milliseconds: 1));
+
+  final TavernUsage usage;
+
+  /// When the turn was asked, if not now.
+  final DateTime? at;
 
   final asked = <String?>[];
 
@@ -28,8 +34,8 @@ class _Recorded extends PreviewTavern {
       chatId: chatId,
       nodeId: nodeId,
       generationType: 'normal',
-      startedAt: DateTime.now(),
-      finishedAt: DateTime.now(),
+      startedAt: at ?? DateTime.now(),
+      finishedAt: at ?? DateTime.now(),
       status: TavernInspectionStatus.completed,
       prompt: const PromptAssembly(
         body: {'model': 'deepseek-flash'},
@@ -61,7 +67,7 @@ class _Recorded extends PreviewTavern {
           {'bookId': 'town', 'uid': 3, 'primaryKey': '雨', 'reason': 'primary', 'content': '镇上的雨已经下了三天。'},
         ],
       },
-      reportedUsage: const TavernUsage(promptTokens: 131, cacheHitTokens: 96, completionTokens: 54),
+      reportedUsage: usage,
     );
   }
 }
@@ -106,6 +112,45 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('tavern-inspect-segment-main')));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(SelectableText, '你是林晚，雨夜小镇旅店的老板娘。只说一半。'), findsOneWidget);
+  });
+
+  testWidgets('a DeepSeek turn shows what it cost, at the hour it was asked', (tester) async {
+    // 9000 × 0.044 + 3000 × 1.32 + 540 × 3.96 = 6494.4 per million at peak, on a Wednesday.
+    const pro = TavernUsage(promptTokens: 12000, cacheHitTokens: 9000, completionTokens: 540, model: 'deepseek-v4-pro');
+    await _open(
+      tester,
+      _Recorded(usage: pro, at: DateTime.utc(2026, 11, 11, 2)),
+      const TavernInspectorPage(chatId: 'c', nodeId: 'r1'),
+    );
+    final cost = find.byKey(const ValueKey('tavern-inspect-cost'));
+    expect(find.descendant(of: cost, matching: find.text('约\u00a0US\$0.0065')), findsOneWidget);
+    expect(find.descendant(of: cost, matching: find.text('按 DeepSeek 官方价，高峰时段')), findsOneWidget);
+  });
+
+  testWidgets('off peak it is half', (tester) async {
+    const pro = TavernUsage(promptTokens: 12000, cacheHitTokens: 9000, completionTokens: 540, model: 'deepseek-v4-pro');
+    final cost = find.byKey(const ValueKey('tavern-inspect-cost'));
+    await _open(
+      tester,
+      _Recorded(usage: pro, at: DateTime.utc(2026, 11, 11, 12)),
+      const TavernInspectorPage(chatId: 'c', nodeId: 'r1'),
+    );
+    expect(find.descendant(of: cost, matching: find.text('约\u00a0US\$0.0032')), findsOneWidget);
+    expect(find.descendant(of: cost, matching: find.text('按 DeepSeek 官方价，低谷时段（半价）')), findsOneWidget);
+  });
+
+  testWidgets('long usage numbers sit under the title, which stays on one line', (tester) async {
+    const big = TavernUsage(promptTokens: 1234567, cacheHitTokens: 987654, completionTokens: 12345);
+    await _open(tester, _Recorded(usage: big), const TavernInspectorPage(chatId: 'c', nodeId: 'r1'));
+    final row = find.byKey(const ValueKey('tavern-inspect-usage'));
+    expect(find.descendant(of: row, matching: find.text('输入 1234567（缓存 987654）· 输出 12345')), findsOneWidget);
+    final title = tester.getSize(find.descendant(of: row, matching: find.text('模型报告的用量'))).height;
+    expect(title, tester.getSize(find.text('类型')).height);
+  });
+
+  testWidgets('usage with no model named: no cost row', (tester) async {
+    await _open(tester, _Recorded(), const TavernInspectorPage(chatId: 'c', nodeId: 'r1'));
+    expect(find.byKey(const ValueKey('tavern-inspect-cost')), findsNothing);
   });
 
   testWidgets('a reply without a record says so', (tester) async {

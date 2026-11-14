@@ -304,7 +304,7 @@ class _NoKeyDraft extends PreviewTavern {
   _NoKeyDraft() : super(tick: const Duration(milliseconds: 1));
 
   @override
-  Stream<TavernEvent> impersonate(String chatId) => Stream.value(const TavernTurnFailed(TavernFailure.noKey));
+  Stream<TavernEvent> impersonate(String chatId) => Stream.value(TavernTurnFailed(TavernFailure.noKey));
 }
 
 /// The preview with a long chat: 150 messages on its path.

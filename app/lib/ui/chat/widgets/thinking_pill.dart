@@ -16,6 +16,7 @@ import '../../common/pressable.dart';
 import '../../common/smooth_size.dart';
 import '../../common/think_glyph.dart';
 import '../../engine_settings/engine_settings_page.dart' show openSettingsPage;
+import '../../fx/orbs/thinking_orb.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 import '../render/markdown_body.dart';
@@ -144,10 +145,11 @@ class _ThinkingPillState extends State<ThinkingPill> {
               shape: Squircle.border(StreamRow.lead * 0.32),
             ),
             child: Center(
-              // 自己一层:转动只重绘这个图形,不重绘整行。
-              child: RepaintBoundary(
-                child: ThinkGlyph(size: 15, color: brand, spinning: active),
-              ),
+              // 思考中是一颗慢慢变形的点阵小光球(Libraries.dev 思考光球),想完换回静止的图形
+              // (和标签一样直接换,不叠着淡入淡出)。
+              child: active
+                  ? ThinkingOrb(state: OrbState.breathing, size: OrbSize.px20, displaySize: 18, ink: OrbInk.tint(brand))
+                  : ThinkGlyph(size: 15, color: brand),
             ),
           ),
         ),

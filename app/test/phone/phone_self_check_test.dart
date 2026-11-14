@@ -182,7 +182,7 @@ void main() {
     for (final entry in reasons.entries) {
       final snapshot = PhoneSelfCheckSnapshot.parse(
         _reply(
-          'cleanup_pending',
+          'done',
           profile: 'target_c1',
           handle: 'private-handle',
           reason: entry.key,
@@ -221,7 +221,7 @@ void main() {
     const private = 'private-token-account-ocr-screen-data';
     final snapshot = PhoneSelfCheckSnapshot.parse(
       _reply(
-          'cleanup_pending',
+          'done',
           handle: private,
           reason: private,
           steps: [
@@ -266,17 +266,14 @@ void main() {
     await channel.status();
     await channel.start();
     await channel.cancel('original');
-    await channel.retry('original');
     expect(calls.map((c) => c.method), [
       'phoneSelfCheckStatus',
       'startPhoneSelfCheck',
       'cancelPhoneSelfCheck',
-      'retryPhoneSelfCheckCleanup',
     ]);
     expect(calls[0].arguments, isNull);
     expect(calls[1].arguments, {'v': 1});
     expect(calls[2].arguments, {'v': 1, 'runHandle': 'original'});
-    expect(calls[3].arguments, calls[2].arguments);
   });
 
   test('C1 start sends only its fixed profile and invalid choices send nothing', () async {
@@ -378,29 +375,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 800));
     await tester.pump();
     expect(controller.snapshot.state, 'done');
-    controller.dispose();
-  });
-
-  testWidgets('retry keeps original handle and rejects older cleanup status', (tester) async {
-    final stale = Completer<Object?>();
-    var reads = 0;
-    final calls = <MethodCall>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_phone, (call) async {
-      calls.add(call);
-      if (call.method == 'retryPhoneSelfCheckCleanup') return _reply('cleaning', handle: 'one');
-      return ++reads == 1 ? _reply('cleanup_pending', handle: 'one') : stale.future;
-    });
-    final controller = PhoneSelfCheckController();
-    await controller.refresh();
-    unawaited(controller.refresh());
-    await tester.pump();
-    await controller.retry();
-    stale.complete(_reply('cleanup_pending', handle: 'stale'));
-    await tester.pump();
-    expect(controller.snapshot.state, 'cleaning');
-    expect(controller.snapshot.runHandle, 'one');
-    expect(calls.singleWhere((c) => c.method == 'retryPhoneSelfCheckCleanup').arguments, {'v': 1, 'runHandle': 'one'});
-    expect(calls.where((c) => c.method == 'startPhoneSelfCheck'), isEmpty);
     controller.dispose();
   });
 
@@ -623,31 +597,6 @@ void main() {
     expect(calls.length, count);
     expect(tester.takeException(), isNull);
   });
-  testWidgets('cleanup recovery stays outside technical details and never restarts the check', (tester) async {
-    final calls = <MethodCall>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_phone, (call) async {
-      calls.add(call);
-      return call.method == 'retryPhoneSelfCheckCleanup'
-          ? _reply('done', handle: 'original')
-          : _reply('cleanup_pending', handle: 'original', reason: 'cleanupUnconfirmed');
-    });
-    await tester.pumpWidget(goldenApp(brightness: Brightness.light, home: const PhoneSelfCheckPage()));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('self-check-start')), findsNothing);
-    expect(find.byKey(const ValueKey('self-check-profile')), findsNothing);
-    expect(find.byKey(const ValueKey('self-check-step-cleanup')), findsNothing);
-    final retry = find.byKey(const ValueKey('self-check-retry'));
-    expect(retry.hitTestable(), findsOneWidget);
-    await tester.tap(retry);
-    await tester.pumpAndSettle();
-    expect(calls.singleWhere((call) => call.method == 'retryPhoneSelfCheckCleanup').arguments, {
-      'v': 1,
-      'runHandle': 'original',
-    });
-    expect(calls.where((call) => call.method == 'startPhoneSelfCheck'), isEmpty);
-    await tester.pumpWidget(const SizedBox());
-  });
-
   testWidgets('profile selection only changes next start, never legacy native facts', (tester) async {
     final calls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_phone, (call) async {
@@ -890,15 +839,13 @@ void main() {
     final calls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_phone, (call) async {
       calls.add(call);
-      return _reply('cleanup_pending', profile: 'target_c2', handle: 'c2-original');
+      return _reply('cleaning', profile: 'target_c2', handle: 'c2-original');
     });
     const channel = PhoneSelfCheckChannel();
     expect((await channel.start(profile: 'target_c2')).profile, 'target_c2');
     await channel.cancel('c2-original');
-    await channel.retry('c2-original');
     expect(calls[0].arguments, {'v': 1, 'profile': 'target_c2'});
     expect(calls[1].arguments, {'v': 1, 'runHandle': 'c2-original'});
-    expect(calls[2].arguments, calls[1].arguments);
   });
 
   testWidgets('C2 same handle cannot downgrade profile and cleanup keeps the original identity', (tester) async {
@@ -906,11 +853,8 @@ void main() {
     final calls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_phone, (call) async {
       calls.add(call);
-      if (call.method == 'retryPhoneSelfCheckCleanup') {
-        return _reply('cleaning', profile: 'target_c2', handle: 'original');
-      }
       return ++reads == 1
-          ? _reply('cleanup_pending', profile: 'target_c2', handle: 'original')
+          ? _reply('cleaning', profile: 'target_c2', handle: 'original')
           : _reply('done', profile: 'target_c1', handle: 'original');
     });
     final controller = PhoneSelfCheckController();
@@ -920,12 +864,7 @@ void main() {
     expect(controller.snapshot.profile, 'target_c2');
     expect(controller.canStart, isFalse);
     await controller.start(profile: 'target_c2');
-    await controller.retry();
     expect(calls.where((call) => call.method == 'startPhoneSelfCheck'), isEmpty);
-    expect(calls.singleWhere((call) => call.method == 'retryPhoneSelfCheckCleanup').arguments, {
-      'v': 1,
-      'runHandle': 'original',
-    });
     controller.dispose();
   });
 

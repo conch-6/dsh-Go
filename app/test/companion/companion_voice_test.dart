@@ -51,6 +51,8 @@ void main() {
         'companion_touch_hint_done': true,
         'companion_home_hint_done': true,
         'companion_voice_enabled': true,
+        // Her own voice, the phone's (not following 朗读's).
+        'companion_voice_v1': '{"source": "system"}',
       });
     });
     tearDown(() {
@@ -319,6 +321,10 @@ void main() {
     });
 
     testWidgets('an OpenAI-compatible voice: fill it in, hear it, or see why not', (tester) async {
+      // Tall enough for the sources list (跟朗读一样 and DeepSeek come first) and the form.
+      tester.view.physicalSize = const Size(1080, 3600);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
       SharedPreferences.setMockInitialValues({});
       final calls = <MethodCall>[];
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(_channel, (call) async {

@@ -75,7 +75,11 @@ class UserBubble extends StatelessWidget {
         await showSelectTextSheet(context, _shown);
       case MessageAction.edit:
         onEdit?.call();
-      case MessageAction.quote || MessageAction.share || MessageAction.regenerate || MessageAction.branch:
+      case MessageAction.quote ||
+          MessageAction.share ||
+          MessageAction.readAloud ||
+          MessageAction.regenerate ||
+          MessageAction.branch:
         break;
     }
   }

@@ -5,6 +5,7 @@
 // whole layer fades away, wherever the motion has got to.
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -397,7 +398,32 @@ class CustomLaunchView extends StatelessWidget {
       color: custom.background(dark: dark),
       child: switch (custom.fit) {
         LaunchFit.fill => ClipRect(
-          child: FittedBox(fit: BoxFit.cover, child: picture),
+          child: custom.zoom <= 1
+              ? FittedBox(
+                  fit: BoxFit.cover,
+                  alignment: Alignment(custom.alignX.clamp(-1.0, 1.0), custom.alignY.clamp(-1.0, 1.0)),
+                  child: picture,
+                )
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final screen = constraints.biggest;
+                    if (screen.isEmpty || size.isEmpty) {
+                      return FittedBox(fit: BoxFit.cover, child: picture);
+                    }
+                    final scale = math.max(screen.width / size.width, screen.height / size.height);
+                    final z = custom.zoom.clamp(1.0, CustomLaunch.maxZoom);
+                    final width = size.width * scale * z;
+                    final height = size.height * scale * z;
+                    return OverflowBox(
+                      alignment: Alignment(custom.alignX.clamp(-1.0, 1.0), custom.alignY.clamp(-1.0, 1.0)),
+                      minWidth: width,
+                      maxWidth: width,
+                      minHeight: height,
+                      maxHeight: height,
+                      child: FittedBox(fit: BoxFit.fill, child: picture),
+                    );
+                  },
+                ),
         ),
         LaunchFit.center => SafeArea(
           child: Padding(

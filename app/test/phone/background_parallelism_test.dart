@@ -141,11 +141,13 @@ void main() {
       'unsupported',
       'connectionRequired',
       'busy',
-      'resourceRecovery',
-      'peerUnsupported',
       'transportSerial',
     ]) {
       expect(BackgroundParallelism.parse({...valid, 'effectiveLimit': 0, 'reason': reason}), isNotNull);
+    }
+    // Removed admission gates: a self-check or an old resource record never zeroes capacity.
+    for (final reason in ['resourceRecovery', 'peerUnsupported']) {
+      expect(BackgroundParallelism.parse({...valid, 'effectiveLimit': 0, 'reason': reason}), isNull);
     }
   });
 

@@ -209,7 +209,7 @@ class ShizukuStarter(
             failureStage = "muxFailed"
             val peer = MuxProtocol.peer(probe)
             peer?.let { MuxProtocol.acknowledge(remote.execute(MuxProtocol.optIn(it)), it) }
-            val candidate = ShizukuChannel(remote, peer, backgroundRequestLimit(probe::get, probe::containsKey, peer != null))
+            val candidate = ShizukuChannel(remote, peer, backgroundRequestLimit(probe.get(Proto.OK), peer != null))
             return synchronized(guard) {
                 if (!owner.valid || !owner.mayStart()) { candidate.close(); return connectFailed("cancelled") }
                 connectReasonCode = null

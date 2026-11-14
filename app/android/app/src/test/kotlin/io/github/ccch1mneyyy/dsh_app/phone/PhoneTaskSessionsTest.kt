@@ -1,6 +1,5 @@
 package io.github.ccch1mneyyy.dsh_app.phone
 
-import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundResourceJournal
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillReplaySelections
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillRoute
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillDrafts
@@ -88,14 +87,13 @@ class PhoneTaskSessionsTest {
     private val legacyCore = PhoneCore(env, legacy, ActionLog(), worker)
     private var journalBytes: String? = null
     @Volatile private var journalCommit: (String) -> Boolean = { journalBytes = it; true }
-    @Volatile private var recoveryAdmission: () -> String? = { null }
     private var skillEpoch: Long? = null
     private var completeSkill: (PhoneTasks.Owner, Long, String) -> Boolean = { _, _, _ -> false }
     private val journal = PhoneTaskJournal({ journalBytes }, { journalCommit(it) })
     // Deadline reads must not trip the Tasks.begin barrier used by the reserved-successor test.
     private val sessions = PhoneTaskSessions(time::get, ids::incrementAndGet,
         { tasks, _ -> PhoneCore(env, tasks, ActionLog(), worker) }, legacy, legacyCore, { changed() }, settleResources = { cleanup(it) }, dispatchCleanup = { cleanupDispatch(it) }, cancelScope = { task, state -> cancelScope(task, state) },
-        journal = journal, recoveryAdmission = { recoveryAdmission() },
+        journal = journal,
         screenRecoveryReady = {
             val ready = env.enabled() && !env.isLocked()
             beforeRecoveryRead()
@@ -1944,60 +1942,6 @@ class PhoneTaskSessionsTest {
         assertTrue(b.get(5, TimeUnit.SECONDS).text.contains("chooser attempted"))
         assertEquals(1L, prepared.get()); assertEquals(1L, started.get())
         assertTrue(task("B").holdsUnknownApp); assertTrue(task("B").heldApps.isEmpty())
-    }
-
-
-    @Test fun oldPhysicalRecoveryBlocksMainBackgroundAndAppsBeforeBeginOrPreparation() {
-        val lookups = AtomicLong(); val reads = AtomicLong()
-        lookup = { lookups.incrementAndGet() }; observe = { reads.incrementAndGet() }
-        recoveryAdmission = { BackgroundResourceJournal.REFUSAL }
-        val calls = listOf(
-            Triple("main", PhoneToolCatalog.SCREEN, emptyMap<String, Any?>()),
-            Triple("background", PhoneToolCatalog.SCREEN, mapOf<String, Any?>("background" to true)),
-            Triple("apps", PhoneToolCatalog.APPS, emptyMap<String, Any?>()),
-            Triple("open", PhoneToolCatalog.OPEN, mapOf<String, Any?>("app" to "example.app")),
-        )
-        for ((session, tool, args) in calls) {
-            val output = sessions.run(admit(session), tool, args)
-            assertTrue(output.isError); assertEquals(BackgroundResourceJournal.REFUSAL, output.text)
-            assertEquals(0L, task(session).tasks.snapshot().id)
-        }
-        assertEquals(0L, lookups.get()); assertEquals(0L, reads.get())
-        assertEquals(0L, actions.get()); assertEquals(0, journalCount())
-    }
-
-    @Test fun logicalAcknowledgementDoesNotBypassTheIndependentPhysicalAdmission() {
-        val old = PhoneTaskJournal({ journalBytes }, { journalBytes = it; true },
-            "00000000-0000-4000-8000-000000000001")
-        old.load()
-        val previousTasks = PhoneTasks(clock = ::taskClock, idSource = ids::incrementAndGet)
-        val begin = previousTasks.begin() as PhoneTasks.Begin.Go
-        assertTrue(old.mark(old.record(begin.owner)))
-        journal.load()
-        assertTrue(journal.acknowledge(journal.status()["batchToken"] as String))
-        recoveryAdmission = { BackgroundResourceJournal.REFUSAL }
-        val output = invoke("after-ack")
-        assertTrue(output.isError); assertEquals(BackgroundResourceJournal.REFUSAL, output.text)
-        assertEquals(0L, task("after-ack").tasks.snapshot().id)
-        recoveryAdmission = { null }
-        assertFalse(invoke("new-after-physical-proof").isError)
-    }
-
-    @Test fun currentProcessPhysicalRecordDoesNotGloballyBlockAnotherCall() {
-        val physical = BackgroundResourceJournal({ null }, { true },
-            "00000000-0000-4000-8000-000000000002")
-        assertTrue(physical.load())
-        val birth = BackgroundResourceJournal.Birth(
-            "00000000-0000-4000-8000-000000000003",
-            "00000000-0000-4000-8000-000000000004", 123, 2000, 1L, 2L)
-        assertTrue(physical.mark(physical.record(
-            "00000000-0000-4000-8000-000000000005", "task", birth, "portrait")))
-        assertEquals("clear", physical.status().state)
-        recoveryAdmission = {
-            if (physical.status().state == "clear") null else BackgroundResourceJournal.REFUSAL
-        }
-        assertFalse(invoke("current-process").isError)
-        assertTrue(task("current-process").tasks.snapshot().active)
     }
 
 

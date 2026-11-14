@@ -1,7 +1,11 @@
-// 她的声音: whether she speaks, and in whose voice. The phone's own; an
-// OpenAI-compatible speech API; or any HTTP API the person describes
-// (companion_voice_source.dart). Fields save as they are edited; 试听 says a
-// line with what is filled in now.
+// 她的声音: whether she speaks, and in whose voice. The same as 朗读's (设置 ›
+// 语音); DeepSeek's; the phone's own; an OpenAI-compatible speech API; or any
+// HTTP API the person describes (companion_voice_source.dart). Fields save as
+// they are edited; 试听 says a line with what is filled in now.
+//
+// With [CompanionVoicePage.shared] it is 设置 › 语音 › 朗读的声音 instead: the
+// voice replies are read aloud in and 语音通话 speaks with — no switch, no
+// following, no cloned voice.
 
 import 'dart:async';
 import 'dart:io';
@@ -13,6 +17,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../companion/companion_voice.dart';
 import '../../companion/companion_voice_source.dart';
 import '../../l10n/l10n.dart';
+import '../../speech/deepseek_speech.dart';
+import '../../speech/speech_settings.dart';
 import '../providers/provider_widgets.dart';
 import '../settings/settings_widgets.dart';
 import '../shell/page_frame.dart';
@@ -20,7 +26,10 @@ import '../theme/app_icons.dart';
 import '../theme/semantic_colors.dart';
 
 class CompanionVoicePage extends ConsumerStatefulWidget {
-  const CompanionVoicePage({super.key});
+  const CompanionVoicePage({super.key, this.shared = false});
+
+  /// 朗读的声音 (the app's), not hers.
+  final bool shared;
 
   @override
   ConsumerState<CompanionVoicePage> createState() => _CompanionVoicePageState();
@@ -42,7 +51,22 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
 
   // Held from the start: edits still waiting are saved as the page closes,
   // when it can no longer read providers.
-  late final CompanionVoiceSettingsController _store = ref.read(companionVoiceSettingsProvider.notifier);
+  late final VoiceOutputSettingsController _store = widget.shared
+      ? ref.read(speechVoiceSettingsProvider.notifier)
+      : ref.read(companionVoiceSettingsProvider.notifier);
+
+  CompanionVoiceSettings? _watch() =>
+      widget.shared ? ref.watch(speechVoiceSettingsProvider) : ref.watch(companionVoiceSettingsProvider);
+
+  CompanionSpeaker get _speaker => ref.read(widget.shared ? speechSpeakerProvider : companionSpeakerProvider);
+
+  /// What actually speaks: hers may be 朗读's.
+  CompanionVoiceSettings _speaking(CompanionVoiceSettings s) {
+    if (widget.shared || !s.follow) return s;
+    final shared = ref.read(speechVoiceSettingsProvider);
+    return (shared ?? const CompanionVoiceSettings(source: CompanionVoiceSource.deepseek)).copyWith(on: s.on);
+  }
+
   CompanionVoiceSettings? _seen;
 
   @override
@@ -222,14 +246,14 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
 
   Future<void> _turn(CompanionVoiceSettings s, bool on) async {
     if (!on) {
-      ref.read(companionSpeakerProvider).stop();
+      _speaker.stop();
       await _set(s.copyWith(on: false));
       return;
     }
     // On only with a voice that can be heard: she says hello in it.
     final next = _fromFields(s).copyWith(on: true);
     setState(() => _preview = '');
-    final why = await ref.read(companionSpeakerProvider).preview(next, context.l10n.companionVoiceHello);
+    final why = await _speaker.preview(_speaking(next), context.l10n.companionVoiceHello);
     if (!mounted) return;
     setState(() => _preview = why ?? 'ok');
     if (why == null) await _set(next);
@@ -238,7 +262,8 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
   Future<void> _try(CompanionVoiceSettings s) async {
     _flush();
     setState(() => _preview = '');
-    final why = await ref.read(companionSpeakerProvider).preview(_fromFields(s), context.l10n.companionVoiceHello);
+    final hello = widget.shared ? context.l10n.speechVoiceHello : context.l10n.companionVoiceHello;
+    final why = await _speaker.preview(_speaking(_fromFields(s)), hello);
     if (mounted) setState(() => _preview = why ?? 'ok');
   }
 
@@ -247,6 +272,17 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
     return switch (reason) {
       'no-phone-voice' => l10n.companionVoiceUnavailable,
       'not-set-up' => l10n.companionVoiceNotSetUp,
+      'no-deepseek' => l10n.speechNoCredential,
+      _ when reason.startsWith('deepseek ') => switch (reason.split(' ')[1]) {
+        'noCredential' => l10n.speechNoCredential,
+        'signIn' => l10n.speechSignIn,
+        'unauthorized' => l10n.speechUnauthorized,
+        'insufficientBalance' => l10n.speechBalance,
+        'rateLimited' => l10n.speechRateLimited,
+        'busy' => l10n.speechBusy,
+        'network' => l10n.speechNetwork,
+        _ => l10n.companionVoicePreviewFailed(reason),
+      },
       _ => l10n.companionVoicePreviewFailed(reason),
     };
   }
@@ -291,8 +327,10 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final colors = DshColors.of(context);
-    final s = _seen = ref.watch(companionVoiceSettingsProvider);
-    if (s == null) return AppPage.list(title: l10n.companionMenuVoice, children: const []);
+    final title = widget.shared ? l10n.speechVoiceTitle : l10n.companionMenuVoice;
+    final s = _seen = _watch();
+    if (s == null) return AppPage.list(title: title, children: const []);
+    final following = !widget.shared && s.follow;
     _fill(s);
     if (s.cloneSample.isNotEmpty && _recordingFor != s.cloneSample) unawaited(_describe(s.cloneSample));
     final busy = _preview == '';
@@ -307,24 +345,38 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
     };
 
     return AppPage.list(
-      title: l10n.companionMenuVoice,
+      title: title,
       children: [
-        SettingsSection(
-          footer: s.on ? null : Text(l10n.companionVoiceOffHint),
-          children: [
-            SettingsSwitchTile(
-              icon: AppIcons.companionVoice,
-              tinted: false,
-              title: l10n.companionVoiceOn,
-              value: s.on,
-              onChanged: busy ? null : (on) => unawaited(_turn(s, on)),
-            ),
-          ],
-        ),
+        if (!widget.shared)
+          SettingsSection(
+            footer: s.on ? null : Text(l10n.companionVoiceOffHint),
+            children: [
+              SettingsSwitchTile(
+                icon: AppIcons.companionVoice,
+                tinted: false,
+                title: l10n.companionVoiceOn,
+                value: s.on,
+                onChanged: busy ? null : (on) => unawaited(_turn(s, on)),
+              ),
+            ],
+          ),
         SettingsSection(
           title: l10n.companionVoiceSource,
           children: [
+            if (!widget.shared)
+              SettingsTile(
+                key: const ValueKey('voice-source-follow'),
+                title: l10n.speechVoiceFollow,
+                subtitle: l10n.speechVoiceFollowHint,
+                chevron: false,
+                trailing: following ? const Icon(AppIcons.selected, size: 20) : null,
+                onTap: () {
+                  setState(() => _preview = null);
+                  unawaited(_set(s.copyWith(follow: true)));
+                },
+              ),
             for (final (source, title, hint) in [
+              (CompanionVoiceSource.deepseek, l10n.speechVoiceDeepseek, l10n.speechVoiceDeepseekHint),
               (CompanionVoiceSource.system, l10n.companionVoiceSystem, l10n.companionVoiceSystemHint),
               (CompanionVoiceSource.preset, l10n.companionVoicePreset, l10n.companionVoicePresetHint),
               (CompanionVoiceSource.openai, l10n.companionVoiceOpenai, l10n.companionVoiceOpenaiHint),
@@ -334,15 +386,37 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
                 title: title,
                 subtitle: hint,
                 chevron: false,
-                trailing: s.source == source ? const Icon(AppIcons.selected, size: 20) : null,
+                key: ValueKey('voice-source-${source.name}'),
+                trailing: !following && s.source == source ? const Icon(AppIcons.selected, size: 20) : null,
                 onTap: () {
                   setState(() => _preview = null);
-                  unawaited(_set(s.copyWith(source: source)));
+                  unawaited(_set(s.copyWith(source: source, follow: false)));
                 },
               ),
           ],
         ),
-        if (s.source == CompanionVoiceSource.preset) ...[
+        if (!following && s.source == CompanionVoiceSource.deepseek)
+          SettingsSection(
+            title: l10n.companionVoiceVoice,
+            footer: Text(l10n.speechVoiceDeepseekFooter),
+            children: [
+              for (final voice in deepSeekVoices)
+                SettingsTile(
+                  key: ValueKey('voice-deepseek-$voice'),
+                  title: switch (voice) {
+                    'tide' => l10n.speechVoiceTide,
+                    _ => l10n.speechVoiceStella,
+                  },
+                  chevron: false,
+                  trailing: s.deepseekVoice == voice ? const Icon(AppIcons.selected, size: 20) : null,
+                  onTap: () {
+                    setState(() => _preview = null);
+                    unawaited(_set(s.copyWith(deepseekVoice: voice)));
+                  },
+                ),
+            ],
+          ),
+        if (!following && s.source == CompanionVoiceSource.preset) ...[
           SettingsSection(
             title: l10n.companionVoiceService,
             children: [
@@ -366,7 +440,7 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
                     helper: l10n.companionVoiceKeyWhere(s.presetInfo.site),
                     child: _text(_presetKey, hint: 'sk-…', secret: true),
                   ),
-                  if (s.presetInfo.clones)
+                  if (s.presetInfo.clones && !widget.shared)
                     FormFieldBlock(
                       label: l10n.companionVoiceVoice,
                       child: SegmentedPill<bool>(
@@ -381,7 +455,7 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
                         },
                       ),
                     ),
-                  if (s.cloning)
+                  if (s.cloning && !widget.shared)
                     FormFieldBlock(
                       label: l10n.companionCloneRecording,
                       helper: _recordingError == null ? l10n.companionCloneHelper : null,
@@ -440,7 +514,7 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
             ],
           ),
         ],
-        if (s.source == CompanionVoiceSource.openai)
+        if (!following && s.source == CompanionVoiceSource.openai)
           SettingsSection(
             title: l10n.companionVoiceApi,
             footer: Text(l10n.companionVoicePrivacy),
@@ -470,7 +544,7 @@ class _CompanionVoicePageState extends ConsumerState<CompanionVoicePage> {
               ),
             ],
           ),
-        if (s.source == CompanionVoiceSource.custom)
+        if (!following && s.source == CompanionVoiceSource.custom)
           SettingsSection(
             title: l10n.companionVoiceRequest,
             footer: Text(l10n.companionVoicePrivacy),

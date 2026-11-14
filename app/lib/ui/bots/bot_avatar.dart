@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../state/bots_state.dart';
 import '../common/display_image.dart';
 import '../common/status_dot.dart';
+import '../fx/bot_avatar/bot_avatar.dart' as fx;
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'bot_format.dart';
@@ -20,20 +21,40 @@ Color botInk(BuildContext context, String color) =>
 /// Name text in the Bot's color: black reads as a heading, so it goes gray.
 Color botNameInk(BuildContext context, String color) => botInk(context, color == 'black' ? 'gray' : color);
 
-/// Round avatar. [working] adds a breathing dot at the lower right.
+/// Round avatar: the Bot's photo, else a little bot of its own (see [mascot]).
+/// [working] adds a breathing dot at the lower right of a photo or letter; the
+/// little bot hops instead.
 class BotAvatar extends ConsumerWidget {
-  const BotAvatar({super.key, required this.bot, this.size = 40, this.working = false});
+  const BotAvatar({super.key, required this.bot, this.size = 40, this.working = false, this.mascot = true});
 
   final DsBot bot;
   final double size;
   final bool working;
 
+  /// Without a photo, a Libraries.dev bot rather than the initial. Stacked
+  /// group faces keep the initial: two bots overlapping hide each other.
+  final bool mascot;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ref0 = bot.imageRef;
     final photo = ref0 == null ? null : ref.watch(dsBotPhotoProvider((botId: bot.id, ref: ref0))).value;
+    // No photo: a Libraries.dev bot in the Bot's own colour, the same one for
+    // this Bot every time; it hops while the Bot works, so no dot is needed.
+    final Widget fallback = mascot
+        ? fx.BotAvatar(
+            id: bot.id,
+            size: size,
+            color: botInk(context, bot.ink),
+            state: working ? fx.BotAvatarState.working : fx.BotAvatarState.idle,
+            // Glossy plastic: drawn on the first frame; plush fur bakes in the background.
+            shading: fx.BotAvatarShading.plastic,
+            excludeFromSemantics: true,
+          )
+        : BotMonogram(name: bot.name, color: bot.ink, size: size);
+    if (photo == null && mascot) return ExcludeSemantics(child: fallback);
     final face = photo == null
-        ? BotMonogram(name: bot.name, color: bot.ink, size: size)
+        ? fallback
         : ClipOval(
             child: Image(
               image: imageForDisplay(
@@ -46,7 +67,7 @@ class BotAvatar extends ConsumerWidget {
               height: size,
               fit: BoxFit.cover,
               gaplessPlayback: true,
-              errorBuilder: (context, _, _) => BotMonogram(name: bot.name, color: bot.ink, size: size),
+              errorBuilder: (context, _, _) => fallback,
             ),
           );
     if (!working) return ExcludeSemantics(child: face);
@@ -157,13 +178,13 @@ class RoomAvatar extends StatelessWidget {
               top: 0,
               child: ClipPath(
                 clipper: _RearClipper(offset: size - small, gap: gap),
-                child: BotAvatar(bot: members[0], size: small),
+                child: BotAvatar(bot: members[0], size: small, mascot: false),
               ),
             ),
             Positioned(
               right: 0,
               bottom: 0,
-              child: BotAvatar(bot: members[1], size: small),
+              child: BotAvatar(bot: members[1], size: small, mascot: false),
             ),
           ],
         ),

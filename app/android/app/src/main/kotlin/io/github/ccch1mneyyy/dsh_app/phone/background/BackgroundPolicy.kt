@@ -13,11 +13,40 @@ object BackgroundPolicy {
         }
     }
 
-    fun supportsViewport(viewport: Viewport, version: Any?): Boolean =
-        viewport == Viewport.PORTRAIT || version == 1
-
     /** Lowest Android the trusted, own-focus virtual display needs (OWN_FOCUS is 14+). */
     const val MIN_SDK = 34
+
+    enum class Unready { OFF, ANDROID, SWITCHING, CHANNEL, UNKNOWN_MODE }
+
+    /**
+     * Why the selected mode is not ready, or null. The whole admission model: a mode other than
+     * off, Android 14+, no channel switch in progress, and the channel's own reason (not installed,
+     * not running, not authorized, not connected). Self-check results are not an input.
+     */
+    fun unready(mode: String, androidOk: Boolean, switching: Boolean, channelReason: String?): Unready? = when {
+        mode == "off" -> Unready.OFF
+        mode !in setOf("shizuku", "sui", "root", "adb") -> Unready.UNKNOWN_MODE
+        !androidOk -> Unready.ANDROID
+        switching -> Unready.SWITCHING
+        channelReason != null -> Unready.CHANNEL
+        else -> null
+    }
+
+    data class Capacity(val effective: Int, val reason: String?)
+
+    /**
+     * Background slots a new task may take now. [busy] is real momentary occupancy only (a channel
+     * switch, a self-check run, a screen-off interruption, a keep restore). [peerLimit] is what the
+     * live link carries, 0 when there is none.
+     */
+    fun capacity(mode: String, androidOk: Boolean, busy: Boolean, peerLimit: Int, configured: Int): Capacity = when {
+        mode == "off" -> Capacity(0, "off")
+        !androidOk -> Capacity(0, "unsupported")
+        busy -> Capacity(0, "busy")
+        peerLimit <= 0 -> Capacity(0, "connectionRequired")
+        peerLimit < configured -> Capacity(peerLimit, "transportSerial")
+        else -> Capacity(configured, null)
+    }
 
     /**
      * Legacy request sizing, retaining its portrait-normalized aspect semantics.

@@ -40,6 +40,7 @@ class PersonaStore {
   final File _file;
   final String Function() _createId;
   Map<String, Object?> _document;
+  Object _authoringVersion = Object();
   final _changes = StreamController<void>.broadcast();
   Future<void> _queue = Future<void>.value();
   Future<void>? _closeFuture;
@@ -47,6 +48,13 @@ class PersonaStore {
   bool _closed = false;
 
   Stream<void> get changes => _changes.stream;
+
+  /// Opaque identity of the last adopted profile document. It exposes no
+  /// document data and changes only after the file replacement succeeds.
+  Object get authoringVersion {
+    _ensureOpen();
+    return _authoringVersion;
+  }
 
   /// Returned models and their JSON documents do not alias stored data.
   List<TavernPersona> list() {
@@ -212,6 +220,7 @@ class PersonaStore {
     await temporary.writeAsString(encoded, flush: true);
     await temporary.rename(_file.path);
     _document = next;
+    _authoringVersion = Object();
   }
 
   void _notify() {

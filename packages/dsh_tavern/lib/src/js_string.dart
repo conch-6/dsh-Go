@@ -13,7 +13,25 @@ String trimJsWhitespace(String value) {
   return value.substring(start, end);
 }
 
-bool _isJsWhitespace(int code) =>
+String trimStartJsWhitespace(String value) {
+  var start = 0;
+  while (start < value.length && isJsWhitespace(value.codeUnitAt(start))) {
+    start++;
+  }
+  return value.substring(start);
+}
+
+String trimEndJsWhitespace(String value) {
+  var end = value.length;
+  while (end > 0 && isJsWhitespace(value.codeUnitAt(end - 1))) {
+    end--;
+  }
+  return value.substring(0, end);
+}
+
+bool _isJsWhitespace(int code) => isJsWhitespace(code);
+
+bool isJsWhitespace(int code) =>
     (code >= 0x0009 && code <= 0x000d) ||
     code == 0x0020 ||
     code == 0x00a0 ||

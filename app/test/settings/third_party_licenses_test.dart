@@ -19,6 +19,8 @@ const _expected = <String, String>{
   'DS Bot': 'Copyright 2026 Fei2411 and the DS Bot contributors',
   'ds-harness-remote': 'Copyright (c) 2026 DSH Remote contributors',
   'DSHA': 'Copyright (c) 2026 qiannianhuanxiang',
+  'Libraries.dev': 'Copyright (c) 2026 Jakub Antalik',
+  'Paper Shaders': 'Copyright (c) Paper Design, Inc.',
   'Shizuku-API': 'Copyright (c) 2021 RikkaW',
   'tawcroot (tawc)': 'Copyright (c) 2026 Sophie Winter',
   'libadb-android': 'Copyright 2021 Muntashir Al-Islam',
@@ -27,6 +29,9 @@ const _expected = <String, String>{
   'Bouncy Castle': 'Copyright (c) 2000-2023 The Legion of the Bouncy Castle Inc.',
   'XZ for Java': 'Copyright (C) The XZ for Java authors and contributors',
   'AndroidX WebKit': 'The Android Open Source Project',
+  'ONNX Runtime': 'Copyright (c) Microsoft Corporation',
+  'Silero VAD': 'Copyright (c) 2020-present Silero Team',
+  'smart-turn': 'Copyright (c) 2024–2025, Daily',
   'flutter_webrtc': 'Copyright (c) 2015 Howard Yang',
   'WebRTC': 'Copyright (c) 2011, The WebRTC project authors',
   'AudioSwitch': 'Copyright 2020 Twilio, inc.',
@@ -34,6 +39,9 @@ const _expected = <String, String>{
   'Material Icons': 'Google',
   'discourse-emojis': 'Joffrey Jaffeux',
   'JetBrains Mono': 'Copyright 2020 The JetBrains Mono Project Authors',
+  'jQuery': 'Copyright OpenJS Foundation and other contributors, https://openjsf.org/',
+  'Lodash': 'Copyright OpenJS Foundation and other contributors <https://openjsf.org/>',
+  'Streaming Zipformer zh-en (sherpa-onnx)': 'csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20',
 };
 
 const _mit = 'Permission is hereby granted, free of charge';
@@ -130,5 +138,28 @@ void main() {
     expect(textOf('XZ for Java'), contains('Permission to use, copy, modify, and/or distribute'));
     expect(textOf('JetBrains Mono'), contains('SIL OPEN FONT LICENSE Version 1.1'));
     expect(textOf('Unicode Character Database (15.0.0)'), File('tool/unicode-15.0-LICENSE.txt').readAsStringSync());
+    // The canvas libraries: their own LICENSE files, as published (npm tarball integrity in
+    // THIRD_PARTY_NOTICES.md), and the shipped builds those files go with.
+    for (final (package, license, build, licenseSha, buildSha) in [
+      (
+        'jQuery',
+        'assets/licenses/jquery-3.7.1-LICENSE.txt',
+        'assets/tavern/jquery-3.7.1.min.js',
+        'd4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d',
+        'fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a',
+      ),
+      (
+        'Lodash',
+        'assets/licenses/lodash-4.17.21-LICENSE.txt',
+        'assets/tavern/lodash-4.17.21.min.js',
+        'f71e8ed126b46346494aad5486874cd8f0aafe95092ed67d2e3cb6110f939abc',
+        'a9705dfc47c0763380d851ab1801be6f76019f6b67e40e9b873f8b4a0603f7a9',
+      ),
+    ]) {
+      expect(textOf(package), File(license).readAsStringSync(), reason: package);
+      expect(textOf(package), contains(_mit), reason: package);
+      expect(sha256.convert(File(license).readAsBytesSync()).toString(), licenseSha, reason: license);
+      expect(sha256.convert(File(build).readAsBytesSync()).toString(), buildSha, reason: build);
+    }
   });
 }

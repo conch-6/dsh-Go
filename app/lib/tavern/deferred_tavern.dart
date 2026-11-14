@@ -124,10 +124,272 @@ class DeferredTavern implements Tavern {
       (await _ready).path(chatId, limit: limit, beforeNodeId: beforeNodeId);
 
   @override
+  Future<List<TavernPathUsage>> pathUsage(String chatId) async => (await _ready).pathUsage(chatId);
+
+  @override
+  Future<TavernAuthoringDraft> createAuthoringDraft(List<TavernAuthoringTarget> targets) async =>
+      (await _ready).createAuthoringDraft(targets);
+
+  @override
+  Future<TavernAuthoringDraft?> readAuthoringDraft(String draftId) async => (await _ready).readAuthoringDraft(draftId);
+
+  /// Returned at once with its id; the render itself runs once the engine is open.
+  @override
+  TavernAuthoringTask<TavernAuthoringRenderResult> renderAuthoringDraft(
+    TavernAuthoringRenderRequest request, {
+    required TavernAuthoringPreviewHost host,
+  }) => _DeferredTask(request.requestId, _ready.then((t) => t.renderAuthoringDraft(request, host: host)));
+
+  /// Returned at once with its id; the preview itself runs once the engine is open.
+  @override
+  TavernAuthoringTask<TavernAuthoringPromptPreview> previewAuthoringPrompt(
+    TavernAuthoringPromptRequest request, {
+    TavernAuthoringPromptHost? host,
+  }) => _DeferredTask(request.requestId, _ready.then((t) => t.previewAuthoringPrompt(request, host: host)));
+
+  /// Returned at once with its id; the trial itself runs once the engine is open.
+  @override
+  TavernAuthoringSimulationTask simulateAuthoringDraft(TavernAuthoringSimulationRequest request) =>
+      _DeferredSimulation(request, _ready.then((t) => t.simulateAuthoringDraft(request)));
+
+  /// Returned at once with its id; the run itself starts once the engine is open.
+  @override
+  TavernAuthoringRun startAuthoringRun(
+    TavernAuthoringRunRequest request, {
+    TavernAuthoringPromptHost? promptHost,
+    TavernAuthoringPreviewHost? renderHost,
+  }) => _DeferredAuthoringRun(
+    request.runId,
+    _ready.then((t) => t.startAuthoringRun(request, promptHost: promptHost, renderHost: renderHost)),
+  );
+
+  @override
+  Future<TavernAuthoringRunSnapshot?> readAuthoringRun(String runId) async => (await _ready).readAuthoringRun(runId);
+
+  @override
+  Future<List<TavernAuthoringRunSummary>> listAuthoringRuns({
+    String? draftId,
+    int limit = 30,
+    String? beforeRunId,
+  }) async => (await _ready).listAuthoringRuns(draftId: draftId, limit: limit, beforeRunId: beforeRunId);
+
+  @override
+  Future<TavernAuthoringToolReceipt?> readAuthoringToolReceipt(String runId, String receiptId) async =>
+      (await _ready).readAuthoringToolReceipt(runId, receiptId);
+
+  @override
+  Future<void> cancelAuthoringRun(String runId) async => (await _ready).cancelAuthoringRun(runId);
+
+  @override
+  Future<TavernAuthoringDraft> createAuthoringSeed(TavernAuthoringSeedInput input) async =>
+      (await _ready).createAuthoringSeed(input);
+
+  @override
+  Future<TavernAuthoringSaveAsReceipt> saveAuthoringAsNew(
+    String draftId, {
+    required int draftRevision,
+    required String physicalResourceId,
+    required List<String> changeIds,
+    required String operationId,
+    required TavernAuthoringMediaSelection media,
+    String? domainId,
+  }) async => (await _ready).saveAuthoringAsNew(
+    draftId,
+    draftRevision: draftRevision,
+    physicalResourceId: physicalResourceId,
+    changeIds: changeIds,
+    operationId: operationId,
+    media: media,
+    domainId: domainId,
+  );
+
+  @override
+  Future<TavernAuthoringReceipt> applyAuthoringChanges(
+    String draftId, {
+    required int draftRevision,
+    required String physicalResourceId,
+    required List<String> changeIds,
+    required TavernAuthorityRevision expectedAuthorityRevision,
+    required String operationId,
+  }) async => (await _ready).applyAuthoringChanges(
+    draftId,
+    draftRevision: draftRevision,
+    physicalResourceId: physicalResourceId,
+    changeIds: changeIds,
+    expectedAuthorityRevision: expectedAuthorityRevision,
+    operationId: operationId,
+  );
+
+  @override
+  Future<TavernAuthoringOperation?> readAuthoringOperation(String operationId, {required String domainId}) async =>
+      (await _ready).readAuthoringOperation(operationId, domainId: domainId);
+
+  @override
+  Future<List<TavernAuthoringRevisionSummary>> listAuthoringRevisions(String physicalResourceId) async =>
+      (await _ready).listAuthoringRevisions(physicalResourceId);
+
+  @override
+  Future<TavernAuthoringReceipt> restoreAuthoringRevision(
+    String physicalResourceId, {
+    required TavernAuthorityRevision revision,
+    required TavernAuthorityRevision expectedAuthorityRevision,
+    required String operationId,
+  }) async => (await _ready).restoreAuthoringRevision(
+    physicalResourceId,
+    revision: revision,
+    expectedAuthorityRevision: expectedAuthorityRevision,
+    operationId: operationId,
+  );
+
+  @override
+  Future<List<TavernAuthoringDraftSummary>> listAuthoringDrafts() async => (await _ready).listAuthoringDrafts();
+
+  @override
+  Future<TavernAuthoringDraft> editAuthoringDraft(
+    String draftId, {
+    required int draftRevision,
+    required List<TavernAuthoringChange> changes,
+  }) async => (await _ready).editAuthoringDraft(draftId, draftRevision: draftRevision, changes: changes);
+
+  @override
+  Future<TavernAuthoringDraft> rebaseAuthoringDraft(
+    String draftId, {
+    required int draftRevision,
+    required List<TavernAuthoringChange> changes,
+  }) async => (await _ready).rebaseAuthoringDraft(draftId, draftRevision: draftRevision, changes: changes);
+
+  @override
+  Future<void> deleteAuthoringDraft(String draftId, {required int draftRevision}) async =>
+      (await _ready).deleteAuthoringDraft(draftId, draftRevision: draftRevision);
+
+  @override
+  Future<TavernAuthoringPreview> previewAuthoringDraft(
+    String draftId, {
+    required int draftRevision,
+    required List<String> changeIds,
+  }) async => (await _ready).previewAuthoringDraft(draftId, draftRevision: draftRevision, changeIds: changeIds);
+
+  @override
+  Future<TavernAuthoringRegexTest> testAuthoringRegex(
+    String draftId, {
+    required int draftRevision,
+    required List<String> changeIds,
+    required String physicalResourceId,
+    required String scriptPath,
+    required String text,
+  }) async => (await _ready).testAuthoringRegex(
+    draftId,
+    draftRevision: draftRevision,
+    changeIds: changeIds,
+    physicalResourceId: physicalResourceId,
+    scriptPath: scriptPath,
+    text: text,
+  );
+
+  @override
+  Future<List<TavernToolTurnSummary>> recentToolTurns(String chatId, {int limit = 20}) async =>
+      (await _ready).recentToolTurns(chatId, limit: limit);
+
+  @override
   Stream<void> pathChanges(String chatId) => _stream((t) => t.pathChanges(chatId));
 
   @override
   Stream<TavernEvent> send(String chatId, String text) => _stream((t) => t.send(chatId, text));
+
+  // Group chats (engine P2 125): the lists are copied as they are when called,
+  // before waiting for the engine.
+
+  @override
+  Future<String> createGroupChat(
+    List<String> characterIds, {
+    String? hostCharacterId,
+    String? title,
+    TavernGroupActivation activation = TavernGroupActivation.natural,
+    int maxSpeakersPerTurn = 3,
+    bool allowSelfResponses = false,
+    bool addGreetings = true,
+  }) {
+    final ids = List<String>.of(characterIds);
+    return _ready.then(
+      (t) => t.createGroupChat(
+        ids,
+        hostCharacterId: hostCharacterId,
+        title: title,
+        activation: activation,
+        maxSpeakersPerTurn: maxSpeakersPerTurn,
+        allowSelfResponses: allowSelfResponses,
+        addGreetings: addGreetings,
+      ),
+    );
+  }
+
+  @override
+  Future<TavernGroupChat?> groupChat(String chatId) async => (await _ready).groupChat(chatId);
+
+  @override
+  Stream<TavernGroupChat?> watchGroupChat(String chatId) => _stream((t) => t.watchGroupChat(chatId));
+
+  @override
+  Future<TavernGroupChat> addGroupMember(
+    String chatId,
+    String characterId, {
+    double? talkativeness,
+    bool muted = false,
+    TavernGroupModelRole? modelRole,
+  }) async => (await _ready).addGroupMember(
+    chatId,
+    characterId,
+    talkativeness: talkativeness,
+    muted: muted,
+    modelRole: modelRole,
+  );
+
+  @override
+  Future<TavernGroupChat> updateGroupMember(
+    String chatId,
+    String characterId, {
+    double? talkativeness,
+    bool? muted,
+    TavernGroupModelRole? modelRole,
+  }) async => (await _ready).updateGroupMember(
+    chatId,
+    characterId,
+    talkativeness: talkativeness,
+    muted: muted,
+    modelRole: modelRole,
+  );
+
+  @override
+  Future<TavernGroupChat> removeGroupMember(String chatId, String characterId) async =>
+      (await _ready).removeGroupMember(chatId, characterId);
+
+  @override
+  Future<TavernGroupChat> reorderGroupMembers(String chatId, List<String> characterIds) {
+    final ids = List<String>.of(characterIds);
+    return _ready.then((t) => t.reorderGroupMembers(chatId, ids));
+  }
+
+  @override
+  Future<TavernGroupChat> updateGroupChat(
+    String chatId, {
+    String? title,
+    TavernGroupActivation? activation,
+    int? maxSpeakersPerTurn,
+    bool? allowSelfResponses,
+  }) async => (await _ready).updateGroupChat(
+    chatId,
+    title: title,
+    activation: activation,
+    maxSpeakersPerTurn: maxSpeakersPerTurn,
+    allowSelfResponses: allowSelfResponses,
+  );
+
+  @override
+  Stream<TavernGroupEvent> sendGroup(String chatId, String text, {String? speakerCharacterId}) =>
+      _stream((t) => t.sendGroup(chatId, text, speakerCharacterId: speakerCharacterId));
+
+  @override
+  Stream<TavernGroupEvent> resumeGroupTurn(String chatId) => _stream((t) => t.resumeGroupTurn(chatId));
 
   @override
   Stream<TavernEvent> regenerate(String chatId, String nodeId) => _stream((t) => t.regenerate(chatId, nodeId));
@@ -232,6 +494,78 @@ class DeferredTavern implements Tavern {
   @override
   Future<TavernTurnInspection?> inspectTurn(String chatId, {String? nodeId}) async =>
       (await _ready).inspectTurn(chatId, nodeId: nodeId);
+
+  // Stage one's tools: what the caller hands over is taken as it is at the
+  // call, before the tavern opens (STAGE1-APP-INTEGRATION §10.1).
+
+  @override
+  Future<TavernToolTurnSnapshot?> readToolTurn(String logicalTurnId) async =>
+      (await _ready).readToolTurn(logicalTurnId);
+
+  @override
+  Future<TavernToolReceipt?> readToolReceipt(String executionId) async => (await _ready).readToolReceipt(executionId);
+
+  @override
+  Future<TavernToolReceipt> rollDice(
+    String chatId, {
+    required String actionId,
+    required String dice,
+    String? label,
+    int? target,
+    String? expectedNodeId,
+  }) async => (await _ready).rollDice(
+    chatId,
+    actionId: actionId,
+    dice: dice,
+    label: label,
+    target: target,
+    expectedNodeId: expectedNodeId,
+  );
+
+  @override
+  Future<TavernMemoryDecisionReceipt> resolveMemoryProposal(
+    String proposalId, {
+    required String decisionId,
+    required int expectedVersion,
+    required TavernMemoryDecision decision,
+    required TavernToolContextAnchor expectedContextAnchor,
+  }) {
+    // The anchor as it was when clicked, apart from the caller's object.
+    final anchor = TavernToolContextAnchor.fromJson(expectedContextAnchor.toJson());
+    return _ready.then(
+      (t) => t.resolveMemoryProposal(
+        proposalId,
+        decisionId: decisionId,
+        expectedVersion: expectedVersion,
+        decision: decision,
+        expectedContextAnchor: anchor,
+      ),
+    );
+  }
+
+  @override
+  Future<TavernToolPolicySnapshot> readToolPolicy({String? chatId}) async =>
+      (await _ready).readToolPolicy(chatId: chatId);
+
+  @override
+  Future<TavernToolPolicyWriteResult> setToolPolicy(Map<String, Object?> patch, {String? chatId}) {
+    final Map<String, Object?> held;
+    try {
+      held = _held(patch, 'setToolPolicy')! as Map<String, Object?>;
+    } on TavernScriptException catch (e) {
+      return Future.error(
+        TavernToolException(
+          code: TavernToolErrorCode.invalidArgument,
+          operation: 'setToolPolicy',
+          message: e.message,
+          committed: false,
+          chatId: chatId,
+          fieldPath: 'toolPolicy',
+        ),
+      );
+    }
+    return _ready.then((t) => t.setToolPolicy(held, chatId: chatId));
+  }
 
   @override
   void configure(TavernModelConfig config) {
@@ -392,6 +726,11 @@ class DeferredTavern implements Tavern {
   Future<List<TavernDirectorEvent>> readDirectorEvents(String chatId, {int limit = 50, String? beforeEventId}) async =>
       (await _ready).readDirectorEvents(chatId, limit: limit, beforeEventId: beforeEventId);
 
+  /// One bridge for as long as this tavern lives (P2 B1): calls go straight
+  /// to the engine's once it is open, and wait for it before.
+  @override
+  late final TavernScriptBridge scripts = _DeferredScripts(this);
+
   /// Nothing to close when it never opened.
   @override
   Future<void> close() async {
@@ -403,4 +742,388 @@ class DeferredTavern implements Tavern {
     }
     await tavern.close();
   }
+}
+
+/// [DeferredTavern.scripts]. Once the engine is open each call goes straight
+/// to its bridge, so the bridge copies what it is given at the call, as its
+/// contract asks; before that, lists and the one raw JSON object are copied
+/// here and the call waits for the engine. The latest host reaches the
+/// engine when it opens. Until then nothing is claimed: no methods, no
+/// scopes.
+class _DeferredScripts implements TavernScriptBridge {
+  _DeferredScripts(this._tavern) {
+    unawaited(
+      _tavern._ready.then((t) {
+        if (_pending) t.scripts.attachHost(_host);
+        _pending = false;
+      }, onError: (Object _) {}),
+    );
+  }
+
+  final DeferredTavern _tavern;
+  TavernScriptHost? _host;
+
+  /// A host was set while the engine was still opening: it gets it on open.
+  bool _pending = false;
+
+  Future<T> _call<T>(Future<T> Function(TavernScriptBridge b) call) {
+    final open = _tavern._open;
+    return open != null ? call(open.scripts) : _tavern._ready.then((t) => call(t.scripts));
+  }
+
+  @override
+  TavernScriptCapabilities get capabilities =>
+      _tavern._open?.scripts.capabilities ??
+      TavernScriptCapabilities(adapterVersion: '', methods: const {}, scopes: const {}, hostAttached: _host != null);
+
+  @override
+  void attachHost(TavernScriptHost? host) {
+    _host = host;
+    final open = _tavern._open;
+    _pending = open == null;
+    open?.scripts.attachHost(host);
+  }
+
+  @override
+  Future<TavernScriptContext> openContext(TavernScriptContextSpec spec) => _call((b) => b.openContext(spec));
+
+  @override
+  Future<TavernScriptSnapshot> snapshot(String contextId) => _call((b) => b.snapshot(contextId));
+
+  @override
+  Future<void> closeContext(String contextId) => _call((b) => b.closeContext(contextId));
+
+  @override
+  Future<void> activateChat(String contextId) => _call((b) => b.activateChat(contextId));
+
+  @override
+  Stream<TavernScriptEvent> watchEvents({String? chatId}) =>
+      _tavern._stream((t) => t.scripts.watchEvents(chatId: chatId));
+
+  @override
+  Future<TavernScriptMessagePage> getChatMessages(
+    String contextId,
+    TavernMessageRange range, {
+    TavernScriptRole? role,
+    TavernHiddenFilter hidden = TavernHiddenFilter.all,
+    bool includeSwipes = false,
+  }) => _call((b) => b.getChatMessages(contextId, range, role: role, hidden: hidden, includeSwipes: includeSwipes));
+
+  @override
+  Future<TavernScriptMutation> setChatMessages(
+    String contextId,
+    List<TavernScriptMessagePatch> patches, {
+    TavernScriptWriteOptions options = const TavernScriptWriteOptions(),
+  }) {
+    final held = List.of(patches);
+    return _call((b) => b.setChatMessages(contextId, held, options: options));
+  }
+
+  @override
+  Future<TavernScriptMutation> createChatMessages(
+    String contextId,
+    List<TavernScriptMessageDraft> messages, {
+    int? insertBefore,
+    TavernScriptWriteOptions options = const TavernScriptWriteOptions(),
+  }) {
+    final held = List.of(messages);
+    return _call((b) => b.createChatMessages(contextId, held, insertBefore: insertBefore, options: options));
+  }
+
+  @override
+  Future<TavernScriptMutation> deleteChatMessages(
+    String contextId,
+    List<int> messageIds, {
+    TavernScriptWriteOptions options = const TavernScriptWriteOptions(),
+  }) {
+    final held = List.of(messageIds);
+    return _call((b) => b.deleteChatMessages(contextId, held, options: options));
+  }
+
+  @override
+  Future<TavernScriptMutation> rotateChatMessages(
+    String contextId,
+    int begin,
+    int middle,
+    int end, {
+    TavernScriptWriteOptions options = const TavernScriptWriteOptions(),
+  }) => _call((b) => b.rotateChatMessages(contextId, begin, middle, end, options: options));
+
+  @override
+  Future<TavernScriptMutation> selectSwipe(
+    String contextId,
+    TavernScriptMessageRef message,
+    int swipeId, {
+    TavernScriptWriteOptions options = const TavernScriptWriteOptions(),
+  }) => _call((b) => b.selectSwipe(contextId, message, swipeId, options: options));
+
+  @override
+  Future<TavernVariableSnapshot> getVariables(String contextId, TavernVariableTarget target) =>
+      _call((b) => b.getVariables(contextId, target));
+
+  @override
+  Future<TavernVariableSnapshot> replaceVariables(
+    String contextId,
+    TavernVariableTarget target,
+    TavernJsonObject value, {
+    String? expectedVersion,
+  }) {
+    if (_tavern._open case final open?) {
+      return open.scripts.replaceVariables(contextId, target, value, expectedVersion: expectedVersion);
+    }
+    final TavernJsonObject held;
+    try {
+      held = _held(value, 'replaceVariables') as TavernJsonObject;
+    } on TavernScriptException catch (e) {
+      return Future.error(e);
+    }
+    return _call((b) => b.replaceVariables(contextId, target, held, expectedVersion: expectedVersion));
+  }
+
+  @override
+  Future<TavernVariableSnapshot> updateVariablesWith(
+    String contextId,
+    TavernVariableTarget target,
+    FutureOr<TavernJsonObject> Function(TavernJsonObject value) updater,
+  ) => _call((b) => b.updateVariablesWith(contextId, target, updater));
+
+  @override
+  Future<TavernVariableMutation> mutateVariables(
+    String contextId,
+    TavernVariableTarget target,
+    List<TavernVariableChange> changes, {
+    String? expectedVersion,
+  }) {
+    final held = List.of(changes);
+    return _call((b) => b.mutateVariables(contextId, target, held, expectedVersion: expectedVersion));
+  }
+
+  // B2: background generation, regex and injections.
+
+  @override
+  Future<TavernScriptGeneration> generate(String contextId, TavernScriptGenerateRequest request) =>
+      _call((b) => b.generate(contextId, request));
+
+  @override
+  Future<TavernScriptGeneration> generateRaw(String contextId, TavernScriptRawRequest request) =>
+      _call((b) => b.generateRaw(contextId, request));
+
+  /// Nothing can be generating before the engine is open.
+  @override
+  bool stopGenerationById(String generationId) => _tavern._open?.scripts.stopGenerationById(generationId) ?? false;
+
+  @override
+  Future<List<TavernScriptRegex>> getTavernRegexes(String contextId, TavernScriptRegexQuery query) =>
+      _call((b) => b.getTavernRegexes(contextId, query));
+
+  @override
+  Future<TavernDisplayResult> formatAsTavernRegexedString(
+    String contextId,
+    String text, {
+    required int source,
+    required RegexPhase destination,
+    num? depth,
+    String? characterId,
+  }) => _call(
+    (b) => b.formatAsTavernRegexedString(
+      contextId,
+      text,
+      source: source,
+      destination: destination,
+      depth: depth,
+      characterId: characterId,
+    ),
+  );
+
+  @override
+  Future<TavernScriptInjectionLease> injectPrompts(
+    String contextId,
+    List<TavernScriptInjection> prompts, {
+    bool once = false,
+  }) {
+    final held = List.of(prompts);
+    return _call((b) => b.injectPrompts(contextId, held, once: once));
+  }
+
+  @override
+  Future<void> uninjectPrompts(String contextId, List<String> ids) {
+    final held = List.of(ids);
+    return _call((b) => b.uninjectPrompts(contextId, held));
+  }
+
+  @override
+  Future<void> releaseInjectionLease(String leaseId) => _call((b) => b.releaseInjectionLease(leaseId));
+
+  @override
+  Future<List<TavernScriptInjectionView>> listInjections(String contextId) => _call((b) => b.listInjections(contextId));
+
+  // B3: Slash, macros, a character's raw data and the books in play. What
+  // the caller hands over is taken as it is now, not once the engine opens.
+
+  @override
+  Future<TavernSlashExecution> triggerSlash(
+    String contextId,
+    String source, {
+    String? executionId,
+    String pipe = '',
+    Map<String, String> arguments = const {},
+  }) {
+    if (_tavern._open case final open?) {
+      return open.scripts.triggerSlash(contextId, source, executionId: executionId, pipe: pipe, arguments: arguments);
+    }
+    final held = Map<String, String>.of(arguments);
+    return _call((b) => b.triggerSlash(contextId, source, executionId: executionId, pipe: pipe, arguments: held));
+  }
+
+  /// Nothing can be running before the engine is open.
+  @override
+  bool stopScript(String executionId) => _tavern._open?.scripts.stopScript(executionId) ?? false;
+
+  @override
+  Future<String> substituteMacros(String contextId, String text) => _call((b) => b.substituteMacros(contextId, text));
+
+  @override
+  Future<TavernCharacter> replaceCharacterData(
+    String contextId,
+    String characterId,
+    TavernJsonObject data, {
+    String? expectedVersion,
+  }) {
+    if (_tavern._open case final open?) {
+      return open.scripts.replaceCharacterData(contextId, characterId, data, expectedVersion: expectedVersion);
+    }
+    final TavernJsonObject held;
+    try {
+      held = _held(data, 'replaceCharacterData') as TavernJsonObject;
+    } on TavernScriptException catch (e) {
+      return Future.error(e);
+    }
+    return _call((b) => b.replaceCharacterData(contextId, characterId, held, expectedVersion: expectedVersion));
+  }
+
+  @override
+  Future<List<TavernScriptBookBinding>> getContextBooks(String contextId) => _call((b) => b.getContextBooks(contextId));
+
+  @override
+  Future<TavernScriptBookSnapshot> readBook(String contextId, TavernScriptBookRef ref) =>
+      _call((b) => b.readBook(contextId, ref));
+
+  @override
+  Future<TavernScriptBookSnapshot> replaceBook(
+    String contextId,
+    TavernScriptBookRef ref,
+    TavernJsonObject book, {
+    String? expectedVersion,
+  }) {
+    if (_tavern._open case final open?) {
+      return open.scripts.replaceBook(contextId, ref, book, expectedVersion: expectedVersion);
+    }
+    final TavernJsonObject held;
+    try {
+      held = _held(book, 'replaceBook') as TavernJsonObject;
+    } on TavernScriptException catch (e) {
+      return Future.error(e);
+    }
+    return _call((b) => b.replaceBook(contextId, ref, held, expectedVersion: expectedVersion));
+  }
+}
+
+/// [value] as it is now: maps and lists copied all the way down, the rest
+/// kept for the engine to judge. A cycle is not JSON.
+Object? _held(Object? value, String operation, [Set<Object>? seen]) {
+  if (value is! Map && value is! List) return value;
+  final active = seen ?? Set<Object>.identity();
+  if (!active.add(value!)) {
+    throw TavernScriptException(
+      code: TavernScriptErrorCode.invalidJson,
+      operation: operation,
+      message: 'The value contains a cycle.',
+    );
+  }
+  try {
+    return switch (value) {
+      Map<String, Object?>() => <String, Object?>{
+        for (final MapEntry(:key, value: v) in value.entries) key: _held(v, operation, active),
+      },
+      Map() => {for (final MapEntry(:key, value: v) in value.entries) key: _held(v, operation, active)},
+      List() => [for (final v in value) _held(v, operation, active)],
+      _ => value,
+    };
+  } finally {
+    active.remove(value);
+  }
+}
+
+/// An authoring run asked for before the engine opened: its id now, the rest
+/// from the engine's own run once there is one.
+class _DeferredAuthoringRun implements TavernAuthoringRun {
+  _DeferredAuthoringRun(this.runId, this._run);
+
+  @override
+  final String runId;
+  final Future<TavernAuthoringRun> _run;
+
+  @override
+  Stream<TavernAuthoringRunEvent> get events => Stream.fromFuture(_run).asyncExpand((run) => run.events);
+
+  @override
+  Future<TavernAuthoringRunSnapshot> get result => _run.then((run) => run.result);
+
+  @override
+  Future<void> cancel() async => (await _run).cancel();
+}
+
+/// An authoring task asked for before the engine opened: its id now, its
+/// result and cancellation from the engine's own task once there is one.
+class _DeferredTask<T> implements TavernAuthoringTask<T> {
+  _DeferredTask(this.requestId, this._task);
+
+  @override
+  final String requestId;
+  final Future<TavernAuthoringTask<T>> _task;
+
+  @override
+  Future<T> get result => _task.then((task) => task.result);
+
+  @override
+  Future<void> cancel() async => (await _task).cancel();
+}
+
+/// A trial asked for before the engine opened: until its task is there, the
+/// view says that nothing has run yet.
+class _DeferredSimulation implements TavernAuthoringSimulationTask {
+  _DeferredSimulation(this._request, this._task) {
+    unawaited(_task.then((task) => _started = task, onError: (Object _) => null));
+  }
+
+  final TavernAuthoringSimulationRequest _request;
+  final Future<TavernAuthoringSimulationTask> _task;
+  TavernAuthoringSimulationTask? _started;
+
+  @override
+  String get requestId => _request.requestId;
+
+  @override
+  Future<TavernAuthoringSimulationResult> get result => _task.then((task) => task.result);
+
+  @override
+  Future<void> cancel() async => (await _task).cancel();
+
+  @override
+  TavernAuthoringSimulationResult get view =>
+      _started?.view ??
+      TavernAuthoringSimulationResult(
+        requestId: _request.requestId,
+        captureId: '',
+        draftId: _request.draftId,
+        draftRevision: _request.draftRevision,
+        changeIds: _request.changeIds,
+        status: TavernAuthoringSimulationStatus.running,
+        origin: const {},
+        turns: const [],
+        requests: const [],
+        usage: const {},
+        cleanup: const {},
+        issues: const [],
+      );
 }

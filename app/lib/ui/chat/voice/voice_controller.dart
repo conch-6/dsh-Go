@@ -1,5 +1,7 @@
-// Composer dictation. Automatic mode uses the engine's voice model when it is
-// ready (the on-device SenseVoice model, voice settings); otherwise the system
+// Composer dictation. Automatic mode uses DeepSeek's recognizer when someone
+// can pay for it (the signed-in account or the API key: speech/voice_cloud.dart),
+// then the engine's voice model when it is ready (the on-device SenseVoice
+// model, voice settings); otherwise the system
 // service, retried once with engine transcription after a non-user service
 // failure. Audio is recorded again; the system service's earlier audio is never
 // claimed to be recoverable.
@@ -10,15 +12,20 @@ import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../voice/live_words.dart';
 import '../../../l10n/l10n.dart';
+import '../../../speech/voice_cloud.dart';
 import '../../../state/voice_settings.dart';
+import '../../speech/speech_ui.dart';
 import '../mention/mention_text_controller.dart';
 import 'voice_bridge.dart';
 
 enum VoicePhase { idle, starting, listening, transcribing }
 
-enum VoiceEngine { system, engine }
+/// Who recognizes: the phone's service, the engine's model, or a cloud service.
+enum VoiceEngine { system, engine, cloud }
 
 class VoiceMessage {
   const VoiceMessage(this.text, {this.openSettings = false, this.change = false});
@@ -71,6 +78,9 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
     Object? Function()? inputOwner,
     Future<VoiceMode> Function()? mode,
     bool Function()? modelReady,
+    this._cloud,
+    this._cloudLikely,
+    this._liveWords,
     this.onRecognized,
     this.requiredProviderId,
     bool observeLifecycle = true,
@@ -99,6 +109,23 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
   /// The on-device voice model is ready for this host (voice settings):
   /// automatic mode then records for it instead of trying the phone service.
   final bool Function() _modelReady;
+
+  /// The cloud recognizer for a mode, if any (DeepSeek's, or the person's own).
+  final VoiceCloudResolver? _cloud;
+
+  /// A cloud recognizer is probably there (settings only, nothing asked):
+  /// the microphone shows even without a phone or engine recognizer.
+  final bool Function()? _cloudLikely;
+
+  /// Words as they are spoken, from the phone's streaming recognizer (null
+  /// when its model is not downloaded): shown as provisional text while a
+  /// recording runs; the recording's own text replaces them when it is done.
+  final Future<LiveWords?> Function(void Function(String words) onWords)? _liveWords;
+  LiveWords? _live;
+
+  /// Live words are in the draft, not yet replaced by the recording's text.
+  bool _liveShown = false;
+  VoiceCloud? _cloudRun;
   final bool _observing;
   void Function(VoiceMessage message)? onMessage;
 
@@ -138,12 +165,13 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
   bool get active => _phase != VoicePhase.idle;
   VoiceEngine? get engine => _engine;
   bool get engineReady => _caps.recorder && (_catalog?.current(client()) ?? false);
-  bool get available => _caps.recognizer || engineReady;
+  bool get available =>
+      _caps.recognizer || engineReady || (_caps.recorder && _cloud != null && (_cloudLikely?.call() ?? false));
 
   bool _current(int operation) => !_disposed && active && operation == _operation;
   // Phone recognition belongs to the draft, not its Host transport. Starting
   // before an engine is selected, recording and fallback keep the original link.
-  bool get _hostCurrent => _engine == VoiceEngine.system
+  bool get _hostCurrent => _engine == VoiceEngine.system || _engine == VoiceEngine.cloud
       ? _runInputOwner == _inputOwner()
       : identical(_runClient, client()) && identical(_runGeneration, _runClient?.mux.generation);
 
@@ -277,6 +305,40 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
       await cancel();
       return;
     }
+    // A cloud recognizer first: DeepSeek's in automatic mode when someone pays for it.
+    final cloudMode = _runMode == VoiceMode.deepseek || _runMode == VoiceMode.cloud;
+    if ((cloudMode || _runMode == VoiceMode.auto) && _cloud != null && _caps.recorder) {
+      VoiceCloud? cloud;
+      try {
+        cloud = await _cloud(_runMode);
+      } catch (_) {
+        cloud = null;
+      }
+      if (!_current(operation)) return;
+      if (cloud != null) {
+        final value = input.value;
+        _base = value;
+        _anchorStart = value.selection.isValid ? value.selection.start : value.text.length;
+        _anchorEnd = value.selection.isValid ? value.selection.end : value.text.length;
+        _heard = '';
+        await _startCloud(operation, cloud);
+        return;
+      }
+    }
+    if (cloudMode) {
+      _finish();
+      _say(
+        VoiceMessage(
+          !_caps.recorder
+              ? appL10n.chatVoiceMicrophoneFailed
+              : _runMode == VoiceMode.deepseek
+              ? appL10n.speechNoCredential
+              : appL10n.speechCloudNotSetUp,
+          change: true,
+        ),
+      );
+      return;
+    }
     final system =
         _runMode == VoiceMode.system || (_runMode == VoiceMode.auto && _caps.recognizer && !_caps.systemUnreliable);
     if (system && !_caps.recognizer) {
@@ -364,9 +426,104 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
       await cancel();
       return;
     }
+    unawaited(_startLive(operation));
     HapticFeedback.lightImpact();
     _setPhase(VoicePhase.listening);
     if (fallback) _say(VoiceMessage(appL10n.voiceFallbackStarted));
+  }
+
+  Future<void> _startCloud(int operation, VoiceCloud cloud) async {
+    _cloudRun = cloud;
+    _engine = VoiceEngine.cloud;
+    _listen(operation);
+    try {
+      await bridge.startRecorder(maxSeconds: cloud.maxSeconds);
+    } on PlatformException catch (error) {
+      if (_current(operation)) {
+        _finish();
+        _say(VoiceMessage(voiceErrorText(_platformCode(error))));
+      }
+      return;
+    }
+    if (!_current(operation) || _phase != VoicePhase.starting) return;
+    unawaited(_startLive(operation));
+    HapticFeedback.lightImpact();
+    _setPhase(VoicePhase.listening);
+    if (_runMode == VoiceMode.auto) unawaited(_cloudNoticeOnce());
+  }
+
+  Future<void> _startLive(int operation) async {
+    final live = await _liveWords?.call((words) {
+      if (_current(operation) && _phase == VoicePhase.listening && words.isNotEmpty) {
+        _apply(words, provisional: true);
+        _liveShown = true;
+      }
+    });
+    if (live == null) return;
+    if (_current(operation)) {
+      _live = live;
+    } else {
+      unawaited(live.stop());
+    }
+  }
+
+  void _stopLive() {
+    final live = _live;
+    _live = null;
+    if (live != null) unawaited(live.stop());
+  }
+
+  static const cloudNoticeKey = 'speech_cloud_notice_shown';
+
+  /// Automatic mode sends the recording to DeepSeek without the person having
+  /// chosen it: said once, with 「更换」 to choose another way.
+  Future<void> _cloudNoticeOnce() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(cloudNoticeKey) == true) return;
+      // Marked as said only once someone is there to hear it.
+      if (_disposed || onMessage == null) return;
+      _say(VoiceMessage(appL10n.speechCloudNotice, change: true));
+      await prefs.setBool(cloudNoticeKey, true);
+    } catch (_) {
+      // No preferences: said this time, and again next time.
+    }
+  }
+
+  Future<void> _transcribeCloud(int operation) async {
+    final cloud = _cloudRun;
+    Uint8List? wav;
+    try {
+      wav = await bridge.stop();
+    } on PlatformException catch (error) {
+      if (_current(operation)) {
+        _finish();
+        _say(VoiceMessage(voiceErrorText(_platformCode(error))));
+      }
+      return;
+    }
+    if (!_current(operation)) return;
+    if (cloud == null || wav == null || wav.length < 44 + 9600) {
+      _finish();
+      _say(VoiceMessage(appL10n.chatVoiceNotHeard));
+      return;
+    }
+    try {
+      final text = await cloud.transcribe(wav);
+      if (!_current(operation)) return;
+      if (text.isEmpty) {
+        _finish();
+        _say(VoiceMessage(appL10n.chatVoiceNotHeard));
+        return;
+      }
+      _apply(text, provisional: false);
+      onRecognized?.call();
+      _finish();
+    } catch (error) {
+      if (!_current(operation)) return;
+      _finish();
+      _say(VoiceMessage(speechErrorText(appL10n, error, listening: true), change: true));
+    }
   }
 
   Future<void> _fallback(int operation) async {
@@ -404,6 +561,7 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
     final operation = _operation;
     HapticFeedback.lightImpact();
     _setPhase(VoicePhase.transcribing);
+    _stopLive();
     if (_engine == VoiceEngine.system) {
       _finalTimeout = Timer(const Duration(seconds: 6), () {
         if (!_current(operation) || _engine != VoiceEngine.system) return;
@@ -417,6 +575,7 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
       }
       return;
     }
+    if (_engine == VoiceEngine.cloud) return _transcribeCloud(operation);
     await _transcribe(operation);
   }
 
@@ -523,7 +682,7 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
       case VoiceError(:final code):
         _error(operation, code);
       case VoiceLimit():
-        if (_engine == VoiceEngine.engine && _phase == VoicePhase.listening) unawaited(stop());
+        if (_engine != VoiceEngine.system && _phase == VoicePhase.listening) unawaited(stop());
       case VoiceEnd():
         if (_engine == VoiceEngine.system) {
           _completeSystem(_heard);
@@ -547,6 +706,7 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
   void _apply(String heard, {required bool provisional}) {
     final base = _base;
     if (base == null) return;
+    if (!provisional) _liveShown = false;
     final text = base.text;
     final spoken = heard.trim();
     final before = text.substring(0, _anchorStart);
@@ -583,10 +743,15 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _finish() {
+    _stopLive();
+    // Not heard after all (failed, empty, too short): the draft goes back.
+    if (_liveShown) _restoreDraft();
+    _liveShown = false;
     _operation++;
     _requestingPermission = false;
     _switching = false;
     _target = null;
+    _cloudRun = null;
     _runInputOwner = null;
     _finalTimeout?.cancel();
     _finalTimeout = null;
@@ -633,6 +798,7 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
     }
     _operation++;
     _disposed = true;
+    _stopLive();
     _finalTimeout?.cancel();
     unawaited(_events?.cancel());
     if (_observing) WidgetsBinding.instance.removeObserver(this);

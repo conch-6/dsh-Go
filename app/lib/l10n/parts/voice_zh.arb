@@ -1,9 +1,9 @@
 {
-  "voiceSettingsTitle": "语音输入",
+  "voiceSettingsTitle": "语音",
   "voiceModeAuto": "自动",
   "voiceModeSystem": "系统",
   "voiceModeEngine": "语音模型",
-  "voiceModeAutoHint": "有语音模型时用它，否则用系统识别",
+  "voiceModeAutoHint": "有 DeepSeek 账号或 API Key 时用 DeepSeek，否则用语音模型或系统识别",
   "voiceModeSystemHint": "使用手机设置中的识别服务",
   "voiceModeEngineHint": "用引擎里的语音模型识别",
   "voiceFallbackStarted": "已改用语音模型，请再说一次",
@@ -137,5 +137,13 @@
     }
   },
   "voiceModelNoticePreparing": "正在校验语音模型",
-  "voiceModelNoticeFailed": "语音模型下载失败，打开 App 重试"
+  "voiceModelNoticeFailed": "语音模型下载失败，打开 App 重试",
+  "voiceModeDeepseek": "DeepSeek",
+  "voiceModeDeepseekHint": "用 DeepSeek 的语音识别，登录的账号或 API Key 付费",
+  "voiceModeCloud": "其他云端服务",
+  "voiceModeCloudHint": "OpenAI 兼容的语音转写接口，例如 Whisper、硅基流动",
+  "voiceCloudSection": "云端识别服务",
+  "voiceCloudFooter": "录音会发给这个服务识别。Key 只存在这台手机上。",
+  "voiceCloudBaseHelper": "填到 /v1 为止，App 会请求 …/audio/transcriptions",
+  "voiceCloudModelHelper": "例如 whisper-1、FunAudioLLM/SenseVoiceSmall"
 }

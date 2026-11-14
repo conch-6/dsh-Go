@@ -20,7 +20,7 @@ class _TimedEffects {
     }
     for (final item in entries) {
       final delay = item.entry._fields['delay'];
-      if (_truthy(delay) && input.messages.length < _jsNumber(delay)) active['delay']!.add(item.hash);
+      if (_truthy(delay) && input.messageCount < _jsNumber(delay)) active['delay']!.add(item.hash);
     }
   }
 
@@ -55,8 +55,8 @@ class _TimedEffects {
   String _key(_RuntimeEntry item) => item.entry.stKey;
 
   Map<String, Object?> _effect(String type, _RuntimeEntry item, {bool protected = false}) {
-    final end = input.messages.length + _jsNumber(item.entry._fields[type]);
-    return {'hash': item.hash, 'start': input.messages.length, 'end': end, 'protected': protected};
+    final end = input.messageCount + _jsNumber(item.entry._fields[type]);
+    return {'hash': item.hash, 'start': input.messageCount, 'end': end, 'protected': protected};
   }
 
   void _check(String type) {
@@ -72,19 +72,19 @@ class _TimedEffects {
       }
       final start = value.containsKey('start') ? _jsNumber(value['start']) : double.nan;
       final end = value.containsKey('end') ? _jsNumber(value['end']) : double.nan;
-      if (input.messages.length <= start && !_truthy(value['protected'])) {
+      if (input.messageCount <= start && !_truthy(value['protected'])) {
         values.remove(key);
         continue;
       }
       if (found == null) {
-        if (input.messages.length >= end) values.remove(key);
+        if (input.messageCount >= end) values.remove(key);
         continue;
       }
       if (!_truthy(found.entry._fields[type])) {
         values.remove(key);
         continue;
       }
-      if (input.messages.length >= end) {
+      if (input.messageCount >= end) {
         values.remove(key);
         if (type == 'sticky' && _truthy(found.entry._fields['cooldown'])) {
           _effects('cooldown')[_key(found)] = _effect('cooldown', found, protected: true);

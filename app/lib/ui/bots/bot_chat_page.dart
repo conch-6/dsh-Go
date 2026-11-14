@@ -95,9 +95,7 @@ class _BotChatPageState extends ConsumerState<BotChatPage> {
     if (team == null || bot == null || mobileUnavailable) {
       return AppPage.list(
         title: 'Bot',
-        children: [
-          DsBotUnavailableMessage(status: status, goneIcon: AppIcons.bot, goneTitle: l10n.botsBotGone),
-        ],
+        children: [DsBotUnavailableMessage(status: status, goneIcon: AppIcons.bot, goneTitle: l10n.botsBotGone)],
       );
     }
     final chat = ref.watch(botChatProvider(widget.botId));
@@ -269,7 +267,10 @@ class _Thinking extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 6),
-    child: SizedBox(height: 14, child: TypingIndicator(color: DshColors.of(context).textTertiary)),
+    child: Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: TypingIndicator(color: DshColors.of(context).textTertiary),
+    ),
   );
 }
 

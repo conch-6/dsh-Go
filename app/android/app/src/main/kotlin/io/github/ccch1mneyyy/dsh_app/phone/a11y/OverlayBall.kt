@@ -37,9 +37,10 @@ import kotlin.math.roundToInt
  * window, 10 dp of room round it for the shadow), the capsule's surface and mark as a circle. It
  * shows the task's state only and opens the capsule on a tap. Held still for a second it stops the
  * task ([HoldToStop]: a ring fills round it first, letting go cancels); screen readers get the
- * same stop as an action. Dragged, it follows the finger and settles on the nearer side, where it
- * stays (side and height kept across tasks, like the pet's dock: pet/EdgeSnap.kt). Left alone it
- * fades, all of it alike, to the 闲置时不透明度.
+ * same stop as an action. It first rests on the right, level with the capsule; dragged, it follows
+ * the finger and settles on the nearer side, where it stays (side and height kept across tasks,
+ * like the pet's dock: pet/EdgeSnap.kt). A confirm card lifts a resting ball above it. Left alone
+ * it fades, all of it alike, to the 闲置时不透明度.
  *
  * The window is added once per control and shown or hidden (GONE windows take no touches); the
  * overlay folds and unfolds the capsule around it ([ControlOverlay]).
@@ -54,15 +55,21 @@ internal class OverlayBall(
     private val onStop: () -> Unit,
     /** A finger came down on the ball (tap, hold or drag): it is not idle. */
     private val onTouchDown: () -> Unit = {},
+    /** The capsule's centre y: where a ball the person never moved rests, level with it. */
+    private val capsuleCentre: () -> Int,
+    /** A confirm card's top while one shows: a resting ball stays above it. */
+    private val bottomLimit: () -> Int?,
 ) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    /** Where the ball rests; saved when the person drops it somewhere. */
-    var dock: Dock = Dock(
+    /** Where the person dropped the ball last (kept across tasks); null until they move it. */
+    private var saved: Dock? = if (prefs.contains(K_Y)) Dock(
         if (prefs.getString(K_SIDE, null) == "left") Side.LEFT else Side.RIGHT,
-        prefs.getFloat(K_Y, DEFAULT_Y),
-    )
-        private set
+        prefs.getFloat(K_Y, 0f),
+    ) else null
+
+    /** Where the ball rests: where it was dropped, else on the right, level with the capsule. */
+    val dock: Dock get() = saved ?: BallGeometry.defaultDock(area(), size, margin, capsuleCentre())
 
     /** Room round the ball for its shadow, on every side (the window is square and centred on it). */
     val pad = context.dp(PAD_DP)
@@ -151,8 +158,11 @@ internal class OverlayBall(
     /** The whole ball's opacity: the 闲置时不透明度 when idle, full otherwise. */
     fun setIdle(alpha: Float, animated: Boolean, durationMs: Long) = OverlayMotion.fadeIdle(root, alpha, animated, durationMs)
 
-    /** Where the ball rests now ([dock] on the current screen). */
-    fun dockPos(): WindowPos = EdgeSnap.position(dock, size, size, area(), margin)
+    /** Where the ball rests now: [dock] on the current screen, above a confirm card if one shows. */
+    fun dockPos(): WindowPos {
+        val a = area()
+        return BallGeometry.above(EdgeSnap.position(dock, size, size, a, margin), size, bottomLimit(), EdgeSnap.minY(a, margin))
+    }
 
     val pos: WindowPos get() = WindowPos(params.x, params.y)
 
@@ -337,10 +347,10 @@ internal class OverlayBall(
     }
 
     private fun settle(velocityX: Float) {
-        val a = area()
-        dock = EdgeSnap.dockFor(params.x, params.y, size, size, a, margin, velocityX)
-        prefs.edit().putString(K_SIDE, if (dock.side == Side.LEFT) "left" else "right").putFloat(K_Y, dock.yFraction).apply()
-        glideTo(EdgeSnap.position(dock, size, size, a, margin), OverlayMotion.on())
+        val d = EdgeSnap.dockFor(params.x, params.y, size, size, area(), margin, velocityX)
+        saved = d
+        prefs.edit().putString(K_SIDE, if (d.side == Side.LEFT) "left" else "right").putFloat(K_Y, d.yFraction).apply()
+        glideTo(dockPos(), OverlayMotion.on())
     }
 
     private fun press(down: Boolean) {
@@ -477,8 +487,6 @@ internal class OverlayBall(
         private const val K_SIDE = "ballSide"
         private const val K_Y = "ballY"
 
-        /** First fold: the right side, a third of the way down — clear of most apps' top bars. */
-        const val DEFAULT_Y = 0.3f
         const val BALL_DP = CapsuleMetrics.HEIGHT_DP
         const val PAD_DP = 10
         const val EDGE_DP = CapsuleMetrics.EDGE_DP

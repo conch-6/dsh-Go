@@ -28,7 +28,8 @@ abstract final class VoiceModelPaths {
   static const models = '$dataRoot/models';
   static const recognizerDir = '$models/sensevoice-onnx';
   static const vadDir = '$models/silero';
-  static const lock = '/opt/dsh/node_modules/@deepseek-ai/dsh-experimental-speech-to-text-sensevoice/runtime/assets.json';
+  static const lock =
+      '/opt/dsh/node_modules/@deepseek-ai/dsh-experimental-speech-to-text-sensevoice/runtime/assets.json';
 
   /// Suffix of the app's resumable partial files (the provider's own are `.<uuid>.part`).
   static const partSuffix = '.dsh-go.part';

@@ -14,7 +14,7 @@ import kotlin.math.sqrt
  * on a loud speaker without a working echo canceller the clip can still trip it (and stop itself),
  * and quiet speech over the clip can be missed. Nothing here keeps or sends audio.
  */
-class SpeechGate(private val echoCancelled: Boolean = true) {
+class SpeechGate(private val echoCancelled: Boolean = true) : TurnGate {
     enum class Edge { NONE, START, END }
 
     private var floor = Double.NaN
@@ -24,12 +24,20 @@ class SpeechGate(private val echoCancelled: Boolean = true) {
     private var playingSince = -1L
 
     /** The app is playing a clip (or stopped playing one) at [nowMs]. */
-    fun setPlaying(on: Boolean, nowMs: Long) {
+    override fun setPlaying(on: Boolean, nowMs: Long) {
         playingSince = if (on) (if (playingSince >= 0) playingSince else nowMs) else -1L
         if (!on) loud = 0
     }
 
     val isSpeaking get() = speaking
+
+    override fun consume(frame: ShortArray, levelDb: Double, nowMs: Long): Edge = consume(levelDb, nowMs)
+
+    override fun reset() {
+        loud = 0
+        quietMs = 0
+        speaking = false
+    }
 
     /** One frame's level in dBFS at [nowMs]; the edge it makes, if any. */
     fun consume(levelDb: Double, nowMs: Long): Edge {

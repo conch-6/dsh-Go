@@ -6,6 +6,8 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import '../../../voice/voice_platform_events.dart';
+
 /// What the phone can do.
 class VoiceCapabilities {
   const VoiceCapabilities({
@@ -109,7 +111,6 @@ abstract class VoiceBridge {
 
 class MethodChannelVoiceBridge implements VoiceBridge {
   static const _methods = MethodChannel('dsh/voice');
-  static const _events = EventChannel('dsh/voice/events');
 
   Stream<VoiceEvent>? _stream;
   static int _nextSession = 0;
@@ -152,12 +153,10 @@ class MethodChannelVoiceBridge implements VoiceBridge {
   }
 
   @override
-  Stream<VoiceEvent> get events => _stream ??= _events
-      .receiveBroadcastStream()
+  Stream<VoiceEvent> get events => _stream ??= voicePlatformEvents
       .map(_decode)
       .where((e) => e != null)
-      .cast<VoiceEvent>()
-      .asBroadcastStream();
+      .cast<VoiceEvent>();
 
   VoiceEvent? _decode(Object? raw) {
     if (raw is! Map || raw['sessionId'] != _session) return null;

@@ -90,6 +90,7 @@ abstract final class DshGlyphs {
   static const dotsThree = IconData(0xe004, fontFamily: family);
   static const dotsThreeVertical = IconData(0xe005, fontFamily: family);
   static const downloadSimple = IconData(0xe02d, fontFamily: family);
+  static const ear = IconData(0xe0ec, fontFamily: family);
   static const envelopeSimple = IconData(0xe0db, fontFamily: family);
   static const exclamationMark = IconData(0xe064, fontFamily: family);
   static const export = IconData(0xe020, fontFamily: family);
@@ -159,6 +160,7 @@ abstract final class DshGlyphs {
   static const medal = IconData(0xe0d9, fontFamily: family);
   static const megaphone = IconData(0xe0cb, fontFamily: family);
   static const microphone = IconData(0xe016, fontFamily: family);
+  static const microphoneSlash = IconData(0xe0eb, fontFamily: family);
   static const minus = IconData(0xe032, fontFamily: family);
   static const minusCircle = IconData(0xe033, fontFamily: family);
   static const musicNote = IconData(0xe096, fontFamily: family);
@@ -173,6 +175,8 @@ abstract final class DshGlyphs {
   static const pauseFill = IconData(0xe04a, fontFamily: family);
   static const pencilSimple = IconData(0xe025, fontFamily: family);
   static const pencilSimpleLine = IconData(0xe034, fontFamily: family);
+  static const phone = IconData(0xe0e9, fontFamily: family);
+  static const phoneDisconnect = IconData(0xe0ea, fontFamily: family);
   static const play = IconData(0xe0e5, fontFamily: family);
   static const playCircle = IconData(0xe0da, fontFamily: family);
   static const playFill = IconData(0xe049, fontFamily: family);
@@ -203,6 +207,7 @@ abstract final class DshGlyphs {
   static const slideshow = IconData(0xe098, fontFamily: family);
   static const smiley = IconData(0xe0d8, fontFamily: family);
   static const sparkle = IconData(0xe09e, fontFamily: family);
+  static const speakerHigh = IconData(0xe0e8, fontFamily: family);
   static const square = IconData(0xe056, fontFamily: family);
   static const squaresFour = IconData(0xe0b2, fontFamily: family);
   static const stack = IconData(0xe0c1, fontFamily: family);
@@ -320,6 +325,7 @@ abstract final class DshGlyphs {
     'dotsThree': dotsThree,
     'dotsThreeVertical': dotsThreeVertical,
     'downloadSimple': downloadSimple,
+    'ear': ear,
     'envelopeSimple': envelopeSimple,
     'exclamationMark': exclamationMark,
     'export': export,
@@ -389,6 +395,7 @@ abstract final class DshGlyphs {
     'medal': medal,
     'megaphone': megaphone,
     'microphone': microphone,
+    'microphoneSlash': microphoneSlash,
     'minus': minus,
     'minusCircle': minusCircle,
     'musicNote': musicNote,
@@ -403,6 +410,8 @@ abstract final class DshGlyphs {
     'pauseFill': pauseFill,
     'pencilSimple': pencilSimple,
     'pencilSimpleLine': pencilSimpleLine,
+    'phone': phone,
+    'phoneDisconnect': phoneDisconnect,
     'play': play,
     'playCircle': playCircle,
     'playFill': playFill,
@@ -433,6 +442,7 @@ abstract final class DshGlyphs {
     'slideshow': slideshow,
     'smiley': smiley,
     'sparkle': sparkle,
+    'speakerHigh': speakerHigh,
     'square': square,
     'squaresFour': squaresFour,
     'stack': stack,

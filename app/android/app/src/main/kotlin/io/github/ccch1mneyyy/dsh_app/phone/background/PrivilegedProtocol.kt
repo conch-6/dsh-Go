@@ -16,20 +16,8 @@ object Proto {
     const val REPLAY_NAVIGATION = "replayNavigation"
     const val OP_REPLAY_NAVIGATION = "replayNavigation"
     const val NAVIGATION = "navigation"
-    const val REVISION = "dsh-vdisplay-2"
-    const val RESOURCE_RECOVERY_VERSION = "resourceRecoveryVersion"
-    const val RECOVERY_PEER = "recoveryPeer"
-    const val RECOVERY_BOOT = "recoveryBoot"
-    const val RECOVERY_PID = "recoveryPid"
-    const val RECOVERY_UID = "recoveryUid"
-    const val RECOVERY_PID_NS_DEV = "recoveryPidNsDev"
-    const val RECOVERY_PID_NS_INO = "recoveryPidNsIno"
-    const val RECOVERY_PID_NS_AVAILABLE = "recoveryPidNsAvailable"
-    const val ALLOCATION_PURPOSE = "allocationPurpose"
-    const val RECOVERY_KIND = "recoveryKind"
-    const val OP_ALLOCATE = "allocate"
-    const val OP_RECOVERY_RETIRE = "recoveryRetire"
-    const val OP_RECOVERY_CHECK = "recoveryCheck"
+    // A running service whose revision differs is refused at connect and replaced (see the starters).
+    const val REVISION = "dsh-vdisplay-3"
 
     // request keys
     const val OP = "op"
@@ -222,8 +210,6 @@ object Reasons {
         "scopeUnsupported" -> "所选后台服务不支持任务资源归属，请更新并显式重新连接；未发送新的资源请求"
         // l10n:keep agent resource protocol
         "scopeBusy", "scopeCapacity" -> "后台资源正在占用或清理，请等待原任务收尾后再开始"
-        // l10n:keep agent resource protocol
-        "scopeHistoryFull" -> "本次后台服务已保留256个任务的收尾记录，请先清理全部任务，再关闭通道并重新选择；不会自动重启"
         // l10n:keep agent resource protocol
         "scopeModeMismatch" -> "后台服务仍采用原兼容模式，请先清理并关闭通道，再显式重新连接"
         // l10n:keep agent resource protocol

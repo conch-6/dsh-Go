@@ -105,12 +105,6 @@ class _PhoneSelfCheckPanelState extends State<PhoneSelfCheckPanel> {
                       onPressed: _controller.canCancel ? () => unawaited(_controller.cancel()) : null,
                       child: Text(l10n.phoneSelfCheckCancel),
                     )
-                  else if (snapshot.state == 'cleanup_pending')
-                    OutlinedButton(
-                      key: const ValueKey('self-check-retry'),
-                      onPressed: _controller.canRetry ? () => unawaited(_controller.retry()) : null,
-                      child: Text(l10n.phoneSelfCheckRetry),
-                    )
                   else
                     FilledButton(
                       key: const ValueKey('self-check-start'),

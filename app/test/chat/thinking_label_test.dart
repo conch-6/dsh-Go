@@ -4,6 +4,7 @@
 
 import 'package:dsh_app/ui/chat/widgets/thinking_pill.dart';
 import 'package:dsh_app/ui/common/think_glyph.dart';
+import 'package:dsh_app/ui/fx/orbs/thinking_orb.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -150,26 +151,31 @@ void main() {
     expect(_maskOver('乙'), findsNothing);
   });
 
-  testWidgets('the whole pill: the glyph is the quiet one, and the label sweeps only while active', (tester) async {
-    Widget pill(bool active) => testApp(
-      Scaffold(
-        body: ThinkingPill(reasoning: '第一段\n第二段', active: active, streaming: active),
-      ),
-    );
-    await tester.pumpWidget(pill(true));
-    // One revolution in 7.2 s: a quarter of the way after 1.8 s.
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 1800));
-    final turns = tester.widget<RotationTransition>(
-      find.descendant(of: find.byType(ThinkGlyph), matching: find.byType(RotationTransition)),
-    );
-    expect(turns.turns.value, closeTo(0.25, 0.01));
-    expect(find.descendant(of: find.byType(ThinkingPill), matching: find.byType(ThinkingTicker)), findsOneWidget);
+  testWidgets(
+    'the whole pill: a thinking orb while active, the quiet glyph after; the label sweeps only while active',
+    (tester) async {
+      Widget pill(bool active) => testApp(
+        Scaffold(
+          body: ThinkingPill(reasoning: '第一段\n第二段', active: active, streaming: active),
+        ),
+      );
+      await tester.pumpWidget(pill(true));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1800));
+      final orb = tester.widget<ThinkingOrb>(
+        find.descendant(of: find.byType(ThinkingPill), matching: find.byType(ThinkingOrb)),
+      );
+      expect(orb.state, OrbState.breathing);
+      expect(find.byType(ThinkGlyph), findsNothing);
+      expect(find.descendant(of: find.byType(ThinkingPill), matching: find.byType(ThinkingTicker)), findsOneWidget);
 
-    await tester.pumpWidget(pill(false));
-    await pumpFrames(tester);
-    expect(tester.binding.transientCallbackCount, 0);
-    await tester.pump(const Duration(seconds: 8));
-    expect(find.descendant(of: find.byType(ThinkingLabel), matching: find.byType(ShaderMask)), findsNothing);
-  });
+      await tester.pumpWidget(pill(false));
+      await pumpFrames(tester);
+      expect(find.byType(ThinkingOrb), findsNothing);
+      expect(find.byType(ThinkGlyph), findsOneWidget);
+      expect(tester.binding.transientCallbackCount, 0);
+      await tester.pump(const Duration(seconds: 8));
+      expect(find.descendant(of: find.byType(ThinkingLabel), matching: find.byType(ShaderMask)), findsNothing);
+    },
+  );
 }

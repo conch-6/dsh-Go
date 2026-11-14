@@ -165,7 +165,7 @@ class _Decorators {
     }
     final explicitDepth = values['depth'] as num?;
     final reverse = values['reverse_depth'] as num?;
-    final rawDepth = explicitDepth ?? (reverse == null ? null : input.messages.length - reverse);
+    final rawDepth = explicitDepth ?? (reverse == null ? null : input.messageCount - reverse);
     // A clamped or truncated depth of zero does not declare V3 prefill.
     return rawDepth == 0;
   }
@@ -173,11 +173,9 @@ class _Decorators {
   int? get depth {
     if (section != null) return null;
     final value = values['depth'] as num?;
-    if (value != null) return math.min(input.messages.length, math.max(0, value.toInt()));
+    if (value != null) return math.min(input.messageCount, math.max(0, value.toInt()));
     final reverse = values['reverse_depth'] as num?;
-    return reverse == null
-        ? null
-        : math.min(input.messages.length, math.max(0, (input.messages.length - reverse).toInt()));
+    return reverse == null ? null : math.min(input.messageCount, math.max(0, (input.messageCount - reverse).toInt()));
   }
 
   Future<bool> allows(_ScanBuffer buffer, WorldInfoScanPhase phase) async {
@@ -245,8 +243,8 @@ class _DecoratorHistory {
     if (input.dryRun) return;
     for (final entry in activated) {
       final old = _object(state['${entry.hash}']);
-      if (_integer(old['lastMessageCount']) == input.messages.length) continue;
-      state['${entry.hash}'] = {...old, 'matches': previous(entry) + 1, 'lastMessageCount': input.messages.length};
+      if (_integer(old['lastMessageCount']) == input.messageCount) continue;
+      state['${entry.hash}'] = {...old, 'matches': previous(entry) + 1, 'lastMessageCount': input.messageCount};
     }
   }
 }

@@ -3,6 +3,7 @@
 // the reply's same-path image left out, geometry, the metadata line, save /
 // share from the original bytes, the viewer, and goldens.
 
+import 'package:dsh_app/ui/fx/image_gen/image_generation.dart';
 import 'package:dsh_app/state/chat_state.dart';
 import 'package:dsh_app/state/features_state.dart' show jobsProvider;
 import 'package:dsh_app/ui/chat/chat_rows.dart';
@@ -221,9 +222,7 @@ void main() {
       expect(find.descendant(of: find.byType(MediaMetaLine), matching: find.textContaining('5 秒')), findsOneWidget);
       expect(find.byType(MediaActionRow), findsNothing);
       // 16:9 at the column's width.
-      final box = tester.getRect(
-        find.descendant(of: find.byType(MediaCard), matching: find.byType(DecoratedBox)).first,
-      );
+      final box = tester.getRect(find.descendant(of: find.byType(MediaCard), matching: find.byType(ImageGeneration)));
       expect(box.width / box.height, moreOrLessEquals(16 / 9, epsilon: 0.01));
     });
 

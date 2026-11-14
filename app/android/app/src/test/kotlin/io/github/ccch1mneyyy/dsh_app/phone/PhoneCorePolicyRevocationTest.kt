@@ -3,7 +3,6 @@ package io.github.ccch1mneyyy.dsh_app.phone
 import android.os.Bundle
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundDisplay
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundDisplayIo
-import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundResourceJournal
 import io.github.ccch1mneyyy.dsh_app.phone.background.PrivilegedCalls
 import io.github.ccch1mneyyy.dsh_app.phone.background.PrivilegedChannel
 import java.time.ZoneId
@@ -209,7 +208,6 @@ class PhoneCorePolicyRevocationTest {
 
     @Test fun policyTighteningWhileTheActualBackgroundChannelWaitsSendsNothing() {
         val display = BackgroundDisplay(
-            journal = BackgroundResourceJournal({ null }, { true }).apply { load() },
             mayUse = { true }, admitUse = { action -> action(); true },
             channelProvider = { error("test owns the channel admission") },
         )
@@ -266,7 +264,6 @@ class PhoneCorePolicyRevocationTest {
 
     private fun queuedBackgroundOpenPolicyChange(denyTarget: Boolean) {
         val display = BackgroundDisplay(
-            journal = BackgroundResourceJournal({ null }, { true }).apply { load() },
             mayUse = { true }, admitUse = { action -> action(); true },
             channelProvider = { error("test owns the channel admission") },
         )

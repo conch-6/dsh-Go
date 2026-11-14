@@ -249,6 +249,29 @@ void main() {
       expect(await CustomLaunch.load(), isNull);
     });
 
+    test('framing (zoom, alignX, alignY) round trips and clamps out-of-range values', () async {
+      final file = File('${dir.path}/custom-frame.png')..writeAsBytesSync(await _png(10, 10));
+      final framed = CustomLaunch(
+        kind: LaunchMediaKind.image,
+        path: file.path,
+        width: 10,
+        height: 10,
+        zoom: 2.5,
+        alignX: -0.4,
+        alignY: 0.75,
+      );
+      await CustomLaunch.save(framed);
+      expect(await CustomLaunch.load(), framed);
+
+      final clamped = CustomLaunch.fromJson({
+        ...framed.toJson(),
+        'zoom': 99,
+        'alignX': -5,
+        'alignY': 3,
+      })!;
+      expect((clamped.zoom, clamped.alignX, clamped.alignY), (CustomLaunch.maxZoom, -1.0, 1.0));
+    });
+
     test('garbage reads as none', () async {
       SharedPreferences.setMockInitialValues({CustomLaunch.prefsKey: '{"kind": "nope"'});
       expect(await CustomLaunch.load(), isNull);
@@ -275,6 +298,11 @@ void main() {
       expect(center.width, 1080);
       final small = LaunchMedia.targetSize(300, 300, screen, LaunchFit.fill);
       expect((small.width, small.height), (300, 300));
+      // Zoomed in: decodes enough detail for the zoomed window, capped at the file's own size.
+      final zoomed = LaunchMedia.targetSize(4000, 3000, const Size(540, 1200), LaunchFit.fill, zoom: 2);
+      expect((zoomed.width, zoomed.height), (3200, 2400));
+      final capped = LaunchMedia.targetSize(4000, 3000, screen, LaunchFit.fill, zoom: 3);
+      expect((capped.width, capped.height), (4000, 3000));
     });
   });
 }

@@ -8,10 +8,6 @@ import io.github.ccch1mneyyy.dsh_app.phone.PhoneSelfCheckReport.Stage
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneSelfCheckReport.State
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundControl
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundDisplayIo
-import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundRecoveryProtocol
-import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundResourceJournal
-import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundResourceScope
-import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundReleaseReceipt
 import io.github.ccch1mneyyy.dsh_app.phone.background.PrivilegedChannel
 import io.github.ccch1mneyyy.dsh_app.phone.background.OwnerScopeProtocol
 import io.github.ccch1mneyyy.dsh_app.phone.background.Proto
@@ -20,13 +16,12 @@ import io.github.ccch1mneyyy.dsh_app.phone.selfcheck.TargetContract
 import io.github.ccch1mneyyy.dsh_app.phone.selfcheck.TargetContract.FrameStage
 import io.github.ccch1mneyyy.dsh_app.phone.selfcheck.TargetState
 import java.util.UUID
-import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
-import java.util.concurrent.RejectedExecutionException
 
 /**
  * One local diagnostic, with the same registry and original physical peer as phone tasks.
  * This lock owns only the run/report. Registry, background, UI and physical I/O are all outside it.
+ * A run always ends: a release it cannot confirm disconnects the borrowed channel instead.
  */
 internal class PhoneSelfCheck(
     private val sessions: PhoneTaskSessions,
@@ -44,11 +39,9 @@ internal class PhoneSelfCheck(
         val borrow: BackgroundControl.SelfCheckBorrow,
         val profile: Profile,
         val host: () -> Activity?,
-        journal: BackgroundResourceJournal,
     ) {
         val handle = UUID.randomUUID().toString()
         val io = BackgroundDisplayIo<PrivilegedChannel>()
-        val resource = BackgroundResourceScope(io, journal, if (profile == Profile.PROBE_B) "probe" else "target")
         val report = PhoneSelfCheckReport(profile)
         val targetRun = if (profile != Profile.PROBE_B) UUID.randomUUID().toString() else null
         val target = targetRun?.let { PhoneSelfCheckTarget.prepare(it,
@@ -87,7 +80,7 @@ internal class PhoneSelfCheck(
             sessions.releaseSelfCheck(lease) // No peer was pinned and no operation was dispatched.
             return abandonStart(ticket, Reason.CHANNEL_UNAVAILABLE)
         }
-        val run = Run(client, live, lease, borrow, profile, host, background.resourceJournal)
+        val run = Run(client, live, lease, borrow, profile, host)
         val accepted = synchronized(lock) {
             val active = !ticket.cancelled && ticket.live()
             starting = null
@@ -142,61 +135,6 @@ internal class PhoneSelfCheck(
         changed()
     }
 
-    fun retryCleanup(handle: String): Map<String, Any?> {
-        val run = synchronized(lock) {
-            val current = latest ?: return responseLocked(false, Reason.UNAVAILABLE)
-            if (current.handle != handle) return responseLocked(false, Reason.IDENTITY_CHANGED)
-            if (!current.held || current.workerActive || current.state != "cleanup_pending")
-                return responseLocked(false, Reason.BUSY)
-            current.workerActive = true
-            current.state = "cleaning"
-            current
-        }
-        worker.execute { cleanup(run) }
-        changed()
-        return synchronized(lock) { responseLocked(true) }
-    }
-
-    /** Internal recovery consumer, called on the controller's worker with no registry/run/IO lock held. */
-    fun retryStoredCleanup(): Boolean {
-        val run = synchronized(lock) {
-            val original = latest ?: return true
-            if (!original.held) return true
-            if (original.workerActive || !original.resource.physicalComplete) return false
-            original.workerActive = true
-            original.state = "cleaning"
-            original
-        }
-        val job = try { worker.submit { cleanup(run) } }
-        catch (_: RejectedExecutionException) {
-            synchronized(lock) {
-                run.workerActive = false
-                if (run.held) run.state = "cleanup_pending"
-            }
-            changed()
-            return false
-        }
-        changed()
-        var interrupted = false
-        try {
-            while (true) {
-                try { job.get(); break }
-                catch (_: InterruptedException) { interrupted = true }
-                catch (_: ExecutionException) {
-                    synchronized(lock) {
-                        run.workerActive = false
-                        if (run.held) run.state = "cleanup_pending"
-                    }
-                    changed()
-                    return false
-                }
-            }
-            return synchronized(lock) { !run.held }
-        } finally {
-            if (interrupted) Thread.currentThread().interrupt()
-        }
-    }
-
     private fun seal(run: Run) {
         run.target?.let(PhoneSelfCheckTarget::seal)
         sessions.sealSelfCheck(run.lease)
@@ -221,7 +159,6 @@ internal class PhoneSelfCheck(
     private fun execute(run: Run) {
         if (run.profile != Profile.PROBE_B) { executeTarget(run); return }
         var channelReady = false
-        var allocationObserved = false
         var verifyEntered = false
         val startedAt = clock()
         try {
@@ -236,40 +173,11 @@ internal class PhoneSelfCheck(
                     update(run, Stage.CHANNEL, State.UNKNOWN, false, Reason.CHANNEL_UNAVAILABLE, clock() - probeStarted)
                     return@call
                 }
-                val birth = BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey)
-                if (!OwnerScopeProtocol.supported(cap) || (cap.get(Proto.SELF_CHECK_PROBE_VERSION) as? Int) != 1 ||
-                    (cap.get(Proto.RELEASE_RECEIPT) as? Int) != 1 || birth == null) {
-                    update(run, Stage.CHANNEL, State.FAIL, true, Reason.UNSUPPORTED_PEER, clock() - probeStarted)
-                    return@call
-                }
                 channelReady = true
                 update(run, Stage.CHANNEL, State.PASS, true, durationMs = clock() - probeStarted)
                 if (!mayStart(run)) { cancelFromWorker(run); return@call }
+                // One request creates the probe's own screen and runs the input check on it.
                 update(run, Stage.DISPLAY, State.RUNNING, false)
-                if (!run.resource.begin(birth)) {
-                    update(run, Stage.DISPLAY, State.SKIPPED, false, Reason.UNAVAILABLE)
-                    return@call
-                }
-                if (!mayStart(run)) { cancelFromWorker(run); return@call }
-                val allocation = OwnerScopeProtocol.first(run.io, peer,
-                    BackgroundRecoveryProtocol.allocate(run.io.owner, "probe", null)) { commit -> admit(run, commit) }
-                if (run.io.wasNotAdmitted()) {
-                    update(run, Stage.DISPLAY, State.SKIPPED, false, Reason.UNAVAILABLE)
-                    return@call
-                }
-                val id = BackgroundRecoveryProtocol.allocationId(allocation::get)
-                if (id == null) {
-                    update(run, Stage.DISPLAY, State.UNKNOWN, false, Reason.DEVICE_UNAVAILABLE)
-                    return@call
-                }
-                allocationObserved = true
-                if (!run.resource.allocated(id) { mayStart(run) }) {
-                    if (!mayStart(run)) cancelFromWorker(run)
-                    update(run, Stage.DISPLAY, State.UNKNOWN, true, Reason.UNAVAILABLE)
-                    return@call
-                }
-                if (!mayStart(run)) { cancelFromWorker(run); return@call }
-                // Empty allocation is not a Presentation/input result. Only this second op can supply those facts.
                 update(run, Stage.INPUT_PROBE, State.RUNNING, false)
                 val request = Bundle().apply {
                     putString(Proto.OP, Proto.OP_SELF_CHECK_PROBE)
@@ -278,11 +186,16 @@ internal class PhoneSelfCheck(
                     putInt(Proto.SELF_CHECK_PROBE_VERSION, 1)
                 }
                 val beginStarted = clock()
-                val reply = OwnerScopeProtocol.execute(peer, run.io.owner, request) {
-                    check(admit(run) {
-                        run.io.checkDispatch()
+                val reply = OwnerScopeProtocol.first(run.io, peer, request) { commit ->
+                    admit(run) {
+                        commit()
                         verifyEntered = true
-                    })
+                    }
+                }
+                if (run.io.wasNotAdmitted()) {
+                    update(run, Stage.DISPLAY, State.SKIPPED, false, Reason.UNAVAILABLE)
+                    update(run, Stage.INPUT_PROBE, State.NOT_RUN, false, Reason.UNAVAILABLE)
+                    return@call
                 }
                 synchronized(lock) {
                     run.report.acceptProbe(run.io.owner, reply.get(Proto.OWNER),
@@ -298,7 +211,7 @@ internal class PhoneSelfCheck(
                 else if (!channelReady) run.report.update(Stage.CHANNEL, State.UNKNOWN, false,
                     Reason.CHANNEL_UNAVAILABLE, clock() - startedAt)
                 else {
-                    run.report.update(Stage.DISPLAY, State.UNKNOWN, allocationObserved,
+                    run.report.update(Stage.DISPLAY, State.UNKNOWN, false,
                         Reason.DEVICE_UNAVAILABLE, clock() - startedAt)
                     run.report.update(Stage.INPUT_PROBE, State.NOT_RUN, false, Reason.UNAVAILABLE)
                 }
@@ -325,9 +238,8 @@ internal class PhoneSelfCheck(
                         clock() - beganStageAt)
                     return@call null
                 }
-                val birth = BackgroundRecoveryProtocol.birth(cap::get, cap::containsKey)
-                if (!OwnerScopeProtocol.supported(cap) || (cap.get(run.targetVersionKey) as? Int) != 1 ||
-                    (cap.get(Proto.RELEASE_RECEIPT) as? Int) != 1 || birth == null) {
+                // The fixed target needs Android 14 task fields; the service reports whether it has them.
+                if ((cap.get(run.targetVersionKey) as? Int) != 1) {
                     update(run, Stage.CHANNEL, State.FAIL, true, Reason.UNSUPPORTED_PEER,
                         clock() - beganStageAt)
                     return@call null
@@ -337,13 +249,8 @@ internal class PhoneSelfCheck(
                 pendingStage = Stage.DISPLAY
                 beganStageAt = clock()
                 update(run, Stage.DISPLAY, State.RUNNING, false)
-                if (!run.resource.begin(birth)) {
-                    update(run, Stage.DISPLAY, State.SKIPPED, false, Reason.UNAVAILABLE)
-                    return@call null
-                }
                 val request = targetRequest(run, Proto.OP_SELF_CHECK_TARGET_CREATE, createNonce).apply {
                     putInt(Proto.RELEASE_RECEIPT, 1)
-                    putInt(Proto.RESOURCE_RECOVERY_VERSION, 1)
                 }
                 if (!mayStart(run)) { cancelFromWorker(run); return@call null }
                 // Commit this exact request immediately after pin; cancellation cannot leave an unused pin.
@@ -352,24 +259,13 @@ internal class PhoneSelfCheck(
                     update(run, Stage.DISPLAY, State.SKIPPED, false, Reason.UNAVAILABLE)
                     return@call null
                 }
-                val allocatedId = BackgroundRecoveryProtocol.allocationId(reply::get)
-                if (allocatedId == null) {
-                    update(run, Stage.DISPLAY, State.UNKNOWN, false, Reason.DEVICE_UNAVAILABLE)
-                    return@call null
-                }
-                val observedId = synchronized(lock) {
+                synchronized(lock) {
                     run.report.acceptTargetCreate(run.io.owner, targetRun, createNonce,
                         reply.get(Proto.OWNER), reply.get(Proto.TARGET_RUN), reply.get(Proto.STEP_NONCE),
                         reply.get(run.targetVersionKey), reply.get(Proto.OK), reply.get(Proto.ERROR),
                         reply.get(Proto.SELF_CHECK_DISPLAY_READY), reply.get(Proto.DISPLAY_ID), clock() - beganStageAt,
                         reply.get(Proto.MAIN_VECTOR_RESULT), reply.get(Proto.GLOBAL_FOCUS_RESULT))
                 }.also { changed() }
-                if (observedId != allocatedId) return@call null
-                if (!run.resource.allocated(allocatedId) { mayStart(run) }) {
-                    if (!mayStart(run)) cancelFromWorker(run)
-                    return@call null
-                }
-                allocatedId
             } ?: return
 
             if (!mayStart(run)) { cancelFromWorker(run); return }
@@ -537,16 +433,17 @@ internal class PhoneSelfCheck(
         }
         changed()
         val startedAt = clock()
+        val unused = run.io.peer() == null || run.io.wasNotAdmitted()
         // A pending Android launch/target must be sealed and truly closed before the VD can go away.
-        val targetClosed = if (run.resource.physicalComplete) true else run.target?.let { target ->
+        val targetClosed = run.target?.let { target ->
             try { PhoneSelfCheckTarget.close(target).also { recordTargetFacts(run, it) }.closed }
             catch (_: Exception) {
                 recordTargetFacts(run, PhoneSelfCheckTarget.snapshot(target))
                 false
             }
         } ?: true
-        val cleaned = targetClosed && try {
-            run.resource.cleanup { peer ->
+        val released = targetClosed && try {
+            run.io.release { peer ->
                 val reply = OwnerScopeProtocol.execute(peer, run.io.owner, Bundle().apply {
                     putString(Proto.OP, Proto.OP_RELEASE)
                     putString(Proto.OWNER, run.io.owner)
@@ -558,11 +455,9 @@ internal class PhoneSelfCheck(
                         putString(Proto.RELEASE_NONCE, checkNotNull(run.releaseNonce))
                     }
                 })
-                val released = BackgroundReleaseReceipt.accepts(run.io.owner, reply.get(Proto.RELEASE_RECEIPT),
-                    reply.get(Proto.OWNER), reply.get(Proto.OK), reply.get("released"),
-                    reply.get(Proto.TASK_SCOPE_EMPTY), reply.get("neverCreated"))
-                if (released && run.profile == Profile.TARGET_C2) {
-                    // Measurement decode failure cannot retract an already valid physical receipt.
+                val ok = reply.get(Proto.OK) == true
+                if (ok && run.profile == Profile.TARGET_C2) {
+                    // Measurement decode failure cannot retract an already confirmed release.
                     try {
                         synchronized(lock) {
                             run.report.acceptFinalMain(run.io.owner, checkNotNull(run.targetRun),
@@ -576,31 +471,22 @@ internal class PhoneSelfCheck(
                             checkNotNull(run.targetRun), checkNotNull(run.releaseNonce)) }
                     }
                 }
-                released
+                ok
             }
         } catch (_: Exception) { false }
-        // Resource completion, return of the original borrow, then registry release, in that order.
-        val returned = cleaned && background.releaseSelfCheckBorrow(run.borrow)
-        val completed = returned && sessions.releaseSelfCheck(run.lease)
-        val unused = run.io.peer() == null || run.io.wasNotAdmitted()
+        // Unconfirmed: the borrowed channel's process goes away with whatever it still holds.
+        if (!released) background.discardPeer(run.borrow.channel)
+        // Return of the original borrow, then registry release, in that order.
+        background.releaseSelfCheckBorrow(run.borrow)
+        sessions.releaseSelfCheck(run.lease)
         synchronized(lock) {
             run.workerActive = false
-            if (completed) {
-                run.held = false
-                run.state = if (run.cancelled || !run.live()) "cancelled" else "done"
-                run.report.update(Stage.CLEANUP, if (unused) State.SKIPPED else State.PASS,
-                    !unused, if (unused) Reason.UNAVAILABLE else null,
-                    durationMs = clock() - startedAt)
-            } else {
-                run.state = "cleanup_pending"
-                if (run.resource.physicalComplete) {
-                    // A failed durable delete cannot retract this original physical receipt.
-                    run.report.update(Stage.CLEANUP, if (unused) State.SKIPPED else State.PASS,
-                        !unused, if (unused) Reason.UNAVAILABLE else null,
-                        durationMs = clock() - startedAt)
-                } else run.report.update(Stage.CLEANUP, State.UNKNOWN, false,
-                    if (targetClosed) Reason.CLEANUP_FAILED else Reason.TARGET_CLEANUP_PENDING, clock() - startedAt)
-            }
+            run.held = false
+            run.state = if (run.cancelled || !run.live()) "cancelled" else "done"
+            if (released) run.report.update(Stage.CLEANUP, if (unused) State.SKIPPED else State.PASS,
+                !unused, if (unused) Reason.UNAVAILABLE else null, durationMs = clock() - startedAt)
+            else run.report.update(Stage.CLEANUP, State.UNKNOWN, false,
+                if (targetClosed) Reason.CLEANUP_FAILED else Reason.TARGET_CLEANUP_PENDING, clock() - startedAt)
         }
         changed()
     }

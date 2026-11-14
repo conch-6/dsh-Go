@@ -200,7 +200,7 @@ test('actual bridge registration keeps both new routes behind its existing conne
     } }; },
     on() { return () => {}; }, provide() {}, inject(_deps, callback) { callback(ctx); },
     effect(effect) { const cleanup = effect(); if (typeof cleanup === 'function') disposals.push(cleanup); },
-    webServer: { register(route) { routes.push(route); return () => {}; }, registerUpgrade() { return () => {}; } },
+    webServer: { tapIndex() { return () => {}; }, register(route) { routes.push(route); return () => {}; }, registerUpgrade() { return () => {}; } },
   };
   applyBridge(ctx, { persist: false, guardRoutes: false });
   t.after(() => { for (const dispose of disposals.reverse()) dispose(); });

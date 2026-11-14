@@ -24,6 +24,7 @@ class WavRecorder(
     private val onLevel: (Double) -> Unit,
     private val onLimit: () -> Unit,
     private val onError: () -> Unit,
+    private val isCurrentCapture: () -> Boolean = { true },
 ) {
     private var record: AudioRecord? = null
     private var thread: Thread? = null
@@ -79,14 +80,18 @@ class WavRecorder(
         val chunk = ShortArray(rate * 60 / 1000) // ~60 ms
         val bytes = ByteBuffer.allocate(chunk.size * 2).order(ByteOrder.LITTLE_ENDIAN)
         val limit = maxSeconds.toLong() * rate
+        val frames = PcmFrames(rate)
+        var pcmTap: StreamingPcm.Tap? = null
         var captured = 0L
         while (running) {
+            val tap = StreamingPcm.current("dictation")
             val n = try {
                 r.read(chunk, 0, chunk.size)
             } catch (error: RuntimeException) {
                 failCapture(IOException("Could not read microphone", error))
                 break
             }
+            if (!running) break
             if (n < 0) {
                 failCapture(IOException("Could not read microphone ($n)"))
                 break
@@ -101,6 +106,11 @@ class WavRecorder(
                 sum += s.toDouble() * s
             }
             synchronized(pcm) { pcm.write(bytes.array(), 0, take * 2) }
+            if (tap !== pcmTap) {
+                frames.reset()
+                pcmTap = tap
+            }
+            if (tap != null) frames.consume(chunk, take) { StreamingPcm.offer(tap, it, isCurrentCapture) }
             captured += take
             onLevel(levelOf(sum, take))
             if (captured >= limit) {

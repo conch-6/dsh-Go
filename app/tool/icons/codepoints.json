@@ -230,5 +230,10 @@
  "sidebarSimpleRight": 57572,
  "play": 57573,
  "pause": 57574,
- "stop": 57575
+ "stop": 57575,
+ "speakerHigh": 57576,
+ "phone": 57577,
+ "phoneDisconnect": 57578,
+ "microphoneSlash": 57579,
+ "ear": 57580
 }

@@ -23,6 +23,20 @@ final class ChatJsonlImportResult {
   final List<String> notices;
 }
 
+/// A physical metadata carrier, not a node-selection or generation identity.
+enum ChatJsonlMetadataCarrier { root, sources, files }
+
+final class ChatJsonlMetadataSource {
+  const ChatJsonlMetadataSource._(this.carrier, this.sourceFile, this.fileIndex);
+
+  final ChatJsonlMetadataCarrier carrier;
+  final String? sourceFile;
+  final int? fileIndex;
+
+  /// Includes the actual files-array slot; no delimiter can alias a raw key.
+  String get identity => jsonEncode([carrier.name, sourceFile, fileIndex]);
+}
+
 /// Imports only the supplied same-character batch. Filenames are labels, not
 /// paths to read. Every document is validated before the single DB transaction.
 final class ChatJsonlCodec {
@@ -76,6 +90,7 @@ final class ChatJsonlCodec {
             parentId: node.parent == null ? null : ids[node.parent],
             role: node.variant.role,
             speaker: node.variant.name,
+            speakerCharacterId: node.variant.speakerCharacterId,
             text: node.variant.text,
             reasoning: node.variant.reasoning,
             at: node.variant.at,
@@ -132,10 +147,17 @@ final class ChatJsonlCodec {
   Map<String, Object?> metadataForNode(ChatStore store, String chatId, {String? nodeId}) {
     final chat = store.chat(chatId);
     final id = nodeId ?? chat.currentLeafId;
-    if (id == null) {
+    return metadataForCapturedNode(store, chat, id == null ? null : store.node(chatId, id));
+  }
+
+  /// Projects a fully read [chat] and a fully read [node] from that same chat.
+  /// The caller has already resolved the store boundary; null means an empty
+  /// captured path. Does not mutate either snapshot or reread its full row.
+  Map<String, Object?> metadataForCapturedNode(ChatStore store, StoredChat chat, StoredNode? node) {
+    if (node == null) {
       return {..._clone(chat.metadata), 'variables': _clone(chat.variables)};
     }
-    final state = _effectiveState(store, chatId, store.node(chatId, id));
+    final state = _effectiveState(store, chat.id, node);
     return metadataForState(chat, state);
   }
 
@@ -143,12 +165,9 @@ final class ChatJsonlCodec {
   /// again. Single-node deletion uses this before reparenting even children
   /// hidden by a pending subtree deletion. Does not mutate [chat] or [state].
   Map<String, Object?> metadataForState(StoredChat chat, Map<String, Object?> state) {
-    var metadata = _clone(chat.metadata);
     final source = state[_sourceKey];
     final header = _sourceFor(chat.metadata, source);
-    if (header != null) {
-      metadata = _map(header['chat_metadata']);
-    }
+    final metadata = header == null ? _clone(chat.metadata) : _map(header['chat_metadata']);
     metadata.remove('variables');
     if (state['variables'] is Map<String, Object?>) {
       metadata['variables'] = _map(state['variables']);
@@ -157,8 +176,99 @@ final class ChatJsonlCodec {
     return metadata;
   }
 
-  List<StChatDocument> exportChat(ChatStore store, String chatId, {String? fileName}) =>
-      _ExportTree(store, chatId, fileName, _createIntegrity).documents();
+  /// The actual source used by [metadataForState], captured with the selected
+  /// state. A stale/unmapped label falls back to root just as that reader does.
+  String? metadataSourceForState(StoredChat chat, Map<String, Object?> state) =>
+      metadataSourceTargetForState(chat, state).sourceFile;
+
+  /// Resolves once with the same null/current and effective-state rules as
+  /// [metadataForNode]. An empty path or an unmapped label resolves to root.
+  ChatJsonlMetadataSource metadataSourceForNode(ChatStore store, String chatId, {String? nodeId}) {
+    final chat = store.chat(chatId);
+    final id = nodeId ?? chat.currentLeafId;
+    return id == null
+        ? _metadataSource(chat.metadata, null)
+        : metadataSourceTargetForState(chat, _effectiveState(store, chatId, store.node(chatId, id)));
+  }
+
+  ChatJsonlMetadataSource metadataSourceTargetForState(StoredChat chat, Map<String, Object?> state) =>
+      _metadataSource(chat.metadata, state[_sourceKey]);
+
+  /// Reads only this captured carrier, without consulting a leaf or applying
+  /// state projections. A missing/rekeyed files slot or missing source returns
+  /// null; it never silently switches to a fallback carrier. Malformed/null
+  /// chat_metadata keeps the ordinary reader's empty-map projection.
+  Map<String, Object?>? readMetadataSource(Map<String, Object?> root, ChatJsonlMetadataSource source) {
+    if (source.carrier == ChatJsonlMetadataCarrier.root) return _clone(root);
+    final header = _metadataSourceHeader(root, source);
+    return header == null ? null : _map(header['chat_metadata']);
+  }
+
+  /// Pure single-source edit for the bridge's short SQL carrier. The caller
+  /// checks current selection/source identity inside its real transaction.
+  /// Only a proven same-key/context catalogue mirror follows the delta;
+  /// unrelated headers, quarantine data and unknown keys are untouched.
+  Map<String, Object?> updateMetadataSource(
+    Map<String, Object?> root, {
+    required String? sourceFile,
+    ChatJsonlMetadataSource? target,
+    required Map<String, Object?> Function(Map<String, Object?>) update,
+  }) {
+    final result = _clone(root);
+    final source = target ?? _metadataSource(result, sourceFile);
+    if (source.sourceFile != sourceFile) {
+      throw const FormatException('The selected metadata source is absent.');
+    }
+    if (source.carrier == ChatJsonlMetadataCarrier.root) return _clone(update(result));
+    final header = _metadataSourceHeader(result, source);
+    if (header == null) throw const FormatException('The selected metadata source is absent.');
+    final metadata = header['chat_metadata'];
+    if (metadata != null && metadata is! Map<String, Object?>) {
+      throw const FormatException('The selected source metadata is not an object.');
+    }
+    final before = _map(metadata);
+    final after = _clone(update(_clone(before)));
+    header['chat_metadata'] = after;
+    if (source.carrier == ChatJsonlMetadataCarrier.sources) {
+      // The normal importer also keeps the file's terminal header. Only its
+      // same-key, same-context mirror follows this edit; a historical context
+      // with the same label remains independent. Apply the context delta once,
+      // preserving the catalogue's variables, navigation and unknown fields.
+      final own = _view(_view(result['dshgo'])[_namespace]);
+      final files = own['files'];
+      final beforeContext = _contextMetadata(before);
+      final afterContext = _contextMetadata(after);
+      if (files is List<Object?>) {
+        for (final file in files.whereType<Map<String, Object?>>()) {
+          final mirror = file['header'];
+          if (file['key'] != sourceFile || mirror is! Map<String, Object?>) continue;
+          final raw = mirror['chat_metadata'];
+          if (raw != null && raw is! Map<String, Object?>) continue;
+          final current = _map(raw);
+          if (_canonical(_contextMetadata(current)) != _canonical(beforeContext)) continue;
+          mirror['chat_metadata'] = _metadataContextDelta(current, beforeContext, afterContext);
+        }
+      }
+    }
+    return result;
+  }
+
+  /// Single-page ST object at the actual commit watermark. It shares the
+  /// existing export projection/family logic without serializing a whole
+  /// JSONL document, inventing a header integrity, or changing stored values.
+  Map<String, Object?> projectMessage(ChatStore store, String chatId, String nodeId) {
+    final tree = _ExportTree(store, chatId, null, _createIntegrity);
+    final node = tree.byId[nodeId];
+    if (node == null) throw StateError('The committed message is absent.');
+    return _clone(tree._exportMessage(node, const {}));
+  }
+
+  List<StChatDocument> exportChat(
+    ChatStore store,
+    String chatId, {
+    String? fileName,
+    Map<String, TavernUsage?> usageOverrides = const {},
+  }) => _ExportTree(store, chatId, fileName, _createIntegrity, usageOverrides: usageOverrides).documents();
 }
 
 const _namespace = 'chatJsonl';
@@ -183,7 +293,13 @@ final class _ExportJob {
 }
 
 final class _ExportTree {
-  _ExportTree(this.store, this.chatId, this.requestedName, this.createIntegrity) {
+  _ExportTree(
+    this.store,
+    this.chatId,
+    this.requestedName,
+    this.createIntegrity, {
+    Map<String, TavernUsage?> usageOverrides = const {},
+  }) : usageOverrides = Map.unmodifiable(usageOverrides) {
     chat = store.chat(chatId);
     nodes = store.allNodes(chatId);
     for (final node in nodes) {
@@ -196,6 +312,7 @@ final class _ExportTree {
   final String chatId;
   final String? requestedName;
   final String Function() createIntegrity;
+  final Map<String, TavernUsage?> usageOverrides;
   late final StoredChat chat;
   late final List<StoredNode> nodes;
   late final List<Map<String, Object?>> sourceFiles;
@@ -377,7 +494,8 @@ final class _ExportTree {
   Map<String, Object?> _exportHeader(_ExportJob job, String mainName, bool isMain, Set<String> integrities) {
     final result = _sourceHeader(job.header);
     var metadata = _map(result['chat_metadata']);
-    if (isMain && _canonical(_contextMetadata(metadata)) == _canonical(_contextMetadata(chat.metadata))) {
+    if (isMain &&
+        (job.path.isEmpty || _canonical(_contextMetadata(metadata)) == _canonical(_contextMetadata(chat.metadata)))) {
       metadata = _map(_sourceHeader({'chat_metadata': chat.metadata})['chat_metadata']);
     }
     if (job.path.isNotEmpty) {
@@ -501,6 +619,7 @@ final class _ExportTree {
     if (own.isNotEmpty && own['version'] != 1) {
       throw StateError('Unsupported stored dshgo.chatJsonl version.');
     }
+    own.remove('speakerCharacterId');
     final state = _state(node);
     own.addAll({
       'version': 1,
@@ -509,8 +628,11 @@ final class _ExportTree {
       'message': _messageFields(node),
       'text': node.message.text,
       'role': node.message.role.name,
+      'speakerCharacterId': ?node.message.speakerCharacterId,
       'hidden': node.message.hidden,
-      'usage': _usageJson(node.message.usage),
+      'usage': _usageJson(
+        usageOverrides.containsKey(node.message.nodeId) ? usageOverrides[node.message.nodeId] : node.message.usage,
+      ),
       'at': node.message.at.toUtc().toIso8601String(),
       'hasMessageVariables': state.containsKey('messageVariables'),
       'sourceHeader': _runtimeSourceHeader(_headerFor(node)),
@@ -797,14 +919,16 @@ final class _Variant {
     name = _text(original['name']);
     final user = original['is_user'] == true;
     final roleName = own['version'] == 1 ? own['role'] : null;
+    // A portable character/system role takes precedence over the ST type hint.
     role = user
         ? TavernRole.user
-        : extra['type'] == 'narrator' || roleName == 'narrator'
+        : roleName == 'narrator' || (extra['type'] == 'narrator' && roleName != 'character' && roleName != 'system')
         ? TavernRole.narrator
         : roleName == 'system'
         ? TavernRole.system
         : TavernRole.character;
     hidden = original['is_system'] == true;
+    speakerCharacterId = role == TavernRole.character ? own['speakerCharacterId'] as String? : null;
     if (role == TavernRole.system && own['hidden'] is bool) {
       hidden = own['hidden'] as bool;
     }
@@ -880,6 +1004,7 @@ final class _Variant {
           if (!_swipeFields.contains(entry.key)) entry.key: entry.value,
       },
       'role': role.name,
+      'speakerCharacterId': speakerCharacterId,
       'hidden': hidden,
       'rawSwipe': rawSwipe,
       'usage': _usageJson(usage),
@@ -892,6 +1017,7 @@ final class _Variant {
   late Map<String, Object?> state;
   late String text;
   late String name;
+  late String? speakerCharacterId;
   late TavernRole role;
   late bool hidden;
   late String? reasoning;
@@ -1152,7 +1278,15 @@ Map<String, Object?> _checkedEnvelope(Object? value, StChatDocument document, in
   if (result.isNotEmpty && result['version'] != 1) {
     _error(document, line, 'Unsupported dshgo.chatJsonl version; no part of this batch was imported.');
   }
-  for (final key in ['nodeId', 'selectedChildId', 'text', 'at', 'sourceFileName', 'runtimeContext']) {
+  for (final key in [
+    'nodeId',
+    'selectedChildId',
+    'speakerCharacterId',
+    'text',
+    'at',
+    'sourceFileName',
+    'runtimeContext',
+  ]) {
     if (result[key] != null && result[key] is! String) {
       _error(document, line, 'chatJsonl.$key must be text.');
     }
@@ -1399,27 +1533,82 @@ List<Map<String, Object?>> _sourceFiles(Map<String, Object?> metadata) {
 }
 
 Map<String, Object?>? _sourceFor(Map<String, Object?> metadata, Object? key) {
-  if (key is! String) {
-    return null;
-  }
+  final source = _metadataSource(metadata, key);
+  final header = _metadataSourceHeader(metadata, source);
+  return header == null ? null : _clone(header);
+}
+
+ChatJsonlMetadataSource _metadataSource(Map<String, Object?> metadata, Object? key) {
+  if (key is! String) return const ChatJsonlMetadataSource._(ChatJsonlMetadataCarrier.root, null, null);
   final own = _view(_view(metadata['dshgo'])[_namespace]);
   final source = _view(own['sources'])[key];
   if (source is Map<String, Object?>) {
-    return _clone(source);
+    return ChatJsonlMetadataSource._(ChatJsonlMetadataCarrier.sources, key, null);
   }
   final files = own['files'];
   if (files is List<Object?>) {
-    for (final entry in files.whereType<Map<String, Object?>>()) {
-      if (entry['key'] == key && entry['header'] is Map<String, Object?>) {
-        return _map(entry['header']);
+    for (var index = 0; index < files.length; index++) {
+      final entry = files[index];
+      if (entry is Map<String, Object?> && entry['key'] == key && entry['header'] is Map<String, Object?>) {
+        return ChatJsonlMetadataSource._(ChatJsonlMetadataCarrier.files, key, index);
       }
     }
+  }
+  return const ChatJsonlMetadataSource._(ChatJsonlMetadataCarrier.root, null, null);
+}
+
+Map<String, Object?>? _metadataSourceHeader(Map<String, Object?> metadata, ChatJsonlMetadataSource source) {
+  final own = _view(_view(metadata['dshgo'])[_namespace]);
+  if (source.carrier == ChatJsonlMetadataCarrier.sources) {
+    final header = _view(own['sources'])[source.sourceFile];
+    return header is Map<String, Object?> ? header : null;
+  }
+  if (source.carrier == ChatJsonlMetadataCarrier.files) {
+    final files = own['files'];
+    final index = source.fileIndex;
+    if (files is! List<Object?> || index == null || index < 0 || index >= files.length) return null;
+    final entry = files[index];
+    if (entry is! Map<String, Object?> || entry['key'] != source.sourceFile) return null;
+    final header = entry['header'];
+    return header is Map<String, Object?> ? header : null;
   }
   return null;
 }
 
+Map<String, Object?> _metadataContextDelta(
+  Map<String, Object?> current,
+  Map<String, Object?> before,
+  Map<String, Object?> after,
+) {
+  final result = _clone(current);
+  for (final key in {...before.keys, ...after.keys}) {
+    if (!after.containsKey(key)) {
+      final oldValue = before[key];
+      final actual = result[key];
+      if (oldValue is Map<String, Object?> && actual is Map<String, Object?>) {
+        final remaining = _metadataContextDelta(actual, oldValue, const {});
+        if (remaining.isEmpty) {
+          result.remove(key);
+        } else {
+          result[key] = remaining;
+        }
+      } else {
+        result.remove(key);
+      }
+    } else if (!before.containsKey(key) || _canonical(before[key]) != _canonical(after[key])) {
+      final oldValue = before[key];
+      final newValue = after[key];
+      final actual = result[key];
+      result[key] = newValue is Map<String, Object?> && actual is Map<String, Object?>
+          ? _metadataContextDelta(actual, oldValue is Map<String, Object?> ? oldValue : const {}, newValue)
+          : _clone({'value': newValue})['value'];
+    }
+  }
+  return result;
+}
+
 Map<String, Object?> _effectiveState(ChatStore store, String chatId, StoredNode node) {
-  final override = _map(node.extra['dshgo'])['tavernState'];
+  final override = _view(node.extra['dshgo'])['tavernState'];
   return override is Map<String, Object?> ? _clone(override) : store.nodeState(chatId, node.message.nodeId);
 }
 

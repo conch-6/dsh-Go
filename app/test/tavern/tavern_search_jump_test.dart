@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../support/haptics.dart';
 import '../support/test_fonts.dart';
 
 /// The preview, its selectSibling calls noted.
@@ -77,6 +78,7 @@ void main() {
       expect(hit, findsOneWidget);
       await tester.tap(hit);
       await tester.pumpAndSettle();
+      final felt = recordHaptics(tester);
       await tester.tap(find.byKey(const ValueKey('tavern-chat-search-go')));
       // Less than the mark's moment: loaded, scrolled, still marked.
       for (var i = 0; i < 30; i++) {
@@ -88,6 +90,7 @@ void main() {
       // Back on the chat, its branch selected, the line on screen and marked.
       expect(find.byType(TavernSearchPage), findsNothing);
       expect(tavern.selected, hasLength(1));
+      expect(felt, ['HapticFeedbackType.selectionClick']);
       expect(target, findsOneWidget);
       final rect = tester.getRect(target);
       expect(rect.top, greaterThan(0));

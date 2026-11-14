@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/l10n.dart';
 import '../../state/app_info.dart';
 import '../common/fade_in.dart';
+import '../fx/metal/metal_text.dart';
 import '../shell/brand_mark.dart';
 import '../theme/theme.dart';
 import 'onboarding_scaffold.dart';
@@ -43,7 +44,8 @@ class WelcomePage extends StatelessWidget {
         const SizedBox(height: 10),
         FadeSlideIn(
           delay: const Duration(milliseconds: 220),
-          child: Text(
+          // The one metal word on this page (Libraries.dev Metal).
+          child: MetalText(
             l10n.shellWelcomeMessage,
             textAlign: TextAlign.center,
             style: theme.textTheme.displaySmall?.copyWith(height: 1.35),

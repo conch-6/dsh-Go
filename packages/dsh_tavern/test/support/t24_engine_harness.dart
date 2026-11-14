@@ -91,6 +91,7 @@ class T24Model extends TavernModelClient {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) {
     generated++;
     if (_pending.isEmpty) throw StateError('Unexpected model call.');

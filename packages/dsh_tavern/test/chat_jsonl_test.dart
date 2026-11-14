@@ -1246,6 +1246,85 @@ void main() {
     expect(_tree(store, result.chatIds.single), expected);
   });
 
+  test('speaker identities omit null carriers and cannot revive cleared selected swipes', () {
+    Map<String, Object?> extra(String id, int marker) => {
+      'vendor': [marker, null],
+      'dshgo': {
+        'outerUnknown': false,
+        'chatJsonl': {
+          'version': 1,
+          'speakerCharacterId': id,
+          'future': {'keep': marker},
+        },
+      },
+    };
+    Map<String, Object?> identity(Object? value) => _map(_map(_map(value)['dshgo'])['chatJsonl']);
+    final chat = load([
+      _document('speaker-identities.jsonl', [
+        {..._row('User', user: true), 'extra': extra('ignored-user-id', 1)},
+        {
+          ..._row('Selected', swipes: ['Inactive', 'Selected'], selected: 1),
+          'extra': extra('selected-id', 3),
+          'swipe_info': [
+            {'send_date': _time.toIso8601String(), 'extra': extra('inactive-id', 2)},
+            {'send_date': _time.toIso8601String(), 'extra': extra('selected-id', 3)},
+          ],
+        },
+      ]),
+    ]);
+    final path = store.path(chat);
+    expect(path.map((message) => message.speakerCharacterId), [null, 'selected-id']);
+    expect(store.children(chat, path.first.nodeId).map((node) => node.message.speakerCharacterId), [
+      'inactive-id',
+      'selected-id',
+    ]);
+    final first = codec.exportChat(store, chat).single;
+    expect(identity(first.messages.first['extra']).containsKey('speakerCharacterId'), isFalse);
+    expect(identity(first.messages.last['extra'])['speakerCharacterId'], 'selected-id');
+    final initialInfos = first.messages.last['swipe_info']! as List<Object?>;
+    expect(initialInfos.map((info) => identity(_map(info)['extra'])['speakerCharacterId']), [
+      'inactive-id',
+      'selected-id',
+    ]);
+    expect(_map(first.messages.first['extra'])['vendor'], [1, null]);
+    expect(_map(_map(first.messages.first['extra'])['dshgo'])['outerUnknown'], isFalse);
+    expect(identity(first.messages.first['extra'])['future'], {'keep': 1});
+
+    store.updateMessage(chat, path.last.nodeId, clearSpeakerCharacterId: true);
+    expect(store.message(chat, path.last.nodeId).speakerCharacterId, isNull);
+    expect(
+      identity(store.node(chat, path.last.nodeId).extra)['speakerCharacterId'],
+      'selected-id',
+      reason: 'The real canonical field is cleared while imported provenance still has its former value.',
+    );
+    final clearedFiles = codec.exportChat(store, chat);
+    final cleared = clearedFiles.single;
+    expect(identity(cleared.messages.first['extra']).containsKey('speakerCharacterId'), isFalse);
+    expect(identity(cleared.messages.last['extra']).containsKey('speakerCharacterId'), isFalse);
+    final clearedInfos = cleared.messages.last['swipe_info']! as List<Object?>;
+    expect(identity(_map(clearedInfos.first)['extra'])['speakerCharacterId'], 'inactive-id');
+    expect(identity(_map(clearedInfos.last)['extra']).containsKey('speakerCharacterId'), isFalse);
+    expect(identity(_map(clearedInfos.first)['extra'])['future'], {'keep': 2});
+    expect(identity(cleared.messages.last['extra'])['future'], {'keep': 3});
+    expect(_map(cleared.messages.last['extra'])['vendor'], [3, null]);
+    expect(
+      identity(store.node(chat, path.last.nodeId).extra)['speakerCharacterId'],
+      'selected-id',
+      reason: 'Export must not mutate stored provenance.',
+    );
+
+    final copy = load(clearedFiles);
+    final copiedPath = store.path(copy);
+    expect(copiedPath.map((message) => message.speakerCharacterId), [null, null]);
+    expect(store.children(copy, copiedPath.first.nodeId).map((node) => node.message.speakerCharacterId), [
+      'inactive-id',
+      null,
+    ]);
+    final again = codec.exportChat(store, copy).single;
+    expect(identity(again.messages.last['extra']).containsKey('speakerCharacterId'), isFalse);
+    expect(identity(again.messages.last['extra'])['future'], {'keep': 3});
+  });
+
   test('a 2005-node chain imports and exports without recursive tree traversal', () {
     final chat = load([
       _document('long', [for (var index = 0; index < 2005; index++) _row('line $index')]),

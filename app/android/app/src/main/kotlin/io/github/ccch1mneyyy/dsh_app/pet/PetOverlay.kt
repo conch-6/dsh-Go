@@ -692,7 +692,12 @@ internal object PetOverlay {
     private var frame: Choreographer.FrameCallback? = null
 
     private fun startLoop() {
-        if (looping || petView?.companionGeometry != null) return
+        if (petView?.companionGeometry != null) return
+        if (looping) {
+            // System animations may have been re-enabled while no frame was scheduled.
+            if (player.still && animationsOn()) restartLoop()
+            return
+        }
         if (!alive(petTicket)) return
         looping = true
         tick()
@@ -1071,7 +1076,6 @@ internal object PetOverlay {
             showTarget()
             react("drag", loop = true)
             startLoop()
-            fitFrame()
         }
 
         override fun onDrag(dx: Int, dy: Int) {

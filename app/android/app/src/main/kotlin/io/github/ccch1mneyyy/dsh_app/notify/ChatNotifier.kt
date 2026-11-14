@@ -375,7 +375,11 @@ class ChatNotifier(private val app: Context) {
             .setAutoCancel(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
             .setGroup(identity.first)
-        if (post != null) builder.setContentIntent(openIntent(post, identity.first, identity.second))
+        // A cold action has no Post; retain the existing notification's route.
+        val tap = post?.let { openIntent(it, identity.first, identity.second) }
+            ?: nm.activeNotifications.firstOrNull { it.tag == identity.first && it.id == identity.second }
+                ?.notification?.contentIntent
+        if (tap != null) builder.setContentIntent(tap)
         if (expire) builder.setTimeoutAfter(1_000)
         nm.notify(identity.first, identity.second, builder.build())
     }

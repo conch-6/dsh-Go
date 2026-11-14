@@ -44,6 +44,8 @@ void main() {
         'nodes_fts',
         'presets',
         'preset_preferences',
+        'group_chats',
+        'group_members',
       ]),
     );
     expect(database.select('SELECT * FROM preset_preferences').single['default_preset_id'], isNull);
@@ -104,7 +106,10 @@ void main() {
       expect(_version(database), ChatStore.schemaVersion);
       _expectUpgradedLegacyData(database, before['data']);
       final oldDefinitions = before['definitions']! as List<Map<String, Object?>>;
-      final keys = oldDefinitions.map((row) => '${row['type']}:${row['name']}').toSet();
+      // V8 deliberately rebuilds memories with constrained provenance. Its
+      // original columns and data are checked separately below.
+      final retainedOld = oldDefinitions.where((row) => row['type'] != 'table' || row['name'] != 'memories').toList();
+      final keys = retainedOld.map((row) => '${row['type']}:${row['name']}').toSet();
       final retainedDefinitions = _definitions(
         database,
       ).where((row) => keys.contains('${row['type']}:${row['name']}')).toList();
@@ -112,7 +117,11 @@ void main() {
         'chats': ', tree_revision INTEGER NOT NULL DEFAULT 0',
         'nodes':
             ', stream_text TEXT, stream_reasoning TEXT, '
-            'deleted_by TEXT REFERENCES deleted_subtrees(id) DEFERRABLE INITIALLY DEFERRED, reported_usage TEXT',
+            'deleted_by TEXT REFERENCES deleted_subtrees(id) DEFERRABLE INITIALLY DEFERRED, reported_usage TEXT, '
+            'speaker_character_id TEXT, source_epoch INTEGER NOT NULL DEFAULT 0\n'
+            "  CHECK(typeof(source_epoch) = 'integer' AND source_epoch >= 0), "
+            'content_version INTEGER NOT NULL DEFAULT 1\n'
+            "  CHECK(typeof(content_version) = 'integer' AND content_version > 0), display_context TEXT",
       };
       for (final row in retainedDefinitions) {
         final addition = additions[row['name']];
@@ -122,7 +131,10 @@ void main() {
           row['sql'] = '${sql.substring(0, sql.length - addition.length - 1)})';
         }
       }
-      expect(retainedDefinitions, oldDefinitions);
+      expect(retainedDefinitions, retainedOld);
+      expect(database.select('SELECT * FROM group_chats'), isEmpty);
+      expect(database.select('SELECT * FROM group_members'), isEmpty);
+      expect(opened.path('chat').map((message) => message.speakerCharacterId), [null, null]);
       expect(database.select('PRAGMA application_id').single['application_id'], 765);
       expect(database.select('PRAGMA foreign_key_check'), isEmpty);
       expect(
@@ -271,18 +283,53 @@ Map<String, Object?> _legacyData(Database database) => {
 };
 void _expectUpgradedLegacyData(Database database, Object? expected) {
   // Keep every old row, field, and unknown column under exact comparison.
-  // Strip only the explicitly checked T23/T24 additions from this genuine v1
-  // fixture. The old payload has no owned inspection to backfill.
-  const addedNames = {'stream_text', 'stream_reasoning', 'deleted_by', 'reported_usage'};
-  expect(_rows(database, 'PRAGMA table_info(nodes)').where((row) => addedNames.contains(row['name'])).toList(), [
-    {'cid': 15, 'name': 'stream_text', 'type': 'TEXT', 'notnull': 0, 'dflt_value': null, 'pk': 0},
-    {'cid': 16, 'name': 'stream_reasoning', 'type': 'TEXT', 'notnull': 0, 'dflt_value': null, 'pk': 0},
-    {'cid': 17, 'name': 'deleted_by', 'type': 'TEXT', 'notnull': 0, 'dflt_value': null, 'pk': 0},
-    {'cid': 18, 'name': 'reported_usage', 'type': 'TEXT', 'notnull': 0, 'dflt_value': null, 'pk': 0},
-  ]);
+  // Strip only the explicitly checked later additions from this genuine v1
+  // fixture. Its extra has neither owned inspection nor portable display data.
+  const addedNames = {'stream_text', 'stream_reasoning', 'deleted_by', 'reported_usage', 'speaker_character_id'};
+  expect(
+    _rows(database, 'PRAGMA table_info(nodes)')
+        .where(
+          (row) =>
+              addedNames.contains(row['name']) ||
+              row['name'] == 'source_epoch' ||
+              row['name'] == 'content_version' ||
+              row['name'] == 'display_context',
+        )
+        .toList(),
+    [
+      {'cid': 15, 'name': 'stream_text', 'type': 'TEXT', 'notnull': 0, 'dflt_value': null, 'pk': 0},
+      {'cid': 16, 'name': 'stream_reasoning', 'type': 'TEXT', 'notnull': 0, 'dflt_value': null, 'pk': 0},
+      {'cid': 17, 'name': 'deleted_by', 'type': 'TEXT', 'notnull': 0, 'dflt_value': null, 'pk': 0},
+      {'cid': 18, 'name': 'reported_usage', 'type': 'TEXT', 'notnull': 0, 'dflt_value': null, 'pk': 0},
+      {'cid': 19, 'name': 'speaker_character_id', 'type': 'TEXT', 'notnull': 0, 'dflt_value': null, 'pk': 0},
+      {'cid': 20, 'name': 'source_epoch', 'type': 'INTEGER', 'notnull': 1, 'dflt_value': '0', 'pk': 0},
+      {'cid': 21, 'name': 'content_version', 'type': 'INTEGER', 'notnull': 1, 'dflt_value': '1', 'pk': 0},
+      {'cid': 22, 'name': 'display_context', 'type': 'TEXT', 'notnull': 0, 'dflt_value': null, 'pk': 0},
+    ],
+  );
   expect(_rows(database, 'PRAGMA table_info(chats)').where((row) => row['name'] == 'tree_revision').toList(), [
     {'cid': 13, 'name': 'tree_revision', 'type': 'INTEGER', 'notnull': 1, 'dflt_value': '0', 'pk': 0},
   ]);
+  final memoryColumns = _rows(database, 'PRAGMA table_info(memories)');
+  expect(memoryColumns.take(3).toList(), [
+    {'cid': 0, 'name': 'id', 'type': 'TEXT', 'notnull': 1, 'dflt_value': null, 'pk': 1},
+    {'cid': 1, 'name': 'chat_id', 'type': 'TEXT', 'notnull': 1, 'dflt_value': null, 'pk': 0},
+    {'cid': 2, 'name': 'entry_json', 'type': 'TEXT', 'notnull': 1, 'dflt_value': null, 'pk': 0},
+  ]);
+  const memoryNames = [
+    'origin',
+    'origin_proposal_id',
+    'origin_logical_turn_id',
+    'origin_receipt_id',
+    'source_node_id',
+    'source_seq',
+    'source_epoch',
+    'source_content_version',
+    'source_live_node_id',
+    'source_validity',
+    'invalidated_reason',
+  ];
+  expect(memoryColumns.skip(3).map((column) => column['name']), memoryNames);
   final actual = _legacyData(database);
   for (final row in actual['chats']! as List<Map<String, Object?>>) {
     expect(row.remove('tree_revision'), 0);
@@ -291,6 +338,18 @@ void _expectUpgradedLegacyData(Database database, Object? expected) {
     for (final name in addedNames) {
       expect(row.containsKey(name), true);
       expect(row.remove(name), isNull);
+    }
+    expect(row.remove('source_epoch'), 0);
+    expect(row.remove('content_version'), 1);
+    expect(jsonDecode(row.remove('display_context')! as String), {
+      'dshgo': {'tavernState': null, 'chatJsonl': null},
+    });
+  }
+  for (final row in actual['memories']! as List<Map<String, Object?>>) {
+    expect(row.remove('origin'), 'legacy');
+    for (final name in memoryNames.skip(1)) {
+      expect(row.containsKey(name), true, reason: name);
+      expect(row.remove(name), isNull, reason: name);
     }
   }
   expect(actual, expected);

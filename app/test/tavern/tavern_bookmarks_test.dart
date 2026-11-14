@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../support/haptics.dart';
 import '../support/test_fonts.dart';
 
 Finder _line(int n) => find.byWidgetPredicate((w) => w is MarkdownBody && w.text.startsWith('第$n句话'));
@@ -107,10 +108,12 @@ void main() {
     unawaited(Navigator.of(tester.element(find.byType(TavernChatPage))).push(TavernBookmarksPage.route(chat)));
     await tester.pumpAndSettle();
     expect(find.text('第3句话'), findsOneWidget);
+    final felt = recordHaptics(tester);
     await tester.tap(find.text('第3句话'));
     await _frames(tester);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byType(TavernBookmarksPage), findsNothing);
+    expect(felt, ['HapticFeedbackType.selectionClick']);
     expect(_line(3), findsOneWidget);
     final rect = tester.getRect(_line(3));
     expect(rect.top, greaterThan(0));
@@ -123,10 +126,12 @@ void main() {
     final (_, chat) = await _open(tester, marks: (_) => [_mark('no-such-node', '不在了的那句')]);
     unawaited(Navigator.of(tester.element(find.byType(TavernChatPage))).push(TavernBookmarksPage.route(chat)));
     await tester.pumpAndSettle();
+    final felt = recordHaptics(tester);
     await tester.tap(find.text('不在了的那句'));
     await _frames(tester, 10);
     await tester.pumpAndSettle();
     expect(find.byType(TavernBookmarksPage), findsOneWidget);
+    expect(felt, isEmpty); // went nowhere: nothing felt
     expect(find.textContaining('已经不在了'), findsOneWidget);
     expect(find.byKey(const ValueKey('tavern-bookmarks-empty')), findsOneWidget);
   });

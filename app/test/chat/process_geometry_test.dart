@@ -1,8 +1,8 @@
+import 'package:dsh_app/ui/fx/orbs/thinking_orb.dart';
 import 'package:dsh_app/ui/chat/render/code_block.dart';
 import 'package:dsh_app/ui/chat/widgets/stream_row.dart';
 import 'package:dsh_app/ui/chat/widgets/thinking_pill.dart';
 import 'package:dsh_app/ui/chat/widgets/tool_row.dart';
-import 'package:dsh_app/ui/common/think_glyph.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -34,7 +34,7 @@ void main() {
     expect(tester.getCenter(dots.at(0)).dy, closeTo(thought.center.dy, 0.5));
     expect(tester.getCenter(dots.at(1)).dy, closeTo(verb.center.dy, 0.5));
   });
-  testWidgets('streaming to running keeps one spinner and the same State', (tester) async {
+  testWidgets('streaming to running keeps one orb and the same State', (tester) async {
     Widget row(ToolStatus status) => testApp(
       Scaffold(
         body: ToolRow(
@@ -44,11 +44,13 @@ void main() {
       ),
     );
     await tester.pumpWidget(row(ToolStatus.streaming));
-    final state = tester.state(find.byType(CircularProgressIndicator));
+    final state = tester.state(find.byType(ThinkingOrb));
     await tester.pumpWidget(row(ToolStatus.running));
     await tester.pump(const Duration(milliseconds: 80));
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    expect(tester.state(find.byType(CircularProgressIndicator)), same(state));
+    expect(find.byType(ThinkingOrb), findsOneWidget);
+    expect(tester.state(find.byType(ThinkingOrb)), same(state));
+    // A command is solving.
+    expect(tester.widget<ThinkingOrb>(find.byType(ThinkingOrb)).state, OrbState.solving);
   });
   testWidgets('streaming thinking is a calm three-line window that folds away when done', (tester) async {
     Widget pill(bool active) => testApp(
@@ -117,10 +119,9 @@ void main() {
     expect(live, settled);
   });
 
-  testWidgets('the spinning glyph paints in its own layer', (tester) async {
+  testWidgets('the thinking orb paints in its own layer', (tester) async {
     await tester.pumpWidget(testApp(const Scaffold(body: ThinkingPill(reasoning: '嗯', active: true))));
-    final boundary = find.ancestor(of: find.byType(ThinkGlyph), matching: find.byType(RepaintBoundary)).first;
-    expect(tester.widget<RepaintBoundary>(boundary).child, isA<ThinkGlyph>());
+    expect(find.descendant(of: find.byType(ThinkingOrb), matching: find.byType(RepaintBoundary)), findsWidgets);
   });
 
   testWidgets('dense code and ANSI output align with section titles and use 18px lines', (tester) async {

@@ -4,6 +4,7 @@ import 'dart:math';
 
 import '../api.dart';
 import '../import_report.dart';
+import '../io/authoring_text.dart';
 import '../io/import_intake.dart';
 import '../io/regex_intake.dart';
 import '../regex/regex_types.dart';
@@ -82,6 +83,43 @@ final class RegexLibrary {
     final result = _queue.then((_) => operation());
     _queue = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
+  }
+
+  /// Captures the complete physical library, including fields not represented
+  /// by runtime script records. An absent library has an explicit empty base.
+  Future<({Map<String, Object?> document, String? rawText, bool present})> readAuthoringSnapshot() =>
+      _exclusive(() async {
+        final source = await _readAuthoringText();
+        if (source == null) {
+          return (document: <String, Object?>{'version': 1, 'scripts': <Object?>[]}, rawText: null, present: false);
+        }
+        final document = jsonDecode(source.text);
+        if (document is! Map<String, Object?> || document['version'] != 1 || document['scripts'] is! List<Object?>) {
+          throw const FormatException('Unsupported regex library.');
+        }
+        return (document: document, rawText: source.rawText, present: true);
+      });
+
+  /// Preview seal compares the original text without parsing a changed file
+  /// or updating the runtime collection.
+  Future<bool> recheckAuthoringSnapshot({required bool present, required String? rawText}) => _exclusive(() async {
+    final source = await _readAuthoringText();
+    return present == (source != null) && rawText == source?.rawText;
+  });
+
+  Future<({String text, String rawText})?> _readAuthoringText() async {
+    try {
+      return await readAuthoringText(_file);
+    } on PathNotFoundException catch (error) {
+      final code = error.osError?.errorCode;
+      if (code != 2 && (!Platform.isWindows || code != 3)) {
+        rethrow;
+      }
+      if (await FileSystemEntity.type(_file.path) != FileSystemEntityType.notFound) {
+        rethrow;
+      }
+      return null;
+    }
   }
 
   Future<TavernRegexImportResult> importScripts(String text) async {

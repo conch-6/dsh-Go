@@ -4,9 +4,6 @@ import android.os.Bundle
 
 /** The three real resource callers share the envelope, not their action/release decoders. */
 internal object OwnerScopeProtocol {
-    fun supported(cap: Bundle): Boolean = supported(cap.get(Proto.OWNER_SCOPE_VERSION), cap.get(Proto.SCOPE_LIMIT))
-    fun supported(version: Any?, limit: Any?): Boolean = version is Int && version == 1 && limit is Int && limit == 3
-
     fun request(source: Bundle): Bundle = Bundle(source).apply { putInt(Proto.OWNER_SCOPE_VERSION, 1) }
 
     fun response(owner: String, source: Bundle): Bundle {
@@ -27,6 +24,11 @@ internal object OwnerScopeProtocol {
 
     fun execute(peer: PrivilegedChannel, owner: String, source: Bundle, beforeSend: () -> Unit = {}): Bundle =
         response(owner, peer.execute(request(source), beforeSend))
+
+    /** RELEASE of one owner's screen; true only when the service confirmed it. */
+    fun release(peer: PrivilegedChannel, owner: String): Boolean = execute(peer, owner, Bundle().apply {
+        putString(Proto.OP, Proto.OP_RELEASE); putString(Proto.OWNER, owner); putInt(Proto.RELEASE_RECEIPT, 1)
+    }).get(Proto.OK) == true
 
     private fun matches(owner: String, source: Bundle): Boolean = OwnerScopeReply.matches(owner, source.get(Proto.OWNER_SCOPE_VERSION), source.get(Proto.OWNER))
 }

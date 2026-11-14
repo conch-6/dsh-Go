@@ -92,6 +92,49 @@ class EngineUpgradeTest {
         assertCurrent()
     }
 
+    @Test fun committedCleanupRemovesInterruptedOldPayloadWithoutFollowingLinks() {
+        for (partial in listOf(false, true)) {
+            base.deleteRecursively(); base.mkdirs(); installed()
+            assertThrows(IOException::class.java) {
+                EngineUpgrade(base, sync = {}, afterStep = { if (it == "committed") throw IOException("kill") })
+                    .activate("new", spec)
+            }
+            assertCurrent()
+            val done = File(base, "engine.done")
+            for (path in ENGINE_PATHS) assertEquals("old", entry("engine.done/old", path).readText())
+            if (partial) assertTrue(File(done, "old/opt/node").deleteRecursively())
+            val user = File(base, "rootfs/usr/bin/gh")
+            Files.createSymbolicLink(File(done, "old/user-link").toPath(), user.toPath())
+            val transaction = EngineUpgrade(base, sync = {})
+            assertFalse(transaction.isPending())
+            transaction.cleanupCommitted()
+            assertFalse(done.exists())
+            assertCurrent()
+            transaction.cleanupCommitted()
+            assertCurrent()
+        }
+    }
+
+    @Test fun committedCleanupLeavesUnfinishedTransactionsForTheInstaller() {
+        for (step in listOf("prepared", "journal", "marker")) {
+            base.deleteRecursively(); base.mkdirs(); installed()
+            assertThrows(IOException::class.java) {
+                EngineUpgrade(base, sync = {}, afterStep = { if (it == step) throw IOException("kill") })
+                    .activate("new", spec)
+            }
+            val transaction = File(base, if (step == "prepared") "engine.prepare" else "engine.upgrade")
+            val version = File(base, "rootfs.version").readText()
+            val original = File(transaction, "original").readText()
+            val payload = entry(if (step == "marker") "rootfs" else "${transaction.name}/new", "opt/dsh")
+            EngineUpgrade(base, sync = {}).cleanupCommitted()
+            assertTrue(transaction.isDirectory)
+            assertEquals(version, File(base, "rootfs.version").readText())
+            assertEquals(original, File(transaction, "original").readText())
+            assertEquals("new", payload.readText())
+            assertUsers()
+        }
+    }
+
     @Test fun failedDataSyncLeavesNoReadyMarkerAndTheRetryFinishes() {
         installed()
         var barriers = 0

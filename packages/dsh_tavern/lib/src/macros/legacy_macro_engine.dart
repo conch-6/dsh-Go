@@ -5,8 +5,8 @@ part of 'macro_engine.dart';
 
 /// ST's legacy, ordered-regex macro engine for Chat Completion prompts.
 ///
-/// Unlike [MacroEngine], this prepares every character field eagerly and runs
-/// one replacement pass per macro kind. It does not parse new blocks, variable
+/// Unlike [MacroEngine], this normally prepares every character field eagerly.
+/// It runs one replacement pass per macro kind and does not parse new blocks, variable
 /// shorthands, or nested arguments, and does not iterate to a fixed point.
 /// Variable maps in [MacroContext] are shared and changed synchronously.
 ///
@@ -32,6 +32,11 @@ class LegacyMacroEngine {
   /// expansion does not inherit this hook.
   /// Per-call card mode and character override have the same scope as in
   /// [MacroEngine.expand]; they do not mutate the shared context.
+  /// [prepareCharacterFieldsOnDemand] is the project's explicit raw-source
+  /// mode, not ST's default eager timing. Each consumed field is prepared once
+  /// per expansion (including a failed preparation); other fields do not run.
+  /// The existing replacement-pass order and actual examples rendering stay
+  /// intact. Ordinary callers should retain the default false.
   String expand(
     String text,
     MacroContext context, {
@@ -39,15 +44,23 @@ class LegacyMacroEngine {
     Object? Function(Object?)? postProcess,
     bool? replaceCharacterCard,
     String? characterOverride,
-  }) => _LegacyEvaluation(
-    this,
-    context,
-    text,
-    overrides,
-    postProcess: postProcess,
-    replaceCharacterCard: replaceCharacterCard,
-    characterOverride: characterOverride,
-  ).evaluate(text);
+    bool prepareCharacterFieldsOnDemand = false,
+  }) {
+    try {
+      return _LegacyEvaluation(
+        this,
+        context,
+        text,
+        overrides,
+        postProcess: postProcess,
+        replaceCharacterCard: replaceCharacterCard,
+        characterOverride: characterOverride,
+        prepareCharacterFieldsOnDemand: prepareCharacterFieldsOnDemand,
+      ).evaluate(text);
+    } on _MacroDependencyFailure catch (failure) {
+      Error.throwWithStackTrace(failure.error, failure.stack);
+    }
+  }
 }
 
 typedef _LegacyPass = ({RegExp regex, Object? Function(Match) replace});
@@ -87,6 +100,7 @@ class _LegacyEvaluation {
     this.characterOverride,
     this.inheritOriginal = true,
     this.postProcess,
+    this.prepareCharacterFieldsOnDemand = false,
   }) : contentHash = MacroEngine.stringHash(original),
        chatIdHash = _truthy(context.chatIdHash) ? context.chatIdHash : MacroEngine.stringHash(context.chatId),
        replaceCharacterCard = replaceCharacterCard ?? context.replaceCharacterCard,
@@ -107,20 +121,22 @@ class _LegacyEvaluation {
   final int contentHash;
   final num chatIdHash;
   final bool replaceCharacterCard;
+  final bool prepareCharacterFieldsOnDemand;
   final String? characterOverride;
   final bool inheritOriginal;
   final Object? Function(Object?)? postProcess;
   final _Evaluation common;
+  final _environmentDependencies = <String, String>{};
 
   String evaluate(String text) {
     if (text.isEmpty) return '';
     final env = _environment();
     final passes = <_LegacyPass>[
-      _legacyPass(r'<USER>', (_) => env['user']!()),
-      _legacyPass(r'<BOT>', (_) => env['char']!()),
-      _legacyPass(r'<CHAR>', (_) => env['char']!()),
-      _legacyPass(r'<CHARIFNOTGROUP>', (_) => env['group']!()),
-      _legacyPass(r'<GROUP>', (_) => env['group']!()),
+      _legacyPass(r'<USER>', (_) => _environmentValue(env, 'user')),
+      _legacyPass(r'<BOT>', (_) => _environmentValue(env, 'char')),
+      _legacyPass(r'<CHAR>', (_) => _environmentValue(env, 'char')),
+      _legacyPass(r'<CHARIFNOTGROUP>', (_) => _environmentValue(env, 'group')),
+      _legacyPass(r'<GROUP>', (_) => _environmentValue(env, 'group')),
       _legacyPass(r'{{roll[ : ]([^}]+)}}', (match) => common._roll(trimJsWhitespace(match[1]!))),
       ..._instructPasses(env),
       ..._variablePasses(context.localVariables, global: false),
@@ -141,7 +157,7 @@ class _LegacyEvaluation {
     env['isMobile'] = () => '${context.isMobile}';
     env['lastGenerationType'] = () => context.lastGenerationType;
     for (final key in _environmentKeys(env)) {
-      passes.add(_legacyPass('{{${RegExp.escape(key)}}}', (_) => _normalize(env[key]!())));
+      passes.add(_legacyPass('{{${RegExp.escape(key)}}}', (_) => _normalize(_environmentValue(env, key))));
     }
     passes.addAll([
       _legacyPass(r'{{maxPrompt}}', (_) => '${context.maxPrompt}'),
@@ -156,12 +172,9 @@ class _LegacyEvaluation {
       _legacyPass(r'{{lastCharMessage}}', (_) => common._lastMessage(user: false)?.text ?? ''),
       _legacyPass(r'{{firstIncludedMessageId}}', (_) => context.firstIncludedMessageId?.toString() ?? ''),
       _legacyPass(r'{{firstDisplayedMessageId}}', (_) => context.firstDisplayedMessageId?.toString() ?? ''),
-      _legacyPass(
-        r'{{lastSwipeId}}',
-        (_) => context.history.isEmpty ? '' : context.history.last.swipeCount?.toString() ?? '',
-      ),
+      _legacyPass(r'{{lastSwipeId}}', (_) => context._historyLast?.swipeCount?.toString() ?? ''),
       _legacyPass(r'{{currentSwipeId}}', (_) => _currentSwipeId()),
-      _legacyPass(r'{{allChatRange}}', (_) => context.history.isEmpty ? '' : '0-${context.history.length - 1}'),
+      _legacyPass(r'{{allChatRange}}', (_) => context._historyLength == 0 ? '' : '0-${context._historyLength - 1}'),
       _legacyPass(r'{{reverse:(.+?)}}', (match) => String.fromCharCodes(match[1]!.runes.toList().reversed)),
       _legacyPass(r'\{\{\/\/([\s\S]*?)\}\}', (_) => '', caseSensitive: true, multiLine: true),
       _legacyPass(r'{{time}}', (_) => common._time('time', const [])),
@@ -195,6 +208,8 @@ class _LegacyEvaluation {
           final callback = postProcess;
           return _jsString(callback == null ? value : callback(value));
         });
+      } on _MacroDependencyFailure {
+        rethrow;
       } catch (_) {
         // ST catches the whole replace pass: keep its previous input string,
         // retain earlier callback side effects, and proceed to the next kind.
@@ -203,10 +218,21 @@ class _LegacyEvaluation {
     return text;
   }
 
+  Object? _environmentValue(Map<String, Object? Function()> env, String key) {
+    final field = _environmentDependencies[key];
+    if (field != null) context._observeCharacterDependency(field);
+    return env[key]!();
+  }
+
   Map<String, Object? Function()> _environment() {
     final env = <String, Object? Function()>{};
-    void put(String key, Object? value) {
+    void put(String key, Object? value, {String? characterField}) {
       env[key] = () => value;
+      if (characterField == null) {
+        _environmentDependencies.remove(key);
+      } else {
+        _environmentDependencies[key] = characterField;
+      }
     }
 
     final original = overrides['original'] ?? (inheritOriginal ? context.original : null);
@@ -218,7 +244,7 @@ class _LegacyEvaluation {
         return original;
       };
     }
-    if (replaceCharacterCard) {
+    if (replaceCharacterCard && !prepareCharacterFieldsOnDemand) {
       final card = context.card;
       // Exactly getCharacterCardFields' eager access order, including fields
       // that legacy exposes under no macro (greetings still have side effects).
@@ -243,26 +269,60 @@ class _LegacyEvaluation {
           _base(greeting);
         }
       }
-      put('charPrompt', system);
+      put(
+        'charPrompt',
+        system,
+        characterField: context.preferCharacterPrompt && !_truthy(context.systemPromptOverride)
+            ? 'system_prompt'
+            : null,
+      );
       // JS right-associative assignment inserts charJailbreak first.
-      put('charJailbreak', jailbreak);
-      put('charInstruction', jailbreak);
-      put('description', description);
-      put('personality', personality);
-      put('scenario', scenario);
+      put(
+        'charJailbreak',
+        jailbreak,
+        characterField: context.preferCharacterJailbreak ? 'post_history_instructions' : null,
+      );
+      put(
+        'charInstruction',
+        jailbreak,
+        characterField: context.preferCharacterJailbreak ? 'post_history_instructions' : null,
+      );
+      put('description', description, characterField: 'description');
+      put('personality', personality, characterField: 'personality');
+      put('scenario', scenario, characterField: _truthy(context.scenarioOverride) ? null : 'scenario');
       put('persona', persona);
       env['mesExamples'] = () => _renderExamples(examples);
-      put('mesExamplesRaw', examples);
-      put('charVersion', _truthy(version) ? version : '');
-      put('char_version', _truthy(version) ? version : '');
-      put('charDepthPrompt', depthPrompt);
-      put('creatorNotes', creatorNotes);
+      if (!_truthy(context.mesExamplesOverride)) _environmentDependencies['mesExamples'] = 'mes_example';
+      put('mesExamplesRaw', examples, characterField: _truthy(context.mesExamplesOverride) ? null : 'mes_example');
+      put('charVersion', _truthy(version) ? version : '', characterField: 'character_version');
+      put('char_version', _truthy(version) ? version : '', characterField: 'character_version');
+      put('charDepthPrompt', depthPrompt, characterField: 'charDepthPrompt');
+      put('creatorNotes', creatorNotes, characterField: 'creator_notes');
+    }
+    if (replaceCharacterCard && prepareCharacterFieldsOnDemand) {
+      _installCharacterFieldsOnDemand(env);
     }
     put('user', context.userName);
-    put('char', characterOverride ?? context.charName);
-    put('charIfNotGroup', characterOverride ?? context.group);
-    put('group', characterOverride ?? context.group);
-    put('groupNotMuted', characterOverride ?? context.groupNotMuted);
+    put(
+      'char',
+      characterOverride ?? context.charName,
+      characterField: characterOverride == null && context._charNameFromCard ? 'name' : null,
+    );
+    put(
+      'charIfNotGroup',
+      characterOverride ?? context.group,
+      characterField: characterOverride == null && context._groupFromCard ? 'name' : null,
+    );
+    put(
+      'group',
+      characterOverride ?? context.group,
+      characterField: characterOverride == null && context._groupFromCard ? 'name' : null,
+    );
+    put(
+      'groupNotMuted',
+      characterOverride ?? context.groupNotMuted,
+      characterField: characterOverride == null && context._groupNotMutedFromCard ? 'name' : null,
+    );
     put('notChar', context.notChar);
     put('model', context.model);
     for (final entry in overrides.entries) {
@@ -271,6 +331,93 @@ class _LegacyEvaluation {
       if (entry.key != 'original' && entry.key != '__proto__') put(entry.key, entry.value);
     }
     return env;
+  }
+
+  Object? Function() _prepareFieldOnce(Object? Function() load) {
+    var prepared = false;
+    Object? value;
+    Object? failure;
+    StackTrace? failureStack;
+    return () {
+      if (!prepared) {
+        prepared = true;
+        try {
+          value = load();
+        } catch (error, stack) {
+          failure = error;
+          failureStack = stack;
+        }
+      }
+      final error = failure;
+      if (error != null) Error.throwWithStackTrace(error, failureStack!);
+      return value;
+    };
+  }
+
+  void _installCharacterFieldsOnDemand(Map<String, Object? Function()> env) {
+    final card = context.card;
+    void put(String key, Object? Function() value, {String? characterField}) {
+      env[key] = value;
+      if (characterField == null) {
+        _environmentDependencies.remove(key);
+      } else {
+        _environmentDependencies[key] = characterField;
+      }
+    }
+
+    final system = _prepareFieldOnce(
+      () => context.preferCharacterPrompt ? _overriddenField('system_prompt', context.systemPromptOverride) : '',
+    );
+    final examples = _prepareFieldOnce(() => _overriddenField('mes_example', context.mesExamplesOverride));
+    final description = _prepareFieldOnce(() => _base(card['description']));
+    final personality = _prepareFieldOnce(() => _base(card['personality']));
+    final persona = _prepareFieldOnce(() => _base(context.persona));
+    final scenario = _prepareFieldOnce(() => _overriddenField('scenario', context.scenarioOverride));
+    final jailbreak = _prepareFieldOnce(
+      () => context.preferCharacterJailbreak ? _base(card['post_history_instructions']) : '',
+    );
+    final version = _prepareFieldOnce(() {
+      final value = card['character_version'];
+      return _truthy(value) ? value : '';
+    });
+    final depthPrompt = _prepareFieldOnce(() {
+      final extensions = card['extensions'];
+      final depth = extensions is Map<String, Object?> ? extensions['depth_prompt'] : null;
+      return _base(depth is Map<String, Object?> ? depth['prompt'] : null);
+    });
+    final creatorNotes = _prepareFieldOnce(() => _base(card['creator_notes']));
+    // Keep the legacy environment key order and alias sharing. First/alternate
+    // greetings expose no legacy environment macro, so this raw-only mode has
+    // no implicit preparation of them. Explicit history is a separate source.
+    put(
+      'charPrompt',
+      system,
+      characterField: context.preferCharacterPrompt && !_truthy(context.systemPromptOverride) ? 'system_prompt' : null,
+    );
+    put(
+      'charJailbreak',
+      jailbreak,
+      characterField: context.preferCharacterJailbreak ? 'post_history_instructions' : null,
+    );
+    put(
+      'charInstruction',
+      jailbreak,
+      characterField: context.preferCharacterJailbreak ? 'post_history_instructions' : null,
+    );
+    put('description', description, characterField: 'description');
+    put('personality', personality, characterField: 'personality');
+    put('scenario', scenario, characterField: _truthy(context.scenarioOverride) ? null : 'scenario');
+    put('persona', persona);
+    put(
+      'mesExamples',
+      () => _renderExamples(examples() as String),
+      characterField: _truthy(context.mesExamplesOverride) ? null : 'mes_example',
+    );
+    put('mesExamplesRaw', examples, characterField: _truthy(context.mesExamplesOverride) ? null : 'mes_example');
+    put('charVersion', version, characterField: 'character_version');
+    put('char_version', version, characterField: 'character_version');
+    put('charDepthPrompt', depthPrompt, characterField: 'charDepthPrompt');
+    put('creatorNotes', creatorNotes, characterField: 'creator_notes');
   }
 
   String _base(Object? value) {
@@ -286,6 +433,7 @@ class _LegacyEvaluation {
       replaceCharacterCard: false,
       characterOverride: characterOverride,
       inheritOriginal: false,
+      prepareCharacterFieldsOnDemand: prepareCharacterFieldsOnDemand,
     ).evaluate(text);
     if (context.collapseNewlines) result = result.replaceAll(_macroNewlines, '\n');
     return result.replaceAll('\r', '');
@@ -310,6 +458,7 @@ class _LegacyEvaluation {
         replaceCharacterCard: true,
         characterOverride: characterOverride,
         inheritOriginal: false,
+        prepareCharacterFieldsOnDemand: prepareCharacterFieldsOnDemand,
       ).evaluate(separator);
     }
     return _examples(raw);
@@ -366,10 +515,22 @@ class _LegacyEvaluation {
     }
     final systemEnabled = _truthy(engine.systemPrompt['enabled']);
     final defaultPrompt = _stringField(engine.systemPrompt, 'content');
-    final charPrompt = env['charPrompt']?.call();
-    final preferredPrompt = context.preferCharacterPrompt && _truthy(charPrompt) ? charPrompt : defaultPrompt;
+    // Default legacy captures this value at factory time. Raw source isolation
+    // must leave its lazy field untouched until an actual enabled macro uses it.
+    final charPrompt = prepareCharacterFieldsOnDemand ? null : env['charPrompt']?.call();
+    final usesCharPrompt = context.preferCharacterPrompt && _truthy(charPrompt);
+    final preferredPrompt = usesCharPrompt ? charPrompt : defaultPrompt;
     result.addAll([
-      _legacyPass(r'{{(systemPrompt)}}', (_) => systemEnabled ? preferredPrompt : ''),
+      _legacyPass(r'{{(systemPrompt)}}', (_) {
+        if (!systemEnabled) return '';
+        final field = context.preferCharacterPrompt ? _environmentDependencies['charPrompt'] : null;
+        if (field != null) context._observeCharacterDependency(field);
+        if (prepareCharacterFieldsOnDemand) {
+          final selected = context.preferCharacterPrompt ? env['charPrompt']?.call() : null;
+          return context.preferCharacterPrompt && _truthy(selected) ? selected : defaultPrompt;
+        }
+        return preferredPrompt;
+      }),
       _legacyPass(
         r'{{(defaultSystemPrompt|instructSystem|instructSystemPrompt)}}',
         (_) => systemEnabled ? defaultPrompt : '',
@@ -381,8 +542,8 @@ class _LegacyEvaluation {
   }
 
   String _currentSwipeId() {
-    if (context.history.isEmpty) return 'NaN';
-    final last = context.history.last;
+    final last = context._historyLast;
+    if (last == null) return 'NaN';
     if (last.swipeId != null) return '${last.swipeId! + 1}';
     return last.swipeIdIsNull ? '' : 'NaN';
   }

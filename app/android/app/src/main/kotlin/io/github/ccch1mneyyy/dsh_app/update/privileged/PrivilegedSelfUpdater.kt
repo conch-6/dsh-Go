@@ -193,17 +193,22 @@ class PrivilegedSelfUpdater(context: Context) {
         if (directory.canonicalFile != File(context.filesDir.canonicalFile, "self-update-v1")) throw SelfUpdateException("invalidPath")
         val file = File(directory, UUID.randomUUID().toString() + ".apk")
         try {
+            // Android streams constructed from a FileDescriptor do not own it.
             val fd = Os.open(source.path, OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW, 0)
-            val size = FileInputStream(fd).use { input ->
-                val stat = Os.fstat(fd)
-                if (!OsConstants.S_ISREG(stat.st_mode)) throw SelfUpdateException("invalidPath")
-                val outFd = Os.open(file.path, OsConstants.O_WRONLY or OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_CLOEXEC, 384)
-                FileOutputStream(outFd).use { output ->
-                    SelfUpdatePolicy.copyVerified(input, output, stat.st_size, digest)
-                    output.fd.sync()
+            val size = try {
+                FileInputStream(fd).use { input ->
+                    val stat = Os.fstat(fd)
+                    if (!OsConstants.S_ISREG(stat.st_mode)) throw SelfUpdateException("invalidPath")
+                    val outFd = Os.open(file.path, OsConstants.O_WRONLY or OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_CLOEXEC, 384)
+                    try {
+                        FileOutputStream(outFd).use { output ->
+                            SelfUpdatePolicy.copyVerified(input, output, stat.st_size, digest)
+                            output.fd.sync()
+                        }
+                    } finally { Os.close(outFd) }
+                    stat.st_size
                 }
-                stat.st_size
-            }
+            } finally { Os.close(fd) }
             Os.chmod(file.path, 256)
             return SelfUpdateSnapshot(file, size)
         } catch (error: Exception) {

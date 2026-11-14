@@ -1,8 +1,9 @@
-/// An ST theme's story colours (docs/design/roleplay-ui.md §10): what a
-/// SillyTavern theme file says quotes and italics are drawn in — the two
-/// colours an ST theme sets that the story here can wear (tavern_ink.dart).
-/// The rest of its look (blur, tints, chat width, custom CSS) stays ST's; the
-/// page here is the app's. Kept as written, made readable where it is drawn.
+/// An ST theme (docs/design/roleplay-ui.md §10): what a SillyTavern theme
+/// file says quotes and italics are drawn in — the two colours an ST theme
+/// sets that the story here can wear (tavern_ink.dart) — and its custom CSS,
+/// which the whole-story canvas takes as ST would (its DOM is ST's). The rest
+/// of its look (blur, tints, chat width) stays ST's; the page here is the
+/// app's. Kept as written, made readable where it is drawn.
 library;
 
 import 'dart:async';
@@ -12,7 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TavernStTheme {
-  const TavernStTheme({required this.name, this.quote, this.italics});
+  const TavernStTheme({required this.name, this.quote, this.italics, this.customCss, this.useCss = true});
 
   final String name;
 
@@ -20,21 +21,50 @@ class TavernStTheme {
   final int? quote;
   final int? italics;
 
-  Map<String, Object?> toJson() => {'name': name, 'quote': quote, 'italics': italics};
+  /// Its custom CSS as written; null where it has none.
+  final String? customCss;
 
-  static TavernStTheme? fromJson(Object? json) => switch (json) {
-    {'name': final String name, 'quote': final int? quote, 'italics': final int? italics}
-        when quote != null || italics != null =>
-      TavernStTheme(name: name, quote: quote, italics: italics),
-    _ => null,
+  /// Whether the canvas takes [customCss] (with ST's colours chosen): one
+  /// that unsettles the page can be let go, the colours kept.
+  final bool useCss;
+
+  /// What the canvas adds after its own styles: [customCss] when it is used.
+  String get canvasCss => useCss ? customCss ?? '' : '';
+
+  TavernStTheme withUseCss(bool use) =>
+      TavernStTheme(name: name, quote: quote, italics: italics, customCss: customCss, useCss: use);
+
+  Map<String, Object?> toJson() => {
+    'name': name,
+    'quote': quote,
+    'italics': italics,
+    if (customCss != null) 'customCss': customCss,
+    if (!useCss) 'useCss': false,
   };
+
+  static TavernStTheme? fromJson(Object? json) {
+    if (json case {'name': final String name, 'quote': final int? quote, 'italics': final int? italics}) {
+      final css = switch (json['customCss']) {
+        final String s when s.trim().isNotEmpty => s,
+        _ => null,
+      };
+      if (quote == null && italics == null && css == null) return null;
+      return TavernStTheme(name: name, quote: quote, italics: italics, customCss: css, useCss: json['useCss'] != false);
+    }
+    return null;
+  }
 
   @override
   bool operator ==(Object other) =>
-      other is TavernStTheme && other.name == name && other.quote == quote && other.italics == italics;
+      other is TavernStTheme &&
+      other.name == name &&
+      other.quote == quote &&
+      other.italics == italics &&
+      other.customCss == customCss &&
+      other.useCss == useCss;
 
   @override
-  int get hashCode => Object.hash(name, quote, italics);
+  int get hashCode => Object.hash(name, quote, italics, customCss, useCss);
 }
 
 /// [map] is an ST theme: ST's own text colour keys are there.
@@ -42,17 +72,22 @@ bool tavernIsStTheme(Map<String, Object?> map) =>
     map.containsKey('main_text_color') &&
     (map.containsKey('quote_text_color') || map.containsKey('italics_text_color'));
 
-/// [map]'s story colours, named by its own `name` or else [fileName] without
-/// `.json`; null when it gives neither colour in a form read here.
+/// [map]'s story colours and custom CSS, named by its own `name` or else
+/// [fileName] without `.json`; null when it gives neither colour in a form
+/// read here, nor any CSS.
 TavernStTheme? tavernStThemeOf(Map<String, Object?> map, {required String fileName}) {
   final quote = tavernCssColor(map['quote_text_color']);
   final italics = tavernCssColor(map['italics_text_color']);
-  if (quote == null && italics == null) return null;
+  final css = switch (map['custom_css']) {
+    final String s when s.trim().isNotEmpty => s,
+    _ => null,
+  };
+  if (quote == null && italics == null && css == null) return null;
   final name = switch (map['name']) {
     final String own when own.trim().isNotEmpty => own.trim(),
     _ => fileName.replaceFirst(RegExp(r'\.json$', caseSensitive: false), ''),
   };
-  return TavernStTheme(name: name, quote: quote, italics: italics);
+  return TavernStTheme(name: name, quote: quote, italics: italics, customCss: css);
 }
 
 final _rgb = RegExp(
@@ -108,6 +143,11 @@ class TavernStThemeController extends Notifier<TavernStTheme?> {
   Future<void> set(TavernStTheme theme) async {
     state = theme;
     await _save((prefs) => prefs.setString(key, jsonEncode(theme.toJson())));
+  }
+
+  /// Whether the canvas takes the theme's custom CSS.
+  Future<void> setUseCss(bool use) async {
+    if (state case final theme?) await set(theme.withUseCss(use));
   }
 
   Future<void> clear() async {

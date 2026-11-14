@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../fx/gooey/gooey.dart';
 import '../theme/theme.dart';
 
 /// One option of a [SegmentedPill].
@@ -36,6 +37,7 @@ class SegmentedPill<T> extends StatefulWidget {
     required this.onChanged,
     this.expand = true,
     this.height = 36,
+    this.onReselect,
   }) : assert(segments.length >= 2);
 
   final List<PillSegment<T>> segments;
@@ -43,6 +45,10 @@ class SegmentedPill<T> extends StatefulWidget {
 
   /// Null disables the control.
   final ValueChanged<T>? onChanged;
+
+  /// A tap on the segment already selected (a 「自定义」 one opening its
+  /// editor again); a drag that ends where it began is not one.
+  final ValueChanged<T>? onReselect;
 
   /// Fill the available width (each segment an equal share); false sizes the
   /// control to its longest label.
@@ -94,6 +100,12 @@ class _SegmentedPillState<T> extends State<SegmentedPill<T>> {
       if (tick) HapticFeedback.selectionClick();
       onChanged(value);
     }
+  }
+
+  void _tap(int index) {
+    final value = widget.segments[index].value;
+    if (value == widget.selected && widget.onReselect != null) return widget.onReselect!(value);
+    _pick(index);
   }
 
   @override
@@ -153,22 +165,42 @@ class _SegmentedPillState<T> extends State<SegmentedPill<T>> {
             decoration: ShapeDecoration(color: track, shape: const StadiumBorder()),
             child: Stack(
               children: [
-                AnimatedPositioned(
-                  duration: _drag != null
-                      ? Duration.zero
-                      : fluid
-                      ? AppMotion.thumbCurve.duration
-                      : AppMotion.of(context, AppMotion.standard),
-                  curve: fluid ? AppMotion.thumbCurve : AppMotion.std,
-                  left: left,
-                  top: SegmentedPill.inset,
-                  bottom: SegmentedPill.inset,
-                  width: segment,
-                  // The fluid tier's thumb swells a little under the finger.
-                  child: AnimatedScale(
-                    scale: fluid && _drag != null ? 1.04 : 1,
-                    duration: AppMotion.quick,
+                if (fluid)
+                  // The fluid tier's thumb is liquid (Libraries.dev Gooey, the tab recipe):
+                  // it stretches and trails as it slides, and is a plain pill at rest.
+                  Positioned.fill(
+                    child: Liquid(
+                      blur: LiquidTabs.blur,
+                      fill: thumb,
+                      shadows: dark ? const [] : LiquidShadows.tabPill(Brightness.light),
+                      child: Stack(
+                        children: [
+                          AnimatedPositioned(
+                            duration: _drag != null ? Duration.zero : AppMotion.thumbCurve.duration,
+                            curve: AppMotion.thumbCurve,
+                            left: left,
+                            top: SegmentedPill.inset,
+                            bottom: SegmentedPill.inset,
+                            width: segment,
+                            child: const LiquidItem(
+                              effect: LiquidEffect.move,
+                              move: LiquidTabs.move,
+                              radius: BorderRadius.all(Radius.circular(999)),
+                              child: SizedBox.expand(),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  AnimatedPositioned(
+                    duration: _drag != null ? Duration.zero : AppMotion.of(context, AppMotion.standard),
                     curve: AppMotion.std,
+                    left: left,
+                    top: SegmentedPill.inset,
+                    bottom: SegmentedPill.inset,
+                    width: segment,
                     child: DecoratedBox(
                       decoration: ShapeDecoration(
                         color: thumb,
@@ -185,7 +217,6 @@ class _SegmentedPillState<T> extends State<SegmentedPill<T>> {
                       ),
                     ),
                   ),
-                ),
                 Row(
                   children: [
                     for (var i = 0; i < n; i++)
@@ -193,14 +224,14 @@ class _SegmentedPillState<T> extends State<SegmentedPill<T>> {
                         child: Semantics(
                           button: true,
                           enabled: enabled,
-                          onTap: enabled ? () => _pick(i) : null,
+                          onTap: enabled ? () => _tap(i) : null,
                           selected: i == _index,
                           inMutuallyExclusiveGroup: true,
                           label: widget.segments[i].label,
                           excludeSemantics: true,
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
-                            onTap: enabled ? () => _pick(i) : null,
+                            onTap: enabled ? () => _tap(i) : null,
                             child: Center(
                               child: Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 6),

@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:dsh_app/state/bots_state.dart';
+import 'package:dsh_app/ui/fx/bot_avatar/bot_avatar.dart' as fx;
 import 'package:dsh_app/ui/bots/bot_avatar.dart';
 import 'package:dsh_app/ui/common/status_dot.dart';
 import 'package:dsh_client/dsh_client.dart';
@@ -106,24 +107,23 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('an absent photo keeps the monogram', (tester) async {
+  testWidgets('an absent photo shows its own little bot', (tester) async {
     _view(tester, 2);
     await _mount(tester, null);
     expect(find.byType(Image), findsNothing);
-    expect(find.byType(BotMonogram), findsOneWidget);
-    expect(find.text('P'), findsOneWidget);
+    expect(find.byType(fx.BotAvatar), findsOneWidget);
+    expect(find.byType(BotMonogram), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('an invalid photo keeps the monogram and working indicator', (tester) async {
+  testWidgets('an invalid photo falls back to the little bot and the working indicator', (tester) async {
     _view(tester, 2);
     await _mount(tester, Uint8List.fromList([1, 2, 3]), working: true);
     final image = tester.widget<Image>(find.byType(Image));
     final context = tester.element(find.byType(Image));
     await tester.runAsync(() => precacheImage(image.image, context, onError: (_, _) {}));
     await pumpFrames(tester, 2);
-    expect(find.byType(BotMonogram), findsOneWidget);
-    expect(find.text('P'), findsOneWidget);
+    expect(find.byType(fx.BotAvatar), findsOneWidget);
     expect(find.byType(StatusDot), findsOneWidget);
     expect(tester.getSize(find.byType(BotAvatar)), const Size.square(40));
     expect(tester.takeException(), isNull);

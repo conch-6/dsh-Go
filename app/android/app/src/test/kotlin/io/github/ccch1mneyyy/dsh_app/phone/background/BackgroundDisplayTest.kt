@@ -21,7 +21,6 @@ import org.junit.Test
 class BackgroundDisplayTest {
     @Test fun inputWaitingForChannelCapacityIsFencedByPauseStopAndSealAtAdmission() {
         val display = BackgroundDisplay(
-            journal = BackgroundResourceJournal({ null }, { true }).apply { load() },
             mayUse = { true },
             admitUse = { action -> action(); true },
             channelProvider = { error("the test owns the actual channel admission") },
@@ -190,7 +189,6 @@ class BackgroundDisplayTest {
 
     private fun withLastElement(): BackgroundDisplay {
         val display = BackgroundDisplay(
-            journal = BackgroundResourceJournal({ null }, { true }).apply { load() },
             mayUse = { true },
             admitUse = { action -> action(); true },
             channelProvider = { error("response validation must not start a connection") },
@@ -209,7 +207,6 @@ class BackgroundDisplayTest {
 
     @Test fun onlyBackIsSentToTheBackgroundScreen() {
         val display = BackgroundDisplay(
-            journal = BackgroundResourceJournal({ null }, { true }).apply { load() },
             mayUse = { true },
             admitUse = { action -> action(); true },
             channelProvider = { error("a refused key must not reach the privileged channel") },

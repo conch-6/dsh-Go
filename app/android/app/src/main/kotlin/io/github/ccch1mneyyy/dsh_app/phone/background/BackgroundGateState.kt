@@ -1,6 +1,6 @@
 package io.github.ccch1mneyyy.dsh_app.phone.background
 
-/** Capability facts and known transport failures; an untested channel is still unknown. */
+/** Self-check facts and the last failed connection; an untested channel is still unknown. */
 internal class BackgroundGateState {
     data class Snapshot(
         val trustedDisplayOk: Boolean? = null,
@@ -45,32 +45,9 @@ internal class BackgroundGateState {
     private var probe: Probe? = null
     private var failedChannel: Any? = null
 
+    /** Diagnostics only: display/input facts never gate admission; connectionError is shown while unconnected. */
     @Volatile var snapshot = Snapshot()
         private set
-
-    // Cleanup/retest is separate from capability success. Connected/reset cannot clear it;
-    // only the current attempt with confirmed cleanup (even on failure), or a rejection
-    // before allocation, can. Its capability/connection error remains in snapshot.
-    @Volatile var needsRetest: Boolean = false
-        private set
-
-    @Synchronized fun requireRetest() { needsRetest = true }
-    @Synchronized fun completedWithCleanup(owner: Probe): Boolean {
-        if (!current(owner)) return false
-        needsRetest = false
-        return true
-    }
-
-    /**
-     * A channel that fails the capability handshake before any allocation has no physical
-     * work to clean up, so the readiness barrier must not hold every later task at zero
-     * capacity. A probe that got past [admit] still needs its cleanup receipt.
-     */
-    @Synchronized fun concludedWithoutAllocation(owner: Probe): Boolean {
-        if (!current(owner)) return false
-        needsRetest = false
-        return true
-    }
 
     @Synchronized fun reset() { probe = null; failedChannel = null; snapshot = Snapshot() }
 
@@ -101,6 +78,13 @@ internal class BackgroundGateState {
         if (!current(owner)) return false
         commit()
         return true
+    }
+
+    /** A connect that failed before any probe. Cleared by the next connect, probe or reset. */
+    @Synchronized fun connectionFailed(reason: Int, mayApply: () -> Boolean) {
+        if (!mayApply()) return
+        failedChannel = null
+        snapshot = snapshot.copy(connectionError = reason)
     }
 
     @Synchronized fun failed(owner: Probe, reason: Int, channel: Any? = null): Boolean {

@@ -659,10 +659,11 @@
   /** The character's files, as the app listed them when it unpacked the pack. */
   let packFiles = null;
   function packIndex() {
-    packFiles ??= fetch(`${CHARACTER}index.json`, { signal: floatAbort?.signal })
+    // Spelled out: WebView 83 (Android 10) cannot parse logical assignment (#1165).
+    packFiles ?? (packFiles = fetch(`${CHARACTER}index.json`, { signal: floatAbort?.signal })
       .then((response) => (response.ok ? response.json() : []))
       .then((files) => (Array.isArray(files) ? files.filter((f) => typeof f === 'string') : []))
-      .catch(() => []);
+      .catch(() => []));
     return packFiles;
   }
 
@@ -805,7 +806,7 @@
       zones = model && !model.tailIds.length ? DEFAULT_ZONES.map((z) => (z.id === 'tail' ? { ...z, id: 'legs' } : z)) : DEFAULT_ZONES;
       zonesFrom = 'default';
     }
-    defaultZoom ??= camera.zoom;
+    defaultZoom ?? (defaultZoom = camera.zoom);
     camera.zoom = Number(adapter?.framing?.zoom) || Number(character.framing?.zoom) || defaultZoom;
     camera.y = Number(adapter?.framing?.y ?? character.framing?.y) || 0;
     if (FLOAT) {

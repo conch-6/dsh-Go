@@ -661,6 +661,7 @@ class _Model extends TavernModelClient {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) {
     bodies.add(jsonDecode(jsonEncode(body)) as Map<String, Object?>);
     if (failure case final error?) return Stream<ModelDelta>.error(error);

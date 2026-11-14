@@ -73,6 +73,21 @@ class TavernUsagePage extends ConsumerWidget {
               ],
             ),
           ),
+          // What the priced replies cost, as 本局用量 says it; the rest counted apart.
+          if (all.fold(0, (n, c) => n + c.usage.replies - c.usage.unpriced) > 0)
+            Padding(
+              key: const ValueKey('tavern-usage-cost'),
+              padding: const EdgeInsets.fromLTRB(24, 4, 24, 6),
+              child: Text(
+                l10n.tavernSessionUsageCost('US\$${tavernUsd(all.fold(0.0, (n, c) => n + c.usage.cost))}'),
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+          if (all.fold(0, (n, c) => n + c.usage.unpriced) case final unpriced when unpriced > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 6),
+              child: Text(l10n.tavernSessionUsageUnpriced(unpriced), style: quiet),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
             child: Text(l10n.tavernUsageAllNote, style: quiet),
@@ -89,7 +104,10 @@ class TavernUsagePage extends ConsumerWidget {
                     ?names[c.chat.characterId],
                     if (c.chat.title.trim().isNotEmpty) c.chat.title.trim(),
                   ].join(' · '),
-                  subtitle: l10n.tavernUsageChatReplies(c.usage.replies, tavernTokenCount(c.usage.completion, zh: zh)),
+                  subtitle: [
+                    l10n.tavernUsageChatReplies(c.usage.replies, tavernTokenCount(c.usage.completion, zh: zh)),
+                    if (c.usage.replies > c.usage.unpriced) tavernCostLabel(l10n, c.usage.cost),
+                  ].join('\n'),
                   value: Text(tavernTokenCount(c.total, zh: zh)),
                   onTap: () => unawaited(Navigator.of(context).push(TavernChatPage.route(c.chat.id))),
                 ),

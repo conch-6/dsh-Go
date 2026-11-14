@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 import '../../l10n/l10n.dart';
 import '../common/expand_reveal.dart';
 import '../common/smooth_size.dart';
+import '../fx/voice_glow/voice_beam.dart';
 import '../pets/pet_perch.dart';
 import '../settings/voice_settings_page.dart';
 import '../theme/app_icons.dart';
@@ -595,13 +596,35 @@ class _ComposerState extends State<Composer> with SingleTickerProviderStateMixin
                   ),
               ],
             );
-            // Dictating: the pet steps away from the voice controls.
+            final padded = Padding(
+              padding: EdgeInsets.fromLTRB(leading == null ? 18 : _keyGap, _keyGap, _keyGap, _keyGap),
+              child: content,
+            );
+            // Dictating: the pet steps away from the voice controls, and a soft light
+            // (Libraries.dev Voice) rises from the glass's bottom edge with the voice,
+            // under the text and keys.
             return PetCover(
               active: dictating,
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(leading == null ? 18 : _keyGap, _keyGap, _keyGap, _keyGap),
-                child: content,
-              ),
+              child: voice == null
+                  ? padded
+                  : Stack(
+                      children: [
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: VoiceBeam(
+                              active: dictating,
+                              level: voice.level,
+                              levelScale: voice.engine == VoiceEngine.system
+                                  ? VoiceLevelScale.linear
+                                  : VoiceLevelScale.playback,
+                              borderRadius: widget.footer != null && _open.value > 0.5 ? AppShape.lg : AppShape.xl,
+                              child: const SizedBox.expand(),
+                            ),
+                          ),
+                        ),
+                        padded,
+                      ],
+                    ),
             );
           },
         ),

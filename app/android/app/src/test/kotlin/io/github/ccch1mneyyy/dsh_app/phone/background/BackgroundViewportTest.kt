@@ -21,14 +21,6 @@ class BackgroundViewportTest {
         assertEquals(BackgroundPolicy.Viewport.LANDSCAPE, BackgroundPolicy.Viewport.parse("landscape"))
     }
 
-    @Test fun landscapeRequiresExactAdvertisedVersionAndPortraitRetainsOldPeerCompatibility() {
-        for (version in listOf(null, 0, 2, "1", 1L, 1.0, true)) {
-            assertFalse(BackgroundPolicy.supportsViewport(BackgroundPolicy.Viewport.LANDSCAPE, version))
-            assertTrue(BackgroundPolicy.supportsViewport(BackgroundPolicy.Viewport.PORTRAIT, version))
-        }
-        assertTrue(BackgroundPolicy.supportsViewport(BackgroundPolicy.Viewport.LANDSCAPE, 1))
-    }
-
     @Test fun oldAspectRequestsKeepTheirPortraitSemantics() {
         assertArrayEquals(intArrayOf(720, 1600), BackgroundPolicy.displaySize(720, 9, 20))
         assertArrayEquals(intArrayOf(720, 1600), BackgroundPolicy.displaySize(720, 20, 9))

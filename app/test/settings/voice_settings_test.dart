@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/state/voice_settings.dart';
 import 'package:dsh_app/ui/settings/voice_settings_page.dart';
@@ -59,7 +61,12 @@ void main() {
           expect(tester.getRect(row).left, greaterThanOrEqualTo(0));
           expect(tester.getRect(row).right, lessThanOrEqualTo(320));
         }
-        await tester.tap(rows.last);
+        // Mid-screen: at the top it would sit under the page's floating header.
+        unawaited(
+          Scrollable.ensureVisible(tester.element(find.byKey(const ValueKey('voice-mode-engine'))), alignment: 0.5),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('voice-mode-engine')));
         await tester.pumpAndSettle();
         final container = ProviderScope.containerOf(tester.element(find.byType(VoiceSettingsPage)));
         expect(container.read(voiceSettingsProvider), VoiceMode.engine);

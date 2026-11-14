@@ -30,11 +30,14 @@ const companionLogYouTone = Color(0xFF9FD8F2);
 /// One line of the log.
 @immutable
 class CompanionLogEntry {
-  const CompanionLogEntry.her(this.text) : speaker = CompanionLogSpeaker.her, code = false;
-  const CompanionLogEntry.you(this.text) : speaker = CompanionLogSpeaker.you, code = false;
+  const CompanionLogEntry.her(this.text, {this.who, this.tone}) : speaker = CompanionLogSpeaker.her, code = false;
+  const CompanionLogEntry.you(this.text) : speaker = CompanionLogSpeaker.you, code = false, who = null, tone = null;
 
   /// What she did, not said: [text] is the verb and what it was done to.
-  const CompanionLogEntry.did(this.text, {this.code = false}) : speaker = CompanionLogSpeaker.narration;
+  const CompanionLogEntry.did(this.text, {this.code = false})
+    : speaker = CompanionLogSpeaker.narration,
+      who = null,
+      tone = null;
 
   final CompanionLogSpeaker speaker;
   final String text;
@@ -42,12 +45,22 @@ class CompanionLogEntry {
   /// Narration whose subject is a command or a path (set in monospace).
   final bool code;
 
-  @override
-  bool operator ==(Object other) =>
-      other is CompanionLogEntry && other.speaker == speaker && other.text == text && other.code == code;
+  /// Who says a line of hers when it is someone other than [CompanionLog.name]
+  /// (the tavern: one of a group, the narrator), and their colour; null: her.
+  final String? who;
+  final Color? tone;
 
   @override
-  int get hashCode => Object.hash(speaker, text, code);
+  bool operator ==(Object other) =>
+      other is CompanionLogEntry &&
+      other.speaker == speaker &&
+      other.text == text &&
+      other.code == code &&
+      other.who == who &&
+      other.tone == tone;
+
+  @override
+  int get hashCode => Object.hash(speaker, text, code, who, tone);
 
   @override
   String toString() => '${speaker.name}: $text';
@@ -297,7 +310,7 @@ class _CompanionLogState extends State<CompanionLog> {
                     herTone: widget.herTone,
                     youTone: widget.youTone,
                     // A speaker's name only where the speaker changes.
-                    named: before == null || before.speaker != entry.speaker,
+                    named: before == null || before.speaker != entry.speaker || before.who != entry.who,
                     first: before == null,
                   );
                 },
@@ -409,7 +422,8 @@ class _LogLine extends StatelessWidget {
       );
     }
     final her = entry.speaker == CompanionLogSpeaker.her;
-    final who = her ? name : l10n.companionLogYou;
+    final who = her ? (entry.who ?? name) : l10n.companionLogYou;
+    final tone = her ? (entry.tone ?? herTone) : youTone;
     return Padding(
       padding: EdgeInsets.only(top: gap),
       child: Semantics(
@@ -424,7 +438,7 @@ class _LogLine extends StatelessWidget {
                 child: Text(
                   who,
                   style: theme.textTheme.labelLarge?.copyWith(
-                    color: her ? herTone : youTone,
+                    color: tone,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.6,
                   ),

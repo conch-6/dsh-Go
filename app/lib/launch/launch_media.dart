@@ -41,10 +41,11 @@ abstract class LaunchMedia extends ChangeNotifier {
 
   /// The size to decode a [width] × [height] picture at so it fills or fits [screen] without
   /// waste; never larger than the file.
-  static ui.TargetImageSize targetSize(int width, int height, Size screen, LaunchFit fit) {
+  static ui.TargetImageSize targetSize(int width, int height, Size screen, LaunchFit fit, {double zoom = 1}) {
     final sx = screen.width / width;
     final sy = screen.height / height;
-    final scale = fit == LaunchFit.fill ? (sx > sy ? sx : sy) : (sx < sy ? sx : sy);
+    final z = fit == LaunchFit.fill ? zoom.clamp(1.0, CustomLaunch.maxZoom) : 1.0;
+    final scale = (fit == LaunchFit.fill ? (sx > sy ? sx : sy) : (sx < sy ? sx : sy)) * z;
     if (scale >= 1) return ui.TargetImageSize(width: width, height: height);
     return ui.TargetImageSize(
       width: (width * scale).ceil().clamp(1, width),
@@ -99,7 +100,7 @@ class _FramesMedia extends LaunchMedia {
     final buffer = await ui.ImmutableBuffer.fromFilePath(custom.path);
     final codec = await ui.instantiateImageCodecWithSize(
       buffer,
-      getTargetSize: (w, h) => LaunchMedia.targetSize(w, h, screen, custom.fit),
+      getTargetSize: (w, h) => LaunchMedia.targetSize(w, h, screen, custom.fit, zoom: custom.zoom),
     );
     try {
       final first = await codec.getNextFrame();

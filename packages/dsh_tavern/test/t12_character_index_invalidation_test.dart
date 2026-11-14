@@ -51,12 +51,13 @@ void main() {
       }
     });
     expect(fault.hiddenLookups, greaterThan(0), reason: 'The real update must reach the selected lookup boundary.');
+    final failure = error;
     // Collect the actual public and disk outcome before asserting. On the old
     // product this is a successful After edit with a still-readable Before
     // summary, not a timeout or a failure to enter the injected boundary.
     final observed = <String, Object?>{
       'returnedName': returned?.name,
-      'receivedExpectedError': identical(error, expectedError),
+      'receivedExpectedError': failure is TavernAuthoringException && identical(failure.cause, expectedError),
       'sourceName': ((await _json(card))['data']! as Map<String, Object?>)['name'],
       'indexName': (await _json(index))['name'],
       'listedName': (await engine.watchCharacters().first).single.name,
@@ -72,6 +73,13 @@ void main() {
       'detailName': 'Before',
       'fieldsName': 'Before',
     }, reason: 'Index invalidation did not complete. Error: $error; IO: ${fault.log.join(' -> ')}');
+    expect(
+      error,
+      isA<TavernAuthoringException>()
+          .having((error) => error.code, 'code', 'resource_write_failed')
+          .having((error) => error.receipt?.state, 'state', TavernAuthoringOperationState.notAdopted)
+          .having((error) => error.receipt?.committed, 'committed', false),
+    );
     expect(await card.readAsBytes(), orderedEquals(cardBefore));
     expect(await original.readAsBytes(), orderedEquals(originalBefore));
     expect(await index.readAsBytes(), orderedEquals(indexBefore));

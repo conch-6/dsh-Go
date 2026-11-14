@@ -171,13 +171,19 @@ void main() {
     expect(find.byKey(const ValueKey('tavern-stage-turn-none')), findsOneWidget);
   });
 
-  testWidgets('wide, 舞台 stands beside the story and reads each new turn', (tester) async {
+  testWidgets('wide, 舞台 stands beside the story; 本回合 is read when shown, and again each new turn', (tester) async {
     final tavern = _Recorded();
     final chat = await _open(tester, tavern, size: const Size(1100, 800));
     expect(find.byType(TavernStagePanel), findsOneWidget);
     expect(find.byKey(const ValueKey('bot-action')), findsNothing); // no key needed
     expect(find.byKey(const ValueKey('bot-details')), findsOneWidget);
+    // 本局 first: a whole turn's prompt is not read for it.
+    expect(tavern.reads, 0);
+
+    await tester.tap(find.descendant(of: find.byKey(const ValueKey('tavern-stage-tabs')), matching: find.text('本回合')));
+    await tester.pumpAndSettle();
     final before = tavern.reads;
+    expect(before, greaterThan(0));
 
     await tester.runAsync(() => tavern.send(chat, '外面怎么了？').drain<void>());
     await tester.pumpAndSettle();

@@ -60,6 +60,11 @@ final class GenerateChoice extends PlusChoice {
   const GenerateChoice();
 }
 
+/// 「语音通话」: a call with this conversation (speech/call/).
+final class CallChoice extends PlusChoice {
+  const CallChoice();
+}
+
 /// A plugin's tool: the caller runs it, in front of the composer.
 final class NativeToolChoice extends PlusChoice {
   const NativeToolChoice(this.action);
@@ -79,9 +84,15 @@ abstract final class PlusPanelMetrics {
 }
 
 /// The ＋ panel. [files] false (DSH Remote stages no files) leaves 文件 out;
-/// [generate] adds 生成; [sessionId] adds 本对话 (a new chat has no
-/// conversation to set yet).
-Future<PlusChoice?> showPlusPanel(BuildContext context, {bool files = true, bool generate = false, String? sessionId}) {
+/// [generate] adds 生成; [call] adds 语音通话; [sessionId] adds 本对话 (a new
+/// chat has no conversation to set yet).
+Future<PlusChoice?> showPlusPanel(
+  BuildContext context, {
+  bool files = true,
+  bool generate = false,
+  bool call = false,
+  String? sessionId,
+}) {
   return showAppSheet<PlusChoice>(
     context,
     isScrollControlled: true,
@@ -89,7 +100,7 @@ Future<PlusChoice?> showPlusPanel(BuildContext context, {bool files = true, bool
       top: false,
       child: SingleChildScrollView(
         child: SheetNavigator(
-          root: (_) => _PlusRoot(files: files, generate: generate, sessionId: sessionId),
+          root: (_) => _PlusRoot(files: files, generate: generate, call: call, sessionId: sessionId),
         ),
       ),
     ),
@@ -111,10 +122,11 @@ Future<void> showPermissionSheet(BuildContext context, String sessionId) {
 }
 
 class _PlusRoot extends ConsumerWidget {
-  const _PlusRoot({required this.files, required this.generate, required this.sessionId});
+  const _PlusRoot({required this.files, required this.generate, required this.call, required this.sessionId});
 
   final bool files;
   final bool generate;
+  final bool call;
   final String? sessionId;
 
   @override
@@ -127,6 +139,7 @@ class _PlusRoot extends ConsumerWidget {
       (AttachChoice(AttachSource.camera), AppIcons.camera, l10n.chatTakePhoto, 2),
       if (files) (AttachChoice(AttachSource.files), AppIcons.files, l10n.chatFile, 4),
       if (generate) (const GenerateChoice(), AppIcons.generateMedia, l10n.mediaGenerateTile, 6),
+      if (call) (const CallChoice(), AppIcons.call, l10n.speechCallTile, 1),
     ];
     return Column(
       mainAxisSize: MainAxisSize.min,

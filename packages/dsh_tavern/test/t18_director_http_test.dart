@@ -141,7 +141,7 @@ void main() {
     expect(mainBody['frequency_penalty'], 0.4);
     expect(mainBody['stop'], ['MAIN_STOP_SENTINEL']);
     expect(mainBody['max_tokens'], 73);
-    expect(_rows(mainBody['tools']).map((tool) => _map(tool['function'])['name']), ['update_state']);
+    expect(_rows(mainBody['tools']).map((tool) => _map(tool['function'])['name']), ['update_state', 'roll']);
 
     h.json(_textCompletion('_CONTINUED'));
     final continued = await h.engine.continueReply(h.chatId, node.nodeId).toList();

@@ -26,7 +26,16 @@ Tap the plus button next to the composer and choose **Photos**, **Take photo** o
 
 Tap an image to view it full screen. Pinch to zoom in or out, up to 8x; double-tap to zoom to 2.5x around the touch point, then double-tap again to fit. Swipe left or right through images in the same attachment group, reply or tool output; the page count is shown. Workspace and web images in a reply form separate groups. While zoomed in, dragging pans the picture instead of turning pages; return to fit before swiping. Save and the long-press menu apply to the current picture.
 
-When the composer is empty and speech recognition is available, the send button becomes a microphone. Tap it and speak; your words fill the composer so you can check them before sending. When the recognition service isn't available, **Change** on the notice opens the voice input settings.
+When the composer is empty and speech recognition is available, the send button becomes a microphone. Tap it and speak; your words fill the composer so you can check them before sending. When you're signed in to DeepSeek or have an API key, DeepSeek's recognizer is used by default (the recording is sent to DeepSeek; you're told the first time); otherwise the voice model or the phone's service. When the recognition service isn't available, **Change** on the notice opens the voice settings.
+
+## Read aloud and voice calls
+
+Under each reply there is a **Read aloud** key: tap it to hear the reply, tap again to stop. It's also in the reply's long-press menu, and in the tavern when you long-press a character's message. Code blocks, tables and link addresses are left out. DeepSeek's voice is used by default, paid by your signed-in DeepSeek account, or the API key in Settings when signed out. To use the phone's own voice or another service:
+
+<!-- nav: commonSettings,voiceSettingsTitle,speechVoiceTitle -->
+`Settings › Voice › Reading voice`
+
+**Voice call** in the plus panel opens a call: just speak, pause, and it is sent; the answer is read while it is written. Start talking while the AI speaks and it stops to listen (turn off **Interrupt by speaking** in Settings); tap the light in the middle to skip an answer. At the bottom are **Mute**, **Hang up** and **Speaker** / **Earpiece**. Approvals and questions appear on the call page. The key at the top right changes the **Call background**: **Deep sea**, **My picture**, or your **Companion** from the companion room, who speaks along with the voice. Calls end when the app goes to the background.
 
 ## Create images and video
 

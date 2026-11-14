@@ -818,6 +818,7 @@ class _Model extends TavernModelClient {
     required TavernModelConfig config,
     required _Json body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) {
     final names = _toolNames(body);
     final kind = names.contains(_secret)

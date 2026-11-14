@@ -143,10 +143,55 @@ final class RegexEngine {
     num? depth,
     String? characterOverride,
     RegexMacroExpansion? expand,
+  }) => _apply(
+    input,
+    placement: placement,
+    phase: phase,
+    isEdit: isEdit,
+    depth: depth,
+    characterOverride: characterOverride,
+    expand: expand,
+  );
+
+  /// Runs the ordinary synchronous phase once while recording its real skips
+  /// and replacements. This is not the protected display-worker path.
+  RegexDisplayResult applyWithDiagnostics(
+    String input, {
+    required int placement,
+    RegexPhase phase = RegexPhase.prompt,
+    bool isEdit = false,
+    num? depth,
+    String? characterOverride,
+    RegexMacroExpansion? expand,
+  }) {
+    final trace = _RegexRunTrace();
+    final text = _apply(
+      input,
+      placement: placement,
+      phase: phase,
+      isEdit: isEdit,
+      depth: depth,
+      characterOverride: characterOverride,
+      expand: expand,
+      trace: trace,
+    );
+    return RegexDisplayResult(text: text, warnings: trace.warnings, replacements: trace.replacements);
+  }
+
+  String _apply(
+    String input, {
+    required int placement,
+    required RegexPhase phase,
+    required bool isEdit,
+    num? depth,
+    String? characterOverride,
+    RegexMacroExpansion? expand,
+    _RegexRunTrace? trace,
   }) {
     if (!enabled || input.isEmpty) return input;
     var result = input;
-    for (final script in _scripts) {
+    for (var index = 0; index < _scripts.length; index++) {
+      final script = _scripts[index];
       final eligible = switch (phase) {
         RegexPhase.writeBack => !script.markdownOnly && !script.promptOnly,
         RegexPhase.prompt => script.promptOnly,
@@ -161,7 +206,14 @@ final class RegexEngine {
         if (minimum != null && minimum >= -1 && depth < minimum) continue;
         if (maximum != null && maximum >= 0 && depth > maximum) continue;
       }
-      result = runScript(script, result, characterOverride: characterOverride, expand: expand);
+      result = _runScript(
+        script,
+        result,
+        characterOverride: characterOverride,
+        expand: expand,
+        trace: trace,
+        ruleIndex: index,
+      );
     }
     return result;
   }
@@ -227,7 +279,6 @@ final class RegexEngine {
           script.disabled ||
           (isEdit && !script.runOnEdit) ||
           !script.placement.contains(placement) ||
-          script.findRegex.isEmpty ||
           result.isEmpty) {
         continue;
       }
@@ -243,6 +294,7 @@ final class RegexEngine {
         warn(script, index, 'invalid-script', '正则条目的已知字段类型不兼容，已跳过。');
         continue;
       }
+      if (script.findRegex.isEmpty) continue;
       if (rules >= limits.maxRules) {
         warn(script, index, 'rule-limit', '本次显示已达规则上限，后续规则跳过。');
         break;
@@ -343,8 +395,23 @@ final class RegexEngine {
 
   /// Direct execution, like ST's /regex command: placement/phase/edit/depth
   /// selection is bypassed, while disabled and invalid-pattern guards remain.
-  String runScript(RegexScript script, String input, {String? characterOverride, RegexMacroExpansion? expand}) {
-    if (!script._valid || script.disabled || script.findRegex.isEmpty || input.isEmpty) return input;
+  String runScript(RegexScript script, String input, {String? characterOverride, RegexMacroExpansion? expand}) =>
+      _runScript(script, input, characterOverride: characterOverride, expand: expand);
+
+  String _runScript(
+    RegexScript script,
+    String input, {
+    String? characterOverride,
+    RegexMacroExpansion? expand,
+    _RegexRunTrace? trace,
+    int ruleIndex = -1,
+  }) {
+    if (script.disabled || input.isEmpty) return input;
+    if (!script._valid) {
+      trace?.warn(script, ruleIndex, 'invalid-script', 'Regex known fields are incompatible; this rule was skipped.');
+      return input;
+    }
+    if (script.findRegex.isEmpty) return input;
     final substitute = expand ?? _identityExpansion;
     final pattern = switch (script.substituteRegex) {
       1 => substitute(script.findRegex),
@@ -352,11 +419,20 @@ final class RegexEngine {
       _ => script.findRegex,
     };
     final compiled = _compile(pattern);
-    if (compiled == null) return input;
+    if (compiled == null) {
+      trace?.warn(
+        script,
+        ruleIndex,
+        'unsupported-pattern',
+        'The expanded regex could not be compiled; this rule was skipped.',
+      );
+      return input;
+    }
     final matches = compiled.global ? compiled.regex.allMatches(input) : compiled.regex.allMatches(input).take(1);
     final output = StringBuffer();
     var previousEnd = 0;
     for (final match in matches) {
+      if (trace != null) trace.replacements++;
       output.write(input.substring(previousEnd, match.start));
       final template = script.replaceString.replaceAll(_matchMacro, r'$0');
       final replacement = _replaceTemplate(
@@ -408,6 +484,22 @@ final class RegexEngine {
     if (_cache.length >= 1000) _cache.remove(_cache.keys.first);
     _cache[input] = parsed;
     return parsed;
+  }
+}
+
+final class _RegexRunTrace {
+  final warnings = <RegexDisplayWarning>[];
+  int replacements = 0;
+  void warn(RegexScript script, int index, String reason, String message) {
+    warnings.add(
+      RegexDisplayWarning(
+        ruleId: script.id,
+        ruleName: script.scriptName,
+        ruleIndex: index,
+        reason: reason,
+        message: message,
+      ),
+    );
   }
 }
 

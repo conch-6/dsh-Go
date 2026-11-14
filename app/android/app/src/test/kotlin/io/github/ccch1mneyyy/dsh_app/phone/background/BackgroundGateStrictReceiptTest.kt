@@ -51,81 +51,27 @@ class BackgroundGateStrictReceiptTest {
         assertNull(state.snapshot.gateDetail)
     }
 
-    @Test fun cancelledProbeCannotPublishButStillRequiresARealFreshProbeAfterCleanup() {
+    @Test fun cancelledProbeCannotPublish() {
         var live = true
         val probe = state.begin { live }!!
-        state.requireRetest()
         live = false
         state.cancelUnwantedPending()
         assertSame(BackgroundGateState.Update.Cancelled, accept(probe))
-        assertFalse(state.completedWithCleanup(probe))
-        val observed = state.snapshot
-        state.connected(observed, Any())
-        state.reset()
-        assertTrue(state.needsRetest)
-        val fresh = state.begin { true }!!
-        assertTrue(accept(fresh) is BackgroundGateState.Update.Accepted)
-        assertTrue(state.completedWithCleanup(fresh))
-        assertFalse(state.needsRetest)
-    }
-
-    @Test fun aProbeRejectedBeforeAllocationReleasesTheRetestBarrier() {
-        state.requireRetest()
-        val probe = state.begin { true }!!
-        assertTrue(state.needsRetest)
-        assertTrue(state.concludedWithoutAllocation(probe))
-        assertFalse(state.needsRetest)
-        state.requireRetest()
-        val stale = state.begin { true }!!
-        val current = state.begin { true }!!
-        assertFalse(state.concludedWithoutAllocation(stale))
-        assertTrue(state.needsRetest)
-        assertTrue(state.concludedWithoutAllocation(current))
-        assertFalse(state.needsRetest)
-    }
-
-    @Test fun failedInputCheckCanFinishCleanupWithoutBecomingSuccessful() {
-        state.requireRetest()
-        val probe = state.begin { true }!!
-        assertTrue(accept(probe, ok = false, inject = null, error = "inputWindowNotReady")
-            is BackgroundGateState.Update.Accepted)
-        assertTrue(state.needsRetest)
-        assertTrue(state.completedWithCleanup(probe))
-        assertFalse(state.needsRetest)
-        assertEquals(true, state.snapshot.trustedDisplayOk)
-        assertNull(state.snapshot.injectOk)
-        assertEquals("inputWindowNotReady", state.snapshot.injectError)
-    }
-
-    @Test fun failedConnectionBeforeAllocationKeepsItsErrorButNotTheRetestBarrier() {
-        state.requireRetest()
-        val probe = state.begin { true }!!
-        assertTrue(state.failed(probe, 42))
-        assertTrue(state.concludedWithoutAllocation(probe))
-        assertFalse(state.needsRetest)
-        assertEquals(42, state.snapshot.connectionError)
         assertNull(state.snapshot.trustedDisplayOk)
-        assertNull(state.snapshot.injectOk)
     }
 
-    @Test fun failedAllocationCanFinishCleanupWithoutErasingItsError() {
-        state.requireRetest()
-        val probe = state.begin { true }!!
-        assertTrue(state.failed(probe, 43, Any()))
-        assertTrue(state.completedWithCleanup(probe))
-        assertFalse(state.needsRetest)
-        assertEquals(43, state.snapshot.connectionError)
-    }
-
-    @Test fun acceptedProbeDoesNotClearRetestUntilItsActualCleanupConsumerCompletes() {
-        val old = state.begin { true }!!
-        state.requireRetest()
-        assertTrue(accept(old) is BackgroundGateState.Update.Accepted)
-        assertTrue(state.needsRetest)
-        val current = state.begin { true }!!
-        assertFalse(state.completedWithCleanup(old))
-        assertTrue(state.needsRetest)
-        assertTrue(accept(current) is BackgroundGateState.Update.Accepted)
-        assertTrue(state.completedWithCleanup(current))
+    @Test fun aFailedConnectIsRememberedUntilTheNextConnectProbeOrReset() {
+        state.connectionFailed(42) { true }
+        assertEquals(42, state.snapshot.connectionError)
+        state.connected(state.snapshot, Any())
+        assertNull(state.snapshot.connectionError)
+        state.connectionFailed(43) { false } // A revoked UI attempt publishes nothing.
+        assertNull(state.snapshot.connectionError)
+        state.connectionFailed(44) { true }
+        state.begin { true }
+        assertNull(state.snapshot.connectionError)
+        state.connectionFailed(45) { true }
+        state.reset()
+        assertNull(state.snapshot.connectionError)
     }
 }

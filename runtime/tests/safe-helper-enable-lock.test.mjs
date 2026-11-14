@@ -33,15 +33,15 @@ function run(t, { uninstall = false, names = ['local-plugin'] } = {}) {
   const exit = {};
   // Schedule an existing writer's commit immediately before the helper acquires
   // the real file lock. All manifest reads/writes use the actual filesystem.
-  const scheduledFs = { ...fs, writeFileSync(path, ...args) {
-    if (uninstall && path === file + '.lock' && !completed) {
+  const scheduledFs = { ...fs, symlinkSync(target, link, ...args) {
+    if (uninstall && link === file + '.lock' && !completed) {
       assert.ok(fs.existsSync(file + '.lock'));
       delete manifest.dependencies['local-plugin'];
       fs.writeFileSync(file, JSON.stringify(manifest));
       fs.unlinkSync(file + '.lock');
       completed = true;
     }
-    return fs.writeFileSync(path, ...args);
+    return fs.symlinkSync(target, link, ...args);
   } };
   try {
     runInNewContext(script, {
@@ -64,6 +64,8 @@ function run(t, { uninstall = false, names = ['local-plugin'] } = {}) {
         exit: code => { status = code; throw exit; }, kill: process.kill.bind(process) },
     });
   } catch (error) { if (error !== exit) throw error; }
+  assert.throws(() => fs.lstatSync(file + '.lock'), { code: 'ENOENT' });
+  assert.deepEqual(fs.readdirSync(join(home, 'profiles/web')).filter(name => name.startsWith('.dsh-helper-lock-')), []);
   return { status, stderr, stdout, completed, manifest: JSON.parse(fs.readFileSync(file, 'utf8')) };
 }
 
@@ -106,5 +108,6 @@ test('real missing-package exit releases the manifest lock without changing its 
   assert.match(result.stderr, /missing-plugin.*没有安装/);
   assert.doesNotMatch(result.stdout, /已启用/);
   assert.equal(fs.readFileSync(file, 'utf8'), before);
-  assert.equal(fs.existsSync(file + '.lock'), false, 'real process.exit must not leave a dead-PID lock');
+  assert.throws(() => fs.lstatSync(file + '.lock'), { code: 'ENOENT' }, 'real process.exit must not leave a lock name');
+  assert.deepEqual(fs.readdirSync(join(home, 'profiles/web')).filter(name => name.startsWith('.dsh-helper-lock-')), []);
 });

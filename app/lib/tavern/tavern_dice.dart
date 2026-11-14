@@ -38,6 +38,18 @@ class TavernDice {
   );
 
   TavernRoll roll(math.Random random) => TavernRoll(this, [for (var i = 0; i < count; i++) 1 + random.nextInt(sides)]);
+
+  /// [notation] (1d20, 2d6+1, d8-2) back to the dice; null when it is not
+  /// that.
+  static TavernDice? parse(String notation) {
+    final m = RegExp(r'^(\d*)d(\d+)([+-]\d+)?$').firstMatch(notation);
+    if (m == null) return null;
+    return TavernDice(
+      count: m.group(1)!.isEmpty ? 1 : int.parse(m.group(1)!),
+      sides: int.parse(m.group(2)!),
+      modifier: m.group(3) == null ? 0 : int.parse(m.group(3)!),
+    );
+  }
 }
 
 /// One throw: each die's face, and the total with the modifier.

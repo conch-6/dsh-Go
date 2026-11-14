@@ -184,12 +184,11 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     }
     private val sessions = PhoneTaskSessions(SystemClock::elapsedRealtime, taskIds::incrementAndGet, ::createSessionCore, tasks, core, ::emitStatus,
         { task -> if (task.sessionId != null) onSessionTask(task.tasks, task.tasks.snapshot()) },
-        settleResources = { taskId -> check(background.endTask(taskId)) { "Background release is unconfirmed" } },
+        settleResources = { taskId -> background.endTask(taskId) },
         dispatchCleanup = { action ->
             if (Looper.myLooper() == Looper.getMainLooper()) cleanupIo.execute(action) else action()
         },
         journal = taskJournal,
-        recoveryAdmission = { background.resourceAdmission() },
         backgroundCapacity = { background.parallelism().effectiveLimit },
         screenRecoveryReady = { isEnabled() && !isLocked() },
         prepareBackground = { task, owner -> background.prepareForTask(owner) { task.tasks.isCurrent(owner) } },
@@ -295,7 +294,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
             override fun notifyFix(kind: String) = notifyFixFor(task, kind)
             override fun beforeHandoff(screen: PhoneScreen, owner: PhoneTasks.Owner): String? {
                 if (screen != PhoneScreen.BACKGROUND) return null
-                check(background.endTask(owner.taskId)) { "后台屏释放尚未确认，暂不能交还主屏。" } // l10n:keep agent handoff failure
+                background.endTask(owner.taskId)
                 return "后台屏已释放。请用户在主屏完成操作，继续前先重新读取主屏。" // l10n:keep agent handoff result
             }
         }
@@ -549,11 +548,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         val record = sessions.task(owner.taskId)?.takeIf { it.tasks === task } ?: return false
         return sessions.stop(record, owner, reason)
     }
-    fun retryTaskCleanup(taskId: Long): Boolean {
-        // A lost original peer cannot answer RELEASE; only the verified recovery receipt completes that driver.
-        if (background.lostTaskId() == taskId) background.retryBackgroundRecovery()
-        return sessions.retryCleanup(taskId)
-    }
+    fun retryTaskCleanup(taskId: Long): Boolean = sessions.retryCleanup(taskId)
     fun resumeTask(taskId: Long): Boolean {
         val record = sessions.task(taskId) ?: return false
         val expected = record.tasks.snapshot()
@@ -791,30 +786,6 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     fun retryTaskInterruptionStorage(): Boolean = sessions.retryJournalStorage().also { emitStatus() }
 
-    /** This is a resource recovery request, never the logical interruption acknowledgement. */
-    fun retryBackgroundRecovery(): Map<String, Any?> {
-        try {
-            settleStoredTask()?.let { return it }
-            if (!background.retryStoredGateCleanup() || !selfCheck.retryStoredCleanup())
-                return mapOf("ok" to false, "reason" to "busy")
-            // A lost original peer's verified receipt completes only its driver; return that slot here too.
-            val recovered = background.retryBackgroundRecovery()
-            return settleStoredTask() ?: recovered
-        } finally { emitStatus() }
-    }
-
-    private fun settleStoredTask(): Map<String, Any?>? {
-        for (taskId in background.pendingStoredTaskIds()) {
-            // The original driver already has a physical completion proof. Persist its clear
-            // and return that exact slot; no repeated RELEASE or lookup by a journal payload.
-            if (!background.endTask(taskId)) return mapOf("ok" to false, "reason" to "storageUnavailable")
-            // Only an already eligible ended/retiring scope releases its registry leases.
-            // An active failed-handoff task intentionally keeps its task/App ownership.
-            sessions.retryCleanup(taskId)
-        }
-        return null
-    }
-
     /** Capture on the same lane as events; never occupy the plugin control queue while waiting. */
     fun status(done: (Result<Map<String, Any?>>) -> Unit) {
         ticker.execute {
@@ -1017,7 +988,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     override fun beforeHandoff(screen: PhoneScreen, owner: PhoneTasks.Owner): String? {
         if (screen != PhoneScreen.BACKGROUND) return null
-        check(background.endTask(owner.taskId)) { "后台屏释放尚未确认，暂不能交还主屏。" } // l10n:keep agent handoff failure
+        background.endTask(owner.taskId)
         // l10n:keep agent stop reason
         return "后台屏已释放。请用户在主屏完成操作，继续前先重新读取主屏（s 开头的屏幕号）。"
     }

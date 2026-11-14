@@ -3,6 +3,7 @@ package io.github.ccch1mneyyy.dsh_app.runtime
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 
 /** Enabled bundles, installed packages and settings layer of the main profile at one moment. */
@@ -213,26 +214,34 @@ object LastKnownGood {
     private fun <T> withLock(file: File, busyConfig: String, block: () -> T): T {
         val lock = File(file.path + ".lock")
         val deadline = System.currentTimeMillis() + 3000
-        while (true) {
-            if (lock.createNewFile()) {
-                break
-            }
-            val holder = try {
-                lock.readText().trim().toIntOrNull()
-            } catch (_: Exception) {
-                null
-            }
-            if (holder != null && !File("/proc/$holder").exists()) {
-                if (lock.delete()) continue
-            }
-            if (System.currentTimeMillis() > deadline) throw IllegalStateException(busyConfig)
-            Thread.sleep(50)
-        }
+        val owner = File.createTempFile(".dsh-lkg-lock-", ".pid", file.parentFile)
+        var published = false
         try {
-            lock.writeText("${android.os.Process.myPid()}\n")
+            // Readers follow the relative link, which is published only after its PID is complete.
+            owner.writeText("${android.os.Process.myPid()}\n")
+            while (true) {
+                try {
+                    Files.createSymbolicLink(lock.toPath(), owner.toPath().fileName)
+                    published = true
+                    break
+                } catch (_: FileAlreadyExistsException) {
+                    // Keep the existing PID read and stale-lock takeover rules.
+                }
+                val holder = try {
+                    lock.readText().trim().toIntOrNull()
+                } catch (_: Exception) {
+                    null
+                }
+                if (holder != null && !File("/proc/$holder").exists()) {
+                    if (lock.delete()) continue
+                }
+                if (System.currentTimeMillis() > deadline) throw IllegalStateException(busyConfig)
+                Thread.sleep(50)
+            }
             return block()
         } finally {
-            lock.delete()
+            // A lock we could not unlink must keep its readable PID record.
+            if (!published || lock.delete()) owner.delete()
         }
     }
 

@@ -4,6 +4,18 @@ library;
 
 import 'dart:convert';
 
+/// Internal shared cadence parsing. The native caller retains its admission,
+/// counter, tick write and issue-publication timing.
+({int every, bool invalid}) directorEvery({
+  Map<String, Object?> settings = const {},
+  Map<String, Object?> card = const {},
+}) {
+  final raw = settings.containsKey('every') ? settings['every'] : card['every'];
+  final present = settings.containsKey('every') || card.containsKey('every');
+  final valid = raw is int && raw >= 1 && raw <= 1000;
+  return (every: valid ? raw : 1, invalid: present && !valid);
+}
+
 /// The director plans the next turn; it does not impersonate the player or
 /// obtain permission to execute a proposed event by naming it in this tool.
 const directorSystemPrompt = '''你是后台剧情导演，只提供下一回合的结构化规划。

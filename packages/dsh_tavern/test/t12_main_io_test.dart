@@ -16,6 +16,39 @@ final _oldProductProbe = Platform.environment['DSH_T12_MAIN_IO_OLD_PRODUCT_PROBE
 const _deadline = Duration(seconds: 10);
 
 void main() {
+  test('stop releases a cold policy read while close still owns its real I/O', () async {
+    final h = await _open();
+    final before = (await h.engine.path(h.chatId)).map((message) => message.nodeId).toList();
+    await h.reopen();
+    final character = '${h.root.path}/characters/${h.characterId}';
+    final log = _eventLog();
+    final card = _ReadGate('policy', log);
+    final original = _ReadGate('original', log);
+    await _withGates(
+      h,
+      {'$character/card.json': card, '$character/original.json': original},
+      drain: () async {
+        if (card.entered.isCompleted) await card.finished.future;
+      },
+      body: () async {
+        final events = T24Events(h.engine.send(h.chatId, 'stop during policy admission'));
+        await card.entered.future.timeout(_deadline);
+        h.engine.stop(h.chatId);
+        await _cancelled(events, log);
+        expect(card.finished.isCompleted, isFalse);
+        final close = _DrainReceipt<void>(h.engine.close(), 'close', [card], log);
+        await _expectReserved(h.root, log);
+        expect(close.returned, isFalse, reason: log.join(' -> '));
+        card.release();
+        await close.checked.timeout(_deadline);
+        expect(card.successfulReads, 1);
+        expect(original.constructed, isFalse);
+        expect(h.model.generated, 0);
+        await _reopenAfterDrain(h, before);
+      },
+    );
+  });
+
   test('close owns a cancelled cold main card read through its later original file read', () async {
     final h = await _open();
     final before = (await h.engine.path(h.chatId)).map((message) => message.nodeId).toList();
@@ -25,7 +58,8 @@ void main() {
     final character = '${h.root.path}/characters/${h.characterId}';
     expect(await File('$character/original.json').exists(), isTrue);
     final log = _eventLog();
-    final card = _ReadGate('card', log);
+    // Admission first reads policy authority only; gate the full detail read.
+    final card = _ReadGate('card', log, skipReads: 1);
     final original = _ReadGate('original', log);
     await _withGates(
       h,
@@ -135,7 +169,8 @@ void main() {
     final archive = File('${work.path}/after-stop.zip');
     final character = '${h.root.path}/characters/${h.characterId}';
     final log = _eventLog();
-    final card = _ReadGate('card', log);
+    // The preceding policy read does not load original.json or warm details.
+    final card = _ReadGate('card', log, skipReads: 1);
     final original = _ReadGate('original', log);
     final captureStates = <Map<String, bool>>[];
     card.onCopy = () {
@@ -312,9 +347,10 @@ Future<void> _drainBooks(_ReadGate first, _ReadGate second) async {
 }
 
 class _ReadGate {
-  _ReadGate(this.name, this.log);
+  _ReadGate(this.name, this.log, {int skipReads = 0}) : _skipReads = skipReads;
   final String name;
   final List<String> log;
+  int _skipReads;
   final entered = Completer<void>();
   final finished = Completer<void>();
   final _released = Completer<void>();
@@ -328,6 +364,10 @@ class _ReadGate {
   }
 
   Future<T> read<T>(Future<T> Function() action) async {
+    if (_skipReads > 0) {
+      _skipReads--;
+      return action();
+    }
     reads++;
     log.add('$name:read-entered');
     if (!entered.isCompleted) entered.complete();

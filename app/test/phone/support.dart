@@ -200,8 +200,6 @@ class FakePhoneNative {
   Future<Map<String, Object?>> Function(Map<String, Object?>)? onPresentPrompt;
 
   /// Gate cleanup's asynchronous native response, without rerunning a probe.
-  Future<Map<String, Object?>> Function(Map<String, Object?>)? onRetryGateCleanup;
-
   Future<bool> Function(String)? onAcknowledgeInterruption;
   Future<bool> Function()? onRetryInterruption;
 
@@ -287,8 +285,6 @@ class FakePhoneNative {
           }}};
         }
         return capacityResult;
-      case 'retryBackgroundGateCleanup':
-        return onRetryGateCleanup?.call(args) ?? results[call.method] ?? {'ok': false};
       case 'setBackgroundMode':
         final r = results[call.method] ?? {'ok': true};
         if (r['ok'] == true) {

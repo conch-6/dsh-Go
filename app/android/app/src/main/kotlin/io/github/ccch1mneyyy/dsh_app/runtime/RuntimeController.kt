@@ -491,6 +491,12 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         worker.execute {
             var launched: DshProcess? = null
             try {
+                try {
+                    installer.cleanupCommittedUpgrade()
+                } catch (e: Exception) {
+                    // The new engine is ready; a later start can retry only the retired payload.
+                    log("[dsh-app] completed engine cleanup failed: ${e.message}", "system")
+                }
                 noteDns(GuestSetup.writeResolvConf(app, installer.rootfs), DnsConfigSource.START)
                 val storage = pendingPhoneStorage && PhoneStorage.isGranted(app) && PhoneStorage.binds().isNotEmpty()
                 PhoneStorage.syncShortcut(installer.rootfs, storage)

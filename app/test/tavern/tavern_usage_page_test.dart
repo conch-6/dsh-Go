@@ -13,13 +13,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/test_fonts.dart';
 
-TavernMessage _reply(String id, int prompt, int cache, int out) => TavernMessage(
+/// A reply, written on a Wednesday at peak (02:00 UTC); [model] priced or not.
+TavernMessage _reply(String id, int prompt, int cache, int out, {String? model}) => TavernMessage(
   nodeId: id,
   role: TavernRole.character,
   speaker: '林晚',
   text: '答',
-  at: DateTime(2026),
-  reportedUsage: TavernUsage(promptTokens: prompt, cacheHitTokens: cache, completionTokens: out),
+  at: DateTime.utc(2026, 11, 11, 2),
+  reportedUsage: TavernUsage(promptTokens: prompt, cacheHitTokens: cache, completionTokens: out, model: model),
 );
 
 /// The preview with three chats: a long one, a short one, and one where the
@@ -29,7 +30,7 @@ class _Three extends PreviewTavern {
 
   static final _at = DateTime(2026, 11, 11);
   final lines = {
-    'long': [for (var i = 0; i < 4; i++) _reply('l$i', 20000, 10000, 1000)],
+    'long': [for (var i = 0; i < 4; i++) _reply('l$i', 20000, 10000, 1000, model: 'deepseek-v4-flash')],
     'short': [_reply('s0', 3000, 0, 500)],
     'quiet': [TavernMessage(nodeId: 'q0', role: TavernRole.character, speaker: '星图', text: '嗯', at: DateTime(2026))],
   };
@@ -91,6 +92,30 @@ void main() {
     );
     expect(
       find.descendant(of: find.byKey(const ValueKey('tavern-usage-long')), matching: find.text('8.4万')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('what it cost: the priced replies, added up and by chat; the others counted apart', (tester) async {
+    await _show(tester, const TavernUsagePage());
+    // Each long reply: 10000 × 0.006 + 10000 × 0.3 + 1000 × 1.2 = 4260 per million, at peak; four of them.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('tavern-usage-cost')),
+        matching: find.textContaining('约 US\$0.0170，'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('1 条回复用的模型不在价目表里，没算进费用'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('tavern-usage-long')),
+        matching: find.text('4 条回复 · 回复 4000\n约\u00a0US\$0.0170'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: find.byKey(const ValueKey('tavern-usage-short')), matching: find.text('1 条回复 · 回复 500')),
       findsOneWidget,
     );
   });

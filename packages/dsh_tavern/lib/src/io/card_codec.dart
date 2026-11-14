@@ -12,6 +12,27 @@ import 'package:image/image.dart' as image;
 
 import '../api.dart';
 import '../regex_library.dart';
+import 'authoring_text.dart';
+
+/// Internal container result. Its JSON has not acquired runtime defaults or
+/// a format upgrade and may still need an author's explicit correction.
+final class DecodedCardSeed {
+  const DecodedCardSeed({
+    required this.json,
+    required this.rawText,
+    required this.originalBytes,
+    required this.sourceFormat,
+    this.assets = const {},
+    this.png,
+  });
+
+  final Map<String, Object?> json;
+  final String rawText;
+  final Uint8List originalBytes;
+  final TavernCardFormat sourceFormat;
+  final Map<String, Uint8List> assets;
+  final Uint8List? png;
+}
 
 /// A card's complete JSON, plus the bytes its container carried.
 ///
@@ -153,6 +174,26 @@ class TavernCard {
 class CardCodec {
   const CardCodec();
 
+  /// Internal authoritative library JSON route. Validation uses a detached
+  /// runtime projection; it must not adopt `_upgrade` defaults into the stored
+  /// V3 data or replace the import container/media retained by the library.
+  Map<String, Object?> decodeAuthority(Uint8List bytes) {
+    final json = _decodeJson(bytes);
+    if (json['spec'] != 'chara_card_v3' || json['spec_version'] is! String || json['data'] is! Map<String, Object?>) {
+      throw const FormatException('Stored character authority must be a V3 envelope.');
+    }
+    _upgrade(json);
+    return json;
+  }
+
+  /// Validates a proposed authoritative envelope without returning defaults.
+  void validateAuthority(Map<String, Object?> json) {
+    if (json['spec'] != 'chara_card_v3' || json['spec_version'] is! String || json['data'] is! Map<String, Object?>) {
+      throw const FormatException('Stored character authority must be a V3 envelope.');
+    }
+    _upgrade(json);
+  }
+
   TavernCard decode(Uint8List bytes) {
     try {
       if (_startsWith(bytes, _pngSignature)) return _decodePng(bytes);
@@ -160,6 +201,32 @@ class CardCodec {
         return _decodeCharx(bytes);
       }
       return TavernCard(json: _upgrade(_decodeJson(bytes)), originalBytes: bytes);
+    } on TavernImportError {
+      rethrow;
+    } on FormatException catch (error) {
+      throw TavernImportError(error.message);
+    } on RangeError {
+      throw const TavernImportError('角色卡文件不完整。');
+    }
+  }
+
+  /// Reads the existing supported containers without adopting `_upgrade` into
+  /// the seed base. Container integrity and safe asset paths still apply.
+  DecodedCardSeed decodeSeed(Uint8List bytes) {
+    try {
+      if (_startsWith(bytes, _pngSignature)) {
+        return _readPngSeed(bytes);
+      }
+      if (_startsWith(bytes, const [0x50, 0x4b, 0x03, 0x04]) || _startsWith(bytes, const [0x50, 0x4b, 0x05, 0x06])) {
+        return _readCharxSeed(bytes);
+      }
+      final source = _decodeJsonSource(bytes);
+      return DecodedCardSeed(
+        json: source.json,
+        rawText: source.rawText,
+        originalBytes: bytes,
+        sourceFormat: TavernCardFormat.json,
+      );
     } on TavernImportError {
       rethrow;
     } on FormatException catch (error) {
@@ -215,7 +282,9 @@ class CardCodec {
     }
   }
 
-  TavernCard _decodePng(Uint8List bytes) {
+  TavernCard _decodePng(Uint8List bytes) => _projectSeed(_readPngSeed(bytes));
+
+  DecodedCardSeed _readPngSeed(Uint8List bytes) {
     final chunks = _pngChunks(bytes);
     _PngChunk? v3;
     _PngChunk? v2;
@@ -240,11 +309,20 @@ class CardCodec {
     final selected = v3 ?? v2;
     if (selected == null) throw const TavernImportError('PNG 中没有 ccv3 或 chara 角色卡。');
     // A present but corrupt ccv3 must not silently downgrade to the stale chara.
-    final json = _upgrade(_decodeJson(base64Decode(selected.text!)));
-    return TavernCard(json: json, assets: assets, png: bytes, originalBytes: bytes, sourceFormat: TavernCardFormat.png);
+    final source = _decodeJsonSource(base64Decode(selected.text!));
+    return DecodedCardSeed(
+      json: source.json,
+      rawText: source.rawText,
+      assets: assets,
+      png: bytes,
+      originalBytes: bytes,
+      sourceFormat: TavernCardFormat.png,
+    );
   }
 
-  TavernCard _decodeCharx(Uint8List bytes) {
+  TavernCard _decodeCharx(Uint8List bytes) => _projectSeed(_readCharxSeed(bytes));
+
+  DecodedCardSeed _readCharxSeed(Uint8List bytes) {
     final seen = <String>{};
     final archive = ZipDecoder().decodeBytes(
       bytes,
@@ -261,20 +339,36 @@ class CardCodec {
       },
     );
     final assets = <String, Uint8List>{};
-    Map<String, Object?>? json;
+    ({Map<String, Object?> json, String rawText})? source;
     for (final file in archive) {
       if (!file.isFile) continue;
       final content = file.readBytes();
       if (content == null || content.length != file.size) throw const FormatException('CHARX 文件不完整。');
       if (file.name == 'card.json') {
-        json = _upgrade(_decodeJson(content));
+        source = _decodeJsonSource(content);
       } else {
         assets[file.name] = Uint8List.fromList(content);
       }
     }
-    if (json == null) throw const TavernImportError('CHARX 根目录缺少 card.json。');
-    return TavernCard(json: json, assets: assets, originalBytes: bytes, sourceFormat: TavernCardFormat.charx);
+    if (source == null) {
+      throw const TavernImportError('CHARX 根目录缺少 card.json。');
+    }
+    return DecodedCardSeed(
+      json: source.json,
+      rawText: source.rawText,
+      assets: assets,
+      originalBytes: bytes,
+      sourceFormat: TavernCardFormat.charx,
+    );
   }
+
+  TavernCard _projectSeed(DecodedCardSeed seed) => TavernCard(
+    json: _upgrade(seed.json),
+    assets: seed.assets,
+    png: seed.png,
+    originalBytes: seed.originalBytes,
+    sourceFormat: seed.sourceFormat,
+  );
 
   Uint8List _encodeCharx(TavernCard card, Map<String, Object?> json) {
     final assets = {...card.assets};
@@ -353,12 +447,15 @@ void _requireAssetPath(String path) {
   if (!isSafeCardAssetPath(path)) throw const FormatException('角色卡资源必须使用目录内的相对路径。');
 }
 
-Map<String, Object?> _decodeJson(List<int> bytes) {
-  var text = utf8.decode(bytes);
+Map<String, Object?> _decodeJson(List<int> bytes) => _decodeJsonSource(bytes).json;
+
+({Map<String, Object?> json, String rawText}) _decodeJsonSource(List<int> bytes) {
+  final source = decodeAuthoringText(bytes);
+  var text = source.text;
   if (text.startsWith('\ufeff')) text = text.substring(1);
   final value = jsonDecode(text);
   if (value is! Map<String, Object?>) throw const FormatException('角色卡 JSON 必须是对象。');
-  return value;
+  return (json: value, rawText: source.rawText);
 }
 
 Map<String, Object?> _upgrade(Map<String, Object?> source) {

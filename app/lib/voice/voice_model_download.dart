@@ -25,7 +25,8 @@ class VoiceDownloadException implements Exception {
   final String? file;
 
   @override
-  String toString() => 'VoiceDownloadException(${kind.name}${status == null ? '' : ' $status'}${file == null ? '' : ' $file'})';
+  String toString() =>
+      'VoiceDownloadException(${kind.name}${status == null ? '' : ' $status'}${file == null ? '' : ' $file'})';
 }
 
 /// One file: where it goes, what it must be, where to get it (tried in order).
@@ -195,7 +196,10 @@ Future<void> _fetch(
   } on FileSystemException catch (e) {
     // ENOSPC (28) and EDQUOT (122): out of room.
     final code = e.osError?.errorCode;
-    throw VoiceDownloadException(code == 28 || code == 122 ? VoiceDownloadError.storage : VoiceDownloadError.unknown, file: name);
+    throw VoiceDownloadException(
+      code == 28 || code == 122 ? VoiceDownloadError.storage : VoiceDownloadError.unknown,
+      file: name,
+    );
   } on SocketException {
     throw VoiceDownloadException(VoiceDownloadError.network, file: name);
   } on HttpException {
@@ -242,7 +246,10 @@ class VoiceDownloadTask {
         if (message[0] == 'ok') {
           if (!done.isCompleted) done.complete();
         } else if (!done.isCompleted) {
-          final kind = VoiceDownloadError.values.firstWhere((k) => k.name == message[1], orElse: () => VoiceDownloadError.unknown);
+          final kind = VoiceDownloadError.values.firstWhere(
+            (k) => k.name == message[1],
+            orElse: () => VoiceDownloadError.unknown,
+          );
           done.completeError(VoiceDownloadException(kind, status: message[2] as int?, file: message[3] as String?));
         }
         port.close();

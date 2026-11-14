@@ -48,6 +48,9 @@ class RuntimeInstaller(
 
     fun isCurrent(): Boolean = installedVersion() == manifest.runtimeVersion
 
+    /** A current runtime skips install(), but an interrupted final cleanup can still need this. */
+    fun cleanupCommittedUpgrade() = engineUpgrade.cleanupCommitted()
+
     /**
      * Extracts the bundled rootfs; [onProgress] gets (compressedBytesRead, totalCompressedBytes).
      * Fails with [KeepFailed] when what a reset kept cannot go back; [dropKept] then gives up
@@ -61,6 +64,8 @@ class RuntimeInstaller(
         // cleanup, including when a different APK resumes this install.
         engineUpgrade.recover()
         staging.deleteRecursivelySafely()
+        if (resumeRootfsInstall(baseDir, manifest.runtimeVersion, manifest.abi, manifest.raw,
+                keepDir, dropKept, sync)) return
         val archives = manifest.archivesForInstall(Files.exists(rootfs.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS))
         checkFreeSpace(archives)
         staging.mkdirs()
@@ -166,6 +171,29 @@ internal fun requiredRuntimeInstallSpace(archives: List<RuntimeArchive>): Long {
     return (bytes.takeIf { it > 0 } ?: 600L * 1024 * 1024) * 115 / 100
 }
 
+/**
+ * Called after reset and engine-transaction recovery, before reserving another archive's space.
+ * Only complete extracted trees are published as rootfs. If first activation stopped before
+ * creating its marker, finish that tree without extracting a second copy. Existing markers
+ * still take the normal route, including same-version repairs after a launch error.
+ */
+internal fun resumeRootfsInstall(
+    base: File, version: String, abi: String, raw: JSONObject,
+    keep: File? = null, dropKept: Boolean = false, sync: () -> Unit,
+): Boolean {
+    val rootfs = File(base, "rootfs")
+    if (File(base, "rootfs.version").present() || !rootfs.isDirectory) return false
+    try {
+        // Reuse the installed-system checks, including the old/carry rejection. Here the
+        // payload was already published, so its identity must match this APK exactly.
+        checkEngineCompatibility(base, raw, version, abi, payloadTree = rootfs)
+    } catch (_: RuntimeUpgradeBlocked) {
+        return false
+    }
+    finishRootfsInstall(base, version, keep, dropKept, sync)
+    return true
+}
+
 /** The production activation route, also exercised without an Android Context in JVM tests. */
 internal fun activateRuntimeUpdate(
     base: File,
@@ -256,15 +284,23 @@ internal fun activateRootfs(
         home.deleteRecursivelySafely()
         if (!carry.renameTo(home)) throw IllegalStateException("could not restore the user's home")
     }
+    finishRootfsInstall(base, version, keep, dropKept, sync, syncDirectory)
+    retired.deleteRecursivelySafely()
+}
+
+private fun finishRootfsInstall(
+    base: File, version: String, keep: File?, dropKept: Boolean, sync: () -> Unit,
+    syncDirectory: (File) -> Unit = ::syncDirectory,
+) {
+    val rootfs = File(base, "rootfs")
     listOf("root", "root/workspace", "tmp", "dev", "proc", "sys").forEach { File(rootfs, it).mkdirs() }
     File(rootfs, "tmp").setWritable(true, false)
     // Before the version: until everything kept is back, the runtime reads as not installed.
     if (keep != null) restoreKept(keep, rootfs, dropKept)
-    // Everything the marker vouches for is on disk before it says ready. A marker torn by a
-    // power cut doesn't match the version, so the next start just installs again.
+    // Sync restored data before publishing a complete ready marker. An interrupted
+    // temporary write leaves the formal marker absent, so first-install resume can retry.
     sync()
-    versionFile.writeText(version)
-    retired.deleteRecursivelySafely()
+    publishRuntimeVersion(base, version, syncDirectory)
 }
 
 internal fun syncDirectory(directory: File) {

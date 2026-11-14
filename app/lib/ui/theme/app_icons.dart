@@ -375,6 +375,21 @@ abstract final class AppIcons {
   /// 伙伴小屋: her words read aloud (companion_voice.dart). Not the microphone: that is the person's voice.
   static const companionVoice = DshGlyphs.musicNote;
 
+  /// 朗读: a reply read aloud (speech/read_aloud.dart); also the loudspeaker during a call.
+  static const readAloud = DshGlyphs.speakerHigh;
+
+  /// 语音通话: start a call with the conversation (speech/call/).
+  static const call = DshGlyphs.phone;
+
+  /// 语音通话: hang up.
+  static const hangUp = DshGlyphs.phoneDisconnect;
+
+  /// 语音通话: the microphone is muted.
+  static const micMuted = DshGlyphs.microphoneSlash;
+
+  /// 语音通话: the voice plays at the ear (earpiece), not on the loudspeaker.
+  static const earpiece = DshGlyphs.ear;
+
   /// 「问 AI」: a question about the app for the agent (ui/common/ask_ai.dart).
   static const askAi = DshGlyphs.sparkle;
 

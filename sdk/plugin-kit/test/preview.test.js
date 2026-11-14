@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
-import { prepare, main } from '../bin/preview.mjs'
+import { prepare, main, flutterCommand } from '../bin/preview.mjs'
 
 function files(t, value = { type: 'text', text: 'Preview' }) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-native-preview-'))
@@ -72,4 +72,16 @@ test('a failed process or missing PNG cannot be reported as a rendered preview',
   assert.ok(existsSync(join(f.out, 'request.json')))
   const second = main([f.view, '--out', join(f.dir, 'second-output')], () => ({ status: 1 }))
   assert.equal(second, 3)
+})
+
+test('Windows starts flutter.bat through cmd.exe; other platforms and .exe start directly', () => {
+  const args = ['test', '--no-pub', 'x_test.dart']
+  assert.deepEqual(flutterCommand('/opt/flutter/bin/flutter', args, 'linux'), { file: '/opt/flutter/bin/flutter', args, options: {} })
+  assert.deepEqual(flutterCommand(String.raw`C:\tools\flutter.exe`, args, 'win32').args, args)
+  const bat = flutterCommand(String.raw`C:\Program Files\flutter\bin\flutter.bat`, args, 'win32')
+  assert.match(bat.file, /cmd\.exe$/i)
+  assert.deepEqual(bat.args.slice(0, 3), ['/d', '/s', '/c'])
+  assert.equal(bat.args[3], String.raw`""C:\Program Files\flutter\bin\flutter.bat" "test" "--no-pub" "x_test.dart""`)
+  assert.equal(bat.options.windowsVerbatimArguments, true)
+  assert.equal(flutterCommand('flutter', args, 'win32').args[3], '""flutter" "test" "--no-pub" "x_test.dart""')
 })

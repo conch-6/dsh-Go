@@ -121,6 +121,13 @@ void main() {
     expect(failed.nodeId, isNull);
     expect(failed.reportedUsage, isNull);
     expect(failed.status, TavernInspectionStatus.failed);
+    final originalInspection = (await h.engine.inspectTurn(h.chatId, nodeId: original.nodeId))!;
+    expect(originalInspection.status, TavernInspectionStatus.completed);
+    expect(originalInspection.reportedUsage!.promptTokens, 31);
+    await h.reopen();
+    expect((await h.engine.inspectTurn(h.chatId))!.toJson(), failed.toJson());
+    expect((await h.engine.inspectTurn(h.chatId, nodeId: original.nodeId))!.toJson(), originalInspection.toJson());
+    expect((await h.engine.path(h.chatId)).last.reportedUsage!.promptTokens, 31);
   });
 
   test('path does not reconstruct the large inspection to read a compact persisted report', () async {

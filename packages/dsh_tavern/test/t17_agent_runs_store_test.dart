@@ -296,7 +296,6 @@ void main() {
       expect(runs.singleWhere((run) => run.id == 'visible').nodeId, 'root');
       expect(runs.singleWhere((run) => run.id == 'purged').nodeId, isNull);
       expect(h.database.select('PRAGMA user_version').single['user_version'], ChatStore.schemaVersion);
-      expect(ChatStore.schemaVersion, 6);
       expect(h.database.select('PRAGMA foreign_key_check'), isEmpty);
     });
   });

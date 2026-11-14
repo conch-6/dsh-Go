@@ -34,6 +34,7 @@ import '../../../state/sessions_state.dart';
 import '../../common/app_sheet.dart';
 import '../../common/bleed.dart';
 import '../../common/brief_notice.dart';
+import '../../fx/image_gen/image_generation.dart';
 import '../../settings/media_settings_page.dart' show MediaSettingsPage;
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
@@ -547,6 +548,26 @@ class _StateBox extends StatelessWidget {
       },
       _ => cancelled ? context.l10n.mediaCancelled : mediaErrorText(meta.error),
     };
+    final label = Text(
+      text,
+      textAlign: TextAlign.center,
+      style: AppType.tabular(theme.textTheme.labelMedium!.copyWith(color: dsh.textTertiary)),
+    );
+    if (!failed) {
+      // Being made: a churning mosaic of the theme's colours fills the final shape
+      // (Libraries.dev Image), the job's line on top.
+      return SizedBox.fromSize(
+        size: layout.size,
+        child: ImageGeneration(
+          generating: true,
+          cardBg: dsh.codeWellHeader,
+          borderRadius: BorderRadius.circular(MediaGridMetrics.outerRadius),
+          child: Center(
+            child: Padding(padding: const EdgeInsets.all(16), child: label),
+          ),
+        ),
+      );
+    }
     return SizedBox.fromSize(
       size: layout.size,
       child: DecoratedBox(
@@ -563,19 +584,11 @@ class _StateBox extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (failed && !cancelled)
-                  Icon(AppIcons.warning, size: 20, color: dsh.textTertiary)
-                else if (!failed)
-                  SizedBox.square(
-                    dimension: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: dsh.textTertiary),
-                  ),
-                const SizedBox(height: 8),
-                Text(
-                  text,
-                  textAlign: TextAlign.center,
-                  style: AppType.tabular(theme.textTheme.labelMedium!.copyWith(color: dsh.textTertiary)),
-                ),
+                if (!cancelled) ...[
+                  Icon(AppIcons.warning, size: 20, color: dsh.textTertiary),
+                  const SizedBox(height: 8),
+                ],
+                label,
                 if (failed && !cancelled) ?_failureAction(context),
               ],
             ),

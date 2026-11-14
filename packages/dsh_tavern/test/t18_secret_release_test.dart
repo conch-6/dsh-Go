@@ -212,6 +212,87 @@ Future<_Json> _trace(TavernEngine engine, String chat) async =>
     _map((await engine.inspectTurn(chat))!.state['secrets']);
 
 void main() {
+  test('authoring preview uses real bind proof and does not treat a copied sample ledger as proof', () async {
+    final h = await _open();
+    await h.engine.setGlobalVariables({'secretVault': 'GLOBAL-MUST-NOT-EXPAND'});
+    final bound = await _bound(h);
+    final draft = await h.engine.createAuthoringDraft([
+      TavernAuthoringTarget(kind: TavernAuthoringTargetKind.character, id: bound.characterId),
+    ]);
+    final saved = await _saved(h.engine, bound.chatId);
+    final before = _db(
+      h,
+      (db) => {
+        for (final table in [
+          'chats',
+          'nodes',
+          'node_states',
+          'agent_runs',
+          'authoring_drafts',
+          'authoring_resources',
+          'authoring_operations',
+        ])
+          table: [for (final row in db.select('SELECT * FROM $table ORDER BY rowid')) Map<String, Object?>.from(row)],
+      },
+    );
+    final generated = h.model.generated;
+    final preview = await h.engine
+        .previewAuthoringPrompt(
+          TavernAuthoringPromptRequest(
+            requestId: 'existing-bind-proof',
+            draftId: draft.id,
+            draftRevision: draft.draftRevision,
+            changeIds: const [],
+            at: T24Harness.at,
+            seed: 7,
+            context: TavernAuthoringChatContext(chatId: bound.chatId),
+          ),
+        )
+        .result;
+    expect(preview.status, TavernAuthoringPreviewStatus.complete);
+    expect(preview.secretTrace['scope'], 'preview');
+    expect(preview.secretTrace['adoptedLocally'], isFalse);
+    expect(preview.secretTrace['attempted'], isFalse);
+    expect(preview.secretTrace['included'], isNotEmpty);
+    final text = _maps(preview.assembly!.body['messages']).map((row) => row['content']).whereType<String>().join('\n');
+    expect(text, contains(_template.replaceAll('{{fact}}', _fact)));
+    expect(text, isNot(contains('GLOBAL-MUST-NOT-EXPAND')));
+    expect(h.engine.variables(bound.chatId).containsKey('secretLeak'), isFalse);
+    final sample = await h.engine
+        .previewAuthoringPrompt(
+          TavernAuthoringPromptRequest(
+            requestId: 'copied-ledger-without-origin-audit',
+            draftId: draft.id,
+            draftRevision: draft.draftRevision,
+            changeIds: const [],
+            at: T24Harness.at,
+            seed: 7,
+            context: TavernAuthoringSampleContext(
+              characterResourceId: 'character:${bound.characterId}',
+              state: saved,
+              history: const [TavernAuthoringSampleMessage(role: TavernRole.user, text: 'sample')],
+            ),
+          ),
+        )
+        .result;
+    expect(sample.status, TavernAuthoringPreviewStatus.complete);
+    expect(sample.secretTrace['adoptedLocally'], isFalse);
+    expect(sample.secretTrace['offered'], isEmpty);
+    expect(sample.secretTrace['attempted'], isFalse);
+    expect(jsonEncode(sample.assembly!.body), isNot(contains(_fact)));
+    expect(
+      _db(
+        h,
+        (db) => {
+          for (final table in before.keys)
+            table: [for (final row in db.select('SELECT * FROM $table ORDER BY rowid')) Map<String, Object?>.from(row)],
+        },
+      ),
+      before,
+    );
+    expect(h.model.generated, generated);
+  });
+
   test('literal release preserves BOM and macros and records offered included attempted without knownBy', () async {
     final h = await _open();
     await h.engine.setGlobalVariables({'secretVault': 'GLOBAL-MUST-NOT-EXPAND'});
@@ -291,7 +372,7 @@ void main() {
       expect(_text(active.call), isNot(contains(_fact)));
       expect((await _trace(h.engine, bound.chatId))['offered'], isEmpty);
       expect((await _saved(h.engine, bound.chatId))[carrier], broken);
-      expect(active.call.body!['tools'], isNull);
+      expect(_maps(active.call.body!['tools']).map((tool) => _map(tool['function'])['name']), ['roll']);
     });
   }
 
@@ -310,7 +391,7 @@ void main() {
       await h.reopen();
       final active = await _reply(h, bound.chatId);
       expect(_text(active.call), isNot(contains(_fact)));
-      expect(active.call.body!['tools'], isNull);
+      expect(_maps(active.call.body!['tools']).map((tool) => _map(tool['function'])['name']), ['roll']);
       final snapshot = await h.engine.readState(bound.chatId);
       expect(snapshot.hiddenPaths, contains('/secret'));
       expect(_map(snapshot.values)['secret'], _fact);

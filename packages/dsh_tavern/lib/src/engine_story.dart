@@ -76,6 +76,22 @@ String? _storyDirectorEligibility(
     return 'director_story_unavailable';
   }
   final saved = contextNodeId == null ? <String, Object?>{} : engine._stateAt(stored.chatId, contextNodeId);
+  return _storyDirectorEligibilityFromState(stored, data, saved, definition: definition);
+}
+
+String? _storyDirectorEligibilityFromState(
+  StoredAgentRun stored,
+  Map<String, Object?> data,
+  Map<String, Object?> saved, {
+  story_core.StoryDefinition? definition,
+}) {
+  definition ??= _storyDefinition(data);
+  if (!definition.defined) {
+    return null;
+  }
+  if (!definition.executable) {
+    return 'director_story_unavailable';
+  }
   final snapshot = definition.inspect(
     runtimeExists: saved.containsKey(_storyRuntimeKey),
     runtime: saved[_storyRuntimeKey],

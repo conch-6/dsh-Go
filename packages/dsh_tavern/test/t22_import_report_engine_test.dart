@@ -293,7 +293,13 @@ void main() {
       final before = (await h.engine.readImportReport(entry.$1, entry.$2))!.toJson();
       final obstruction = await Directory('${entry.$3}.writing').create();
       try {
-        await expectLater(h.engine.recheckImport(entry.$1, entry.$2), throwsA(isA<FileSystemException>()));
+        final failure = entry.$1 == TavernImportKind.lorebook
+            ? isA<TavernAuthoringException>()
+                  .having((error) => error.code, 'code', 'resource_write_failed')
+                  .having((error) => error.receipt?.committed, 'committed', isFalse)
+                  .having((error) => error.cause, 'cause', isA<FileSystemException>())
+            : isA<FileSystemException>();
+        await expectLater(h.engine.recheckImport(entry.$1, entry.$2), throwsA(failure));
         expect(await File(entry.$3).readAsBytes(), beforeBytes);
         expect((await h.engine.readImportReport(entry.$1, entry.$2))!.toJson(), before);
       } finally {
@@ -481,6 +487,7 @@ class _NoModel extends TavernModelClient {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) async* {
     calls++;
     throw StateError('Import inspection must never invoke the model.');

@@ -54,7 +54,7 @@ _Json _definition() => {
   'rules': <Object?>[],
 };
 
-_Json _slots() => {
+_Json _slots({bool release = false}) => {
   'v': 1,
   'slots': [
     {
@@ -63,7 +63,7 @@ _Json _slots() => {
       'entityPath': '/entity',
       'unbound': {'exists': true, 'value': null},
       'bindWhen': true,
-      'release': {'id': 'alibi-release', 'audience': 'currentCharacter', 'when': false, 'template': 'Fact: {{fact}}'},
+      'release': {'id': 'alibi-release', 'audience': 'currentCharacter', 'when': release, 'template': 'Fact: {{fact}}'},
     },
   ],
 };
@@ -97,9 +97,10 @@ class _BindingModel extends T24Model {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) {
     atEntry?.call();
-    return super.generate(config: config, body: body, cancellation: cancellation);
+    return super.generate(config: config, body: body, cancellation: cancellation, onRequestStarted: onRequestStarted);
   }
 }
 
@@ -157,7 +158,7 @@ Future<void> _settings(_Fixture f, int every) => f.h.engine.setSettings({
   'director': {'enabled': true, 'secretsEnabled': true, 'every': every},
 });
 
-Future<_Fixture> _ready() async {
+Future<_Fixture> _ready({bool release = false}) async {
   final h = await _BindingHarness.open();
   addTearDown(h.dispose);
   // A continuation must actually offer update_state in the terminal SQL case.
@@ -167,7 +168,7 @@ Future<_Fixture> _ready() async {
     'dshgo': {
       'v': 1,
       'state': _definition(),
-      'director': {'secretSlots': _slots()},
+      'director': {'secretSlots': _slots(release: release)},
     },
   };
   final character = await h.engine.importCard(Uint8List.fromList(utf8.encode(jsonEncode(card))));
@@ -438,6 +439,113 @@ Future<TavernAgentRun> _expectBound(_Fixture f) async {
 }
 
 void main() {
+  test('authoring adopts scoped B and releases it without writing live proof or changing source eligibility', () async {
+    final f = await _ready(release: true);
+    final base = await f.h.engine.createAuthoringDraft([
+      TavernAuthoringTarget(kind: TavernAuthoringTargetKind.character, id: f.characterId),
+    ]);
+    final draft = await f.h.engine.editAuthoringDraft(
+      base.id,
+      draftRevision: base.draftRevision,
+      changes: [
+        TavernAuthoringChange(
+          id: 'different-source',
+          physicalResourceId: 'character:${f.characterId}',
+          path: '/data/description',
+          operation: TavernAuthoringChangeKind.set,
+          value: 'A different captured character.',
+        ),
+      ],
+    );
+    final before = _db(
+      f,
+      (db) => {
+        for (final table in [
+          'chats',
+          'nodes',
+          'node_states',
+          'agent_runs',
+          'authoring_drafts',
+          'authoring_resources',
+          'authoring_operations',
+        ])
+          table: [for (final row in db.select('SELECT * FROM $table ORDER BY rowid')) Map<String, Object?>.from(row)],
+      },
+    );
+    final generated = f.h.model.generated;
+    final preview = await f.h.engine
+        .previewAuthoringPrompt(
+          TavernAuthoringPromptRequest(
+            requestId: 'local-bind-release',
+            draftId: draft.id,
+            draftRevision: draft.draftRevision,
+            changeIds: const [],
+            at: T24Harness.at,
+            seed: 7,
+            context: TavernAuthoringChatContext(chatId: f.chatId, nodeId: f.sourceId, generationType: 'continue'),
+          ),
+        )
+        .result;
+    expect(preview.status, TavernAuthoringPreviewStatus.complete);
+    final text = _maps(preview.assembly!.body['messages']).map((row) => row['content']).whereType<String>().join('\n');
+    expect(text, contains('Fact: $_fact'));
+    final trace = preview.secretTrace;
+    expect(trace['scope'], 'preview');
+    expect(trace['captureId'], preview.captureId);
+    expect(trace['origin'], {'kind': 'chat', 'chatId': f.chatId, 'nodeId': f.sourceId});
+    expect(trace['adoptedLocally'], isTrue);
+    expect(trace['afterStateFingerprint'], isNot(trace['beforeStateFingerprint']));
+    expect(_maps(trace['changes']).map((change) => change['path']), ['/private/fact']);
+    final offered = _maps(trace['offered']).single;
+    expect(offered['text'], 'Fact: $_fact');
+    expect(trace['included'], [offered['sourceId']]);
+    expect(trace['attempted'], isFalse);
+    expect(jsonEncode(trace), isNot(contains('bindReceiptId')));
+    expect(jsonEncode(trace), isNot(contains('"committed"')));
+
+    // A selected candidate changes the authenticated card. It must not
+    // rewrite the old proposal fingerprint merely to obtain a local proof.
+    final changed = await f.h.engine
+        .previewAuthoringPrompt(
+          TavernAuthoringPromptRequest(
+            requestId: 'local-bind-source-mismatch',
+            draftId: draft.id,
+            draftRevision: draft.draftRevision,
+            changeIds: const ['different-source'],
+            at: T24Harness.at,
+            seed: 7,
+            context: TavernAuthoringChatContext(chatId: f.chatId, nodeId: f.sourceId, generationType: 'continue'),
+          ),
+        )
+        .result;
+    expect(changed.status, TavernAuthoringPreviewStatus.complete);
+    expect(changed.secretTrace['adoptedLocally'], isFalse);
+    expect(changed.secretTrace['offered'], isEmpty);
+    expect(changed.issues.map((issue) => issue.type), contains('secret_source_changed'));
+    expect(
+      _db(
+        f,
+        (db) => {
+          for (final table in before.keys)
+            table: [for (final row in db.select('SELECT * FROM $table ORDER BY rowid')) Map<String, Object?>.from(row)],
+        },
+      ),
+      before,
+    );
+    expect(f.h.model.generated, generated);
+    expect(await _bindRuns(f), isEmpty);
+    expect(_factAt(f), isNull);
+    final native = await _start(f, f.h.engine.continueReply(f.chatId, f.sourceId));
+    expect(
+      _maps(native.call.body!['messages']).map((row) => row['content']).whereType<String>().join('\n'),
+      contains('Fact: $_fact'),
+    );
+    await _expectBound(f);
+    await _finish(native);
+    expect(_success(native).nodeId, f.sourceId);
+    expect(await _bindRuns(f), hasLength(1), reason: 'Only the later native turn writes a real bind audit.');
+  });
+
   test('a published proposal commits portable B and its independent bind run before the main provider entry', () async {
     final f = await _ready();
     final physical = _physical(f);
@@ -670,6 +778,32 @@ void main() {
     final physical = _physical(f);
     await f.h.engine.setPreset(_overflowPreset(), chatId: f.chatId);
     final generated = f.h.model.generated;
+    final draft = await f.h.engine.createAuthoringDraft([
+      TavernAuthoringTarget(kind: TavernAuthoringTargetKind.character, id: f.characterId),
+    ]);
+    final before = _node(f);
+    final preview = await f.h.engine
+        .previewAuthoringPrompt(
+          TavernAuthoringPromptRequest(
+            requestId: 'local-bind-before-budget-failure',
+            draftId: draft.id,
+            draftRevision: draft.draftRevision,
+            changeIds: const [],
+            at: T24Harness.at,
+            seed: 7,
+            context: TavernAuthoringChatContext(chatId: f.chatId, nodeId: f.sourceId, generationType: 'continue'),
+          ),
+        )
+        .result;
+    expect(preview.status, TavernAuthoringPreviewStatus.failed);
+    expect(preview.assembly, isNull);
+    expect(preview.issues.single.type, 'prompt_budget_exceeded');
+    expect(preview.secretTrace['adoptedLocally'], isTrue);
+    expect(preview.secretTrace['attempted'], isFalse);
+    expect(_maps(preview.secretTrace['changes']).map((change) => change['path']), ['/private/fact']);
+    expect(_node(f), before);
+    expect(await _bindRuns(f), isEmpty);
+    expect(f.h.model.generated, generated);
     final events = T24Events(f.h.engine.continueReply(f.chatId, f.sourceId));
     final failure = await _failed(events);
     expect(failure.kind, TavernFailure.contextTooLong);
@@ -749,7 +883,7 @@ void main() {
       // A nonempty public patch performs a real publication and revision bump
       // even when the description string equals its current value. Its first
       // card read owns the library queue; the main's cold _record waits behind.
-      final editing = f.h.engine.updateCharacterFields(f.characterId, {'description': description});
+      final editing = gate.edit(() => f.h.engine.updateCharacterFields(f.characterId, {'description': description}));
       await gate.entered.future.timeout(_deadline);
       final call = f.h.model.prepare();
       final events = T24Events(f.h.engine.continueReply(f.chatId, f.sourceId));
@@ -757,8 +891,9 @@ void main() {
       expect(call.listening.isCompleted, isFalse);
       expect(gate.byteReads, 1);
       gate.releaseEdit();
-      // The second read belongs to the queued main. Hold its real new bytes
-      // until the public edit future has completed, making the order explicit.
+      // The writer also reads its authority before-image. Identify the queued
+      // main by its operation zone, then hold its real new bytes until the
+      // public edit future has completed, making the order explicit.
       await gate.mainRead.future.timeout(_deadline);
       expect((await editing.timeout(_deadline)).id, f.characterId);
       expect(call.listening.isCompleted, isFalse);
@@ -923,14 +1058,17 @@ class _ReadGate {
   Future<Uint8List> readBytes(Future<Uint8List> Function() operation) => read(operation);
 }
 
-// Unlike the existing late-proposal gate, this gate never waits for a later
-// public edit while a main library read owns the same serialized queue. The
-// edit owns read 1; the main is admitted behind it and owns read 2.
+// Hold the public edit's first card read, admit the cold main behind it, and
+// then hold the main's first card read. Additional reads within the writer
+// (including its authority before-image) retain its zone and cannot be
+// mistaken for the queued main or deadlock the shared library queue.
 class _QueuedEditGate extends _ReadGate {
   final mainRead = Completer<void>();
   final _editReleased = Completer<void>();
   final _mainReleased = Completer<void>();
   var byteReads = 0;
+
+  Future<T> edit<T>(Future<T> Function() action) => runZoned(action, zoneValues: {this: true});
 
   void releaseEdit() {
     if (!_editReleased.isCompleted) _editReleased.complete();
@@ -950,12 +1088,14 @@ class _QueuedEditGate extends _ReadGate {
   Future<T> read<T>(Future<T> Function() operation) => operation();
   @override
   Future<Uint8List> readBytes(Future<Uint8List> Function() operation) async {
-    final index = ++byteReads;
+    byteReads++;
     final bytes = await operation();
-    if (index == 1) {
-      entered.complete();
-      await _editReleased.future;
-    } else if (index == 2) {
+    if (Zone.current[this] == true) {
+      if (!entered.isCompleted) {
+        entered.complete();
+        await _editReleased.future;
+      }
+    } else if (!mainRead.isCompleted) {
       mainRead.complete();
       await _mainReleased.future;
     }

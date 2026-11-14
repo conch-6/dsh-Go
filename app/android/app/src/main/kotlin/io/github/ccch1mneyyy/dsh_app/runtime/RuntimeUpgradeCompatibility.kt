@@ -1,18 +1,21 @@
 package io.github.ccch1mneyyy.dsh_app.runtime
 
+import io.github.ccch1mneyyy.dsh_app.files.GuestFiles
 import java.io.File
 import java.nio.file.Files
 import java.security.MessageDigest
 import org.json.JSONObject
 
-internal fun checkEngineCompatibility(baseDir: File, raw: JSONObject, version: String, abi: String): EngineUpgradeSpec {
+internal fun checkEngineCompatibility(
+    baseDir: File, raw: JSONObject, version: String, abi: String,
+    payloadTree: File = File(baseDir, "staging"),
+): EngineUpgradeSpec {
     val rootfs = File(baseDir, "rootfs")
-    val staging = File(baseDir, "staging")
     if (Files.isSymbolicLink(rootfs.toPath()) || File(baseDir, "home.carry").exists()) {
         throw RuntimeUpgradeBlocked("legacy_interrupted")
     }
     val next = parseUpgrade(raw)
-    val shipped = readRuntimeInfo(staging)
+    val shipped = readRuntimeInfo(payloadTree)
     if (parseUpgrade(shipped) != next || shipped.optString("runtimeVersion") != version) {
         throw RuntimeUpgradeBlocked("manifest")
     }
@@ -32,14 +35,14 @@ internal fun checkEngineCompatibility(baseDir: File, raw: JSONObject, version: S
         File(baseDir, "rootfs.old").deleteRecursivelySafely()
     }
     if (previous.optString("abi") != abi || shipped.optString("abi") != abi ||
-        osIdentity(rootfs) != (base?.osRelease ?: osIdentity(staging))) throw RuntimeUpgradeBlocked("base")
+        osIdentity(rootfs) != (base?.osRelease ?: osIdentity(payloadTree))) throw RuntimeUpgradeBlocked("base")
     if (previous.has("upgrade")) {
         if (parseUpgrade(previous).baseId != next.baseId) throw RuntimeUpgradeBlocked("base")
     } else {
         // One-time adoption of old bundles. Do not infer compatibility just
         // from rNN or Node versions. Keep Python and all user pip packages.
         if (previous.optString("ubuntuVersion") != next.ubuntuVersion ||
-            !(if (base != null) matchesPython(rootfs, base.python3Sha256) else samePython(rootfs, staging))) {
+            !(if (base != null) matchesPython(rootfs, base.python3Sha256) else samePython(rootfs, payloadTree))) {
             throw RuntimeUpgradeBlocked("base")
         }
     }
@@ -76,7 +79,11 @@ private fun parseBaseCompatibility(raw: JSONObject): BaseCompatibility = try {
 }
 
 private fun readRuntimeInfo(tree: File): JSONObject = try {
-    JSONObject(File(tree, "etc/dsh-app/runtime.json").readText())
+    // An existing image may still hold a tawc backup token before any new launch.
+    val file = File(tree, "etc/dsh-app/runtime.json").takeIf { it.isFile }
+        ?: GuestFiles.resolve(tree, "/etc/dsh-app/runtime.json", PhoneStorage.GUEST_PATH)
+        ?: throw RuntimeUpgradeBlocked("manifest")
+    JSONObject(file.readText())
 } catch (_: Exception) {
     throw RuntimeUpgradeBlocked("manifest")
 }
@@ -92,7 +99,12 @@ private fun parseUpgrade(json: JSONObject): EngineUpgradeSpec = try {
 }
 
 private fun osIdentity(tree: File): List<String> = try {
-    val rows = File(tree, "etc/os-release").readLines()
+    val file = File(tree, "etc/os-release").takeIf { it.isFile }
+        ?: io.github.ccch1mneyyy.dsh_app.files.GuestFiles.resolve(
+            tree, "/etc/os-release", PhoneStorage.GUEST_PATH,
+        )
+        ?: throw RuntimeUpgradeBlocked("base")
+    val rows = file.readLines()
     listOf("ID", "VERSION_ID").map { key ->
         rows.single { it.startsWith("$key=") }.substringAfter('=').trim().trim('"', '\'')
     }

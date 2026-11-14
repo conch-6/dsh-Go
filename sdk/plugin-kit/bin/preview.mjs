@@ -60,6 +60,14 @@ export function prepare(argv, cwd = process.cwd()) {
   return { opts, report, request, out: resolve(cwd, opts.out) }
 }
 
+// Windows cannot start flutter.bat (or the bare `flutter` on PATH, which is a .bat)
+// without cmd.exe; anything ending in .exe still starts directly.
+export function flutterCommand(flutter, args, platform = process.platform) {
+  if (platform !== 'win32' || /\.exe$/i.test(flutter)) return { file: flutter, args, options: {} }
+  const line = [flutter, ...args].map(a => `"${a}"`).join(' ')
+  return { file: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], options: { windowsVerbatimArguments: true } }
+}
+
 export function main(argv, run = spawnSync) {
   if (argv.length === 1 && ['--help', '-h'].includes(argv[0])) { process.stdout.write(`${usage}\n`); return 0 }
   let job
@@ -72,8 +80,9 @@ export function main(argv, run = spawnSync) {
     mkdirSync(job.out, { recursive: true })
     writeFileSync(join(job.out, 'request.json'), JSON.stringify(job.request, null, 2) + '\n', { flag: 'wx' })
     writeFileSync(join(job.out, 'sdk-diagnostics.json'), JSON.stringify(job.report, null, 2) + '\n', { flag: 'wx' })
-    const result = run(job.opts.flutter, ['test', '--no-pub', 'test/plugins/view/local_preview_test.dart'], {
-      cwd: appDir, stdio: 'inherit', env: { ...process.env, DSH_PLUGIN_PREVIEW_REQUEST: join(job.out, 'request.json') },
+    const cmd = flutterCommand(job.opts.flutter, ['test', '--no-pub', 'test/plugins/view/local_preview_test.dart'])
+    const result = run(cmd.file, cmd.args, {
+      ...cmd.options, cwd: appDir, stdio: 'inherit', env: { ...process.env, DSH_PLUGIN_PREVIEW_REQUEST: join(job.out, 'request.json') },
     })
     if (result.error) throw result.error
     if (result.status !== 0) { process.stderr.write(`Flutter preview failed; partial output: ${job.out}\n`); return 3 }

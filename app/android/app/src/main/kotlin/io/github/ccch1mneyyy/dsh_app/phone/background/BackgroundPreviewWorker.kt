@@ -13,22 +13,25 @@ internal class BackgroundPreviewWorker {
         return Executors.newSingleThreadExecutor { job -> Thread(job, "dsh-preview").apply { isDaemon = true } }
             .also { worker = it }
     }
-
-    /** A release receipt must observe the encoder's real termination, not just a queued shutdown. */
+    /** Release receipts observe the encoder's real termination, not just a queued shutdown. */
     fun stop() {
         val old = worker ?: return
         old.shutdown()
-        runCatching { old.awaitTermination(STOP_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
+        awaitQuietly(old, STOP_TIMEOUT_MS)
     }
 
     fun drained(): Boolean {
         val old = worker ?: return true
-        if (!old.isTerminated && old.isShutdown) {
-            runCatching { old.awaitTermination(DRAIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
-        }
+        if (!old.isTerminated && old.isShutdown) awaitQuietly(old, DRAIN_TIMEOUT_MS)
         if (!old.isTerminated) return false
         worker = null
         return true
+    }
+
+    /** A short, bounded wait: the caller's own interrupt must survive the best-effort drain. */
+    private fun awaitQuietly(old: ExecutorService, timeoutMs: Long) {
+        try { old.awaitTermination(timeoutMs, TimeUnit.MILLISECONDS) }
+        catch (_: InterruptedException) { Thread.currentThread().interrupt() }
     }
 
     private companion object {

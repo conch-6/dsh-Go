@@ -219,6 +219,7 @@ class _Hit extends StatelessWidget {
                     final page = Navigator.of(context);
                     Navigator.of(sheet).pop();
                     await container.read(tavernProvider).selectSibling(chatId, message.nodeId, message.siblingIndex);
+                    unawaited(HapticFeedback.selectionClick());
                     container.read(tavernJumpProvider(chatId).notifier).go(message.nodeId);
                     if (page.mounted) page.pop();
                   },

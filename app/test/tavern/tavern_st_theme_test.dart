@@ -97,6 +97,32 @@ void main() {
       expect(TavernStTheme.fromJson(jsonDecode(jsonEncode(theme.toJson()))), theme);
     });
 
+    test('its custom CSS is kept as written, for the canvas, and can be let go', () {
+      const css = '#chat .mes { border-left: 3px solid gold; }\n.mes_text q { color: tomato; }';
+      final theme = tavernStThemeOf({..._dark, 'custom_css': css}, fileName: 'x')!;
+      expect((theme.customCss, theme.useCss, theme.canvasCss), (css, true, css));
+      expect(tavernStThemeOf(_dark, fileName: 'x')!.customCss, isNull); // '' is none
+      expect(tavernStThemeOf({..._dark, 'custom_css': '  \n'}, fileName: 'x')!.customCss, isNull);
+      // CSS alone is a theme too.
+      final cssOnly = tavernStThemeOf({
+        'main_text_color': 'rgba(1,1,1,1)',
+        'quote_text_color': 'none',
+        'custom_css': css,
+      }, fileName: 'x')!;
+      expect((cssOnly.quote, cssOnly.italics, cssOnly.customCss), (null, null, css));
+      // Let go: the colours stay, the canvas gets none; kept across a restart.
+      final off = theme.withUseCss(false);
+      expect((off.quote, off.customCss, off.canvasCss), (theme.quote, css, ''));
+      expect(TavernStTheme.fromJson(jsonDecode(jsonEncode(off.toJson()))), off);
+      expect(TavernStTheme.fromJson(jsonDecode(jsonEncode(theme.toJson()))), theme);
+      // One kept before there was CSS reads as it was.
+      expect(
+        TavernStTheme.fromJson({'name': 'Old', 'quote': 0xE18A24, 'italics': null}),
+        const TavernStTheme(name: 'Old', quote: 0xE18A24),
+      );
+      expect(TavernStTheme.fromJson({'name': 'Empty', 'quote': null, 'italics': null}), isNull);
+    });
+
     test('its colours are made readable on the page, hue kept', () {
       final theme = tavernStThemeOf(_dark, fileName: 'x')!;
       const white = Color(0xFFFFFFFF);
@@ -124,6 +150,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('换成了 ST 主题「Dark V 1.0」的配色'), findsOneWidget);
     expect(find.text('ST 主题：Dark V 1.0'), findsOneWidget);
+    // No custom CSS in this one: nothing to switch.
+    expect(find.byKey(const ValueKey('tavern-st-theme-css')), findsNothing);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString(TavernSettingsController.paletteKey), 'st');
     expect(prefs.getString(TavernStThemeController.key), contains('Dark V 1.0'));
@@ -141,5 +169,39 @@ void main() {
     expect(find.byKey(const ValueKey('tavern-st-theme-import')), findsOneWidget);
     expect(prefs.getString(TavernSettingsController.paletteKey), 'ember');
     expect(prefs.getString(TavernStThemeController.key), isNull);
+  });
+
+  testWidgets('a theme with custom CSS: on for the canvas, and can be turned off, colours kept', (tester) async {
+    const css = '#chat .mes { border-left: 3px solid gold; }';
+    await _settings(tester, [
+      TavernChatFile(fileName: 'Gold.json', bytes: _bytes({..._dark, 'name': 'Gold', 'custom_css': css})),
+    ]);
+    await _show(tester, 'tavern-st-theme-import');
+    await tester.tap(find.byKey(const ValueKey('tavern-st-theme-import')));
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await tester.pumpAndSettle();
+    final container = ProviderScope.containerOf(tester.element(find.byType(TavernSettingsPage)));
+    expect(container.read(tavernStThemeProvider)!.canvasCss, css);
+
+    await _show(tester, 'tavern-st-theme-css');
+    expect(find.text('用它的自定义 CSS'), findsOneWidget);
+    expect(
+      tester
+          .widget<Switch>(
+            find.descendant(of: find.byKey(const ValueKey('tavern-st-theme-css')), matching: find.byType(Switch)),
+          )
+          .value,
+      isTrue,
+    );
+    await tester.tap(find.byKey(const ValueKey('tavern-st-theme-css')));
+    await tester.pumpAndSettle();
+    final off = container.read(tavernStThemeProvider)!;
+    expect((off.useCss, off.canvasCss, off.quote), (false, '', 0xE18A24));
+    final prefs = await SharedPreferences.getInstance();
+    expect(jsonDecode(prefs.getString(TavernStThemeController.key)!), containsPair('useCss', false));
+    expect(prefs.getString(TavernSettingsController.paletteKey), 'st');
   });
 }

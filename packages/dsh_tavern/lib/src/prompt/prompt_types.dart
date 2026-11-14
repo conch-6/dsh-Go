@@ -111,6 +111,7 @@ final class PromptHistoryMessage {
     this.hidden = false,
     this.isSystem = false,
     this.forceAvatar = false,
+    this.expandMacros = true,
     this.toolCalls,
     this.toolCallId,
   });
@@ -121,6 +122,10 @@ final class PromptHistoryMessage {
   final bool hidden;
   final bool isSystem;
   final bool forceAvatar;
+
+  /// Prepared request input shares its exact value with WI scanning.
+  /// Stored history retains the existing later macro phase by default.
+  final bool expandMacros;
   final List<Map<String, Object?>>? toolCalls;
   final String? toolCallId;
 }
@@ -136,12 +141,19 @@ final class PromptInjection {
     this.order = 100,
     this.fragments = const [],
     this.v3Depth = false,
+    this.sortKey,
+    this.sourceOrder = 0,
   });
   final PromptFragment fragment;
   final String role;
   final PromptPlacement placement;
   final int depth;
   final int order;
+
+  /// Preserve source sorting independently of the collision-free assembler id.
+  /// Existing extensions continue to sort by their original source identifier.
+  final String? sortKey;
+  final int sourceOrder;
 
   /// A CCV3 depth/reverse_depth is bounded by the available history, not by
   /// ST's native 10000-message extension limit. Native injections retain it.

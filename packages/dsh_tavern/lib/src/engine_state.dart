@@ -85,7 +85,7 @@ class _StateInput {
 Future<TavernStateSnapshot> _readSavedState(TavernEngine engine, String chatId) async {
   final chat = engine._store.chat(chatId);
   final leaf = chat.currentLeafId;
-  final saved = leaf == null ? <String, Object?>{} : engine._stateAt(chatId, leaf);
+  final saved = engine._stateAt(chatId, leaf);
   final extra = leaf == null ? <String, Object?>{} : engine._store.node(chatId, leaf).extra;
   final metadata = engine._chatCodec.metadataForNode(engine._store, chatId);
   final settings = engine._effectiveSettings(chat, metadata);
@@ -201,7 +201,7 @@ Future<TavernStateEditResult> _editSavedState(
     () => engine._withMutation(chatId, () async {
       final chat = engine._store.chat(chatId);
       final leaf = chat.currentLeafId;
-      final saved = leaf == null ? <String, Object?>{} : engine._stateAt(chatId, leaf);
+      final saved = engine._stateAt(chatId, leaf);
       final extra = leaf == null ? <String, Object?>{} : engine._store.node(chatId, leaf).extra;
       final settings = engine._effectiveSettings(chat, engine._chatCodec.metadataForNode(engine._store, chatId));
       final record = await engine._record(chat.characterId);
@@ -645,20 +645,179 @@ class _StateRun {
 /// Candidate data is deliberately separate from turn.state. The normal SQL
 /// attempt may roll back and be followed by the existing partial-body commit.
 class _StateSettlement {
-  _StateSettlement({required this.state, required this.runs, required this.trace, this.ownAudit, this.events});
+  _StateSettlement({
+    required this.state,
+    required this.runs,
+    required this.trace,
+    this.ownAudit,
+    this.events,
+    this.toolSettlements = const [],
+  });
   final Map<String, Object?> state;
   final Map<String, Object?>? ownAudit;
   final List<_StateRun> runs;
   final Map<String, Object?> trace;
   final _CardEventSettlement? events;
+  final List<StoredToolStateSettlement> toolSettlements;
 }
+
+class _StagedStateCall {
+  _StagedStateCall(this.call, this.problems, this.execution, {this.requestId, this.requestIndex});
+  final ModelToolCall call;
+  final List<Map<String, Object?>> problems;
+  final state_core.StateApplyResult? execution;
+  final String? requestId;
+  final int? requestIndex;
+  TavernToolReceipt? receipt;
+}
+
+class _StagedStateBatch {
+  _StagedStateBatch(this.requestId, this.requestIndex, this.batch);
+  final String requestId;
+  final int requestIndex;
+  final ModelToolBatch batch;
+}
+
+state_core.StateSession? _ordinaryStateSession(_Turn turn) {
+  final definition = turn.stateDefinition;
+  final input = _StateInput(turn.currentState);
+  if (!turn.stateAutomatic ||
+      definition == null ||
+      !definition.executable ||
+      !input.writable ||
+      turn.kind == _TurnKind.impersonate) {
+    return null;
+  }
+  return turn.stateSession ??= definition.startSession(
+    valueExists: input.valueExists,
+    value: input.value,
+    runtimeExists: input.runtimeExists,
+    runtime: input.runtime,
+  );
+}
+
+_StagedStateCall _evaluateStateCall(
+  ModelToolCall call, {
+  required bool normal,
+  required bool toolAllowed,
+  required bool eligibleStructure,
+  required state_core.StateSession? session,
+  String? requestId,
+  int? requestIndex,
+}) {
+  final problems = <Map<String, Object?>>[...call.issues];
+  // A custom transport can provide typed rejection facts without also
+  // filling the legacy issue list. Unknown provenance alone is still allowed.
+  if (!call.identityComplete && call.issues.isEmpty) {
+    problems.add(_stateIssue('invalid-tool-identity', '', 'The tool call has no complete unique identity.'));
+  }
+  if (!call.originalArgumentsStringComplete && call.issues.isEmpty) {
+    problems.add(_stateIssue('incomplete-tool-arguments', '', 'The original tool argument string is not complete.'));
+  }
+  if (call.unsupportedEnvelope) {
+    problems.add(_stateIssue('unsupported-tool-envelope', '', 'The tool call envelope is not supported.'));
+  }
+  if (!normal) {
+    problems.add(
+      _stateIssue(
+        'terminal-not-normal',
+        '',
+        'Only a successful stop or tool_calls terminal can commit state operations.',
+      ),
+    );
+  }
+  if (!toolAllowed || session == null) {
+    problems.add(
+      _stateIssue('tool-not-offered', '', 'This captured request does not authorize update_state execution.'),
+    );
+  }
+  if (!eligibleStructure) {
+    problems.add(
+      _stateIssue('batch-resource-limit', '', 'A response resource limit prevents every tool call in this batch.'),
+    );
+  }
+  if (call.name != 'update_state') {
+    problems.add(_stateIssue('unknown-state-tool', '', 'The state executor only accepts update_state.'));
+  }
+  final parameters = call.parameters;
+  if (parameters != null && (parameters.length != 1 || !parameters.containsKey('ops'))) {
+    problems.add(_stateIssue('tool-parameters', '', 'update_state requires exactly one ops field.'));
+  }
+  final execution = problems.isEmpty && call.valid && session != null && parameters != null
+      ? session.apply(
+          parameters['ops'],
+          actor: state_core.StateActor.model,
+          source: requestId == null ? 'tool:${call.index}:${call.id}' : '$requestId:tool:${call.index}:${call.id}',
+        )
+      : null;
+  return _StagedStateCall(call, problems, execution, requestId: requestId, requestIndex: requestIndex);
+}
+
+void _stageOrdinaryStateBatchTrace(_Turn turn, _OrdinaryToolRequest request) {
+  if (turn.stagedStateBatches.any((item) => item.requestId == request.snapshot.requestId)) return;
+  turn.stagedStateBatches.add(
+    _StagedStateBatch(
+      request.snapshot.requestId,
+      request.snapshot.requestIndex,
+      request.batch ?? request.accumulator.finish(),
+    ),
+  );
+}
+
+_StagedStateCall _stageOrdinaryStateCall(
+  _Turn turn,
+  _OrdinaryToolRequest request,
+  ModelToolCall call, {
+  required bool normal,
+}) {
+  final previous = turn.stagedStateCalls
+      .where((item) => item.requestId == request.snapshot.requestId && item.call.index == call.index)
+      .firstOrNull;
+  if (previous != null) return previous;
+  final staged = _evaluateStateCall(
+    call,
+    normal: normal,
+    toolAllowed: request.stateAllowed,
+    eligibleStructure: (request.batch ?? request.accumulator.finish()).eligibleStructure,
+    session: normal ? _ordinaryStateSession(turn) : null,
+    requestId: request.snapshot.requestId,
+    requestIndex: request.snapshot.requestIndex,
+  );
+  turn.stagedStateCalls.add(staged);
+  return staged;
+}
+
+void _stageOrdinaryStateDiagnostics(_Turn turn, _OrdinaryToolRequest request, {required bool normal}) {
+  _stageOrdinaryStateBatchTrace(turn, request);
+  for (final call in (request.batch ?? request.accumulator.finish()).calls) {
+    if (call.name != 'roll' && call.name != 'remember') {
+      _stageOrdinaryStateCall(turn, request, call, normal: normal);
+    }
+  }
+}
+
+Map<String, Object?> _stateToolWire(_StagedStateCall staged, String status) => {
+  'status': status,
+  'acceptedCount': staged.execution?.acceptedCount ?? 0,
+  'rejectedCount': staged.execution?.rejectedCount ?? (staged.problems.isEmpty ? 0 : 1),
+  'issues': [
+    for (final issue in [...staged.problems, ...?staged.execution?.issues].take(32))
+      {'code': issue['code'], 'path': issue['path']},
+  ],
+};
 
 _StateSettlement? _settleStateTurn(TavernEngine engine, _Turn turn, {required bool successful}) {
   final batch = turn.stateTools.finish();
+  final ordinary = turn.toolOwner != null;
+  if (ordinary && turn.toolRequest != null && turn.toolFailureCode == null) {
+    // A transport failure can leave unprocessed calls. They are diagnostics,
+    // never another opportunity to apply a staged operation.
+    _stageOrdinaryStateDiagnostics(turn, turn.toolRequest!, normal: false);
+  }
   final definition = turn.stateDefinition;
   if (definition == null &&
-      batch.calls.isEmpty &&
-      batch.issues.isEmpty &&
+      (ordinary ? turn.stagedStateCalls.isEmpty : batch.calls.isEmpty) &&
+      (ordinary ? turn.stagedStateBatches.every((item) => item.batch.issues.isEmpty) : batch.issues.isEmpty) &&
       turn.cardEventDefinition == null &&
       !_hasSecretTrace(turn)) {
     return null;
@@ -676,55 +835,26 @@ _StateSettlement? _settleStateTurn(TavernEngine engine, _Turn turn, {required bo
       definition.executable &&
       input.writable &&
       turn.kind != _TurnKind.impersonate) {
-    session =
-        turn.stateSession ??
-        definition.startSession(
-          valueExists: input.valueExists,
-          value: input.value,
-          runtimeExists: input.runtimeExists,
-          runtime: input.runtime,
-        );
+    session = turn.stateSession ??= definition.startSession(
+      valueExists: input.valueExists,
+      value: input.value,
+      runtimeExists: input.runtimeExists,
+      runtime: input.runtime,
+    );
   }
   final runs = <_StateRun>[];
-  final modelResults = <int, state_core.StateApplyResult>{};
-  final gates = <int, List<Map<String, Object?>>>{};
-  for (final call in batch.calls) {
-    final problems = <Map<String, Object?>>[...call.issues];
-    if (!normal) {
-      problems.add(
-        _stateIssue(
-          'terminal-not-normal',
-          '',
-          'Only a successful stop or tool_calls terminal can commit state operations.',
-        ),
-      );
-    }
-    if (!turn.stateToolAllowed || session == null) {
-      problems.add(
-        _stateIssue('tool-not-offered', '', 'This captured request does not authorize update_state execution.'),
-      );
-    }
-    if (!batch.eligibleStructure) {
-      problems.add(
-        _stateIssue('batch-resource-limit', '', 'A response resource limit prevents every tool call in this batch.'),
-      );
-    }
-    if (call.name != 'update_state') {
-      problems.add(_stateIssue('unknown-state-tool', '', 'The state executor only accepts update_state.'));
-    }
-    final parameters = call.parameters;
-    if (parameters != null && (parameters.length != 1 || !parameters.containsKey('ops'))) {
-      problems.add(_stateIssue('tool-parameters', '', 'update_state requires exactly one ops field.'));
-    }
-    if (problems.isEmpty && call.valid && session != null && parameters != null) {
-      modelResults[call.index] = session.apply(
-        parameters['ops'],
-        actor: state_core.StateActor.model,
-        source: 'tool:${call.index}:${call.id}',
-      );
-    }
-    gates[call.index] = problems;
-  }
+  final callResults = ordinary
+      ? turn.stagedStateCalls
+      : [
+          for (final call in batch.calls)
+            _evaluateStateCall(
+              call,
+              normal: normal,
+              toolAllowed: turn.stateToolAllowed,
+              eligibleStructure: batch.eligibleStructure,
+              session: session,
+            ),
+        ];
   // Exactly one pass after all model calls, including a normal reply with no
   // tools, thinking, or prefill. The pure layer never infers from body text.
   final eventInvocation = _cardEventInvocation(engine, turn, before, normal: normal, sharedSession: session != null);
@@ -798,23 +928,66 @@ _StateSettlement? _settleStateTurn(TavernEngine engine, _Turn turn, {required bo
     if (definition != null) 'definitionFingerprint': definition.fingerprint,
     'elapsedMs': elapsedMs,
   };
-  for (final call in batch.calls) {
-    final execution = modelResults[call.index];
+  final toolSettlements = <StoredToolStateSettlement>[];
+  for (final staged in callResults) {
+    final call = staged.call;
+    final execution = staged.execution;
     final parameters = call.parameters;
+    final receipt = staged.receipt;
+    final runId = receipt != null
+        ? '${receipt.executionId}:state-tool'
+        : staged.requestId != null
+        ? '${staged.requestId}:state-diagnostic:${call.index}'
+        : '$invocation:tool:${call.index}';
     runs.add(
-      _StateRun('$invocation:tool:${call.index}', 'state.tool', {
+      _StateRun(runId, 'state.tool', {
         ...common,
+        if (staged.requestIndex != null) 'requestIndex': staged.requestIndex,
         'tool': {'index': call.index, 'id': call.id, 'type': call.type, 'name': call.name},
         'parameters': ?parameters,
         if (parameters == null) 'argumentsPrefix': String.fromCharCodes(call.arguments.runes.take(16384)),
         if (parameters == null) 'argumentsTruncated': call.arguments.runes.length > 16384,
         'committed': acceptedResult != null && execution != null && execution.acceptedCount > 0,
         'execution': execution?.toJson(),
-        'issues': gates[call.index],
+        'issues': [
+          ...staged.problems,
+          if (!normal && !staged.problems.any((issue) => issue['code'] == 'terminal-not-normal'))
+            _stateIssue('terminal-not-normal', '', 'The logical turn did not adopt model staging.'),
+        ],
       }),
     );
+    if (receipt != null && receipt.status == 'staged') {
+      final changed = execution?.receipts.any((item) => item['accepted'] == true && item['changed'] == true) ?? false;
+      final status = acceptedResult == null || execution == null
+          ? 'discarded'
+          : execution.acceptedCount == 0 && execution.rejectedCount > 0
+          ? 'rejected'
+          : changed
+          ? 'committed'
+          : 'completed_no_change';
+      toolSettlements.add(
+        StoredToolStateSettlement(
+          executionId: receipt.executionId,
+          status: status,
+          result: _stateToolWire(staged, status),
+        ),
+      );
+    }
   }
-  if (batch.issues.isNotEmpty) {
+  if (ordinary) {
+    for (final item in turn.stagedStateBatches) {
+      if (item.batch.issues.isEmpty) continue;
+      runs.add(
+        _StateRun('${item.requestId}:state-batch', 'state.tool_batch', {
+          ...common,
+          'requestIndex': item.requestIndex,
+          'committed': false,
+          'eligibleStructure': item.batch.eligibleStructure,
+          'issues': item.batch.issues,
+        }),
+      );
+    }
+  } else if (batch.issues.isNotEmpty) {
     runs.add(
       _StateRun('$invocation:batch', 'state.tool_batch', {
         ...common,
@@ -844,6 +1017,7 @@ _StateSettlement? _settleStateTurn(TavernEngine engine, _Turn turn, {required bo
     state: next,
     runs: runs,
     events: events,
+    toolSettlements: toolSettlements,
     ownAudit: stateOwn == null && events?.ownAudit == null ? null : {...?stateOwn, ...?events?.ownAudit},
     trace: {
       ..._statePreparationTrace(turn),

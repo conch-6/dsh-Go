@@ -545,6 +545,7 @@ object SafeMode {
 const fs = require('fs')
 const path = require('path')
 const cp = require('child_process')
+const { randomUUID } = require('crypto')
 
 const HOME = process.env.DSH_APP_ORIGINAL_HOME || process.env.DSH_HOME || '/root/.dsh'
 const SAFE = process.env.DSH_APP_SAFE_DIR || '/var/lib/dsh-app/safe-mode'
@@ -626,29 +627,39 @@ function requireInstalledBundle (name) {
   throw new Error(name + ' 在 DSH 安装和 web profile 中都无法解析，不能启用')
 }
 
-// Same protocol as DSH's own writers: a `wx`-created <file>.lock holding the writer's pid,
-// taken over when that pid no longer exists; the new content lands by rename.
+// Publish a complete pid record at <file>.lock; the other writers follow symlinks.
+// Dead-pid takeover stays the same, and new manifest content still lands by rename.
 function withLock (file, fn) {
   const lock = file + '.lock'
   const deadline = Date.now() + 5000
-  for (;;) {
-    try {
-      fs.writeFileSync(lock, process.pid + '\n', { flag: 'wx', mode: 0o600 })
-      break
-    } catch (e) {
-      // write/close errors follow our exclusive create; an open error owns no lock.
-      if (e.syscall === 'write' || e.syscall === 'close') fs.rmSync(lock, { force: true })
-      if (e.code !== 'EEXIST') throw e
-      const pid = parseInt(String(readText(lock) || '').trim(), 10)
-      if (pid > 0 && !alive(pid)) {
-        fs.rmSync(lock, { force: true })
-        continue
+  const owner = path.join(path.dirname(file), '.dsh-helper-lock-' + randomUUID() + '.pid')
+  const fd = fs.openSync(owner, 'wx', 0o600)
+  let published = false
+  try {
+    try { fs.writeFileSync(fd, process.pid + '\n') } finally { fs.closeSync(fd) }
+    for (;;) {
+      try {
+        fs.symlinkSync(path.basename(owner), lock)
+        published = true
+        break
+      } catch (e) {
+        if (e.code !== 'EEXIST') throw e
+        const pid = parseInt(String(readText(lock) || '').trim(), 10)
+        if (pid > 0 && !alive(pid)) {
+          fs.rmSync(lock, { force: true })
+          continue
+        }
+        if (Date.now() > deadline) break
+        sleep(100)
       }
-      if (Date.now() > deadline) die('package.json 正被别的进程修改（锁文件 ' + lock + '），稍后再试')
-      sleep(100)
     }
+    if (published) return fn()
+  } finally {
+    // If unlink fails, keep the owner so the remaining lock is still readable.
+    if (published) fs.rmSync(lock, { force: true })
+    fs.rmSync(owner, { force: true })
   }
-  try { return fn() } finally { fs.rmSync(lock, { force: true }) }
+  die('package.json 正被别的进程修改（锁文件 ' + lock + '），稍后再试')
 }
 function writeAtomic (file, text) {
   const tmp = file + '.' + process.pid + '.' + Date.now() + '.tmp'

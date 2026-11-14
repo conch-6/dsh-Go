@@ -10,6 +10,7 @@ import '../../common/expand_reveal.dart';
 import '../../common/fluid_bits.dart';
 import '../../common/smooth_size.dart';
 import '../../common/tool_glyph.dart';
+import '../../fx/orbs/thinking_orb.dart';
 import '../../plugins/view/plugin_view.dart' show DshUiParsed, PluginToolCard;
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
@@ -355,7 +356,18 @@ String _trailKind(ToolView view, bool autoAllowing) => switch (view.item.status)
   final status => status.name,
 };
 
-/// 行尾状态:运行中小环 / 失败 ✕ / 已拒绝 / 已取消 / diff 统计。成功默认安静。
+/// 运行中的工具演哪段光球:跑命令是解题,改文件是写作,读和搜是检索,子任务是干活,
+/// 待办是规划,其余(多是 MCP)是连接服务。
+OrbState _orbFor(ToolKind kind) => switch (kind) {
+  ToolKind.command => OrbState.solving,
+  ToolKind.edit => OrbState.composing,
+  ToolKind.read || ToolKind.search || ToolKind.web => OrbState.searching,
+  ToolKind.agent => OrbState.working,
+  ToolKind.todo => OrbState.weaving,
+  ToolKind.other => OrbState.connecting,
+};
+
+/// 行尾状态:运行中小光球 / 失败 ✕ / 已拒绝 / 已取消 / diff 统计。成功默认安静。
 class _StatusTrail extends StatelessWidget {
   const _StatusTrail({super.key, required this.view, this.autoAllowing = false});
 
@@ -368,17 +380,14 @@ class _StatusTrail extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
-    final colors = theme.colorScheme;
     final dsh = DshColors.of(context);
     final label = theme.textTheme.labelSmall?.copyWith(fontSize: 12);
 
     switch (view.item.status) {
       case ToolStatus.streaming || ToolStatus.running:
       case ToolStatus.awaitingApproval when autoAllowing:
-        return SizedBox.square(
-          dimension: 14,
-          child: CircularProgressIndicator(strokeWidth: 1.8, color: colors.primary),
-        );
+        // 点阵小光球(Libraries.dev 思考光球),按工具在做的事选一段。
+        return ThinkingOrb(state: _orbFor(toolKindOf(view.item)), size: OrbSize.px20, displaySize: 18);
       case ToolStatus.awaitingApproval:
         return Text(l10n.commonWaitingApproval, style: label?.copyWith(color: dsh.warning));
       case ToolStatus.failed:

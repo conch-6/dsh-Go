@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../support/haptics.dart';
 import '../support/test_fonts.dart';
 
 /// A tree node: [id] under [parent], the [index]th of its siblings.
@@ -147,11 +148,14 @@ void main() {
 
     await tester.tap(_row(old.nodeId));
     await tester.pumpAndSettle();
+    final felt = recordHaptics(tester);
     await tester.tap(find.byKey(const ValueKey('tavern-branch-switch')));
     await tester.pumpAndSettle();
 
     expect(find.byType(TavernBranchesPage), findsNothing);
     expect(find.text('切到了这条分支'), findsOneWidget);
+    // Felt as a swipe to another reply is: one light tick.
+    expect(felt, ['HapticFeedbackType.selectionClick']);
     final now = (await tester.runAsync(() => tavern.path(chat)))!;
     expect(now.last.nodeId, old.nodeId);
   });

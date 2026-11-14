@@ -14,6 +14,11 @@ class ModelToolCall {
     required Map<String, Object?>? parameters,
     required List<Map<String, Object?>> issues,
     required this.valid,
+    required this.identityComplete,
+    required this.originalArgumentsStringComplete,
+    required this.metadataConflict,
+    required this.unsupportedEnvelope,
+    required this.structuralKnowledge,
   }) : _parameters = parameters == null ? null : jsonEncode(parameters),
        _issues = jsonEncode(issues);
 
@@ -25,6 +30,14 @@ class ModelToolCall {
   final String? _parameters;
   final String _issues;
   final bool valid;
+  final bool identityComplete;
+  final bool originalArgumentsStringComplete;
+  final bool metadataConflict;
+  final bool unsupportedEnvelope;
+  final String structuralKnowledge;
+  String get replayability => !identityComplete || !originalArgumentsStringComplete || unsupportedEnvelope
+      ? 'invalid'
+      : (structuralKnowledge == 'known' ? 'confirmed' : 'unknown');
 
   Map<String, Object?>? get parameters => _parameters == null ? null : jsonDecode(_parameters) as Map<String, Object?>;
   List<Map<String, Object?>> get issues => _decodeIssues(_issues);
@@ -38,13 +51,28 @@ class ModelToolCall {
     'parameters': parameters,
     'issues': issues,
     'valid': valid,
+    'identityComplete': identityComplete,
+    'originalArgumentsStringComplete': originalArgumentsStringComplete,
+    'metadataConflict': metadataConflict,
+    'unsupportedEnvelope': unsupportedEnvelope,
+    'structuralKnowledge': structuralKnowledge,
+    'replayability': replayability,
   };
 }
 
 class ModelToolBatch {
-  ModelToolBatch._(List<ModelToolCall> calls, List<Map<String, Object?>> issues, this.eligibleStructure)
-    : calls = List.unmodifiable(calls),
-      _issues = jsonEncode(issues);
+  ModelToolBatch._(
+    List<ModelToolCall> calls,
+    List<Map<String, Object?>> issues,
+    this.eligibleStructure, {
+    required this.rollNameObserved,
+    required this.resourceOverflow,
+    required this.hasUnassignedFragment,
+    required this.metadataConflict,
+    required this.unsupportedEnvelope,
+    required this.structuralKnowledge,
+  }) : calls = List.unmodifiable(calls),
+       _issues = jsonEncode(issues);
 
   final List<ModelToolCall> calls;
   final String _issues;
@@ -53,12 +81,43 @@ class ModelToolBatch {
   /// structural usability; an unassigned bad fragment cannot poison a valid
   /// independent call with its own explicit index.
   final bool eligibleStructure;
+  final bool rollNameObserved;
+  final bool resourceOverflow;
+  final bool hasUnassignedFragment;
+  final bool metadataConflict;
+  final bool unsupportedEnvelope;
+  final String structuralKnowledge;
+  bool get finalIdentityComplete =>
+      !hasUnassignedFragment && !resourceOverflow && calls.every((call) => call.identityComplete);
+  bool get originalArgumentsStringComplete =>
+      !hasUnassignedFragment && !resourceOverflow && calls.every((call) => call.originalArgumentsStringComplete);
+  String get replayability =>
+      resourceOverflow ||
+          hasUnassignedFragment ||
+          metadataConflict ||
+          unsupportedEnvelope ||
+          !finalIdentityComplete ||
+          !originalArgumentsStringComplete
+      ? 'invalid'
+      : (structuralKnowledge == 'known' ? 'confirmed' : 'unknown');
+  Map<String, Object?> get structuralState => {
+    'resourceOverflow': resourceOverflow,
+    'hasUnassignedFragment': hasUnassignedFragment,
+    'metadataConflict': metadataConflict,
+    'unsupportedEnvelope': unsupportedEnvelope,
+    'finalIdentityComplete': finalIdentityComplete,
+    'originalArgumentsStringComplete': originalArgumentsStringComplete,
+    'structuralKnowledge': structuralKnowledge,
+    'replayability': replayability,
+  };
   List<Map<String, Object?>> get issues => _decodeIssues(_issues);
 
   Map<String, Object?> toJson() => {
     'calls': [for (final call in calls) call.toJson()],
     'issues': issues,
     'eligibleStructure': eligibleStructure,
+    'rollNameObserved': rollNameObserved,
+    'structuralState': structuralState,
   };
 }
 
@@ -72,6 +131,10 @@ class ModelToolAccumulator {
   final _issues = _IssueBag(global: true);
   var _argumentBytes = 0;
   var _resourceOverflow = false;
+  var _rollNameObserved = false;
+  var _hasUnassignedFragment = false;
+  var _unsupportedEnvelope = false;
+  var _structuralUnknown = false;
   Map<String, Object?>? _resourceIssue;
   ModelToolBatch? _finished;
 
@@ -79,6 +142,12 @@ class ModelToolAccumulator {
     if (_finished != null) {
       throw StateError('A finished tool batch cannot accept more fragments.');
     }
+    // This O(1) fact survives invalid indexes, resource drops and capped
+    // diagnostics. It is a candidate observation, never authorization.
+    _rollNameObserved = _rollNameObserved || fragment.name == 'roll';
+    final structure = fragment.structure;
+    _unsupportedEnvelope = _unsupportedEnvelope || (structure?.unsupportedEnvelope ?? false);
+    _structuralUnknown = _structuralUnknown || structure == null || structure.structuralKnowledge != 'known';
     final index = fragment.index;
     var call = index == null || index < 0 ? null : _calls[index];
     final appendArguments = _countArguments(
@@ -87,6 +156,7 @@ class ModelToolAccumulator {
     );
     final issues = fragment.issues;
     if (index == null || index < 0) {
+      _hasUnassignedFragment = true;
       for (final issue in issues) {
         _issues.add(issue);
       }
@@ -106,6 +176,10 @@ class ModelToolAccumulator {
     for (final issue in issues) {
       call.issues.add(issue);
     }
+    call.structuralUnknown = call.structuralUnknown || structure == null || structure.structuralKnowledge != 'known';
+    call.unsupportedEnvelope = call.unsupportedEnvelope || (structure?.unsupportedEnvelope ?? false);
+    call.invalidMetadataType = call.invalidMetadataType || (structure?.invalidMetadataType ?? false);
+    call.invalidArgumentsType = call.invalidArgumentsType || (structure?.invalidArgumentsType ?? false);
     call.metadata('id', fragment.id);
     call.metadata('type', fragment.type);
     call.metadata('function.name', fragment.name);
@@ -178,6 +252,7 @@ class ModelToolAccumulator {
     for (final duplicates in ids.values) {
       if (duplicates.length > 1) {
         for (final call in duplicates) {
+          call.duplicateId = true;
           call.issues.add(_issue('duplicate_id', 'id', 'Different call indexes use the same id.', call.index));
         }
       }
@@ -242,6 +317,19 @@ class ModelToolAccumulator {
           parameters: parameters,
           issues: issues,
           valid: !_resourceOverflow && issues.isEmpty && parameters != null,
+          identityComplete:
+              call.id != null &&
+              call.id!.isNotEmpty &&
+              call.type == 'function' &&
+              call.name != null &&
+              call.name!.isNotEmpty &&
+              !call.duplicateId &&
+              !call.metadataConflict &&
+              !call.invalidMetadataType,
+          originalArgumentsStringComplete: call.sawArguments && !call.invalidArgumentsType && !_resourceOverflow,
+          metadataConflict: call.metadataConflict,
+          unsupportedEnvelope: call.unsupportedEnvelope,
+          structuralKnowledge: call.structuralUnknown ? 'unknown' : 'known',
         ),
       );
     }
@@ -256,7 +344,17 @@ class ModelToolAccumulator {
         issues.add(resourceIssue);
       }
     }
-    return ModelToolBatch._(calls, issues, !_resourceOverflow);
+    return ModelToolBatch._(
+      calls,
+      issues,
+      !_resourceOverflow,
+      rollNameObserved: _rollNameObserved,
+      resourceOverflow: _resourceOverflow,
+      hasUnassignedFragment: _hasUnassignedFragment,
+      metadataConflict: calls.any((call) => call.metadataConflict),
+      unsupportedEnvelope: _unsupportedEnvelope,
+      structuralKnowledge: _structuralUnknown ? 'unknown' : 'known',
+    );
   }
 }
 
@@ -268,6 +366,12 @@ class _CallBuffer {
   final issues = _IssueBag();
   var sawArguments = false;
   var endsWithLeadSurrogate = false;
+  var duplicateId = false;
+  var metadataConflict = false;
+  var invalidMetadataType = false;
+  var invalidArgumentsType = false;
+  var unsupportedEnvelope = false;
+  var structuralUnknown = false;
 
   String? get id => _metadata['id'];
   String? get type => _metadata['type'];
@@ -281,6 +385,7 @@ class _CallBuffer {
     if (previous == null) {
       _metadata[field] = value;
     } else if (previous != value) {
+      metadataConflict = true;
       issues.add(_issue('conflicting_metadata', field, 'Repeated tool metadata does not agree.', index));
     }
   }

@@ -1,5 +1,8 @@
 package io.github.ccch1mneyyy.dsh_app.phone.a11y
 
+import io.github.ccch1mneyyy.dsh_app.pet.Dock
+import io.github.ccch1mneyyy.dsh_app.pet.EdgeSnap
+import io.github.ccch1mneyyy.dsh_app.pet.SafeArea
 import io.github.ccch1mneyyy.dsh_app.pet.Side
 import io.github.ccch1mneyyy.dsh_app.pet.WindowPos
 import kotlin.math.ceil
@@ -121,9 +124,6 @@ internal object CapsuleMetrics {
 
     /** Gap to the screen sides, as the app's floating controls (page-design §7). */
     const val EDGE_DP = 12
-
-    /** Below the status bar. */
-    const val TOP_GAP_DP = 6
 
     fun slots(stopped: Boolean): List<Slot> =
         if (stopped) listOf(Slot.MARK, Slot.LINE) else listOf(Slot.MARK, Slot.LINE, Slot.PAUSE, Slot.STOP)
@@ -293,12 +293,62 @@ internal class HoldToStop(val armMs: Long = ARM_MS, val fillMs: Long = FILL_MS) 
 }
 
 /**
+ * Where the capsule sits, in px: centred, in the lower middle of the screen (its centre at
+ * [CENTRE] of the safe height, in the thumb's reach and off the app's own header), and always
+ * [GAP_DP] clear of the navigation bar and of whatever takes the bottom — the keyboard, the
+ * confirm card — by moving up over it. The card grows upward from it, so the header (and 停止)
+ * stays where the capsule was. Its window hangs from the bottom (Gravity.BOTTOM): a taller
+ * window grows up, the bottom edge never moves.
+ */
+internal object CapsulePlacement {
+    const val CENTRE = 0.72f
+    const val GAP_DP = 12
+
+    /** The capsule's centre y on [area]; [obstacleTop]: the top of a keyboard or confirm card, if one shows. */
+    fun centreY(area: SafeArea, headerH: Int, gap: Int, obstacleTop: Int? = null): Int {
+        val top = area.top
+        val bottom = area.screenH - area.bottom
+        val base = top + ((bottom - top) * CENTRE).roundToInt()
+        val limit = minOf(bottom, obstacleTop ?: bottom) - gap - headerH / 2
+        val floor = top + gap + headerH / 2
+        return maxOf(floor, minOf(base, limit))
+    }
+
+    /**
+     * The card's room, header included, above a capsule centred at [centreY]: up to [gap] under
+     * the status bar. A short screen with the keyboard up has little; the card's body scrolls in it.
+     */
+    fun cardRoom(area: SafeArea, centreY: Int, headerH: Int, gap: Int): Int = centreY + headerH / 2 - (area.top + gap)
+
+    /** The body's height in a card at most [maxCard] tall, of which the header takes [headerPart]. */
+    fun bodyHeight(natural: Int, maxCard: Int, headerPart: Int): Int = minOf(natural, (maxCard - headerPart).coerceAtLeast(0))
+
+    /** The window's Gravity.BOTTOM offset for a capsule centred at [centreY], its root padding the surface by [padBottom] below. */
+    fun windowY(screenH: Int, centreY: Int, headerH: Int, padBottom: Int) = screenH - (centreY + headerH / 2) - padBottom
+
+    /** A Gravity.BOTTOM window's top on screen, from its offset [y] and its height. */
+    fun windowTop(screenH: Int, y: Int, windowH: Int) = screenH - y - windowH
+}
+
+/**
  * Where the ball's window goes, in px. The ball sits [edge] from the screen side like the app's
  * floating controls; folding starts on the capsule's end circle.
  */
 internal object BallGeometry {
     /** The window margin EdgeSnap keeps from the safe area so the ball itself is [edge] in. */
     fun margin(edge: Int, pad: Int) = edge - pad
+
+    /** A ball the person never moved: on the right, level with the capsule (centre [centreY]). */
+    fun defaultDock(area: SafeArea, size: Int, margin: Int, centreY: Int): Dock {
+        val lo = EdgeSnap.minY(area, margin)
+        val hi = EdgeSnap.maxY(area, size, margin)
+        val f = if (hi <= lo) 0f else ((centreY - size / 2 - lo).toFloat() / (hi - lo)).coerceIn(0f, 1f)
+        return Dock(Side.RIGHT, f)
+    }
+
+    /** A resting ball window ([size] square) at [pos] lifted, if it would reach below [limit] (a confirm card's top), but not above [minY]. */
+    fun above(pos: WindowPos, size: Int, limit: Int?, minY: Int): WindowPos =
+        if (limit == null || pos.y + size <= limit) pos else WindowPos(pos.x, maxOf(minY, limit - size))
 
     /** The x of a window [windowW] wide centred on a [screenW] screen (Gravity.CENTER_HORIZONTAL). */
     fun centredX(screenW: Int, windowW: Int) = (screenW - windowW) / 2

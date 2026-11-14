@@ -193,7 +193,12 @@ void main() {
     final pending = await Directory('${h.directory.path}/characters/${first.id}/card.json.writing').create();
     await expectLater(
       h.engine.updateCharacterBookEntry(first.id, 0, {'content': 'NOT COMMITTED'}),
-      throwsA(isA<FileSystemException>()),
+      throwsA(
+        isA<TavernAuthoringException>()
+            .having((error) => error.code, 'code', 'resource_write_failed')
+            .having((error) => error.receipt?.committed, 'committed', isFalse)
+            .having((error) => error.cause, 'cause', isA<FileSystemException>()),
+      ),
     );
     expect(_hits(await h.engine.previewCharacterBook(first.id, '')).single['content'], 'UPDATED');
     await pending.delete();
@@ -847,6 +852,7 @@ class _Model extends TavernModelClient {
     required TavernModelConfig config,
     required Map<String, Object?> body,
     required ModelCancellation cancellation,
+    void Function(int attempt)? onRequestStarted,
   }) {
     bodies.add(_map(body));
     cancellations.add(cancellation);

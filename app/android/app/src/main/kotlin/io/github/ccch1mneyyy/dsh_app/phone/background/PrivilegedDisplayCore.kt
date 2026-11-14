@@ -109,10 +109,6 @@ class PrivilegedDisplayCore internal constructor(
     private var lastC2Release: SelfCheckTargetCompletion? = null
     private var selfCheckOwner = hosted?.probe == true
     private var probeConsumed = false
-    private var allocationConsumed = false
-    private var allocationReady = false
-    private var retiredOwner: String? = null
-    private val recoveryPlatform by lazy { RecoveryPlatform() }
     private var selfCheckWindow: BackgroundInputProbe? = null
     private var releasingDisplayId: Int? = null
     private var displayCreationAttempted = false
@@ -130,12 +126,14 @@ class PrivilegedDisplayCore internal constructor(
         val result = try {
             rootTasksMethod.invoke(taskManager, displayId) as? List<*> ?: throw Fault("releaseQueryFailed")
         } catch (error: InvocationTargetException) {
-            // A released virtual display can already be unknown to ATMS. That is an empty task
-            // scope, not a failed query. Transport/permission failures still stay visible.
-            if (error.cause is IllegalArgumentException) return emptyList()
+            // A virtual display ATMS has already forgotten is an empty task scope, not a failed
+            // query. The default display must stay readable, and permission/transport failures
+            // keep their stable releaseQueryFailed code.
+            if (displayId != Display.DEFAULT_DISPLAY && error.cause is IllegalArgumentException) return emptyList()
             throw Fault("releaseQueryFailed")
         } catch (_: IllegalArgumentException) {
-            return emptyList()
+            if (displayId != Display.DEFAULT_DISPLAY) return emptyList()
+            throw Fault("releaseQueryFailed")
         }
         if (result.any { !rootTaskInfoType.isInstance(it) }) throw Fault("releaseQueryFailed")
         return result.map { it as Any }
@@ -143,9 +141,9 @@ class PrivilegedDisplayCore internal constructor(
 
     internal fun rootTasksEmpty(displayId: Int): Boolean = rootTaskInfos(displayId).isEmpty()
 
-    /** Probe displays belong to this app only; their own task is not a user task screen. */
+    /** A probe display carries only this app's own task; it must not block the owner's release. */
     private fun releaseTasksGone(displayId: Int): Boolean =
-        rootTaskInfos(displayId).isEmpty() || probeDisplay || selfCheckOwner
+        probeDisplay || selfCheckOwner || rootTaskInfos(displayId).isEmpty()
 
     private class Fault(val code: String) : Exception()
 
@@ -171,19 +169,20 @@ class PrivilegedDisplayCore internal constructor(
                 response.putInt(Proto.BACKGROUND_COORDINATES, 1)
                 response.putInt(Proto.AFTER_LOCAL_VISUAL, 1)
                 response.putInt(Proto.REPLAY_NAVIGATION, 1)
-                // A real successful full query is required; finding the reflective method is insufficient.
-                if (runCatching { rootTasksEmpty(Display.DEFAULT_DISPLAY) }.isSuccess) {
-                    response.putInt(Proto.RELEASE_RECEIPT, 1)
-                    response.putInt(Proto.SELF_CHECK_PROBE_VERSION, 1)
-                    if (Build.VERSION.SDK_INT >= 34 && runCatching {
-                        rootTaskInfoType.getField("topActivity")
-                        rootTaskInfoType.getField("displayId")
-                        privileged.packageManager.getActivityInfo(ComponentName(Proto.APP_PACKAGE, TargetContract.ACTIVITY_CLASS), 0)
-                    }.isSuccess) {
-                        response.putInt(Proto.SELF_CHECK_TARGET_VERSION, 1)
-                        response.putInt(Proto.SELF_CHECK_TARGET_C2_VERSION, 1)
-                    }
-                } else response.putString(Proto.ERROR, "releaseQueryFailed")
+                // Protocol facts of this APK, not device checks: a device that cannot do something
+                // reports it from the real operation, with its own error code.
+                response.putInt(Proto.RELEASE_RECEIPT, 1)
+                response.putInt(Proto.SELF_CHECK_PROBE_VERSION, 1)
+                // The fixed self-check target only: it reads these task fields on the main display.
+                if (Build.VERSION.SDK_INT >= 34 && runCatching {
+                    rootTaskInfoType.getField("topActivity")
+                    rootTaskInfoType.getField("displayId")
+                    privileged.packageManager.getActivityInfo(ComponentName(Proto.APP_PACKAGE, TargetContract.ACTIVITY_CLASS), 0)
+                    rootTasksEmpty(Display.DEFAULT_DISPLAY)
+                }.isSuccess) {
+                    response.putInt(Proto.SELF_CHECK_TARGET_VERSION, 1)
+                    response.putInt(Proto.SELF_CHECK_TARGET_C2_VERSION, 1)
+                }
                 return response
             }
             if (op == Proto.OP_COLLECT_SYSTEM_IME) {
@@ -254,7 +253,6 @@ class PrivilegedDisplayCore internal constructor(
     }
 
     private fun failureCode(e: Throwable): String = when (e) {
-        is ResourceRecovery.Failure -> e.code
         is Fault -> e.code
         is TargetIdentity.Failure -> e.code
         is InputProbe.Failure -> e.code
@@ -265,14 +263,10 @@ class PrivilegedDisplayCore internal constructor(
 
     private fun failureDetail(e: Throwable): String? =
         if (e is InputProbe.Failure) e.observation?.encode()
-        else if (e is ResourceRecovery.Failure || e is Fault || e is TargetIdentity.Failure || e is InterruptedException || e is SecurityException) null
+        else if (e is Fault || e is TargetIdentity.Failure || e is InterruptedException || e is SecurityException) null
         else e.javaClass.simpleName
 
     private fun dispatch(op: String?, request: Bundle, response: Bundle) {
-        if (op == Proto.OP_ALLOCATE) {
-            allocate(request, response)
-            return
-        }
         if (SelfCheckTargetRequest.Step.entries.any { it.op == op }) {
             selfCheckTarget(request, response)
             return
@@ -315,10 +309,8 @@ class PrivilegedDisplayCore internal constructor(
         }
         requireTreeReady()
         if (selfCheckOwner || targetSequence != null) throw Fault("identityChanged")
-        if (op == Proto.OP_REPLAY_NAVIGATION && hosted?.recovery != true)
+        if (op == Proto.OP_REPLAY_NAVIGATION && hosted == null)
             throw Fault("identityChanged")
-        if (hosted?.recovery == true && (!allocationReady || display == null))
-            throw Fault("allocationRequired")
         if (owner != null && owner != ownerId) throw Fault("identityChanged")
         if ((op == Proto.OP_CREATE || op == Proto.OP_LAUNCH) && request.containsKey(Proto.RELEASE_RECEIPT)) {
             if (request.get(Proto.RELEASE_RECEIPT) !is Int || request.getInt(Proto.RELEASE_RECEIPT) != 1) throw Fault("invalidArguments")
@@ -361,7 +353,6 @@ class PrivilegedDisplayCore internal constructor(
         }
         when (op) {
             Proto.OP_CREATE, Proto.OP_LAUNCH -> {
-                if (hosted?.recovery == true && op != Proto.OP_LAUNCH) throw Fault("allocationRequired")
                 if (display == null) createDisplay(request)
                 else requestedViewport(request)?.let {
                     if (width != it.width || height != it.height) throw Fault("viewportConflict")
@@ -471,8 +462,6 @@ class PrivilegedDisplayCore internal constructor(
         }
         if (owner != parsed.owner || !strictOwner || selfCheckOwner) throw Fault("identityChanged")
         sequence.enter(parsed)?.let { throw Fault(it) }
-        if (hosted?.recovery == true && parsed.step != SelfCheckTargetRequest.Step.CREATE && !allocationReady)
-            throw Fault("allocationRequired")
         if (Build.VERSION.SDK_INT < 34) throw Fault("targetUnavailable")
         if (keyguard?.isKeyguardLocked == true) throw Fault("locked")
         when (parsed.step) {
@@ -484,10 +473,7 @@ class PrivilegedDisplayCore internal constructor(
                 })
                 val actual = display?.display ?: throw Fault("displayMissing")
                 if (!actual.isValid || actual.displayId <= Display.DEFAULT_DISPLAY) throw Fault("displayUnsupported")
-                if (hosted?.recovery == true) {
-                    allocationEvidence(response)
-                    allocationReady = true
-                } else response.putInt(Proto.DISPLAY_ID, actual.displayId)
+                response.putInt(Proto.DISPLAY_ID, actual.displayId)
                 response.putBoolean(Proto.SELF_CHECK_DISPLAY_READY, true)
             }
             SelfCheckTargetRequest.Step.READ -> {
@@ -728,21 +714,17 @@ class PrivilegedDisplayCore internal constructor(
         if (selfCheckWindow != null) throw Fault("releaseUnconfirmed")
         // The one verify attempt is consumed even if the allocated display or keyguard check fails.
         probeConsumed = true
-        if (hosted?.recovery == true) {
-            if (!allocationReady || display == null || displayApiReleased) throw Fault("allocationRequired")
-        } else {
-            if (display != null || reader != null || pendingReader != null || readerAllocationUncertain)
-                throw Fault("releaseUnconfirmed")
-            owner = ownerId
-            strictOwner = true
-            selfCheckOwner = true
-            releasingDisplayId = null
-            displayCreationAttempted = false
-            displayApiReleased = false
-            visualObservation = null
-        }
+        if (display != null || reader != null || pendingReader != null || readerAllocationUncertain)
+            throw Fault("releaseUnconfirmed")
+        owner = ownerId
+        strictOwner = true
+        selfCheckOwner = true
+        releasingDisplayId = null
+        displayCreationAttempted = false
+        displayApiReleased = false
+        visualObservation = null
         if (keyguard?.isKeyguardLocked == true) throw Fault("locked")
-        if (hosted?.recovery != true) createDisplay(Bundle().apply {
+        createDisplay(Bundle().apply {
             putInt(Proto.SHORT_SIDE, 360)
             putInt(Proto.ASPECT_W, 9)
             putInt(Proto.ASPECT_H, 20)
@@ -816,32 +798,6 @@ class PrivilegedDisplayCore internal constructor(
         return preset
     }
 
-    private fun allocate(request: Bundle, response: Bundle) {
-        val parsed = ResourceRecovery.allocation(request.keySet()) { request.get(it) } ?: throw Fault("invalidArguments")
-        if (hosted?.recovery != true || hosted.target != null || parsed.owner != owner || parsed.probe != hosted.probe)
-            throw Fault("identityChanged")
-        if (allocationConsumed) throw Fault("allocationAlreadyStarted")
-        allocationConsumed = true
-        requireTreeReady()
-        if (keyguard?.isKeyguardLocked == true) throw Fault("locked")
-        createDisplay(if (parsed.probe) Bundle().apply {
-            putInt(Proto.SHORT_SIDE, 360); putInt(Proto.ASPECT_W, 9); putInt(Proto.ASPECT_H, 20)
-        } else request, probe = parsed.probe)
-        allocationEvidence(response)
-        allocationReady = true // App must still persist this actual ID before sending its second stage.
-    }
-
-    private fun allocationEvidence(response: Bundle) {
-        val original = display?.display ?: throw Fault("displayMissing")
-        val id = original.displayId
-        if (id <= Display.DEFAULT_DISPLAY || !original.isValid) throw Fault("displayUnsupported")
-        val actual = recoveryPlatform.display(id)
-        if (!actual.virtual || actual.name != ResourceRecovery.tag(checkNotNull(owner)) || actual.uid != Process.myUid() ||
-            display?.display !== original || !original.isValid) throw Fault("displayTargetChanged")
-        response.putInt(Proto.DISPLAY_ID, id)
-        response.putInt(Proto.RESOURCE_RECOVERY_VERSION, 1)
-    }
-
     private fun createDisplay(request: Bundle, probe: Boolean = false) {
         val shortSide = request.getInt(Proto.SHORT_SIDE, 720).coerceIn(360, 1080)
         val aspectW = request.getInt(Proto.ASPECT_W, 9).coerceAtLeast(1)
@@ -867,7 +823,7 @@ class PrivilegedDisplayCore internal constructor(
             // their existing display flags; this tests delivery, not every target app's policy.
             displayCreationAttempted = true
             probeDisplay = probe
-            val vd = displays.createVirtualDisplay(if (hosted?.recovery == true) ResourceRecovery.tag(checkNotNull(owner)) else "dsh-background", w, h, 320, ir.surface,
+            val vd = displays.createVirtualDisplay("dsh-background", w, h, 320, ir.surface,
                 flags or if (probe) DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION else 0)
             display = vd; reader = ir; pendingReader = null
             releasingDisplayId = vd.display.displayId
@@ -988,9 +944,9 @@ class PrivilegedDisplayCore internal constructor(
         stopPreview()
         preview.invalidate()
         selfCheckWindow?.let { window ->
-            // A probe that did not detach within its own timeout must not turn a completed
-            // physical release into releasePending. Clear the handle first and let the
-            // activity's 8s self-expiry / finishAndRemoveTask finish its task.
+            // A probe that has not detached within its own timeout must not turn a finished
+            // physical release into releasePending. Drop the handle first; the probe activity's
+            // 8s self-expiry / finishAndRemoveTask still tears its own task down.
             selfCheckWindow = null
             runCatching { window.close() }
         }
@@ -1007,7 +963,9 @@ class PrivilegedDisplayCore internal constructor(
             }
             closeReaders()
             val deadline = SystemClock.uptimeMillis() + 1_000
-            while (!releaseTasksGone(displayId)) {
+            // The display itself is already released. A ROM whose task query is unreadable cannot
+            // confirm the tasks left; that is not a reason to fail every release on it.
+            while (!runCatching { releaseTasksGone(displayId) }.getOrDefault(true)) {
                 val remaining = deadline - SystemClock.uptimeMillis()
                 if (remaining <= 0) throw Fault("releasePending")
                 Thread.sleep(minOf(50L, remaining))
@@ -1021,19 +979,7 @@ class PrivilegedDisplayCore internal constructor(
         targetIdentity.clear()
         targetSequence = null; targetSnapshot = null; targetMain = null
         releasingDisplayId = null; displayCreationAttempted = false; displayApiReleased = false; probeDisplay = false
-        allocationReady = false
     }
-
-    /** Host has permanently sealed admissions. This does not fabricate a normal/C2 receipt. */
-    internal fun retireResources(): Boolean = lock.withLock {
-        releasePhysical()
-        if (!previewWorker.drained()) return false
-        owner?.let { retiredOwner = it }
-        clearResourceState()
-        true
-    }
-
-    internal fun recoveryMode(): Boolean = hosted?.recovery == true
 
     private fun releaseStrict(ownerId: String, targetRelease: SelfCheckTargetRelease? = null): Boolean {
         if (lastReleasedOwner == ownerId) return lastReleaseNeverCreated
@@ -1357,7 +1303,6 @@ class PrivilegedDisplayCore internal constructor(
             if (selfCheckOwner || targetSequence != null) throw Fault("identityChanged")
             val requestedOwner = request.getString(Proto.OWNER)
             if (requestedOwner.isNullOrEmpty() || requestedOwner != owner) throw Fault("identityChanged")
-            if (enabled && hosted?.recovery == true && !allocationReady) throw Fault("allocationRequired")
             requireDisplay()
             if (!enabled) stopPreview()
             else {
@@ -1408,7 +1353,7 @@ class PrivilegedDisplayCore internal constructor(
     }
 
     internal fun hasResources(): Boolean = lock.withLock { owner != null }
-    internal fun knowsOwner(value: String): Boolean = lock.withLock { owner == value || lastReleasedOwner == value || retiredOwner == value }
+    internal fun knowsOwner(value: String): Boolean = lock.withLock { owner == value || lastReleasedOwner == value }
 
     internal fun completedRelease(): HostedRelease? = lock.withLock {
         lastReleasedOwner?.let { HostedRelease(it, lastReleaseNeverCreated, lastC2Release) }

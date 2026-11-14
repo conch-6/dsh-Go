@@ -240,19 +240,27 @@ internal class SurfacePainter(private val context: Context) {
     private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val hairline = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val r = RectF()
+    private val shift = Matrix()
     private var shadedTop = Float.NaN
     private var shadedWith: OverlayPalette? = null
 
     fun draw(canvas: Canvas, rect: RectF, radius: Float, c: OverlayPalette) {
         // The fall of colour is over the capsule's own height, so a card is no darker at its foot.
         val top = rect.top
-        val span = context.dpf(CapsuleMetrics.HEIGHT_DP.toFloat())
-        if (top != shadedTop || c !== shadedWith) {
-            fill.shader = LinearGradient(0f, top, 0f, top + span, c.surfaceTop, c.surfaceBottom, Shader.TileMode.CLAMP)
+        if (c !== shadedWith) {
+            val span = context.dpf(CapsuleMetrics.HEIGHT_DP.toFloat())
+            fill.shader = LinearGradient(0f, 0f, 0f, span, c.surfaceTop, c.surfaceBottom, Shader.TileMode.CLAMP)
             // The rim: light on the upper edge, gone by a third of the capsule's height.
-            rim.shader = LinearGradient(0f, top, 0f, top + span / 3, c.rim, c.rim and 0x00FFFFFF, Shader.TileMode.CLAMP)
-            shadedTop = top
+            rim.shader = LinearGradient(0f, 0f, 0f, span / 3, c.rim, c.rim and 0x00FFFFFF, Shader.TileMode.CLAMP)
             shadedWith = c
+            shadedTop = Float.NaN
+        }
+        if (top != shadedTop) {
+            // The card grows up: the top moves every frame of the morph, the gradients follow it.
+            shift.setTranslate(0f, top)
+            fill.shader.setLocalMatrix(shift)
+            rim.shader.setLocalMatrix(shift)
+            shadedTop = top
         }
         canvas.drawRoundRect(rect, radius, radius, fill)
         val hair = context.dpf(1f)

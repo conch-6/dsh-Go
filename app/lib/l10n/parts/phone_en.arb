@@ -492,14 +492,13 @@
   "phoneSelfCheckScope": "Uses the selected connected channel and a temporary presentation display. App launch, text input, screenshots, OCR and MAIN disturbance are not tested. Cleanup alone does not prove a display was created.",
   "phoneSelfCheckStart": "Start check",
   "phoneSelfCheckCancel": "Request cancellation",
-  "phoneSelfCheckRetry": "Retry cleanup only",
   "phoneSelfCheckRefresh": "Refresh status",
   "phoneSelfCheckSave": "Save sanitized report",
   "phoneSelfCheckSaving": "Saving…",
   "phoneSelfCheckSaved": "Report saved to Downloads/DSH-Go.",
   "phoneSelfCheckSaveFailed": "Could not save the report.",
   "phoneSelfCheckReportHint": "Save only when you choose. The local report contains fixed results, with no screenshots, recognized text, logs, account data or run identifier.",
-  "phoneSelfCheckRunState": "{state, select, idle{Not started} running{Running partial check} cleaning{Cleaning up; cancellation does not undo sent input} done{Check ended; see Technical details for results} cancelled{Cancelled; observed actions remain recorded} cleanup_pending{Cleanup unconfirmed — resources remain reserved} other{Status unavailable}}",
+  "phoneSelfCheckRunState": "{state, select, idle{Not started} running{Running partial check} cleaning{Cleaning up; cancellation does not undo sent input} done{Check ended; see Technical details for results} cancelled{Cancelled; observed actions remain recorded} other{Status unavailable}}",
   "@phoneSelfCheckRunState": {
     "placeholders": {
       "state": {
@@ -616,8 +615,7 @@
   "phoneBackgroundParallelUnsupported": "Background operation is unavailable on this device.",
   "phoneBackgroundParallelConnection": "A connection is required before a new background task can start.",
   "phoneBackgroundParallelBusy": "The background channel is being prepared or maintained. New tasks cannot start yet.",
-  "phoneBackgroundParallelRecovery": "Resolve unfinished background resource recovery before starting new tasks.",
-  "phoneBackgroundParallelPeer": "The connected service does not support the required background capabilities.",
+  "phoneGateRetest": "Check this channel again",
   "phoneBackgroundParallelSerial": "This connection supports one background slot. Your preference remains saved.",
   "@phoneBackgroundParallelStatus": {
     "placeholders": {

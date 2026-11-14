@@ -37,6 +37,7 @@ async function probe(kind, timing, outcome, directory) {
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); return dispose; },
     on() {}, inject(_names, fn) { fn(ctx); },
     webServer: {
+      tapIndex() { return () => {}; },
       register(route) { routes.push(route); return () => {}; },
       registerUpgrade(route) { upgrades.push(route); return () => {}; },
     },

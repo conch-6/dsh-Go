@@ -721,14 +721,13 @@
   "phoneSelfCheckScope": "使用已选择并连接的通道和临时展示屏。应用启动、文字输入、截图、OCR及主屏受扰情况均未测试。清理通过不代表展示屏创建成功。",
   "phoneSelfCheckStart": "开始检查",
   "phoneSelfCheckCancel": "请求取消",
-  "phoneSelfCheckRetry": "仅重试清理",
   "phoneSelfCheckRefresh": "刷新状态",
   "phoneSelfCheckSave": "保存脱敏报告",
   "phoneSelfCheckSaving": "保存中…",
   "phoneSelfCheckSaved": "报告已存入下载/DSH-Go。",
   "phoneSelfCheckSaveFailed": "报告保存失败。",
   "phoneSelfCheckReportHint": "仅在你点击保存时导出。本机报告只含固定结果，不含截图、识别文字、日志、账户数据或运行标识。",
-  "phoneSelfCheckRunState": "{state, select, idle{尚未开始} running{部分自检进行中} cleaning{正在清理；取消不代表已撤销派发的输入} done{检查已结束，结果见技术详情} cancelled{已取消，已观察到的操作仍保留} cleanup_pending{清理尚未确认，资源仍保留} other{状态不可用}}",
+  "phoneSelfCheckRunState": "{state, select, idle{尚未开始} running{部分自检进行中} cleaning{正在清理；取消不代表已撤销派发的输入} done{检查已结束，结果见技术详情} cancelled{已取消，已观察到的操作仍保留} other{状态不可用}}",
   "@phoneSelfCheckRunState": {
     "placeholders": {
       "state": {
@@ -845,8 +844,7 @@
   "phoneBackgroundParallelUnsupported": "此设备当前无法使用后台操作。",
   "phoneBackgroundParallelConnection": "建立连接后才能接纳新的后台任务。",
   "phoneBackgroundParallelBusy": "后台通道正在准备或维护，暂不能接纳新任务。",
-  "phoneBackgroundParallelRecovery": "请先处理未完成的后台资源恢复，再开始新任务。",
-  "phoneBackgroundParallelPeer": "当前连接的服务不支持所需的后台能力。",
+  "phoneGateRetest": "重新检查此通道",
   "phoneBackgroundParallelSerial": "此连接支持一个后台槽位，设置偏好仍会保留。",
   "@phoneBackgroundParallelStatus": {
     "placeholders": {

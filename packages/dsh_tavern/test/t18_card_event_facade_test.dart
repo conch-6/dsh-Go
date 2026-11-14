@@ -1146,7 +1146,7 @@ void _stateAndTransactionTests() {
       await h.engine.setSettings({'stateEnabled': false});
       final run = await _direct(h, chat);
       final first = await _reply(h, chat);
-      expect(first.call.body!.containsKey('tools'), isFalse);
+      expect(_maps(first.call.body!['tools']).map((tool) => _map(tool['function'])['name']), ['roll']);
       expect(await _count(h, chat), 0);
       final disabled = await _view(h, chat);
       expect(_maps(disabled['effects']).map((effect) => effect['text']), ['INDEPENDENT-NOTICE']);
@@ -1179,7 +1179,7 @@ void _stateAndTransactionTests() {
     expect(await _count(h, chat), 0);
     expect((await _view(h, chat))['consumed'], isEmpty);
     final notOriginallyAuthorized = await _startMain(h, h.engine.send(chat, ''));
-    expect(notOriginallyAuthorized.call.body!.containsKey('tools'), isFalse);
+    expect(_maps(notOriginallyAuthorized.call.body!['tools']).map((tool) => _map(tool['function'])['name']), ['roll']);
     await h.engine.setSettings({'stateEnabled': true});
     await _finishMain(notOriginallyAuthorized);
     _success(notOriginallyAuthorized);

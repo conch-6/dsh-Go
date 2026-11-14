@@ -10,6 +10,7 @@ import 'package:dsh_app/ui/chat/media/media_card.dart';
 import 'package:dsh_app/ui/chat/media/media_viewer.dart';
 import 'package:dsh_app/ui/chat/render/markdown_image.dart';
 import 'package:dsh_app/ui/chat/tool_view.dart';
+import 'package:dsh_app/ui/fx/image_gen/image_generation.dart';
 import 'package:dsh_app/ui/theme/theme.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
@@ -70,6 +71,8 @@ Future<void> _pumpCards(
 }
 
 void main() {
+  // The generation mosaic starts at a random moment; the same one every run here.
+  ImageGeneration.debugSeed = 7;
   for (final brightness in Brightness.values) {
     final suffix = brightness.name;
 

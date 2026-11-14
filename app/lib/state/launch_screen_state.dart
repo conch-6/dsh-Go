@@ -44,6 +44,19 @@ class CustomLaunchController extends AsyncNotifier<CustomLaunch?> {
     await _store(current.copyWith(backdrop: backdrop));
   }
 
+  /// Where the screen sits in a [LaunchFit.fill] picture.
+  Future<void> frame({required double zoom, required double alignX, required double alignY}) async {
+    final current = state.value;
+    if (current == null) return;
+    await _store(
+      current.copyWith(
+        zoom: zoom.clamp(1.0, CustomLaunch.maxZoom),
+        alignX: alignX.clamp(-1.0, 1.0),
+        alignY: alignY.clamp(-1.0, 1.0),
+      ),
+    );
+  }
+
   Future<void> _store(CustomLaunch custom) async {
     state = AsyncData(custom);
     await CustomLaunch.save(custom);

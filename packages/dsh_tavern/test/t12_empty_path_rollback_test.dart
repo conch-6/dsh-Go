@@ -69,6 +69,12 @@ void main() {
     // output. Its non-null partial is not evidence of a newly committed path.
     expect(failed.partial!.nodeId, retained.target);
     expect(failed.partial!.text, 'A1');
+    // Restoring the continuation writes the old body once. Body revisions
+    // remain monotonic even when the restored bytes equal the original.
+    final targetRow = (retained.payload['nodes']! as List<Map<String, Object?>>).singleWhere(
+      (node) => node['id'] == retained.target,
+    );
+    targetRow['content_version'] = (targetRow['content_version']! as int) + 1;
     await _expectEmpty(h, retained);
     await h.reopen();
     await _expectEmpty(h, retained);

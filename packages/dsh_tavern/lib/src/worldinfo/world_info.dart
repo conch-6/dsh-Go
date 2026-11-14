@@ -355,6 +355,7 @@ class WorldInfoInput {
     required this.maxContext,
     required this.tokenCount,
     required this.random,
+    int? messageCount,
     this.expand = _identity,
     this.settings = const WorldInfoSettings(),
     this.externalActivations = const <WorldInfoEntryRef>{},
@@ -378,9 +379,14 @@ class WorldInfoInput {
     this.postProcessContent,
     this.availablePromptSections,
     this.checkCancelled,
-  });
+  }) : _messageCount = messageCount;
   final List<WorldInfoBook> books;
   final List<WorldInfoMessage> messages;
+  final int? _messageCount;
+
+  /// Complete prompt-eligible history length when [messages] is a scan suffix.
+  /// Hidden and ST-system messages are excluded from both counts.
+  int get messageCount => _messageCount ?? messages.length;
   final int maxContext;
   final int Function(String) tokenCount;
   final double Function() random;
@@ -878,7 +884,7 @@ class WorldInfoEngine {
       if (next == null && !overflowed && settings.minActivations > activated.length) {
         final overMax =
             (settings.minActivationsDepthMax > 0 && buffer.depth > settings.minActivationsDepthMax) ||
-            buffer.depth > input.messages.length;
+            buffer.depth > input.messageCount;
         if (!overMax) {
           next = WorldInfoScanPhase.minActivations;
           buffer.skew++;

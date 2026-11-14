@@ -171,7 +171,8 @@ void main() {
     expect(receipt['accepted'], isTrue);
     expect(receipt['clamps'], isNotEmpty);
     expect(runs.where((run) => run.kind == 'state.rules'), hasLength(1));
-    expect(runs.map((run) => run.result['invocationId']).toSet(), hasLength(1));
+    expect(runs.where((run) => run.kind != 'tool.turn').map((run) => run.result['invocationId']).toSet(), hasLength(1));
+    expect(runs.where((run) => run.kind == 'tool.turn'), hasLength(1));
   });
 
   for (final reason in <String?>[null, 'length', 'content_filter']) {
@@ -256,7 +257,7 @@ void main() {
       _tool(0, [_set(8)]),
     ]);
     _done(active);
-    expect(active.call.body!.containsKey('tools'), isFalse);
+    expect(_rows(active.call.body!['tools']).map((tool) => _map(tool['function'])['name']), ['roll']);
     final snapshot = await h.engine.readState(h.chatId);
     expect(snapshot.automaticEnabled, isFalse);
     expect(snapshot.values, {'n': 0, 'ticks': 0});
@@ -309,15 +310,17 @@ void main() {
     expect(_map(partialState['messageVariables'])['stat_data'], {'keep': 7});
     expect(h.engine.variables(h.chatId), {'local': 4});
     final failedRuns = await h.engine.readAgentRuns(h.chatId);
-    expect(failedRuns.map((run) => run.kind), unorderedEquals(['state.tool', 'state.rules']));
+    final failedStateRuns = failedRuns.where((run) => run.kind != 'tool.turn').toList();
+    expect(failedStateRuns.map((run) => run.kind), unorderedEquals(['state.tool', 'state.rules']));
     expect(
-      failedRuns.every(
+      failedStateRuns.every(
         (run) =>
             run.nodeId == partialId && run.result['committed'] == false && run.result['outcome'] == 'not-committed',
       ),
       isTrue,
     );
-    expect(failedRuns.map((run) => run.result['invocationId']).toSet(), hasLength(1));
+    expect(failedStateRuns.map((run) => run.result['invocationId']).toSet(), hasLength(1));
+    expect(failedRuns.where((run) => run.kind == 'tool.turn'), hasLength(1));
     expect(
       _db(h, (db) => db.select(r"SELECT id FROM agent_runs WHERE json_extract(result_json, '$.committed') = 1")),
       isEmpty,
@@ -353,7 +356,8 @@ void main() {
     expect(prompt['id'], committed.effects.singleWhere((effect) => effect['type'] == 'prompt')['effectId']);
     expect(_saved(h, partialId)['dshgoStateRuntime'], initialRuntime);
     final allRuns = await h.engine.readAgentRuns(h.chatId);
-    expect(allRuns, hasLength(4));
+    expect(allRuns.where((run) => run.kind != 'tool.turn'), hasLength(4));
+    expect(allRuns.where((run) => run.kind == 'tool.turn'), hasLength(2));
     final successfulRuns = allRuns.where((run) => run.nodeId == success.message.nodeId).toList();
     expect(successfulRuns.map((run) => run.kind), unorderedEquals(['state.tool', 'state.rules']));
     expect(successfulRuns.every((run) => run.result['committed'] == true), isTrue);
@@ -393,7 +397,9 @@ void main() {
       expect(ownAfter[key], ownBefore[key], reason: key);
     }
     final runs = await h.engine.readAgentRuns(h.chatId);
-    final fresh = runs.where((run) => !previousRuns.any((old) => old.id == run.id)).single;
+    final freshRuns = runs.where((run) => !previousRuns.any((old) => old.id == run.id)).toList();
+    final fresh = freshRuns.where((run) => run.kind != 'tool.turn').single;
+    expect(freshRuns.where((run) => run.kind == 'tool.turn'), hasLength(1));
     expect(fresh.kind, 'state.tool');
     expect(fresh.nodeId, original.nodeId);
     expect(fresh.result['committed'], isFalse);

@@ -9,7 +9,6 @@ internal data class HostedScope(
     val owner: String,
     val probe: Boolean = false,
     val target: SelfCheckTargetRequest? = null,
-    val recovery: Boolean = false,
 ) {
     val maintenance: Boolean get() = probe || target != null
 }
@@ -35,32 +34,22 @@ internal data class HostedRelease(val owner: String, val neverCreated: Boolean, 
     }
 }
 
-/** Actual Binder/framed-server router; resource Core instances have independent fixed owners. */
+/**
+ * Actual Binder/framed-server router; resource Core instances have independent fixed owners.
+ * Every display belongs to this process: if the App cannot confirm a release it disconnects the
+ * channel, and the system reclaims whatever this process still holds when it exits.
+ */
 internal class PrivilegedDisplayHost(private val context: Context) {
     val peerInstance: String = java.util.UUID.randomUUID().toString()
     private val trees = PrivilegedTreeAccess(context)
     private val legacy = PrivilegedDisplayCore(context, trees)
     private val scopes = OwnerScopes<PrivilegedDisplayCore, HostedRelease>()
-    private val recoveryPlatform = RecoveryPlatform()
-    private val birth by lazy { runCatching { recoveryPlatform.birth(peerInstance) }.getOrNull() }
-    @Volatile private var retirementComplete = false
 
     fun handle(request: Bundle): Bundle {
         val op = request.get(Proto.OP) as? String ?: return failure("invalidArguments")
         if (op == Proto.OP_PROBE) return legacy.handle(request).apply {
-            if (get(Proto.OK) == true) {
-                putInt(Proto.OWNER_SCOPE_VERSION, 1); putInt(Proto.SCOPE_LIMIT, 3)
-                birth?.let { value ->
-                    putInt(Proto.RESOURCE_RECOVERY_VERSION, 1); putString(Proto.RECOVERY_PEER, value.peer)
-                    putString(Proto.RECOVERY_BOOT, value.boot); putInt(Proto.RECOVERY_PID, value.pid)
-                    putInt(Proto.RECOVERY_UID, value.uid); putLong(Proto.RECOVERY_PID_NS_DEV, value.nsDev)
-                    putLong(Proto.RECOVERY_PID_NS_INO, value.nsIno)
-                    if (!value.nsAvailable) putBoolean(Proto.RECOVERY_PID_NS_AVAILABLE, false)
-                } ?: run { if (!containsKey(Proto.ERROR)) putString(Proto.ERROR, "recoveryUnavailable") }
-            }
+            if (get(Proto.OK) == true) { putInt(Proto.OWNER_SCOPE_VERSION, 1); putInt(Proto.SCOPE_LIMIT, 3) }
         }
-        if (op == Proto.OP_RECOVERY_RETIRE) return retire(request)
-        if (op == Proto.OP_RECOVERY_CHECK) return checkRecovery(request)
         if (op == Proto.OP_DESTROY || op == Proto.OP_GRANT_SECURE_SETTINGS) {
             scopes.enterGlobal()?.let { return failure(it) }
             return try {
@@ -73,7 +62,7 @@ internal class PrivilegedDisplayHost(private val context: Context) {
             } finally { scopes.leaveGlobal() }
         }
         if (!request.containsKey(Proto.OWNER_SCOPE_VERSION)) {
-            if (op == Proto.OP_ALLOCATE || op == Proto.OP_REPLAY_NAVIGATION || request.containsKey(Proto.RESOURCE_RECOVERY_VERSION)) return failure("invalidArguments")
+            if (op == Proto.OP_REPLAY_NAVIGATION) return failure("invalidArguments")
             scopes.enterGlobal(legacyResource = true)?.let { return failure(it) }
             return try { legacy.handle(request) } finally { scopes.leaveGlobal() }
         }
@@ -81,7 +70,7 @@ internal class PrivilegedDisplayHost(private val context: Context) {
         if (request.get(Proto.OWNER_SCOPE_VERSION) !is Int || request.get(Proto.OWNER_SCOPE_VERSION) != 1 ||
             owner == null || !TargetContract.validRun(owner)) return failure("invalidArguments")
         val inner = Bundle(request).apply { remove(Proto.OWNER_SCOPE_VERSION) }
-        val opening = op in setOf(Proto.OP_ALLOCATE, Proto.OP_CREATE, Proto.OP_LAUNCH, Proto.OP_SELF_CHECK_PROBE, Proto.OP_SELF_CHECK_TARGET_CREATE)
+        val opening = op in setOf(Proto.OP_CREATE, Proto.OP_LAUNCH, Proto.OP_SELF_CHECK_PROBE, Proto.OP_SELF_CHECK_TARGET_CREATE)
         val initial = if (opening) initial(inner, owner) else null
         // Known identities never receive scopeAccepted=false for malformed subsequent requests.
         val entry = scopes.enter(owner, opening && initial != null, initial?.maintenance == true, op == Proto.OP_RELEASE) {
@@ -98,15 +87,7 @@ internal class PrivilegedDisplayHost(private val context: Context) {
             is OwnerScopes.Entry.Acquired -> {
                 var completed: HostedRelease? = null
                 try {
-                    // Only target CREATE selection is stripped; its original nonce parser stays exact.
-                    val selected = inner.containsKey(Proto.RESOURCE_RECOVERY_VERSION)
-                    val targetCreate = op == Proto.OP_SELF_CHECK_TARGET_CREATE
-                    val reply = if (selected && (birth == null ||
-                        targetCreate && (!entry.record.core.recoveryMode() || inner.get(Proto.RESOURCE_RECOVERY_VERSION) !is Int ||
-                            inner.get(Proto.RESOURCE_RECOVERY_VERSION) != 1) ||
-                        !targetCreate && op != Proto.OP_ALLOCATE)) failure("invalidArguments")
-                    else entry.record.core.handle(
-                        if (targetCreate && selected) Bundle(inner).apply { remove(Proto.RESOURCE_RECOVERY_VERSION) } else inner)
+                    val reply = entry.record.core.handle(inner)
                     if (op == Proto.OP_RELEASE && reply.get(Proto.OK) == true) {
                         if (entry.record.core.previewDrained()) completed = entry.record.core.completedRelease()
                         else { reply.putBoolean(Proto.OK, false); reply.putString(Proto.ERROR, "releasePending") }
@@ -121,67 +102,14 @@ internal class PrivilegedDisplayHost(private val context: Context) {
 
     private fun initial(request: Bundle, owner: String): HostedScope? {
         if (request.get(Proto.RELEASE_RECEIPT) !is Int || request.get(Proto.RELEASE_RECEIPT) != 1) return null
-        if (request.containsKey(Proto.RESOURCE_RECOVERY_VERSION) &&
-            request.get(Proto.OP) !in setOf(Proto.OP_ALLOCATE, Proto.OP_SELF_CHECK_TARGET_CREATE)) return null
         return when (request.get(Proto.OP)) {
-            Proto.OP_ALLOCATE -> if (birth == null) null else ResourceRecovery.allocation(request.keySet()) { request.get(it) }
-                ?.let { HostedScope(it.owner, probe = it.probe, recovery = true) }
             Proto.OP_SELF_CHECK_PROBE -> SelfCheckProbeRequest.owner(request.keySet()) { request.get(it) }
                 ?.let { HostedScope(it, probe = true) }
-            Proto.OP_SELF_CHECK_TARGET_CREATE -> {
-                val recovery = request.containsKey(Proto.RESOURCE_RECOVERY_VERSION)
-                if (recovery && (birth == null || ResourceRecovery.uuid(owner) == null ||
-                    request.get(Proto.RESOURCE_RECOVERY_VERSION) !is Int ||
-                    request.get(Proto.RESOURCE_RECOVERY_VERSION) != 1)) null
-                else {
-                    val keys = if (recovery) request.keySet() - Proto.RESOURCE_RECOVERY_VERSION else request.keySet()
-                    SelfCheckTargetRequest.parse(keys) { request.get(it) }?.let { HostedScope(it.owner, target = it, recovery = recovery) }
-                }
-            }
+            Proto.OP_SELF_CHECK_TARGET_CREATE -> SelfCheckTargetRequest.parse(request.keySet()) { request.get(it) }
+                ?.let { HostedScope(it.owner, target = it) }
             Proto.OP_CREATE, Proto.OP_LAUNCH -> HostedScope(owner)
             else -> null
         }
-    }
-
-    private fun retire(request: Bundle): Bundle {
-        val expected = ResourceRecovery.retire(request.keySet()) { request.get(it) }
-            ?: return failure("invalidArguments")
-        if (expected != peerInstance) return failure("identityChanged")
-        if (birth == null) return failure("recoveryUnavailable")
-        if (retirementComplete) return retiredReply()
-        val originals = scopes.beginRetire() ?: return failure("scopeBusy")
-        var complete = false
-        return try {
-            // All original cores stay reachable on failure. No C2 nonce or MAIN sample is fabricated.
-            for (record in originals) if (!record.core.retireResources()) return failure("releasePending")
-            if (!legacy.retireResources() || !trees.ready()) return failure("releasePending")
-            complete = true
-            retirementComplete = true
-            retiredReply()
-        } catch (_: Throwable) { failure("releasePending") }
-        finally { scopes.finishRetire(complete) }
-    }
-
-    private fun retiredReply() = Bundle().apply {
-        putBoolean(Proto.OK, true); putInt(Proto.RESOURCE_RECOVERY_VERSION, 1)
-        putString(Proto.RECOVERY_PEER, peerInstance); putString(Proto.RECOVERY_KIND, "peerRetired")
-    }
-
-    private fun checkRecovery(request: Bundle): Bundle {
-        val old = ResourceRecovery.check(request.keySet()) { request.get(it) } ?: return failure("invalidArguments")
-        val current = birth ?: return failure("recoveryUnavailable")
-        scopes.enterGlobal()?.let { return failure(it) }
-        return try {
-            if (legacy.hasResources() || !trees.ready()) return failure("scopeBusy")
-            val kind = recoveryPlatform.verify(current, old, legacy::rootTasksEmpty)
-            Bundle().apply {
-                putBoolean(Proto.OK, true); putInt(Proto.RESOURCE_RECOVERY_VERSION, 1)
-                putString(Proto.RECOVERY_PEER, old.birth.peer); putString(Proto.OWNER, old.owner)
-                putString(Proto.RECOVERY_KIND, kind); old.displayId?.let { putInt(Proto.DISPLAY_ID, it) }
-            }
-        } catch (e: ResourceRecovery.Failure) { failure(e.code) }
-        catch (_: Throwable) { failure("recoveryUnknown") }
-        finally { scopes.leaveGlobal() }
     }
 
     private fun failure(code: String) = Bundle().apply { putBoolean(Proto.OK, false); putString(Proto.ERROR, code) }

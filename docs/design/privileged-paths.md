@@ -58,13 +58,20 @@ root 实际就绪、真实 reason 为 null 时，旧 reason 才提示使用新�
 | v | integer 1 | 协议版本 |
 | mode | 五模式之一 | 当前选择；可来自本次明确操作或已保存的保持选择，不是推荐 |
 | ready / reason | boolean / string或null | 当前尝试后台屏的可用性与本地化原因 |
-| supportedModes | string[] | 实现认识的模式；不代表用户授权或 ROM gate 已验证 |
+| supportedModes | string[] | 实现认识的模式；不代表用户授权或设备能力已验证 |
 | recommendedMode | 五模式之一 | 只读建议 |
 | grantPath | granted / shizuku / shizukuPermission / sui / suiPermission / root / adb / setup | 自动恢复无障碍页面下一步动作 |
 | rootSelected | boolean | 明确准备过 root，或从有效的保持 root 设置恢复；尚未切换/关闭 |
 | keep | object，可缺省 | 显式保持意图、恢复阶段和固定原因；缺省为关闭，connected 不证明显示/输入就绪 |
 
-`ready` 不应翻译成“所有设备能力已经验证”：gate 明确失败时会拒绝，但尚未获得 gate 结果的 null 与通过 true 不同。实际选择动作会尝试现有显示/输入 gate；只有相应观察成立才能在验收记录中写成功。
+### 准入
+
+后台屏的准入只有三条：模式不是 off、Android ≥ 14、所选通道已连接且已授权（Shizuku/Sui 在运行并已授权，root/自连 ADB 已连上）。此外只有真实的瞬时占用（槽位已满、正在切换通道、自检正在借用通道、息屏中断收尾、保持恢复进行中）会让一次调用拿不到后台屏。`ready` 与 `parallelism.effectiveLimit` 都只按这些算（`BackgroundPolicy.unready` / `capacity`）。
+
+- **自检只是诊断**：选择通道后会跑一次显示/输入自检，结果写进 `background.trustedDisplay` / `inject`，失败时在 `background.selfCheckWarning` 给一句「自检没通过，但仍可尝试」的提示；它不压低槽位、不拒绝任务。真失败在任务真正建屏、注入时由那一步带固定错误码返回。
+- **握手不要求可选字段**：App 与特权服务是同一个 APK，PROBE 只看 `ok`（及 mux 能力决定 1 或 3 个槽位）。版本不一致只会来自 App 升级后仍在跑的旧特权进程：连接时 revision 不符即拒绝并换掉它（Shizuku 以 remove 方式解绑旧 UserService 后重绑一次；root / 自连 ADB 每次连接都用当前 APK 新起 app_process，旧进程随 App 进程退出时的 stdin EOF 结束）。
+- **释放没确认就断开**：任务、设置自检、手机自检释放后台屏时，服务没确认就断开该通道。虚拟屏属于创建它的特权进程，进程结束由系统回收；下次使用重新连接（root 仍须用户操作或已开启「保持 root 通道」）。不存在「清理待定」锁，也不持久化资源记录；旧版本留下的 `phone-background-resources` 记录在启动时删除。
+- 不变的安全边界：特权进程只接受本 App uid 的调用（Shizuku Binder 校验调用方 uid，root 校验 uid=0 与 revision，ADB 走本 App 自己配对的连接），owner scope 隔离各任务的屏。
 
 `background.root` 是缓存和已建进程的状态：checked 表示是否主动检查过；available 为 null/boolean，表示最近主动 probe 是否确认成功；connected 表示现有连接存活；starting 表示主动启动等待；reasonCode 为固定有限码。available 不是 manager 安装检测，也不是永久授权事实；已断线时即使保留上次 available=true，也不能显示 connected。
 
@@ -97,7 +104,8 @@ App策略上限是启动30秒、单次协议操作30秒。授予权限复用已�
 | rootCancelled | root启动已取消 | 保持当前用户选择结果 |
 | rootDisconnected | root通道已断开 | 保持开启时等待恢复事件，否则再次主动选择/准备 |
 | rootGrantFailed | 未能授予自动恢复所需权限 | 检查管理器授权，再主动授予并核验实际权限 |
-| Android<14或显示/输入gate失败 | Android版本要求 / 此系统不支持 / 未能确认后台屏输入结果 | 不假装ready，不改用主屏完成后台操作 |
+| Android<14 | Android版本要求 | 不假装ready，不改用主屏完成后台操作 |
+| 自检显示/输入未通过 | 自检没通过，但仍可尝试（附原因） | 仍 ready；任务真正失败时报该步骤的错误码，不改用主屏 |
 | 已排队动作过期 | 通道选择已取消 | 忽略旧结果，刷新当前状态 |
 
 页面采用现有中英文词条与组件。原生根错误在values/values-zh的i18n_strings.xml，新增页面词条在phone_background_{zh,en}.arb；本文不要求页面直出未经约束的su原文。
@@ -148,7 +156,7 @@ root/ADB入口先准备Looper再创建ActivityThread systemContext，之后进�
 - 旧原生（无 v1 块）只列 Shizuku 与自连 ADB，不出现 Sui / root、不出现建议。
 - **自动恢复无障碍**按 grantPath 写出路径（通过 Shizuku / Sui / root / 自连 ADB 授予，或先授权 Shizuku / Sui），root 路径附「通过已授权的 root 连接，只授予这一项权限」；无路径时在「配置…」下另给「申请 root 授权」（`prepareRoot`，同一提醒，不看 Android 14 门槛）；root 已选但断开时只给重新申请，不换别的路径。
 
-具体页面验收：保持关闭时，只开设置页/搜索/前后台切换无root提示；点prepare一次才产生一次启动尝试；API33仍能独立准备；API34+选择root后gate才决定后台屏；prepare不改变原mode；来源改变的旧Sui按钮不授权错误来源；按off后等待中的旧结果不复活勾选；旧原生侧不发送prepareRoot；新原生root投影旧字段off/false，但断线/超时后的任务错误保留实际原因；Sui授WSS后当前共享后台服务不被解绑。
+具体页面验收：保持关闭时，只开设置页/搜索/前后台切换无root提示；点prepare一次才产生一次启动尝试；API33仍能独立准备；API34+选择root后连上即可用后台屏，自检结果只作提示；prepare不改变原mode；来源改变的旧Sui按钮不授权错误来源；按off后等待中的旧结果不复活勾选；旧原生侧不发送prepareRoot；新原生root投影旧字段off/false，但断线/超时后的任务错误保留实际原因；Sui授WSS后当前共享后台服务不被解绑。
 
 ## 9. 真机矩阵与逐步可观察验收
 
@@ -174,7 +182,7 @@ root/ADB入口先准备Looper再创建ActivityThread systemContext，之后进�
 | --- | --- | --- |
 | V1 冷启动/只读 | 保持关闭，撤销或清楚记录既有授权，冷启App并反复读取状态 | 没有首次 su、没有权限请求、没有自动选择建议；root 为 unchecked/null |
 | V2 明确选择 | 保持关闭，点击通道/授权或 prepareRoot；分别允许、拒绝、超过等待上限 | 只调用所选身份，由 Sui/管理器处理授权；固定失败原因、不猜 stderr，不自动重试 |
-| V3 协议与gate | root验证probe；API34+选择后台模式并尝试显示/注入 | uid0与revision同时成立才接root；显示/输入不支持则ready=false，无主屏替代 |
+| V3 协议与自检 | root验证probe；API34+选择后台模式并跑一次显示/注入自检 | uid0与revision同时成立才接root；连上即ready，自检失败只显示提示；真不支持时任务报具体错误码，无主屏替代 |
 | V4 独立授予 | mode=off或保留其它mode时prepareRoot，再点授予；共享API也走一次 | mode不被prepare改变；actual WSS permission确认；共享Sui服务不被误解绑 |
 | V5 正常任务 | 启动一个普通、非敏感应用的后台任务，结束/主动交接 | 显示与任务owner匹配，正常结束释放资源，前台操作不受意外抢占 |
 | V6 失效 | 分别撤权、杀服务、锁屏；再在保持开/关下启动新任务 | 关闭保持时 root 不隐式 su；开启时仅按恢复事件请求同一身份，不重放旧任务。锁屏资源按实际 task/driver 路径记录，不断言每次都断开 root |

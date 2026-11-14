@@ -5,6 +5,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
@@ -40,6 +41,7 @@ class TavernBookmarksPage extends ConsumerWidget {
       await container.read(tavernBookmarksProvider(chatId).notifier).remove(mark.nodeId);
       return;
     }
+    unawaited(HapticFeedback.selectionClick());
     container.read(tavernJumpProvider(chatId).notifier).go(mark.nodeId);
     if (page.mounted) page.pop();
   }
