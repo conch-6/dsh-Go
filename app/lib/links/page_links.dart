@@ -32,8 +32,6 @@ const catalogPageLinks = <String>{'schedules', 'cordis', 'agent-team', 'forum', 
 /// 伙伴小屋: the home-screen widget opens it (android companion/CompanionWidget.kt).
 const companionPageLink = 'companion';
 
-/// 酒馆 (role play): main.dart registers its page ([registerPageLink]).
-const tavernPageLink = 'tavern';
 
 /// Pages the entry point adds, by id: pages under ui/ that this file may not
 /// import itself (docs/architecture.md, 目录).

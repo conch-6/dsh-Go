@@ -35,7 +35,6 @@ import '../../state/draft_store.dart';
 import '../../state/hosts_state.dart';
 import '../../state/sessions_state.dart';
 import '../common/discard_guard.dart';
-import '../tavern/tavern_intake.dart';
 
 /// Draws nothing. Put it once in the home shell's stack, next to [LinkHost].
 class SystemEntryHost extends ConsumerStatefulWidget {
@@ -86,13 +85,6 @@ class _SystemEntryHostState extends ConsumerState<SystemEntryHost> {
     }
     if (share.shareLink case final link?) {
       ref.read(appLinksProvider).add(link.appLink);
-      return;
-    }
-    // A lone character card goes to 酒馆.
-    if (share.files case [final file]
-        when share.skipped.isEmpty && await isTavernCardFile(File(file.path), file.name)) {
-      final ui = ref.read(linkRouterProvider).context ?? (mounted ? context : null);
-      if (ui != null && ui.mounted) await openTavernCardFile(ui, ref, File(file.path), file.name);
       return;
     }
     final request = await ComposeRequest.fromShare(share, heldBytes: _heldDraftBytes);

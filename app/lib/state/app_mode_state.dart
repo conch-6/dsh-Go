@@ -12,7 +12,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum AppMode { work, companion, tavern }
+enum AppMode { work, companion }
 
 class AppModeState {
   const AppModeState({this.startup = AppMode.work, this.loaded = false});
