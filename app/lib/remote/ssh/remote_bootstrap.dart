@@ -95,6 +95,36 @@ class RemoteDshBootstrap {
 
   bool get _defaultCommand => launchCommand == defaultDshLaunchCommand;
 
+  /// A tmux launch command (`tmux new-session -d -s name 'dsh web …'`): the
+  /// client detaches immediately, so the plain start flow would see its pid
+  /// exit and report a failure even though the server is coming up inside
+  /// the session. [startScript] runs those through [_tmuxStartScript] instead.
+  bool get isTmuxCommand {
+    final c = launchCommand;
+    return c == 'tmux' || c.startsWith('tmux ');
+  }
+
+  /// The tmux session named by the launch command (`-s name`, `-sname`,
+  /// `--session name`, `--session=name`, including attached flag clusters
+  /// like `-ds name`). Null when the command names no session — the start
+  /// script then fails with a hint instead of guessing.
+  String? get tmuxSession {
+    final long = RegExp(r'--session(?:=|\s+)([^\s]+)').firstMatch(launchCommand);
+    if (long != null) return long.group(1);
+    final tokens = launchCommand.split(RegExp(r'\s+'));
+    for (var i = 0; i < tokens.length; i++) {
+      final t = tokens[i];
+      if (t.length < 2 || t.codeUnitAt(0) != 0x2d /* - */ || t.codeUnitAt(1) == 0x2d) continue;
+      final s = t.indexOf('s', 1);
+      if (s < 0 || t.substring(1, s).contains(RegExp(r'[^a-zA-Z]'))) continue;
+      final attached = t.substring(s + 1);
+      if (attached.startsWith('=')) return attached.substring(1);
+      if (attached.isNotEmpty) return attached;
+      if (i + 1 < tokens.length) return tokens[i + 1];
+    }
+    return null;
+  }
+
   /// Reuses the running instance when it's healthy, otherwise starts one.
   /// [onDetail] receives short progress notes for the UI.
   Future<RemoteDshEndpoint> ensureRunning({bool forceRestart = false, void Function(String)? onDetail}) async {
@@ -154,9 +184,9 @@ class RemoteDshBootstrap {
       ..writeln(r"""
 _st() {
   if [ -r "/proc/$1/stat" ]; then
-    S=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
-    S=${S##*) }
-    set -- $S
+    T=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+    T=${T##*) }
+    set -- $T
     [ "$#" -ge 20 ] || return 1
     shift 19
     printf '%s\n' "$1"
@@ -178,11 +208,21 @@ ours() {
     *) return 1;;
   esac
 }
+""")
+      // tmux often lives off the non-login SSH PATH (Homebrew etc.); the
+      // tmux start/stop paths below need it. Harmless elsewhere.
+      ..writeln(r"""
+if ! command -v tmux >/dev/null 2>&1; then
+  for c in /opt/homebrew/bin /usr/local/bin; do
+    if [ -x "$c/tmux" ]; then PATH="$c:$PATH"; export PATH; break; fi
+  done
+fi
 """);
     return b.toString();
   }
 
   String probeScript() {
+    if (isTmuxCommand) return _tmuxProbeScript();
     return '${_prelude()}'
         'printf \'$_tag home %s\\n\' "\$HOME"\n'
         'if [ -f "\$D/web.pid" ]; then\n'
@@ -199,6 +239,34 @@ ours() {
         'true\n';
   }
 
+  /// Probe for tmux launch commands: also recognises instances the user
+  /// started by hand inside the named session (no web.pid/web.cmd records).
+  /// A live pane whose history contains the `token=` URL is reusable as-is —
+  /// the app must never kill a session that already serves `dsh web`.
+  String _tmuxProbeScript() {
+    final sess = tmuxSession;
+    final b = StringBuffer(_prelude())
+      ..writeln('printf \'$_tag home %s\\n\' "\$HOME"')
+      ..writeln('S=${sess == null ? '' : shQuote(sess)}')
+      ..writeln('if [ -n "\$S" ] && command -v tmux >/dev/null 2>&1 && tmux has-session -t "\$S" 2>/dev/null; then')
+      // Detached panes default to 80 columns, which can wrap the token URL;
+      // widen before capturing (harmless when a client is attached).
+      ..writeln('  tmux resize-pane -t "\$S" -x 240 -y 60 2>/dev/null')
+      ..writeln('  P=\$(tmux list-panes -t "\$S" -F \'#{pane_pid}\' 2>/dev/null | head -n 1)')
+      ..writeln('  if [ -n "\$P" ] && kill -0 "\$P" 2>/dev/null; then')
+      ..writeln('    printf \'$_tag alive %s\\n\' "\$P"')
+      ..writeln('    L=\$(tmux capture-pane -t "\$S" -p -J -S - 2>/dev/null | grep -E \'https?://[^ ]*[?&]token=\' | tail -n 1)')
+      ..writeln('    if [ -n "\$L" ]; then')
+      ..writeln('      printf \'$_tag url %s\\n\' "\$L"')
+      ..writeln('      if [ ! -f "\$D/web.cmd" ] || [ "\$(cat "\$D/web.cmd" 2>/dev/null)" = ${shQuote(launchCommand)} ]; then printf \'$_tag samecmd\\n\'; fi')
+      ..writeln('      printf \'%s\\n\' "\$S" > "\$D/web.tmux" 2>/dev/null')
+      ..writeln('    fi')
+      ..writeln('  fi')
+      ..writeln('fi')
+      ..writeln('true');
+    return b.toString();
+  }
+
   String _stopOld() =>
       'if [ -f "\$D/web.pid" ]; then\n'
       '  P=\$(cat "\$D/web.pid" 2>/dev/null)\n'
@@ -209,6 +277,15 @@ ours() {
       '    ours "\$P" && kill -9 "\$P" 2>/dev/null\n'
       '  fi\n'
       '  rm -f "\$D/web.pid"\n'
+      'fi\n'
+      // tmux-managed instances also live in a named session; the marker file
+      // records its name so the next start (or a manual stop) can retire it.
+      // No `-t "=name"` exact-match syntax here: older tmux treats it as a
+      // literal name and silently matches nothing.
+      'if [ -f "\$D/web.tmux" ]; then\n'
+      '  S=\$(cat "\$D/web.tmux" 2>/dev/null)\n'
+      '  if [ -n "\$S" ] && command -v tmux >/dev/null 2>&1; then tmux kill-session -t "\$S" 2>/dev/null; fi\n'
+      '  rm -f "\$D/web.tmux"\n'
       'fi\n';
 
   String stopScript() => '${_prelude()}${_stopOld()}true\n';
@@ -232,6 +309,7 @@ printf 'DSHAPP dsh %s\n' "$(command -v dsh)"
   String startScript({bool forceRestart = false}) {
     final seconds = startTimeout.inSeconds.clamp(5, 600);
     final cwd = workingDirectory?.trim();
+    if (isTmuxCommand) return _tmuxStartScript(seconds, cwd, forceRestart);
     final b = StringBuffer(_prelude())
       ..writeln('printf \'$_tag home %s\\n\' "\$HOME"')
       ..writeln('mkdir -p "\$D" || { printf \'$_tag nodir\\n\'; exit 70; }')
@@ -261,6 +339,96 @@ fi''');
       ..writeln('i=0')
       ..writeln('while [ \$i -lt $seconds ]; do')
       ..writeln('  L=\$(grep -E \'https?://[^ ]*[?&]token=\' "\$D/web.log" 2>/dev/null | tail -n 1)')
+      ..writeln('  if [ -n "\$L" ]; then printf \'$_tag url %s\\n\' "\$L"; exit 0; fi')
+      ..writeln('  if ! kill -0 "\$P" 2>/dev/null; then')
+      ..writeln(
+        '    printf \'$_tag exited\\n\'; tail -n 20 "\$D/web.log" 2>/dev/null | sed \'s/^/$_tag log /\'; exit 1',
+      )
+      ..writeln('  fi')
+      ..writeln('  sleep 1; i=\$((i+1))')
+      ..writeln('done')
+      ..writeln('printf \'$_tag timeout\\n\'; tail -n 20 "\$D/web.log" 2>/dev/null | sed \'s/^/$_tag log /\'; exit 1');
+    return b.toString();
+  }
+
+  /// Start script for tmux launch commands. The tmux client detaches right
+  /// away, so unlike the plain flow there is no long-lived `$!` to wait on:
+  /// the real server lives in a named session's pane, whose history holds the
+  /// `token=` URL. The command runs verbatim — no appended `--host` `--port`
+  /// flags, those would land on tmux, not on `dsh web` inside. A session that
+  /// already exists gets a short grace period (its dsh may still be starting,
+  /// or belong to a hand-started instance probe raced with) before being
+  /// replaced. Plain `-t "$S"` matching everywhere: older tmux doesn't know
+  /// the `-t "=name"` exact-match prefix and silently finds nothing.
+  String _tmuxStartScript(int seconds, String? cwd, bool force) {
+    final sess = tmuxSession;
+    final b = StringBuffer(_prelude())
+      ..writeln('printf \'$_tag home %s\\n\' "\$HOME"')
+      ..writeln('mkdir -p "\$D" || { printf \'$_tag nodir\\n\'; exit 70; }')
+      ..writeln('chmod 700 "\$D" 2>/dev/null')
+      ..write(_stopOld());
+    if (cwd != null && cwd.isNotEmpty) {
+      b.writeln('cd ${remotePathExpr(cwd)} 2>/dev/null || printf \'$_tag nocwd\\n\'');
+    }
+    b
+      ..writeln('printf \'%s\' ${shQuote(launchCommand)} > "\$D/web.cmd"')
+      ..writeln(': > "\$D/web.log"')
+      ..writeln('S=${sess == null ? '' : shQuote(sess)}')
+      ..writeln('FORCE=${force ? '1' : ''}')
+      ..writeln('if [ -z "\$S" ]; then')
+      ..writeln(
+        '  printf \'tmux: the launch command needs a session name (add -s <name>)\\n\' >> "\$D/web.log"\n'
+        '  printf \'$_tag exited\\n\'; tail -n 20 "\$D/web.log" 2>/dev/null | sed \'s/^/$_tag log /\'; exit 1',
+      )
+      ..writeln('fi')
+      ..writeln('if ! command -v tmux >/dev/null 2>&1; then')
+      ..writeln(
+        '  printf \'tmux: command not found\\n\' >> "\$D/web.log"\n'
+        '  printf \'$_tag exited\\n\'; tail -n 20 "\$D/web.log" 2>/dev/null | sed \'s/^/$_tag log /\'; exit 1',
+      )
+      ..writeln('fi')
+      // A 401-triggered restart (FORCE) must not re-grab the stale token
+      // from the old pane's history — that would loop forever.
+      ..writeln('if [ -z "\$FORCE" ] && tmux has-session -t "\$S" 2>/dev/null; then')
+      ..writeln('  tmux resize-pane -t "\$S" -x 240 -y 60 2>/dev/null')
+      ..writeln('  i=0')
+      ..writeln('  while [ \$i -lt 5 ]; do')
+      ..writeln('    L=\$(tmux capture-pane -t "\$S" -p -J -S - 2>/dev/null | grep -E \'https?://[^ ]*[?&]token=\' | tail -n 1)')
+      ..writeln('    if [ -n "\$L" ]; then printf \'$_tag url %s\\n\' "\$L"; printf \'%s\\n\' "\$S" > "\$D/web.tmux"; exit 0; fi')
+      ..writeln('    P=\$(tmux list-panes -t "\$S" -F \'#{pane_pid}\' 2>/dev/null | head -n 1)')
+      ..writeln('    if [ -z "\$P" ] || ! kill -0 "\$P" 2>/dev/null; then break; fi')
+      ..writeln('    if command -v pgrep >/dev/null 2>&1 && ! pgrep -P "\$P" >/dev/null 2>&1; then break; fi')
+      ..writeln('    sleep 1; i=\$((i+1))')
+      ..writeln('  done')
+      // The session serves no dsh (idle pane, dead command): replace it.
+      ..writeln('  tmux kill-session -t "\$S" 2>/dev/null')
+      ..writeln('fi')
+      ..writeln('nohup $launchCommand </dev/null >>"\$D/web.log" 2>&1 &')
+      ..writeln('i=0')
+      ..writeln('while [ \$i -lt 10 ]; do')
+      ..writeln('  tmux has-session -t "\$S" 2>/dev/null && break')
+      ..writeln('  sleep 1; i=\$((i+1))')
+      ..writeln('done')
+      ..writeln('if ! tmux has-session -t "\$S" 2>/dev/null; then')
+      ..writeln(
+        '  printf \'$_tag exited\\n\'; tail -n 20 "\$D/web.log" 2>/dev/null | sed \'s/^/$_tag log /\'; exit 1',
+      )
+      ..writeln('fi')
+      // Detached panes default to 80 columns, which can wrap the token URL.
+      ..writeln('tmux resize-pane -t "\$S" -x 240 -y 60 2>/dev/null')
+      ..writeln('P=\$(tmux list-panes -t "\$S" -F \'#{pane_pid}\' 2>/dev/null | head -n 1)')
+      ..writeln('if [ -z "\$P" ]; then')
+      ..writeln(
+        '  printf \'$_tag exited\\n\'; tail -n 20 "\$D/web.log" 2>/dev/null | sed \'s/^/$_tag log /\'; exit 1',
+      )
+      ..writeln('fi')
+      ..writeln('_st "\$P" > "\$D/web.st"')
+      ..writeln('printf \'%s\\n\' "\$P" > "\$D/web.pid"')
+      ..writeln('printf \'%s\\n\' "\$S" > "\$D/web.tmux"')
+      ..writeln('printf \'$_tag started %s\\n\' "\$P"')
+      ..writeln('i=0')
+      ..writeln('while [ \$i -lt $seconds ]; do')
+      ..writeln('  L=\$(tmux capture-pane -t "\$S" -p -J -S - 2>/dev/null | grep -E \'https?://[^ ]*[?&]token=\' | tail -n 1)')
       ..writeln('  if [ -n "\$L" ]; then printf \'$_tag url %s\\n\' "\$L"; exit 0; fi')
       ..writeln('  if ! kill -0 "\$P" 2>/dev/null; then')
       ..writeln(
