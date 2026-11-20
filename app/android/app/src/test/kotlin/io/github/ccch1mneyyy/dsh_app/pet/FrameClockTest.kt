@@ -110,6 +110,23 @@ class FrameClockTest {
         assertTrue("bonus=$bonus", bonus in 480..720)
     }
 
+    @Test fun aBonusPlaysItsTimeThenTheStateLoopsFromItsFirstFrame() {
+        val think = anim(100, 100, name = "think")
+        val intro = anim(50, 50, 50, loop = false, name = "think-in")
+        val p = PetPlayer(Random(1))
+        p.setState(think, null, PetBonus(listOf(intro), 1f), now = 0, playMs = { it.totalMs })
+        val first = p.frame(0)!!
+        assertEquals("think-in", first.anim.name)
+        assertEquals(50L, first.nextInMs)
+        assertEquals(2, p.frame(120)!!.index)
+        assertEquals(30L, p.frame(120)!!.nextInMs)
+        val back = p.frame(150)!!
+        assertEquals("think", back.anim.name)
+        assertEquals(0, back.index)
+        assertEquals(1, p.frame(260)!!.index)
+        assertEquals("think", p.frame(10_000)!!.anim.name)
+    }
+
     @Test fun reactionsPlayOnTopAndGiveTheStateBack() {
         val idle = anim(100, name = "idle")
         val poke = anim(100, 100, loop = false, name = "poke")
@@ -120,6 +137,31 @@ class FrameClockTest {
         assertEquals(1, p.frame(650)!!.index)
         assertTrue(p.reacting)
         assertEquals("idle", p.frame(700)!!.anim.name)
+        assertTrue(!p.reacting)
+    }
+
+    @Test fun reducedMotionTapStaysOnItsFirstFrameAndSchedulesItsReturnToTheState() {
+        val idle = anim(100, name = "idle")
+        val poke = anim(100, 100, loop = false, name = "poke")
+        val p = PetPlayer(Random(2))
+        p.still = true
+        p.setState(idle, emptyList(), null, now = 0)
+        p.react(poke, loop = false, now = 500)
+
+        val first = p.frame(500)!!
+        assertEquals("poke", first.anim.name)
+        assertEquals(0, first.index)
+        assertEquals(200L, first.nextInMs)
+        val held = p.frame(650)!!
+        assertEquals("poke", held.anim.name)
+        assertEquals(0, held.index)
+        assertEquals(50L, held.nextInMs)
+        assertTrue(p.reacting)
+
+        val after = p.frame(700)!!
+        assertEquals("idle", after.anim.name)
+        assertEquals(0, after.index)
+        assertNull(after.nextInMs)
         assertTrue(!p.reacting)
     }
 

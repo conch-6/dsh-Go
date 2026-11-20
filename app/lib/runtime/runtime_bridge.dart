@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import 'background_protection.dart';
+
 /// Lifecycle of the on-device Linux runtime and the local DSH server.
 enum RuntimePhase {
   notInstalled,
@@ -200,6 +202,7 @@ class RuntimeStatus {
     this.tawcEngineEnabled = false,
     this.tawcEngineAvailable = false,
     this.tawcEngineActive = false,
+    this.tawcRecoveryAvailable = false,
     this.currentExecutionMode,
     this.launchSelectedMode,
     this.launchSpawned = false,
@@ -274,10 +277,13 @@ class RuntimeStatus {
   final bool directEngineActive;
   final String? directEngineFallbackReason;
 
-  /// The opt-in tawcroot launch (native `TawcrootLaunch`); one of it and Direct is on at most.
+  /// The tawcroot launch, on by default (native `TawcrootLaunch`); one of it and Direct is on at most.
   final bool tawcEngineEnabled;
   final bool tawcEngineAvailable;
   final bool tawcEngineActive;
+
+  /// Android can offer the opt-in launcher for the most recent PRoot failure.
+  final bool tawcRecoveryAvailable;
 
   /// Native process observation, never inferred from the saved direct preference.
   final String? currentExecutionMode;
@@ -364,6 +370,7 @@ class RuntimeStatus {
     tawcEngineEnabled: map['tawcEngineEnabled'] == true,
     tawcEngineAvailable: map['tawcEngineAvailable'] == true,
     tawcEngineActive: map['tawcEngineActive'] == true,
+    tawcRecoveryAvailable: map['tawcRecoveryAvailable'] == true,
     currentExecutionMode: map['currentExecutionMode'] as String?,
     launchSelectedMode: map['launchSelectedMode'] as String?,
     launchSpawned: map['launchSpawned'] == true,
@@ -703,6 +710,38 @@ class RuntimeBridge {
 
   /// Opens Android's "All files access" page for this app (fallback when legacy access is off).
   Future<bool> openAllFilesAccess() async => await _methods.invokeMethod<bool>('openAllFilesAccess') ?? false;
+
+  /// Optional native background protection; old hosts expose no switches.
+  Future<BackgroundProtection?> backgroundProtection() async {
+    try {
+      return BackgroundProtection.fromMap(await _methods.invokeMapMethod<Object?, Object?>('backgroundProtection'));
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  Future<BackgroundProtection?> setBackgroundProtection({
+    bool? audioEnabled,
+    bool? locationEnabled,
+    bool? taskEnabled,
+  }) async => BackgroundProtection.fromMap(
+    await _methods.invokeMapMethod<Object?, Object?>('setBackgroundProtection', {
+      'audioEnabled': ?audioEnabled,
+      'locationEnabled': ?locationEnabled,
+      'taskEnabled': ?taskEnabled,
+    }),
+  );
+
+  /// Opens the relevant system settings, without assuming permission was granted.
+  Future<bool> openBackgroundProtectionSettings() async {
+    try {
+      return await _methods.invokeMethod<bool>('openBackgroundProtectionSettings') ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
 
   /// Whether Android leaves DSH out of battery optimization; null without the native side.
   Future<bool?> batteryExempt() async {

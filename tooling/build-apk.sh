@@ -17,7 +17,10 @@
 #   -n, --build-number N             use 2..2100000000 instead of the build minute (never lower than installed)
 #   --build-name X.Y.Z               version name instead of app/pubspec.yaml's
 #   --keep-daemon                    leave the Gradle daemon running afterwards
+#   --no-companion                   release without the licensed companion pack
 #   --beta                           embed the beta channel token (internal builds only)
+#   --side                           test build that installs next to the released app
+#                                    (package ...dsh_app.test, named DSH Go 测试, own data)
 #   --dry-run                        print what would run
 #
 # The version name comes from app/pubspec.yaml; its `+N` is only a placeholder.
@@ -25,6 +28,9 @@
 # (lib/update/update_config.dart) for internal builds; the token file is
 # ~/keys/dshgo-beta-channel.token (mode 600), DSH_BETA_TOKEN_FILE points
 # elsewhere. Never printed, never part of a public release.
+# Release builds carry the companion pack, which stays out of the repository:
+# app/assets/companion/whale-girl.zip, else ~/keys/dsh-go/companion-pack-whale-girl.zip
+# (DSH_COMPANION_PACK points elsewhere), credited by tooling/companion_pack.py.
 # This script takes no machine locks; callers add their own.
 set -euo pipefail
 
@@ -32,10 +38,10 @@ ROOT=$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 APP="$ROOT/app"
 OUT="$APP/build/app/outputs/flutter-apk"
 
-usage() { sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 die() { echo "build-apk: $*" >&2; exit 1; }
 
-flavor=arm64 mode=release target='' code='' name='' dry=0 keep_daemon=0 want_beta=0
+flavor=arm64 mode=release target='' code='' name='' dry=0 keep_daemon=0 want_beta=0 side=0 companion=1 no_companion=0
 extra=()
 while (($#)); do
   case "$1" in
@@ -50,6 +56,8 @@ while (($#)); do
     --build-name=*) name=${1#*=}; shift ;;
     --keep-daemon) keep_daemon=1; shift ;;
     --beta) want_beta=1; shift ;;
+    --side) side=1; shift ;;
+    --no-companion) companion=0 no_companion=1; shift ;;
     --dry-run) dry=1; shift ;;
     -h | --help) usage; exit 0 ;;
     --) shift; extra=("$@"); break ;;
@@ -123,7 +131,15 @@ for f in "${flavors[@]}"; do
   commands+=("$(printf '%q ' "${cmd[@]}")")
 done
 
-echo "dsh-go $name ($code, $when) · $mode · ${flavors[*]}$( ((beta)) && echo ' · beta channel')"
+# Side builds: own package (app/build.gradle.kts). Their in-app updater still
+# fetches the released APK, which installs as the released app, not over this one.
+if ((side)); then
+  [[ $mode == release ]] || die "--side is for release builds"
+  export DSH_SIDE_BUILD=1
+else
+  unset DSH_SIDE_BUILD
+fi
+echo "dsh-go $name ($code, $when) · $mode · ${flavors[*]}$( ((beta)) && echo ' · beta channel')$( ((side)) && echo ' · side (dsh_app.test)')"
 if ((dry)); then
   for c in "${commands[@]}"; do echo "(cd app && ${c% })"; done
   ((keep_daemon)) || echo "(cd app/android && ./gradlew --stop)"
@@ -143,6 +159,17 @@ if ! command -v flutter >/dev/null 2>&1; then
   [[ -f $ROOT/tooling/env.sh ]] && source "$ROOT/tooling/env.sh"
   command -v flutter >/dev/null 2>&1 || die "flutter is not on PATH"
 fi
+# The companion pack (docs/design/companion.md); a fresh checkout has none.
+((companion)) && [[ $mode == release ]] || companion=0
+if ((companion)) && [[ ! -f $APP/assets/companion/whale-girl.zip ]]; then
+  pack=${DSH_COMPANION_PACK-$HOME/keys/dsh-go/companion-pack-whale-girl.zip}
+  # A killed --no-companion build may have left the only copy here.
+  if [[ ! -f $pack && -f $APP/build/.whale-girl.zip.held ]]; then
+    pack="$APP/build/.whale-girl.zip.held"
+  fi
+  [[ -f $pack ]] || die "no companion pack at $pack; set DSH_COMPANION_PACK, or pass --no-companion"
+  python3 -I "$ROOT/tooling/companion_pack.py" place "$pack"
+fi
 # A HarmonyOS build's plugin overrides must never reach an APK.
 [[ ! -e "$ROOT/app/pubspec_overrides.yaml" ]] || die "app/pubspec_overrides.yaml is left over from a HarmonyOS build; remove it"
 
@@ -151,14 +178,23 @@ stop_daemon() {
   (cd "$APP/android" && ./gradlew --stop -q >/dev/null 2>&1) || true
 }
 drop_beta() { [[ -f $beta_json ]] && shred -u "$beta_json" 2>/dev/null || rm -f "$beta_json"; }
-trap 'drop_beta; stop_daemon' EXIT
+# --no-companion: a pack an earlier build placed waits outside the assets meanwhile.
+pack_asset="$APP/assets/companion/whale-girl.zip" pack_held="$APP/build/.whale-girl.zip.held"
+pack_moved=0 # only this build's own move is put back, never one a killed build left
+put_back_pack() { ((!pack_moved)) || mv -f "$pack_held" "$pack_asset"; }
+trap 'drop_beta; stop_daemon; put_back_pack' EXIT
+if ((no_companion)) && [[ -f $pack_asset ]]; then
+  mkdir -p "$APP/build"
+  mv -f "$pack_asset" "$pack_held"
+  pack_moved=1
+fi
 if ((beta)); then
   mkdir -p "$APP/build"
   (umask 077; python3 -c 'import json, sys; print(json.dumps({"DSH_BETA_CHANNEL_TOKEN": open(sys.argv[1]).read().strip()}))' \
     "$beta_file" >"$beta_json")
 fi
 
-# libtawcroot.so for the opt-in tawcroot launch method, from the pinned tawc commit.
+# libtawcroot.so for the tawcroot launch method (the default where available), from the pinned tawc commit.
 # Release builds must carry it; other builds go on without it (the option shows unavailable).
 # DSH_SKIP_RUNTIME_CHECK=1: remote-only fork never launches a local runtime, skip.
 if [[ -z ${DSH_SKIP_RUNTIME_CHECK:-} ]]; then
@@ -188,6 +224,7 @@ for i in "${!flavors[@]}"; do
   # R8 renaming what ONNX Runtime's JNI looks up by name aborts the app when a call starts.
   if [[ $mode == release ]]; then
     python3 -I "$ROOT/tooling/check_apk_jni.py" "$apk" || die "$f: see proguard-rules.pro"
+    ((companion)) && { python3 -I "$ROOT/tooling/companion_pack.py" check "$apk" || die "$f: companion pack"; }
   fi
   if [[ -n $aapt2 ]]; then
     badge=$("$aapt2" dump badging "$apk" 2>/dev/null | sed -n '/^package:/p' || true)

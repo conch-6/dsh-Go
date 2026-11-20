@@ -28,6 +28,8 @@ import 'pairing_page.dart';
 import 'relay_credit.dart';
 import 'relay_login_sheet.dart';
 import 'ssh_host_form.dart';
+import 'session_backup_page.dart';
+import 'remote_web/remote_web_entry.dart';
 
 /// 远程主机 (a list page): the computers and servers this phone can drive.
 ///
@@ -156,6 +158,16 @@ class RemoteScreen extends ConsumerWidget {
               ),
             ],
           ),
+        SettingsSection(
+          children: [
+            SettingsTile(
+              icon: AppIcons.save,
+              spot: Spots.remoteSessionBackup,
+              onTap: () => push(const SessionBackupPage()),
+            ),
+          ],
+        ),
+        const RemoteWebEntry(),
       ],
     );
   }

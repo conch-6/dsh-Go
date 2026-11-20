@@ -1445,6 +1445,34 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
   }
 
   Widget _rowWidget(ChatRow row) {
+    final (seq, messageKey) = switch (row) {
+      AssistantRow(:final item) => (item.seq, item.rowKey),
+      ToolCallRow(:final item) => (item.seq, null),
+      ToolGroupRow(:final tools) => (tools.first.seq, null),
+      _ => (null, null),
+    };
+    // The stable message key carries its turn even in a partial history page.
+    final match = messageKey == null ? null : RegExp(r'^m([0-9]+)[.]').firstMatch(messageKey);
+    int? turn = match == null ? null : int.tryParse(match.group(1)!);
+    if (turn == null && seq != null) {
+      for (final trace in ref.read(chatProvider(widget.sessionId)).turns.reversed) {
+        if (seq > trace.startSeq && (trace.endSeq == null || seq < trace.endSeq!)) {
+          turn = trace.turn;
+          break;
+        }
+      }
+    }
+    final body = _rowContent(row);
+    if (turn == null) return body;
+    // A row must not start the global sessions watcher just to supply an image base.
+    final knownSessions = ref.exists(sessionsProvider) ? ref.read(sessionsProvider).value : null;
+    final cwd =
+        ref.read(chatProvider(widget.sessionId).notifier).header?.cwd ??
+        knownSessions?.where((session) => session.sessionId == widget.sessionId).firstOrNull?.cwd;
+    return MarkdownImageScope(sessionId: widget.sessionId, baseDir: cwd, turn: turn, child: body);
+  }
+
+  Widget _rowContent(ChatRow row) {
     return switch (row) {
       UserRow(:final item) when dshUiReplyChip(item.text) != null => DshUiReplyChip(label: dshUiReplyChip(item.text)!),
       UserRow(:final item) => UserBubble(
@@ -1453,6 +1481,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
             ? null
             : SentAttachments.echoed(sessionId: widget.sessionId, images: item.images, files: item.files),
         onEdit: widget.onEditPrompt == null ? null : () => _editPrompt(item),
+        onQuote: widget.onQuote == null ? null : _quote,
       ),
       PendingRow(:final prompt) => _pendingBubble(prompt),
       AssistantRow(:final item, :final showActions, :final footnote) => _reply(item, showActions, footnote),

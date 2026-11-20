@@ -3380,6 +3380,12 @@ abstract class L10n {
   /// **'通道身份已改变，请停止后重新授权或连接。'**
   String get androidShellErrorIdentityChanged;
 
+  /// No description provided for @androidShellErrorHelperStartFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'Android Shell 辅助进程未能启动，命令未执行。'**
+  String get androidShellErrorHelperStartFailed;
+
   /// No description provided for @androidShellErrorBusy.
   ///
   /// In zh, this message translates to:
@@ -3469,6 +3475,132 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'未能确认操作结果。先核实结果；已派发的命令不要自动重试。'**
   String get androidShellErrorUnknown;
+
+  /// No description provided for @backgroundProtectionDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认关闭，仅在有本机任务且 App 退到后台时尝试保护；系统仍可能暂停任务。'**
+  String get backgroundProtectionDescription;
+
+  /// No description provided for @backgroundProtectionAudio.
+  ///
+  /// In zh, this message translates to:
+  /// **'静音音频保护'**
+  String get backgroundProtectionAudio;
+
+  /// No description provided for @backgroundProtectionAudioHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'任务期间在后台播放静音音频，会增加耗电；不会抢占录音、通话或朗读。'**
+  String get backgroundProtectionAudioHint;
+
+  /// No description provided for @backgroundProtectionLocation.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台定位保护'**
+  String get backgroundProtectionLocation;
+
+  /// No description provided for @backgroundProtectionLocationHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'需系统“始终允许”位置权限，会增加耗电并涉及位置隐私；不保存坐标。'**
+  String get backgroundProtectionLocationHint;
+
+  /// No description provided for @backgroundProtectionTask.
+  ///
+  /// In zh, this message translates to:
+  /// **'连续任务保护'**
+  String get backgroundProtectionTask;
+
+  /// No description provided for @backgroundProtectionTaskHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'仅在本机任务期间申请系统连续任务，是否生效取决于当前版本和系统许可。'**
+  String get backgroundProtectionTaskHint;
+
+  /// No description provided for @backgroundProtectionStatus.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前状态'**
+  String get backgroundProtectionStatus;
+
+  /// No description provided for @backgroundProtectionOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'未开启增强保护'**
+  String get backgroundProtectionOff;
+
+  /// No description provided for @backgroundProtectionReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'已开启，当前未运行；有本机任务且退到后台时才会尝试保护。'**
+  String get backgroundProtectionReady;
+
+  /// No description provided for @backgroundProtectionAudioActive.
+  ///
+  /// In zh, this message translates to:
+  /// **'静音音频保护正在运行'**
+  String get backgroundProtectionAudioActive;
+
+  /// No description provided for @backgroundProtectionLocationActive.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台定位保护正在运行'**
+  String get backgroundProtectionLocationActive;
+
+  /// No description provided for @backgroundProtectionBothActive.
+  ///
+  /// In zh, this message translates to:
+  /// **'静音音频与后台定位保护正在运行'**
+  String get backgroundProtectionBothActive;
+
+  /// No description provided for @backgroundProtectionTaskActive.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统连续任务保护正在运行'**
+  String get backgroundProtectionTaskActive;
+
+  /// No description provided for @backgroundProtectionLocationRestricted.
+  ///
+  /// In zh, this message translates to:
+  /// **'定位权限被系统限制，无法开启定位保护；可保持前台或使用远程主机。'**
+  String get backgroundProtectionLocationRestricted;
+
+  /// No description provided for @backgroundProtectionNeedsAlways.
+  ///
+  /// In zh, this message translates to:
+  /// **'定位保护尚未生效，请点此在系统设置中将位置权限设为“始终允许”。'**
+  String get backgroundProtectionNeedsAlways;
+
+  /// No description provided for @backgroundProtectionLocationServicesOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统定位服务已关闭，请点此检查系统设置。'**
+  String get backgroundProtectionLocationServicesOff;
+
+  /// No description provided for @backgroundProtectionTaskUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本缺少系统连续任务资格，请保持 App 在前台或使用远程主机。'**
+  String get backgroundProtectionTaskUnavailable;
+
+  /// No description provided for @backgroundProtectionUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'保护暂不可用，请返回 App 重试；长任务可保持前台或使用远程主机。'**
+  String get backgroundProtectionUnavailable;
+
+  /// No description provided for @backgroundProtectionCleanup.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在结束上一次后台保护，尚未完成释放。'**
+  String get backgroundProtectionCleanup;
+
+  /// No description provided for @backgroundProtectionUpdateFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'未能更新后台保护，请查看当前状态后重试。'**
+  String get backgroundProtectionUpdateFailed;
 
   /// No description provided for @botsFolderGone.
   ///
@@ -5341,6 +5473,12 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'鲸娘'**
   String get botsPetWhaleGirl;
+
+  /// No description provided for @botsPetPinkFish.
+  ///
+  /// In zh, this message translates to:
+  /// **'小粉鱼'**
+  String get botsPetPinkFish;
 
   /// No description provided for @botsPetNone.
   ///
@@ -22466,6 +22604,18 @@ abstract class L10n {
   /// **'查看日志了解原因，或连接远程主机继续使用'**
   String get phoneFailureLaunchHint;
 
+  /// No description provided for @phoneFailureTawcHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'PRoot 无法执行本机引擎。可以尝试用 tawcroot 启动，继续使用已有的运行环境和数据。'**
+  String get phoneFailureTawcHint;
+
+  /// No description provided for @phoneFailureRetryWithTawcroot.
+  ///
+  /// In zh, this message translates to:
+  /// **'用 tawcroot 启动'**
+  String get phoneFailureRetryWithTawcroot;
+
   /// No description provided for @phoneFailureNoSpaceHint.
   ///
   /// In zh, this message translates to:
@@ -23159,7 +23309,7 @@ abstract class L10n {
   /// No description provided for @phoneTawcHint.
   ///
   /// In zh, this message translates to:
-  /// **'实验功能，默认关闭，下次启动生效，和「直接启动」二选一。用 tawcroot 代替兼容启动运行本机引擎：启动快约三倍，装包、apt 也更快。启动不成功会自动改回兼容启动。关掉后的第一次启动会先把它留下的硬链接整理成普通文件，可能要多等一会。'**
+  /// **'默认开启，改动下次启动生效，和「直接启动」二选一。用 tawcroot 代替兼容启动运行本机引擎：启动快约三倍，装包、apt 也更快。启动不成功会自动改回兼容启动。关掉后的第一次启动会先把它留下的硬链接整理成普通文件，可能要多等一会。'**
   String get phoneTawcHint;
 
   /// No description provided for @phoneTawcFailedHint.
@@ -31094,6 +31244,90 @@ abstract class L10n {
   /// **'文件超过远程上传协议的大小上限'**
   String get stateRemoteUploadTooLarge;
 
+  /// No description provided for @remoteWebOpen.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开 DSH Web'**
+  String get remoteWebOpen;
+
+  /// No description provided for @remoteWebTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'DSH Web'**
+  String get remoteWebTitle;
+
+  /// No description provided for @remoteWebOpening.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在打开 DSH Web…'**
+  String get remoteWebOpening;
+
+  /// No description provided for @remoteWebRefresh.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新首页'**
+  String get remoteWebRefresh;
+
+  /// No description provided for @remoteWebBusy.
+  ///
+  /// In zh, this message translates to:
+  /// **'人太多了，请稍后重试'**
+  String get remoteWebBusy;
+
+  /// No description provided for @remoteWebPairingRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接授权失效，请重新连接或配对主机。'**
+  String get remoteWebPairingRequired;
+
+  /// No description provided for @remoteWebHostNotReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机网页版尚未就绪。请启动 DSH Web，并将 Remote 插件更新到 0.6.6 或更新版本。'**
+  String get remoteWebHostNotReady;
+
+  /// No description provided for @remoteWebReconnect.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接已断开，请重新连接主机后再打开。'**
+  String get remoteWebReconnect;
+
+  /// No description provided for @remoteWebUnsafeUrl.
+  ///
+  /// In zh, this message translates to:
+  /// **'网页地址无法验证，已停止打开。请检查主机配置。'**
+  String get remoteWebUnsafeUrl;
+
+  /// No description provided for @remoteWebExchangeRejected.
+  ///
+  /// In zh, this message translates to:
+  /// **'访问验证失败，请返回后重新打开。'**
+  String get remoteWebExchangeRejected;
+
+  /// No description provided for @remoteWebSessionExpired.
+  ///
+  /// In zh, this message translates to:
+  /// **'网页连接已过期，请返回后重新打开。'**
+  String get remoteWebSessionExpired;
+
+  /// No description provided for @remoteWebPlatformUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前平台暂不支持此网页入口。请使用原生远程界面。'**
+  String get remoteWebPlatformUnavailable;
+
+  /// No description provided for @remoteWebTryAgain.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法打开网页，请检查主机连接后重试。'**
+  String get remoteWebTryAgain;
+
+  /// No description provided for @remoteWebUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法打开，请稍后重试'**
+  String get remoteWebUnavailable;
+
   /// No description provided for @riskDontShowAgain.
   ///
   /// In zh, this message translates to:
@@ -32179,6 +32413,174 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'只有确认系统已不在安装时才结束等待。清除本次记录不等于取消系统安装；不会自动重试或切换路线，仍需再次原生确认。'**
   String get selfUpdateEndWaitingNote;
+
+  /// No description provided for @backupRecordFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机未能保存恢复记录。请记下上面的对话 ID 并检查目标主机，不要重复导入。'**
+  String get backupRecordFailed;
+
+  /// No description provided for @backupSearchKeywords.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份,恢复,迁移,复制对话,同步,backup,restore'**
+  String get backupSearchKeywords;
+
+  /// No description provided for @backupTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'对话备份'**
+  String get backupTitle;
+
+  /// No description provided for @backupHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份到手机后，可切换主机恢复到已有工作区。每次恢复会新建对话；不含附件、源码和跨对话关系。'**
+  String get backupHint;
+
+  /// No description provided for @backupCancelled.
+  ///
+  /// In zh, this message translates to:
+  /// **'已取消，已校验保存的备份仍可恢复。'**
+  String get backupCancelled;
+
+  /// No description provided for @backupUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'结果待核对：请连接原目标主机查询，或先在目标端检查。不会自动重新导入。'**
+  String get backupUnknown;
+
+  /// No description provided for @backupFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'操作失败（{code}）。请检查连接或存储后重试。'**
+  String backupFailed(String code);
+
+  /// No description provided for @backupSaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存 {count} 条备份。'**
+  String backupSaved(int count);
+
+  /// No description provided for @backupSavedCloseFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存 {count} 条备份，源主机导出句柄未能关闭；断线或闲置后会自动释放。'**
+  String backupSavedCloseFailed(int count);
+
+  /// No description provided for @backupRestoreConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'将“{title}”恢复到“{workspace}”？会创建一条新对话，不合并或覆盖已有历史。'**
+  String backupRestoreConfirm(String title, String workspace);
+
+  /// No description provided for @backupRestored.
+  ///
+  /// In zh, this message translates to:
+  /// **'已恢复，新对话：{id}'**
+  String backupRestored(String id);
+
+  /// No description provided for @backupRestoredDetached.
+  ///
+  /// In zh, this message translates to:
+  /// **'历史已恢复，未加入工作区。对话 ID：{id}。请在目标端查找，不要重复导入。'**
+  String backupRestoredDetached(String id);
+
+  /// No description provided for @backupOriginalDevice.
+  ///
+  /// In zh, this message translates to:
+  /// **'请使用原 Remote 设备身份连接原目标主机，再查询提交结果。'**
+  String get backupOriginalDevice;
+
+  /// No description provided for @backupStorageFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法读取备份。请检查应用存储和系统密钥；不会重置或覆盖已有备份。'**
+  String get backupStorageFailed;
+
+  /// No description provided for @backupConnectHost.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接一台已配对的 Remote 主机，即可备份或恢复。'**
+  String get backupConnectHost;
+
+  /// No description provided for @backupNoWorkspace.
+  ///
+  /// In zh, this message translates to:
+  /// **'等待主机工作区列表；没有工作区时请先在主机上创建。'**
+  String get backupNoWorkspace;
+
+  /// No description provided for @backupWorkspace.
+  ///
+  /// In zh, this message translates to:
+  /// **'整个工作区'**
+  String get backupWorkspace;
+
+  /// No description provided for @backupToPhone.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份到手机'**
+  String get backupToPhone;
+
+  /// No description provided for @backupExportUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'此主机未提供对话导出能力，请更新主机 Remote 插件。'**
+  String get backupExportUnsupported;
+
+  /// No description provided for @backupImportUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'此主机未提供对话恢复能力，请更新主机 Remote 插件。'**
+  String get backupImportUnsupported;
+
+  /// No description provided for @backupPending.
+  ///
+  /// In zh, this message translates to:
+  /// **'待核对的恢复'**
+  String get backupPending;
+
+  /// No description provided for @backupCheck.
+  ///
+  /// In zh, this message translates to:
+  /// **'查询'**
+  String get backupCheck;
+
+  /// No description provided for @backupAcknowledge.
+  ///
+  /// In zh, this message translates to:
+  /// **'已在目标端核对'**
+  String get backupAcknowledge;
+
+  /// No description provided for @backupAcknowledgeConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认已在目标端核对？清除此待确认记录后，可手动再导入，但可能创建重复对话。'**
+  String get backupAcknowledgeConfirm;
+
+  /// No description provided for @backupOnPhone.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机上的备份'**
+  String get backupOnPhone;
+
+  /// No description provided for @backupEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没有备份。备份仅保存在本机，卸载 App 会丢失。'**
+  String get backupEmpty;
+
+  /// No description provided for @backupRestore.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复到当前工作区'**
+  String get backupRestore;
+
+  /// No description provided for @backupDeleteConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除手机上的这条备份及其恢复记录？不会删除主机上的对话。'**
+  String get backupDeleteConfirm;
 
   /// No description provided for @shellDeletePermanently.
   ///
@@ -36407,7 +36809,7 @@ abstract class L10n {
   /// No description provided for @stateProviderModelsMissing.
   ///
   /// In zh, this message translates to:
-  /// **'找不到模型列表，检查 Base URL'**
+  /// **'找不到模型列表。检查 Base URL；有的服务不提供模型列表，可以手动添加模型'**
   String get stateProviderModelsMissing;
 
   /// No description provided for @stateProviderRateLimited.
@@ -37589,7 +37991,7 @@ abstract class L10n {
   /// No description provided for @tavernPreviewStatus.
   ///
   /// In zh, this message translates to:
-  /// **'预览 · 回复是示例，还没接上模型'**
+  /// **'预览 · 示例回复'**
   String get tavernPreviewStatus;
 
   /// No description provided for @tavernRegenerate.
@@ -37631,7 +38033,7 @@ abstract class L10n {
   /// No description provided for @tavernKeyMissing.
   ///
   /// In zh, this message translates to:
-  /// **'还没填 DeepSeek API Key，填好就能开始。'**
+  /// **'还没填 DeepSeek API Key'**
   String get tavernKeyMissing;
 
   /// No description provided for @tavernKeyMissingAction.
@@ -37667,13 +38069,13 @@ abstract class L10n {
   /// No description provided for @tavernCutShort.
   ///
   /// In zh, this message translates to:
-  /// **'回复写到回复上限，在这里断开了。可以接着写，或在酒馆设置 › 生成里把回复上限调高。'**
+  /// **'回复到了回复上限。可以接着写，或调高这段对话所用预设的回复上限。'**
   String get tavernCutShort;
 
   /// No description provided for @tavernFiltered.
   ///
   /// In zh, this message translates to:
-  /// **'这条回复被模型的内容过滤拦下了一部分。'**
+  /// **'回复有一部分被内容过滤拦下了。'**
   String get tavernFiltered;
 
   /// No description provided for @tavernErrorBalance.
@@ -37892,12 +38294,6 @@ abstract class L10n {
   /// **'这个文件不是文本'**
   String get tavernPresetNotText;
 
-  /// No description provided for @tavernPresetsEmpty.
-  ///
-  /// In zh, this message translates to:
-  /// **'还没有预设'**
-  String get tavernPresetsEmpty;
-
   /// No description provided for @tavernPresetsEmptyMessage.
   ///
   /// In zh, this message translates to:
@@ -37991,7 +38387,7 @@ abstract class L10n {
   /// No description provided for @tavernRegexEmptyMessage.
   ///
   /// In zh, this message translates to:
-  /// **'SillyTavern 导出的正则 JSON（一条或一组）都能导入。全局正则对所有对话生效；卡和预设自带的正则跟着它们走。'**
+  /// **'可以导入 SillyTavern 导出的正则 JSON，一条或一组'**
   String get tavernRegexEmptyMessage;
 
   /// No description provided for @tavernRegexUnnamed.
@@ -38075,7 +38471,7 @@ abstract class L10n {
   /// No description provided for @tavernLorebooksEmptyMessage.
   ///
   /// In zh, this message translates to:
-  /// **'SillyTavern 导出的世界书 JSON 都能导入。设为全局后对所有对话生效；卡自带的世界书跟着卡走。'**
+  /// **'可以导入 SillyTavern 导出的世界书 JSON'**
   String get tavernLorebooksEmptyMessage;
 
   /// No description provided for @tavernLorebookCount.
@@ -38561,7 +38957,7 @@ abstract class L10n {
   /// No description provided for @tavernPersonasNote.
   ///
   /// In zh, this message translates to:
-  /// **'长按设为默认或删除。没有单独选人设的对话用默认的。'**
+  /// **'长按可设为默认或删除'**
   String get tavernPersonasNote;
 
   /// No description provided for @tavernPersonaUnsetDefault.
@@ -38621,7 +39017,7 @@ abstract class L10n {
   /// No description provided for @tavernPersonaDescriptionHelp.
   ///
   /// In zh, this message translates to:
-  /// **'模型会读到这段：你是谁、什么样子、和角色是什么关系。'**
+  /// **'你是谁、什么样子、和角色的关系'**
   String get tavernPersonaDescriptionHelp;
 
   /// No description provided for @tavernPersonaDescriptionHint.
@@ -38633,7 +39029,7 @@ abstract class L10n {
   /// No description provided for @tavernPersonaDefaultSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'新对话和没有单独选人设的对话都用它'**
+  /// **'没单独选人设的对话都用它'**
   String get tavernPersonaDefaultSubtitle;
 
   /// No description provided for @tavernPersonaDelete.
@@ -38690,6 +39086,12 @@ abstract class L10n {
   /// **'未设置'**
   String get tavernPersonaNotSet;
 
+  /// No description provided for @tavernLibraryNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'无'**
+  String get tavernLibraryNone;
+
   /// No description provided for @tavernFieldName.
   ///
   /// In zh, this message translates to:
@@ -38717,7 +39119,7 @@ abstract class L10n {
   /// No description provided for @tavernExportPngSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'设定藏在图片里，SillyTavern 等酒馆都能导入'**
+  /// **'SillyTavern 等酒馆都能导入'**
   String get tavernExportPngSubtitle;
 
   /// No description provided for @tavernExportJson.
@@ -39083,7 +39485,7 @@ abstract class L10n {
   /// No description provided for @tavernLorebookSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'这张卡自带的设定条目'**
+  /// **'卡里自带的条目'**
   String get tavernLorebookSubtitle;
 
   /// No description provided for @tavernLorebookEntries.
@@ -39131,7 +39533,7 @@ abstract class L10n {
   /// No description provided for @tavernImportFromFileSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'角色卡、预设、世界书、正则、快速回复或聊天记录，会自己认出来'**
+  /// **'角色卡、预设、世界书等，自动识别'**
   String get tavernImportFromFileSubtitle;
 
   /// No description provided for @tavernImportFromLink.
@@ -39143,7 +39545,7 @@ abstract class L10n {
   /// No description provided for @tavernImportFromLinkSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'Chub、RisuRealm 的角色页，或卡文件的直链'**
+  /// **'Chub、RisuRealm 或卡文件的链接'**
   String get tavernImportFromLinkSubtitle;
 
   /// No description provided for @tavernLinkInvalid.
@@ -39353,7 +39755,7 @@ abstract class L10n {
   /// No description provided for @tavernStorybookWholeNote.
   ///
   /// In zh, this message translates to:
-  /// **'一共 {count} 句，隐藏的消息不放进去。EPUB 能用微信读书、Apple 图书等打开。'**
+  /// **'一共 {count} 句，隐藏的消息不放进去'**
   String tavernStorybookWholeNote(int count);
 
   /// No description provided for @tavernStorybookEpub.
@@ -39449,7 +39851,7 @@ abstract class L10n {
   /// No description provided for @tavernLive2dSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'视觉小说排版里用它代替卡面，会动、说话时会张嘴'**
+  /// **'视觉小说排版里代替卡面'**
   String get tavernLive2dSubtitle;
 
   /// No description provided for @tavernLive2dNone.
@@ -39785,7 +40187,7 @@ abstract class L10n {
   /// No description provided for @tavernStageStateNote.
   ///
   /// In zh, this message translates to:
-  /// **'卡里定义了状态以后，好感、属性、背包、时间地点都会在这里，每回合变了什么会标出来（「+5」），你也能直接改。没定义的老卡会在这里列出它的变量。'**
+  /// **'卡里定义了状态，好感、属性、背包等就会显示在这里。'**
   String get tavernStageStateNote;
 
   /// No description provided for @tavernStageDirectorEmpty.
@@ -39797,7 +40199,7 @@ abstract class L10n {
   /// No description provided for @tavernStageDirectorNote.
   ///
   /// In zh, this message translates to:
-  /// **'打开导演后，它会在每回合之后在后台读剧情：给下一回合留一条看不见的提示，记下自己的笔记（默认藏着，怕剧透），再在输入框上方给你三个建议回复。它不替你说话，也不写正文。'**
+  /// **'导演会读剧情，给下一回合留提示，并在输入框上方给出三条建议。'**
   String get tavernStageDirectorNote;
 
   /// No description provided for @tavernStageTurnNone.
@@ -39887,7 +40289,7 @@ abstract class L10n {
   /// No description provided for @tavernLorebookChatNote.
   ///
   /// In zh, this message translates to:
-  /// **'只在这段对话里用。标着「全局」的本来就对所有对话生效。'**
+  /// **'只对这段对话。「全局」的对所有对话都生效。'**
   String get tavernLorebookChatNote;
 
   /// No description provided for @tavernLorebookCharacterNote.
@@ -39995,7 +40397,7 @@ abstract class L10n {
   /// No description provided for @tavernPrefillNote.
   ///
   /// In zh, this message translates to:
-  /// **'开着时，这段文字作为回复的开头发给模型，模型从这里接着写。放在「思考」只在开了思考时生效，没开就放进正文。「接着写」的回合不用它。'**
+  /// **'放在「思考」只在开了思考时生效，没开就放进正文。「接着写」的回合不用它。'**
   String get tavernPrefillNote;
 
   /// No description provided for @tavernPresetPromptEmpty.
@@ -40280,23 +40682,11 @@ abstract class L10n {
   /// **'只发，不回复'**
   String get tavernSendOnly;
 
-  /// No description provided for @tavernSendOnlySubtitle.
-  ///
-  /// In zh, this message translates to:
-  /// **'这句放进故事，她先不接话'**
-  String get tavernSendOnlySubtitle;
-
   /// No description provided for @tavernNarrate.
   ///
   /// In zh, this message translates to:
   /// **'以旁白身份发'**
   String get tavernNarrate;
-
-  /// No description provided for @tavernNarrateSubtitle.
-  ///
-  /// In zh, this message translates to:
-  /// **'作为叙述插进故事，不算你说的话'**
-  String get tavernNarrateSubtitle;
 
   /// No description provided for @tavernSendFailed.
   ///
@@ -40313,7 +40703,7 @@ abstract class L10n {
   /// No description provided for @tavernStateVariablesNote.
   ///
   /// In zh, this message translates to:
-  /// **'卡和对话里 {{setvar}} 这类宏记下的变量，到当前这条为止。点一项看全部，也能直接改。'**
+  /// **'宏（如 {{setvar}}）记下的变量，到当前这条为止。点一项可查看或修改。'**
   String get tavernStateVariablesNote;
 
   /// No description provided for @tavernData.
@@ -40901,7 +41291,7 @@ abstract class L10n {
   /// No description provided for @tavernSessionUsageNote.
   ///
   /// In zh, this message translates to:
-  /// **'当前这条线上 {count} 条回复的合计；换掉的备选不算'**
+  /// **'当前分支 {count} 条回复的合计，换掉的备选不算'**
   String tavernSessionUsageNote(int count);
 
   /// No description provided for @tavernSessionUsageNone.
@@ -40915,6 +41305,12 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'约 {usd}，按 DeepSeek 官方价，分高峰和低谷时段算；法定节假日全天是低谷价，那几天这里会算高一点'**
   String tavernSessionUsageCost(String usd);
+
+  /// No description provided for @tavernStageCost.
+  ///
+  /// In zh, this message translates to:
+  /// **'约 {usd}，按 DeepSeek 官方价估算'**
+  String tavernStageCost(String usd);
 
   /// No description provided for @tavernSessionUsageUnpriced.
   ///
@@ -40937,7 +41333,7 @@ abstract class L10n {
   /// No description provided for @tavernWriteOwnSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'从一张空白卡开始，名字、设定和开场白都自己填'**
+  /// **'从一张空白卡开始'**
   String get tavernWriteOwnSubtitle;
 
   /// No description provided for @tavernNewCharacterName.
@@ -41093,13 +41489,13 @@ abstract class L10n {
   /// No description provided for @tavernStateNote.
   ///
   /// In zh, this message translates to:
-  /// **'卡定义的状态，到当前这条消息为止。这回合变了的标着「+5」这样的记号；点一项看全部，也能直接改，改动记在这条消息上，换回答、切分支会跟着回退。'**
+  /// **'到当前这条消息为止。点一项可查看或修改，改动随这条消息回退。'**
   String get tavernStateNote;
 
   /// No description provided for @tavernStatePreview.
   ///
   /// In zh, this message translates to:
-  /// **'还没开始记，下面是卡给的初始值。'**
+  /// **'还没有记录，下面是初始值。'**
   String get tavernStatePreview;
 
   /// No description provided for @tavernStateChanged.
@@ -41171,7 +41567,7 @@ abstract class L10n {
   /// No description provided for @tavernDirectorAutoNote.
   ///
   /// In zh, this message translates to:
-  /// **'只对这段对话。开了以后每隔几个回合，在回复写完后多问一次模型：下一拍往哪走、给你三条可以做的事。每次都会多用一些额度。'**
+  /// **'只对这段对话。每隔几个回合多请求一次模型，会多用一些额度。'**
   String get tavernDirectorAutoNote;
 
   /// No description provided for @tavernDirectorRun.
@@ -41201,7 +41597,7 @@ abstract class L10n {
   /// No description provided for @tavernDirectorSuggestionsNote.
   ///
   /// In zh, this message translates to:
-  /// **'点一条放进输入框，改不改、发不发由你。'**
+  /// **'点一条放进输入框'**
   String get tavernDirectorSuggestionsNote;
 
   /// No description provided for @tavernDirectorNotes.
@@ -41213,7 +41609,7 @@ abstract class L10n {
   /// No description provided for @tavernDirectorStale.
   ///
   /// In zh, this message translates to:
-  /// **'这是之前的情况下想的，现在不一定合适，只供参考。'**
+  /// **'基于之前的剧情，仅供参考。'**
   String get tavernDirectorStale;
 
   /// No description provided for @tavernDirectorFailed.
@@ -41807,7 +42203,7 @@ abstract class L10n {
   /// No description provided for @tavernRegexFieldFindHelp.
   ///
   /// In zh, this message translates to:
-  /// **'SillyTavern 的写法：/规则/标志，比如 /(早安|晚安)/gi'**
+  /// **'写法 /规则/标志，如 /(早安|晚安)/gi'**
   String get tavernRegexFieldFindHelp;
 
   /// No description provided for @tavernRegexFieldReplaceHelp.
@@ -41897,7 +42293,7 @@ abstract class L10n {
   /// No description provided for @tavernRegexPhaseNote.
   ///
   /// In zh, this message translates to:
-  /// **'原文：直接改写存下来的消息。只改显示：存档不变，只是看起来不同。只改发出：只改发给模型的那一份。'**
+  /// **'原文：改写存下的消息；只改显示：存档不变；只改发出：只改发给模型的那份'**
   String get tavernRegexPhaseNote;
 
   /// No description provided for @tavernRegexMinDepth.
@@ -41993,7 +42389,7 @@ abstract class L10n {
   /// No description provided for @tavernCardScriptsHint.
   ///
   /// In zh, this message translates to:
-  /// **'这张卡带了 {count} 个脚本，打开「整页画布（试用）」才会运行'**
+  /// **'{count} 个卡片脚本要在整页画布里运行'**
   String tavernCardScriptsHint(int count);
 
   /// No description provided for @tavernCardScriptsHintAction.
@@ -42011,7 +42407,7 @@ abstract class L10n {
   /// No description provided for @tavernRenderSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'只管这个角色的单人对话：卡里的状态栏、美化要选网页或画布才显示，脚本只在画布里运行'**
+  /// **'只管这个角色的单人对话。状态栏、美化要选网页或画布，脚本只在画布里运行'**
   String get tavernRenderSubtitle;
 
   /// No description provided for @tavernRenderText.
@@ -42043,6 +42439,18 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'画面重新加载了'**
   String get tavernCanvasReloaded;
+
+  /// No description provided for @tavernLowPower.
+  ///
+  /// In zh, this message translates to:
+  /// **'省电渲染'**
+  String get tavernLowPower;
+
+  /// No description provided for @tavernLowPowerSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'去掉卡片网页里的模糊和循环动画，手机更流畅'**
+  String get tavernLowPowerSubtitle;
 
   /// No description provided for @tavernGroupSpeaking.
   ///
@@ -42083,7 +42491,7 @@ abstract class L10n {
   /// No description provided for @tavernGroupMembersNote.
   ///
   /// In zh, this message translates to:
-  /// **'按点选的顺序排；第一个是主持，故事共用的状态记在它的卡上。'**
+  /// **'按点选的顺序排，第一个是主持'**
   String get tavernGroupMembersNote;
 
   /// No description provided for @tavernGroupHost.
@@ -42137,7 +42545,7 @@ abstract class L10n {
   /// No description provided for @tavernGroupNaturalNote.
   ///
   /// In zh, this message translates to:
-  /// **'像 SillyTavern：被点到名的先说，其余看各自的话多话少；每轮最多几个人说在群设置里改。'**
+  /// **'像 SillyTavern：被点到名的先说，其余看各自的话多话少'**
   String get tavernGroupNaturalNote;
 
   /// No description provided for @tavernGroupListOrderNote.
@@ -42203,7 +42611,7 @@ abstract class L10n {
   /// No description provided for @tavernGroupMaxSpeakers.
   ///
   /// In zh, this message translates to:
-  /// **'每轮最多几人说'**
+  /// **'每轮最多几人'**
   String get tavernGroupMaxSpeakers;
 
   /// No description provided for @tavernGroupSelfResponses.
@@ -42215,13 +42623,13 @@ abstract class L10n {
   /// No description provided for @tavernGroupSelfResponsesNote.
   ///
   /// In zh, this message translates to:
-  /// **'上一句是谁说的，这一轮还能先轮到他。'**
+  /// **'刚说完的人这一轮还能再说'**
   String get tavernGroupSelfResponsesNote;
 
   /// No description provided for @tavernGroupHostNote.
   ///
   /// In zh, this message translates to:
-  /// **'主持是「{name}」：故事共用的状态、导演和秘密记在它的卡上；它可以不在发言名单里。'**
+  /// **'主持是「{name}」，故事共用的状态记在它的卡上'**
   String tavernGroupHostNote(String name);
 
   /// No description provided for @tavernGroupMuted.
@@ -43052,12 +43460,6 @@ abstract class L10n {
   /// **'用 AI 改这张卡'**
   String get tavernDraftsForCard;
 
-  /// No description provided for @tavernDraftsForCardSubtitle.
-  ///
-  /// In zh, this message translates to:
-  /// **'在草稿里改，挑好再应用'**
-  String get tavernDraftsForCardSubtitle;
-
   /// No description provided for @tavernDraftsEmpty.
   ///
   /// In zh, this message translates to:
@@ -43565,7 +43967,7 @@ abstract class L10n {
   /// No description provided for @tavernImportFromDeepSeekSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'在 DeepSeek 的设置里导出全部历史对话，再选那个 ZIP'**
+  /// **'选 DeepSeek 设置里导出的 ZIP'**
   String get tavernImportFromDeepSeekSubtitle;
 
   /// No description provided for @tavernDeepSeekTitle.
@@ -43577,7 +43979,7 @@ abstract class L10n {
   /// No description provided for @tavernDeepSeekFound.
   ///
   /// In zh, this message translates to:
-  /// **'找到 {count} 段对话，聊得最多的排在前面。勾上想接着聊的。'**
+  /// **'找到 {count} 段对话，勾上要接回来的'**
   String tavernDeepSeekFound(int count);
 
   /// No description provided for @tavernDeepSeekMessages.
@@ -43649,7 +44051,7 @@ abstract class L10n {
   /// No description provided for @tavernPacksSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'装进来的玩法包；装上不等于启用，要在全局、角色或对话里加上才生效'**
+  /// **'装上后要在全局、角色或对话里加上才生效'**
   String get tavernPacksSubtitle;
 
   /// No description provided for @tavernPacksEmpty.
@@ -43711,12 +44113,6 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'全局启用'**
   String get tavernPackScopeGlobal;
-
-  /// No description provided for @tavernPackScopeGlobalSubtitle.
-  ///
-  /// In zh, this message translates to:
-  /// **'所有对话都用的玩法包'**
-  String get tavernPackScopeGlobalSubtitle;
 
   /// No description provided for @tavernPackScopeCharacter.
   ///
@@ -43841,7 +44237,7 @@ abstract class L10n {
   /// No description provided for @tavernPackAddNote.
   ///
   /// In zh, this message translates to:
-  /// **'只给某个角色或对话用，在角色页或对话的舞台面板里加'**
+  /// **'只给某个角色或对话：在角色页或舞台面板里加'**
   String get tavernPackAddNote;
 
   /// No description provided for @tavernPackCast.
@@ -43853,7 +44249,7 @@ abstract class L10n {
   /// No description provided for @tavernPackCastNote.
   ///
   /// In zh, this message translates to:
-  /// **'导入会新建一个角色，不改原来的卡，也不会自动加进群聊'**
+  /// **'导入会新建角色，不改原来的卡'**
   String get tavernPackCastNote;
 
   /// No description provided for @tavernPackCastFromCard.
@@ -44221,6 +44617,132 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'导出的来源或选项变了，请重新预览'**
   String get tavernPackExportChanged;
+
+  /// No description provided for @tavernScripts.
+  ///
+  /// In zh, this message translates to:
+  /// **'脚本库'**
+  String get tavernScripts;
+
+  /// No description provided for @tavernScriptsEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没有全局脚本'**
+  String get tavernScriptsEmpty;
+
+  /// No description provided for @tavernScriptsEmptyMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'可以导入酒馆助手导出的脚本 JSON，打开的在整页画布里运行'**
+  String get tavernScriptsEmptyMessage;
+
+  /// No description provided for @tavernScriptsImport.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入脚本'**
+  String get tavernScriptsImport;
+
+  /// No description provided for @tavernScriptsImported.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 个脚本加入了脚本库'**
+  String tavernScriptsImported(int count);
+
+  /// No description provided for @tavernScriptsExportAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出全部'**
+  String get tavernScriptsExportAll;
+
+  /// No description provided for @tavernScriptsOrder.
+  ///
+  /// In zh, this message translates to:
+  /// **'调整顺序'**
+  String get tavernScriptsOrder;
+
+  /// No description provided for @tavernScriptsOrderNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'从上到下依次运行，拖动右边的把手调整。'**
+  String get tavernScriptsOrderNote;
+
+  /// No description provided for @tavernScriptCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 个'**
+  String tavernScriptCount(int count);
+
+  /// No description provided for @tavernScriptUnnamed.
+  ///
+  /// In zh, this message translates to:
+  /// **'未命名脚本'**
+  String get tavernScriptUnnamed;
+
+  /// No description provided for @tavernScriptOpenFolder.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开文件夹'**
+  String get tavernScriptOpenFolder;
+
+  /// No description provided for @tavernScriptExport.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出'**
+  String get tavernScriptExport;
+
+  /// No description provided for @tavernScriptDelete.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除'**
+  String get tavernScriptDelete;
+
+  /// No description provided for @tavernScriptDeleteTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除「{name}」？'**
+  String tavernScriptDeleteTitle(String name);
+
+  /// No description provided for @tavernScriptDeleteMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'它的变量和按钮会一起删除，找不回来。'**
+  String get tavernScriptDeleteMessage;
+
+  /// No description provided for @tavernChatScripts.
+  ///
+  /// In zh, this message translates to:
+  /// **'脚本'**
+  String get tavernChatScripts;
+
+  /// No description provided for @tavernChatScriptsNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'按运行顺序'**
+  String get tavernChatScriptsNote;
+
+  /// No description provided for @tavernScriptSourceGlobal.
+  ///
+  /// In zh, this message translates to:
+  /// **'全局'**
+  String get tavernScriptSourceGlobal;
+
+  /// No description provided for @tavernScriptSourcePreset.
+  ///
+  /// In zh, this message translates to:
+  /// **'预设'**
+  String get tavernScriptSourcePreset;
+
+  /// No description provided for @tavernScriptSourceCard.
+  ///
+  /// In zh, this message translates to:
+  /// **'卡'**
+  String get tavernScriptSourceCard;
+
+  /// No description provided for @tavernChatScriptsSkipped.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 个脚本没有运行'**
+  String tavernChatScriptsSkipped(int count);
 
   /// No description provided for @updateCheck.
   ///

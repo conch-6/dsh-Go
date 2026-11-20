@@ -24,7 +24,7 @@ import '../settings/settings_widgets.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
-import 'tavern_home_page.dart' show plainPreview;
+import 'tavern_home_page.dart' show plainPreviewLines;
 import 'tavern_lorebooks_page.dart';
 import 'tavern_widgets.dart';
 
@@ -188,7 +188,7 @@ class _PersonaRow extends StatelessWidget {
     return _AvatarRow(
       leading: TavernPersonaAvatar(name: persona.name, path: persona.avatarPath),
       title: persona.name,
-      subtitle: plainPreview(persona.description),
+      subtitle: plainPreviewLines(persona.description, 1),
       onTap: onTap,
       onLongPress: onLongPress,
       trailing: switch (badge) {
@@ -342,7 +342,7 @@ class _TavernPersonaEditPageState extends ConsumerState<TavernPersonaEditPage> {
               builder: (sheet) => SafeArea(
                 top: false,
                 child: SheetGroup(
-                  margin: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                  margin: kTavernSheetMargin,
                   children: [
                     SettingsTile(
                       icon: AppIcons.image,
@@ -511,7 +511,6 @@ class _TavernPersonaEditPageState extends ConsumerState<TavernPersonaEditPage> {
         children: [
           SettingsSwitchTile(
             key: const ValueKey('tavern-persona-default'),
-            icon: AppIcons.profile,
             title: l10n.tavernPersonaSetDefault,
             subtitle: l10n.tavernPersonaDefaultSubtitle,
             value: _default ?? false,
@@ -522,6 +521,7 @@ class _TavernPersonaEditPageState extends ConsumerState<TavernPersonaEditPage> {
             TavernLorebookBindingTile(
               key: const ValueKey('tavern-persona-lorebooks'),
               scope: (source: WorldInfoSource.persona, id: persona.id),
+              icon: null,
               title: l10n.tavernLorebooksBound,
               subtitle: l10n.tavernLorebooksBoundPersona,
               sheetTitle: l10n.tavernLorebookForPersona(persona.name),

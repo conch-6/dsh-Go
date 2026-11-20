@@ -22,6 +22,8 @@ import '../../tavern/tavern_canvas.dart';
 import '../../tavern/tavern_canvas_audio.dart';
 import '../../tavern/tavern_canvas_calls.dart';
 import '../../tavern/tavern_canvas_helpers.dart' show tavernMvuIssueText;
+import '../../tavern/tavern_islands.dart' show tavernFrameBaseUrl, tavernPageColorsJs;
+import '../../tavern/tavern_page_perf.dart';
 import '../../tavern/tavern_card_scripts.dart';
 import '../../tavern/tavern_provider.dart';
 import '../../tavern/tavern_settings.dart';
@@ -44,11 +46,17 @@ typedef TavernCanvasBuilder = Widget Function({
 });
 
 /// The libraries card scripts find on the canvas page, as 酒馆助手's pages
-/// give them: jQuery and lodash (bundled; licences in THIRD_PARTY_NOTICES.md).
+/// give them: jQuery, lodash, zod (`z`) and `YAML` (bundled; licences in
+/// THIRD_PARTY_NOTICES.md). Islands get them too.
+/// The libraries' names, in [tavernCanvasLibrariesProvider]'s order.
+const tavernLibraryNames = ['jQuery', 'lodash', 'zod', 'YAML'];
+
 final tavernCanvasLibrariesProvider = FutureProvider<List<String>>(
   (ref) async => [
     await rootBundle.loadString('assets/tavern/jquery-3.7.1.min.js'),
     await rootBundle.loadString('assets/tavern/lodash-4.17.21.min.js'),
+    await rootBundle.loadString('assets/tavern/zod-4.6.7.min.js'),
+    await rootBundle.loadString('assets/tavern/yaml-2.9.1.min.js'),
   ],
 );
 
@@ -76,6 +84,10 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
   late WebViewGuard _guard = WebViewGuard(onGone: _onGone);
   bool _ready = false;
   Object? _loaded;
+
+  /// Which document the page is: one asked by a page since reloaded is not
+  /// answered into the new one (its call ids start again).
+  int _document = 0;
   String? _rendered;
   Timer? _streamTimer;
   (String, String)? _streamSent;
@@ -153,6 +165,28 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
   /// The character the page was last built for.
   String? _character;
 
+  /// The theme's colours for the page, and the last set it was given.
+  Map<String, Color> _colors = const {};
+  Map<String, Color>? _pushed;
+
+  /// The page's own light / dark (prefers-color-scheme), kept with the app's:
+  /// set at attach, then in place on a theme change, as the colours are.
+  bool _wantDark = false;
+  bool? _darkSent;
+
+  void _syncDark() {
+    if (_darkSent == null || _darkSent == _wantDark) return;
+    _darkSent = _wantDark;
+    unawaited(_guard.setDark(_wantDark).catchError((_) {}));
+  }
+
+  void _pushColors() {
+    final controller = _controller;
+    if (!_ready || controller == null || mapEquals(_pushed, _colors)) return;
+    _pushed = _colors;
+    unawaited(controller.runJavaScript(tavernPageColorsJs(_colors)).catchError((_) {}));
+  }
+
   /// Loads the page, again when its look or its guards change.
   void _open() {
     final theme = Theme.of(context);
@@ -164,46 +198,57 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
         ? ref.read(tavernStThemeProvider)?.canvasCss ?? ''
         : '';
     final reading = ref.read(tavernSettingsProvider.select((s) => (s.textSize, s.lineHeight)));
+    // 省电渲染: the page is built again with it, the story drawn as it was.
+    final lowPower = ref.read(tavernSettingsProvider.select((s) => s.lowPower));
     final text = theme.colorScheme.onSurface;
     // Card scripts get their libraries first; the page waits for them (and
     // goes without, should they not load) — not when scripts do not run.
     final List<String> libraries;
-    // So with the card's own scripts (none for a group, or when they do not run).
-    final List<TavernCardScript> cardScripts;
     // And the card itself, for the scripts that ask about the character.
     final Map<String, Object?>? card;
     final character = widget.calls?.characterId();
     if (noScripts) {
       libraries = const [];
-      cardScripts = const [];
       card = null;
     } else {
       final loaded = ref.read(tavernCanvasLibrariesProvider);
-      final scripts = character == null ? null : ref.read(tavernCardScriptsProvider(character));
+      // The chat's scripts are told to the page once it is up (_pushScripts),
+      // but it waits for them, so they start with the story.
+      final chat = widget.calls?.chatId;
+      final scripts = chat == null ? null : ref.read(tavernChatScriptsProvider((chat, character)));
       final data = character == null ? null : ref.read(tavernCardDataProvider(character));
       if (loaded.isLoading || (scripts?.isLoading ?? false) || (data?.isLoading ?? false)) return;
       libraries = loaded.value ?? const [];
-      cardScripts = scripts?.value ?? const [];
       card = data?.value;
     }
-    final key = (
-      noScripts,
-      offline,
-      theme.brightness,
-      ink?.dialogue,
-      ink?.action,
-      theme.colorScheme.primary,
-      reading,
-      themeCss,
-      Object.hashAll(cardScripts),
-      card,
-      character,
-    );
+    // The colours are set in place on the loaded page (_pushColors), never by
+    // loading it again: that would start the card's scripts, and what they
+    // write, once more on every step of a theme's cross-fade.
+    _colors = {
+      'text': text,
+      'accent': theme.colorScheme.primary,
+      'muted': dsh.textTertiary,
+      'user': theme.colorScheme.primary.withValues(alpha: 0.12),
+      'quote': ink?.dialogue ?? text,
+      'emphasis': ink?.action ?? text,
+    };
+    _wantDark = theme.brightness == Brightness.dark;
+    _syncDark();
+    final key = (noScripts, offline, reading, themeCss, card, character, lowPower);
     _character = character;
-    if (key == _loaded) return;
+    if (key == _loaded) {
+      _pushColors();
+      return;
+    }
     _loaded = key;
+    _document++;
     _ready = false;
     _rendered = null;
+    // The old page's script buttons go with it, now (a press could not reach
+    // them); after this frame, as this can run while the chat page builds.
+    if (widget.calls case final calls? when calls.hostButtons.value.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => calls.hostButtons.value = const []);
+    }
     final document = tavernCanvasDocument(
       text: text,
       accent: theme.colorScheme.primary,
@@ -233,9 +278,10 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
       offline: offline,
       libraries: libraries,
       themeCss: themeCss,
-      cardScripts: [for (final s in cardScripts) s.toJson()],
       card: card,
       characterId: character,
+      lowPower: lowPower,
+      perf: tavernPerfLog,
     );
     final controller = _controller ??= WebViewController();
     final textZoom = MediaQuery.textScalerOf(context).scale(100).round().clamp(50, 300);
@@ -256,7 +302,9 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
       if (!mounted || controller != _controller) return;
       await _guard.attach(controller, dark: dark, textZoom: textZoom).catchError((_) {});
       if (!mounted || controller != _controller) return;
-      await controller.loadHtmlString(document).catchError((_) {});
+      _darkSent = dark;
+      _syncDark();
+      await controller.loadHtmlString(document, baseUrl: tavernFrameBaseUrl).catchError((_) {});
     }());
   }
 
@@ -274,13 +322,17 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
     switch (data['type']) {
       case 'ready':
         _ready = true;
+        _pushed = null;
+        _pushColors();
         _rendered = null;
         _streamSent = null;
         _avatars.reset();
+        widget.calls?.hostButtons.value = const [];
         _audio?.report(null);
         if (_hidden) _suspendAudio(true);
         _pushPersonas();
         _pushAudio();
+        _pushScripts();
         _render();
         _onStream();
       case 'menu':
@@ -296,10 +348,18 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
         if (messenger != null) _toasts.show(messenger, data);
       case 'toastClear':
         _toasts.clear(data);
-      // A card script's buttons changed: the composer's row shows them.
+      // A script's buttons changed: the composer's row shows them.
       case 'buttons':
-        if (data case {'scriptId': final String id, 'names': final List<Object?> names}) {
-          widget.calls?.showButtons(id, [for (final n in names) '$n']);
+        if (data case {'key': final String key, 'names': final List<Object?> names}) {
+          widget.calls?.showButtons(key, [for (final n in names) '$n']);
+        }
+      // What scripts put in ST's places for buttons: the same row shows them.
+      case 'hostButtons':
+        if (data['buttons'] case final List<Object?> list) {
+          widget.calls?.hostButtons.value = [
+            for (final b in list)
+              if (b case {'id': final String id, 'label': final String label}) (id: id, label: label),
+          ];
         }
       // What the engine said went wrong with the card's variables (MVU),
       // said as a notice: the page went on.
@@ -317,6 +377,8 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
         if (widget.calls?.chatId case final chat?) unawaited(tavernSaveAudio(chat, data['state']).catchError((_) {}));
       case 'audioNow':
         _audio?.report(data['now']);
+      case 'perf':
+        debugPrint(tavernPerfLine('canvas', data, lowPower: ref.read(tavernSettingsProvider).lowPower));
     }
   }
 
@@ -331,10 +393,26 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
     await controller.runJavaScript('window.dsh&&dsh.setAudioState(${jsonEncode(state)})').catchError((_) {});
   }
 
+  /// The chat's scripts (global, the current preset's, the card's), to who
+  /// answers them and, once the page is up, to the page; not when scripts
+  /// do not run.
+  void _pushScripts() {
+    final calls = widget.calls;
+    if (calls == null || ref.read(tavernSettingsProvider).islandNoScripts) return;
+    final chosen = ref.read(tavernChatScriptsProvider((calls.chatId, calls.characterId()))).value;
+    if (chosen == null) return;
+    calls.setScripts(chosen);
+    final controller = _controller;
+    if (!_ready || controller == null) return;
+    final json = jsonEncode([for (final s in chosen.scripts) tavernScriptJson(s)]);
+    unawaited(controller.runJavaScript('window.dsh&&dsh.setScripts($json)').catchError((_) {}));
+  }
+
   /// A dsh.call from the page, answered to the page that asked (not to one
   /// built since, after the renderer went).
   Future<void> _answer(Map<Object?, Object?> request) async {
     final controller = _controller;
+    final document = _document;
     final calls = widget.calls;
     final reply = calls == null
         ? {
@@ -343,7 +421,7 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
             'error': {'code': 'unsupportedCapability', 'message': 'Nothing answers here.', 'committed': false},
           }
         : await calls.handle(request);
-    if (!mounted || controller == null || !identical(controller, _controller)) return;
+    if (!mounted || controller == null || !identical(controller, _controller) || document != _document) return;
     await controller.runJavaScript('window.dsh&&dsh.answer(${jsonEncode(reply)})').catchError((_) {});
   }
 
@@ -400,7 +478,11 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
   /// The page itself stays put; a link opens outside the app.
   NavigationDecision _onNavigation(NavigationRequest request) {
     final url = request.url;
-    if (url == 'about:blank' || url.startsWith('data:') || url.startsWith('about:srcdoc')) {
+    // Its own page, loaded from its base URL (WebKit asks for that load).
+    if (url == 'about:blank' ||
+        url == tavernFrameBaseUrl ||
+        url.startsWith('data:') ||
+        url.startsWith('about:srcdoc')) {
       return NavigationDecision.navigate;
     }
     if (!request.isMainFrame) return NavigationDecision.navigate;
@@ -421,11 +503,14 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
     // The handlers the lost page was running will not answer; its music
     // stopped with it.
     widget.calls?.pageLost();
+    // Its script buttons too, even while the new page waits for what it loads.
+    widget.calls?.hostButtons.value = const [];
     _audio?.report(null);
     setState(() {
       _guard = WebViewGuard(onGone: _onGone);
       _controller = null;
       _loaded = null;
+      _darkSent = null;
     });
     _open();
   }
@@ -458,7 +543,9 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
   @override
   Widget build(BuildContext context) {
     ref.listen(
-      tavernSettingsProvider.select((s) => (s.islandNoScripts, s.islandOffline, s.textSize, s.lineHeight, s.palette)),
+      tavernSettingsProvider.select(
+        (s) => (s.islandNoScripts, s.islandOffline, s.textSize, s.lineHeight, s.palette, s.lowPower),
+      ),
       (_, _) => _open(),
     );
     ref.listen(tavernStThemeProvider, (_, _) => _open());
@@ -471,8 +558,14 @@ class _TavernCanvasViewState extends ConsumerState<TavernCanvasView> {
       ref.listen(tavernCardDataProvider(character), (_, next) {
         if (!next.isLoading) _open();
       });
-      ref.listen(tavernCardScriptsProvider(character), (_, next) {
-        if (!next.isLoading) _open();
+    }
+    // The chat's scripts as they change: the page starts, keeps or stops
+    // their frames itself, never reloading for them.
+    if (widget.calls case final calls?) {
+      ref.listen(tavernChatScriptsProvider((calls.chatId, calls.characterId())), (_, next) {
+        if (next.isLoading) return;
+        _open();
+        _pushScripts();
       });
     }
     ref.listen(tavernCanvasLibrariesProvider, (_, next) {

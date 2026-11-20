@@ -1,10 +1,7 @@
 // What a share card shows (晒成果), built from the conversation, and the text work
 // done before it is drawn: the same redaction as a shared file or link
 // (credentials, home folders, app storage), visual replies summarised,
-// pictures gathered into galleries, long code lines folded and long answers cut
-// at a block boundary.
-
-import 'dart:math' as math;
+// pictures gathered into galleries and long code lines folded.
 
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/widgets.dart';
@@ -37,8 +34,9 @@ final class ShareQuestion extends ShareBlock {
 /// A reply: Markdown (code, maths, tables, pictures) drawn with the chat's
 /// renderer; its `![…](…)` pictures become galleries ([shareSegments]).
 final class ShareAnswer extends ShareBlock {
-  const ShareAnswer(this.markdown);
+  const ShareAnswer(this.markdown, {this.turn});
   final String markdown;
+  final int? turn;
 }
 
 /// A delivered file: an image preview, or a file tile with an excerpt.
@@ -120,8 +118,9 @@ final class ShareAttachmentImage extends ShareImage {
 /// A picture a reply points at (`![…](chart.png)`): a workspace file, a web
 /// address or a `data:` URL.
 final class ShareUrlImage extends ShareImage {
-  const ShareUrlImage(this.url);
+  const ShareUrlImage(this.url, {this.turn});
   final String url;
+  final int? turn;
 }
 
 /// A picture already in hand (tests, a file's preview).
@@ -249,9 +248,6 @@ class ShareContent {
   bool get hasMeta => model != null || stats != null || process.isNotEmpty;
   bool get isConversation => blocks.any((b) => b is ShareAnswer || b is ShareQuestion);
 
-  /// Several replies: drawn as a chat-style long image, with a taller budget.
-  bool get isLong => blocks.whereType<ShareAnswer>().length >= 2;
-
   /// The meta capsules: model, time, steps.
   List<String> get metaPills => [
     ?model,
@@ -282,10 +278,6 @@ String? shareTitleText(String? title) {
   if (t == null || t.isEmpty) return null;
   return redactText(t);
 }
-
-/// Columns a code line takes on the card before it wraps (JetBrains Mono at
-/// 13 on the card's content width less the well's padding).
-const shareCodeColumns = 38;
 
 /// `![alt](url)`, optionally wrapped in a link: `[![alt](url)](href)`. An
 /// address may hold one level of balanced parentheses.
@@ -433,93 +425,6 @@ List<ShareSegment> shareSegments(String markdown) {
   return out;
 }
 
-int _columns(String s) => s.runes.fold(0, (sum, r) => sum + (_wide(r) ? 2 : 1));
-
-bool _wide(int rune) =>
-    (rune >= 0x1100 && rune <= 0x115F) ||
-    (rune >= 0x2E80 && rune <= 0xA4CF) ||
-    (rune >= 0xAC00 && rune <= 0xD7A3) ||
-    (rune >= 0xF900 && rune <= 0xFAFF) ||
-    (rune >= 0xFE30 && rune <= 0xFE4F) ||
-    (rune >= 0xFF00 && rune <= 0xFF60) ||
-    (rune >= 0xFFE0 && rune <= 0xFFE6) ||
-    rune >= 0x1F300;
-
-// ── Smart truncation ─────────────────────────────────────────────────────────
-
-/// How tall (logical px) the body of one card may get before it is cut.
-const shareBodyBudget = 1500.0;
-
-/// The budget of a chat-style long image (several replies). Its hard cap
-/// keeps the 2× bitmap near 30 MB.
-const shareLongBudget = 3600.0;
-
-/// The card's body after truncation.
-class ShareLayout {
-  const ShareLayout(this.blocks, {required this.truncated});
-  final List<ShareBlock> blocks;
-
-  /// Something was left out: the card ends with 「…」.
-  final bool truncated;
-}
-
-/// Picks what fits in [budget]: blocks in order, the one that overflows cut
-/// at a paragraph / list item / code line / gallery (a lone huge paragraph
-/// at a sentence end), the rest dropped. Heights are estimated from the
-/// source (CJK ≈ 1 em, Latin ≈ 0.55 em, code lines at the mono line height,
-/// galleries at their layout's size) and lean high, so the card is cut by
-/// text rather than by a hard edge. [leading] is the body's line height.
-ShareLayout layoutShareBlocks(
-  List<ShareBlock> blocks, {
-  double budget = shareBodyBudget,
-  double width = 342,
-  double leading = 1.65,
-}) {
-  final m = _Metrics(width, leading);
-  final out = <ShareBlock>[];
-  var left = budget;
-  for (final block in blocks) {
-    switch (block) {
-      case ShareQuestion():
-        final h = m.question(block);
-        if (h > left && out.isNotEmpty) return ShareLayout(out, truncated: true);
-        out.add(block);
-        left -= h;
-      case ShareAnswer(:final markdown):
-        final (kept, cut, used) = m.fitMarkdown(markdown, left);
-        if (kept.isNotEmpty) out.add(ShareAnswer(kept));
-        left -= used;
-        if (cut) return ShareLayout(out, truncated: true);
-      case ShareFile() || SharePlugin():
-        out.add(block);
-        left -= 240;
-    }
-  }
-  return ShareLayout(out, truncated: false);
-}
-
-const _gap = 14.0;
-const _codeLine = 20.5; // mono 13 × 1.55
-const _codeChrome = 84.0; // header 36 + padding 24 + margins 16, rounded up
-const _galleryChrome = 14.0; // the gaps around a gallery
-
-double _units(String s) {
-  var u = 0.0;
-  for (final r in s.runes) {
-    u += _wide(r) ? 1.0 : 0.56;
-  }
-  return u;
-}
-
-int _wrapLines(String text, double width, {double em = 16}) {
-  final perLine = width / em;
-  var lines = 0;
-  for (final line in text.split('\n')) {
-    lines += (_units(line) / perLine).ceil().clamp(1, 1 << 20);
-  }
-  return lines;
-}
-
 /// One top-level Markdown chunk: a fenced code block or a run of lines
 /// between blank lines.
 class _Chunk {
@@ -562,156 +467,6 @@ List<_Chunk> _chunks(String markdown) {
   flush();
   return chunks;
 }
-
-/// Pictures-only chunks in a row are drawn as one gallery: measured as one.
-List<_Chunk> _mergedChunks(String markdown) {
-  final out = <_Chunk>[];
-  for (final chunk in _chunks(markdown)) {
-    final previous = out.lastOrNull;
-    if (!chunk.code && previous != null && !previous.code && _imagesOnly(previous) && _imagesOnly(chunk)) {
-      out[out.length - 1] = _Chunk([...previous.lines, '', ...chunk.lines]);
-    } else {
-      out.add(chunk);
-    }
-  }
-  return out;
-}
-
-bool _imagesOnly(_Chunk chunk) {
-  final (text, urls) = _splitImages(chunk.lines.where((l) => l.trim().isNotEmpty).toList());
-  return urls.isNotEmpty && text.isEmpty;
-}
-
-/// Height estimates for one card's column.
-class _Metrics {
-  _Metrics(this.width, double leading) : line = (16 * leading).ceilToDouble();
-
-  final double width;
-
-  /// One body line (bodyLarge 16 × the leading, rounded up).
-  final double line;
-
-  double question(ShareQuestion q) {
-    var h = 0.0;
-    if (q.text.isNotEmpty) {
-      // The bubble is 82 % wide with 16 of padding a side; at most six lines.
-      final lines = _wrapLines(q.text, width * 0.82 - 32).clamp(1, 6);
-      h += lines * line + 20 + 16;
-    }
-    if (q.images.isNotEmpty) {
-      h +=
-          ShareGalleryLayout.height(
-            q.images.length,
-            math.min(ShareGalleryLayout.questionWidth, width),
-            question: true,
-            aspect: q.images.length == 1 ? q.images.single.aspect : null,
-          ) +
-          8;
-    }
-    return h;
-  }
-
-  double gallery(int count) =>
-      count == 0 ? 0 : ShareGalleryLayout.height(count, width, question: false) + _galleryChrome;
-
-  double lineHeight(String src) {
-    final t = src.trimLeft();
-    if (RegExp(r'^#{1,6}\s').hasMatch(t)) return _wrapLines(t, width, em: 19) * 30 + 6;
-    if (t.startsWith('|')) return 42;
-    if (RegExp(r'^(?:[-*_]\s*){3,}$').hasMatch(t)) return 25;
-    if (t.startsWith(r'$$') || t.startsWith(r'\[')) return 32;
-    final indent = RegExp(r'^(?:\s*(?:[-*+]|\d+[.)])\s+|\s*>\s?)').firstMatch(src)?.group(0)?.length ?? 0;
-    return _wrapLines(src.substring(indent), width - (indent > 0 ? 24 : 0)) * line;
-  }
-
-  /// A line as drawn: its text (if any) and its pictures as a gallery.
-  double lineWithImages(String line) {
-    final (text, urls) = _splitImages([line]);
-    return (text.isEmpty ? 0 : lineHeight(text.single)) + gallery(urls.length);
-  }
-
-  double chunkHeight(_Chunk chunk) {
-    if (chunk.code) return _codeChrome + _codeRows(chunk.lines.skip(1).take(chunk.lines.length - 2)) * _codeLine;
-    final (text, urls) = _splitImages(chunk.lines.where((l) => l.trim().isNotEmpty).toList());
-    return text.fold(text.isEmpty ? 0.0 : _gap, (sum, l) => sum + lineHeight(l)) + gallery(urls.length);
-  }
-
-  /// (kept Markdown, was it cut, height used).
-  (String, bool, double) fitMarkdown(String markdown, double budget) {
-    final chunks = _mergedChunks(markdown);
-    final kept = <String>[];
-    var used = 0.0;
-    for (final chunk in chunks) {
-      final h = chunkHeight(chunk);
-      if (used + h <= budget) {
-        kept.add(chunk.lines.join('\n'));
-        used += h;
-        continue;
-      }
-      final room = budget - used;
-      if (chunk.code) {
-        // Keep the opening fence, as many lines as fit (at least three when
-        // nothing else made it), then close it again.
-        final fits = ((room - _codeChrome) / _codeLine).floor();
-        if (fits >= 3 || kept.isEmpty) {
-          final body = chunk.lines.skip(1).take(chunk.lines.length - 2).toList();
-          var rows = 0;
-          var take = 0;
-          while (take < body.length) {
-            final r = _codeRows([body[take]]);
-            if (rows + r > fits.clamp(3, 1 << 20) && take > 0) break;
-            rows += r;
-            take++;
-          }
-          final fence = _fence.firstMatch(chunk.lines.first)!.group(1)!;
-          kept.add([chunk.lines.first, ...body.take(take), fence].join('\n'));
-          used += _codeChrome + rows * _codeLine;
-        }
-      } else if (!_imagesOnly(chunk)) {
-        // A gallery is kept whole or not at all; text is cut between lines.
-        var acc = _gap;
-        final lines = <String>[];
-        for (final line in chunk.lines) {
-          final lh = lineWithImages(line);
-          if (acc + lh > room) {
-            // A single paragraph larger than the card: cut it at a sentence.
-            if (lines.isEmpty && kept.isEmpty && !line.contains('![')) lines.add(_cutSentence(line, room));
-            break;
-          }
-          lines.add(line);
-          acc += lh;
-        }
-        if (lines.isNotEmpty) {
-          kept.add(lines.join('\n'));
-          used += acc;
-        }
-      }
-      return (kept.join('\n\n'), true, used);
-    }
-    return (kept.join('\n\n'), false, used);
-  }
-
-  String _cutSentence(String text, double room) {
-    final maxLines = (room / line).floor().clamp(2, 1 << 20);
-    final maxUnits = maxLines * width / 16;
-    var units = 0.0;
-    var end = 0;
-    final runes = text.runes.toList();
-    for (var i = 0; i < runes.length; i++) {
-      units += _wide(runes[i]) ? 1.0 : 0.56;
-      if (units > maxUnits) break;
-      end = i + 1;
-    }
-    final head = String.fromCharCodes(runes.take(end));
-    final stop = head.lastIndexOf(RegExp(r'[。！？；.!?;]') /* l10n:keep sentence boundary regex */);
-    final cut = stop > head.length ~/ 2 ? head.substring(0, stop + 1) : head;
-    return '${cut.trimRight()}…';
-  }
-}
-
-/// Rows [lines] of code take once wrapped at [shareCodeColumns].
-int _codeRows(Iterable<String> lines) =>
-    lines.fold(0, (sum, line) => sum + (_columns(line) / shareCodeColumns).ceil().clamp(1, 1 << 20));
 
 // ── From the conversation ────────────────────────────────────────────────────
 
@@ -828,6 +583,12 @@ ShareQuestion shareQuestionOf(UserChatItem item, {bool images = true}) => ShareQ
   ],
 );
 
+int? _imageTurn(ChatState state, AssistantChatItem reply) {
+  final key = reply.rowKey;
+  final match = key == null ? null : RegExp(r'^m([0-9]+)[.]').firstMatch(key);
+  return match == null ? turnOf(state.turns, reply.seq)?.turn : int.tryParse(match.group(1)!);
+}
+
 /// A reply's card: the conversation title, the question above it, the reply
 /// and its turn's model, time and work. [sessionId] is where its pictures
 /// are fetched from (null: the conversation open in the chat).
@@ -849,7 +610,7 @@ ShareContent shareContentForReply(
     title: shareTitleText(state.title),
     blocks: [
       if (question != null) shareQuestionOf(question, images: images),
-      ShareAnswer(shareMarkdown(reply.text, images: images)),
+      ShareAnswer(shareMarkdown(reply.text, images: images), turn: _imageTurn(state, reply)),
     ],
     model: reply.model ?? trace?.lastModel.model ?? state.model?.model,
     stats: shareStats(trace),
@@ -892,7 +653,10 @@ ShareContent shareContentForItems(
       for (final item in picked)
         switch (item) {
           final UserChatItem prompt => shareQuestionOf(prompt, images: images),
-          AssistantChatItem(:final text) => ShareAnswer(shareMarkdown(text, images: images)),
+          final AssistantChatItem reply => ShareAnswer(
+            shareMarkdown(reply.text, images: images),
+            turn: _imageTurn(state, reply),
+          ),
           _ => throw StateError('not shareable'),
         },
     ],

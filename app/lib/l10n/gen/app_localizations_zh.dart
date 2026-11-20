@@ -1783,6 +1783,9 @@ class L10nZh extends L10n {
   String get androidShellErrorIdentityChanged => '通道身份已改变，请停止后重新授权或连接。';
 
   @override
+  String get androidShellErrorHelperStartFailed => 'Android Shell 辅助进程未能启动，命令未执行。';
+
+  @override
   String get androidShellErrorBusy => '另一项操作尚未结束，请稍后重试，或先停止 Android Shell。';
 
   @override
@@ -1826,6 +1829,69 @@ class L10nZh extends L10n {
 
   @override
   String get androidShellErrorUnknown => '未能确认操作结果。先核实结果；已派发的命令不要自动重试。';
+
+  @override
+  String get backgroundProtectionDescription => '默认关闭，仅在有本机任务且 App 退到后台时尝试保护；系统仍可能暂停任务。';
+
+  @override
+  String get backgroundProtectionAudio => '静音音频保护';
+
+  @override
+  String get backgroundProtectionAudioHint => '任务期间在后台播放静音音频，会增加耗电；不会抢占录音、通话或朗读。';
+
+  @override
+  String get backgroundProtectionLocation => '后台定位保护';
+
+  @override
+  String get backgroundProtectionLocationHint => '需系统“始终允许”位置权限，会增加耗电并涉及位置隐私；不保存坐标。';
+
+  @override
+  String get backgroundProtectionTask => '连续任务保护';
+
+  @override
+  String get backgroundProtectionTaskHint => '仅在本机任务期间申请系统连续任务，是否生效取决于当前版本和系统许可。';
+
+  @override
+  String get backgroundProtectionStatus => '当前状态';
+
+  @override
+  String get backgroundProtectionOff => '未开启增强保护';
+
+  @override
+  String get backgroundProtectionReady => '已开启，当前未运行；有本机任务且退到后台时才会尝试保护。';
+
+  @override
+  String get backgroundProtectionAudioActive => '静音音频保护正在运行';
+
+  @override
+  String get backgroundProtectionLocationActive => '后台定位保护正在运行';
+
+  @override
+  String get backgroundProtectionBothActive => '静音音频与后台定位保护正在运行';
+
+  @override
+  String get backgroundProtectionTaskActive => '系统连续任务保护正在运行';
+
+  @override
+  String get backgroundProtectionLocationRestricted => '定位权限被系统限制，无法开启定位保护；可保持前台或使用远程主机。';
+
+  @override
+  String get backgroundProtectionNeedsAlways => '定位保护尚未生效，请点此在系统设置中将位置权限设为“始终允许”。';
+
+  @override
+  String get backgroundProtectionLocationServicesOff => '系统定位服务已关闭，请点此检查系统设置。';
+
+  @override
+  String get backgroundProtectionTaskUnavailable => '当前版本缺少系统连续任务资格，请保持 App 在前台或使用远程主机。';
+
+  @override
+  String get backgroundProtectionUnavailable => '保护暂不可用，请返回 App 重试；长任务可保持前台或使用远程主机。';
+
+  @override
+  String get backgroundProtectionCleanup => '正在结束上一次后台保护，尚未完成释放。';
+
+  @override
+  String get backgroundProtectionUpdateFailed => '未能更新后台保护，请查看当前状态后重试。';
 
   @override
   String get botsFolderGone => '这个文件夹已经不在了';
@@ -2880,6 +2946,9 @@ class L10nZh extends L10n {
 
   @override
   String get botsPetWhaleGirl => '鲸娘';
+
+  @override
+  String get botsPetPinkFish => '小粉鱼';
 
   @override
   String get botsPetNone => '不显示';
@@ -12022,6 +12091,12 @@ class L10nZh extends L10n {
   String get phoneFailureLaunchHint => '查看日志了解原因，或连接远程主机继续使用';
 
   @override
+  String get phoneFailureTawcHint => 'PRoot 无法执行本机引擎。可以尝试用 tawcroot 启动，继续使用已有的运行环境和数据。';
+
+  @override
+  String get phoneFailureRetryWithTawcroot => '用 tawcroot 启动';
+
+  @override
   String get phoneFailureNoSpaceHint => '清理一些空间后重试';
 
   @override
@@ -12440,7 +12515,7 @@ class L10nZh extends L10n {
 
   @override
   String get phoneTawcHint =>
-      '实验功能，默认关闭，下次启动生效，和「直接启动」二选一。用 tawcroot 代替兼容启动运行本机引擎：启动快约三倍，装包、apt 也更快。启动不成功会自动改回兼容启动。关掉后的第一次启动会先把它留下的硬链接整理成普通文件，可能要多等一会。';
+      '默认开启，改动下次启动生效，和「直接启动」二选一。用 tawcroot 代替兼容启动运行本机引擎：启动快约三倍，装包、apt 也更快。启动不成功会自动改回兼容启动。关掉后的第一次启动会先把它留下的硬链接整理成普通文件，可能要多等一会。';
 
   @override
   String get phoneTawcFailedHint => '这台手机上 tawcroot 没有启动成功，已改用兼容启动。停止引擎后打开可再试一次。';
@@ -16944,6 +17019,48 @@ class L10nZh extends L10n {
   String get stateRemoteUploadTooLarge => '文件超过远程上传协议的大小上限';
 
   @override
+  String get remoteWebOpen => '打开 DSH Web';
+
+  @override
+  String get remoteWebTitle => 'DSH Web';
+
+  @override
+  String get remoteWebOpening => '正在打开 DSH Web…';
+
+  @override
+  String get remoteWebRefresh => '刷新首页';
+
+  @override
+  String get remoteWebBusy => '人太多了，请稍后重试';
+
+  @override
+  String get remoteWebPairingRequired => '连接授权失效，请重新连接或配对主机。';
+
+  @override
+  String get remoteWebHostNotReady => '主机网页版尚未就绪。请启动 DSH Web，并将 Remote 插件更新到 0.6.6 或更新版本。';
+
+  @override
+  String get remoteWebReconnect => '连接已断开，请重新连接主机后再打开。';
+
+  @override
+  String get remoteWebUnsafeUrl => '网页地址无法验证，已停止打开。请检查主机配置。';
+
+  @override
+  String get remoteWebExchangeRejected => '访问验证失败，请返回后重新打开。';
+
+  @override
+  String get remoteWebSessionExpired => '网页连接已过期，请返回后重新打开。';
+
+  @override
+  String get remoteWebPlatformUnavailable => '当前平台暂不支持此网页入口。请使用原生远程界面。';
+
+  @override
+  String get remoteWebTryAgain => '暂时无法打开网页，请检查主机连接后重试。';
+
+  @override
+  String get remoteWebUnavailable => '暂时无法打开，请稍后重试';
+
+  @override
   String get riskDontShowAgain => '不再提示';
 
   @override
@@ -17502,6 +17619,102 @@ class L10nZh extends L10n {
 
   @override
   String get selfUpdateEndWaitingNote => '只有确认系统已不在安装时才结束等待。清除本次记录不等于取消系统安装；不会自动重试或切换路线，仍需再次原生确认。';
+
+  @override
+  String get backupRecordFailed => '手机未能保存恢复记录。请记下上面的对话 ID 并检查目标主机，不要重复导入。';
+
+  @override
+  String get backupSearchKeywords => '备份,恢复,迁移,复制对话,同步,backup,restore';
+
+  @override
+  String get backupTitle => '对话备份';
+
+  @override
+  String get backupHint => '备份到手机后，可切换主机恢复到已有工作区。每次恢复会新建对话；不含附件、源码和跨对话关系。';
+
+  @override
+  String get backupCancelled => '已取消，已校验保存的备份仍可恢复。';
+
+  @override
+  String get backupUnknown => '结果待核对：请连接原目标主机查询，或先在目标端检查。不会自动重新导入。';
+
+  @override
+  String backupFailed(String code) {
+    return '操作失败（$code）。请检查连接或存储后重试。';
+  }
+
+  @override
+  String backupSaved(int count) {
+    return '已保存 $count 条备份。';
+  }
+
+  @override
+  String backupSavedCloseFailed(int count) {
+    return '已保存 $count 条备份，源主机导出句柄未能关闭；断线或闲置后会自动释放。';
+  }
+
+  @override
+  String backupRestoreConfirm(String title, String workspace) {
+    return '将“$title”恢复到“$workspace”？会创建一条新对话，不合并或覆盖已有历史。';
+  }
+
+  @override
+  String backupRestored(String id) {
+    return '已恢复，新对话：$id';
+  }
+
+  @override
+  String backupRestoredDetached(String id) {
+    return '历史已恢复，未加入工作区。对话 ID：$id。请在目标端查找，不要重复导入。';
+  }
+
+  @override
+  String get backupOriginalDevice => '请使用原 Remote 设备身份连接原目标主机，再查询提交结果。';
+
+  @override
+  String get backupStorageFailed => '无法读取备份。请检查应用存储和系统密钥；不会重置或覆盖已有备份。';
+
+  @override
+  String get backupConnectHost => '连接一台已配对的 Remote 主机，即可备份或恢复。';
+
+  @override
+  String get backupNoWorkspace => '等待主机工作区列表；没有工作区时请先在主机上创建。';
+
+  @override
+  String get backupWorkspace => '整个工作区';
+
+  @override
+  String get backupToPhone => '备份到手机';
+
+  @override
+  String get backupExportUnsupported => '此主机未提供对话导出能力，请更新主机 Remote 插件。';
+
+  @override
+  String get backupImportUnsupported => '此主机未提供对话恢复能力，请更新主机 Remote 插件。';
+
+  @override
+  String get backupPending => '待核对的恢复';
+
+  @override
+  String get backupCheck => '查询';
+
+  @override
+  String get backupAcknowledge => '已在目标端核对';
+
+  @override
+  String get backupAcknowledgeConfirm => '确认已在目标端核对？清除此待确认记录后，可手动再导入，但可能创建重复对话。';
+
+  @override
+  String get backupOnPhone => '手机上的备份';
+
+  @override
+  String get backupEmpty => '还没有备份。备份仅保存在本机，卸载 App 会丢失。';
+
+  @override
+  String get backupRestore => '恢复到当前工作区';
+
+  @override
+  String get backupDeleteConfirm => '删除手机上的这条备份及其恢复记录？不会删除主机上的对话。';
 
   @override
   String get shellDeletePermanently => '永久删除';
@@ -19738,7 +19951,7 @@ class L10nZh extends L10n {
   String get stateProviderKeyRejected => 'API Key 无效或没有权限';
 
   @override
-  String get stateProviderModelsMissing => '找不到模型列表，检查 Base URL';
+  String get stateProviderModelsMissing => '找不到模型列表。检查 Base URL；有的服务不提供模型列表，可以手动添加模型';
 
   @override
   String get stateProviderRateLimited => '请求太频繁，稍后再试';
@@ -20445,7 +20658,7 @@ class L10nZh extends L10n {
   String get tavernReady => '就绪';
 
   @override
-  String get tavernPreviewStatus => '预览 · 回复是示例，还没接上模型';
+  String get tavernPreviewStatus => '预览 · 示例回复';
 
   @override
   String get tavernRegenerate => '重新生成';
@@ -20466,7 +20679,7 @@ class L10nZh extends L10n {
   String get tavernErrorNoKey => '先在设置里填 DeepSeek API Key';
 
   @override
-  String get tavernKeyMissing => '还没填 DeepSeek API Key，填好就能开始。';
+  String get tavernKeyMissing => '还没填 DeepSeek API Key';
 
   @override
   String get tavernKeyMissingAction => '去填写';
@@ -20484,10 +20697,10 @@ class L10nZh extends L10n {
   String get tavernErrorTooLong => '对话太长了，超出了模型的上下文';
 
   @override
-  String get tavernCutShort => '回复写到回复上限，在这里断开了。可以接着写，或在酒馆设置 › 生成里把回复上限调高。';
+  String get tavernCutShort => '回复到了回复上限。可以接着写，或调高这段对话所用预设的回复上限。';
 
   @override
-  String get tavernFiltered => '这条回复被模型的内容过滤拦下了一部分。';
+  String get tavernFiltered => '回复有一部分被内容过滤拦下了。';
 
   @override
   String get tavernErrorBalance => 'DeepSeek 账户余额不足，充值后再试';
@@ -20613,9 +20826,6 @@ class L10nZh extends L10n {
   String get tavernPresetNotText => '这个文件不是文本';
 
   @override
-  String get tavernPresetsEmpty => '还没有预设';
-
-  @override
   String get tavernPresetsEmptyMessage => 'SillyTavern 导出的预设 JSON 和 dsh-preset-enhance 的分享包都能导入。';
 
   @override
@@ -20667,7 +20877,7 @@ class L10nZh extends L10n {
   String get tavernRegexEmpty => '还没有全局正则';
 
   @override
-  String get tavernRegexEmptyMessage => 'SillyTavern 导出的正则 JSON（一条或一组）都能导入。全局正则对所有对话生效；卡和预设自带的正则跟着它们走。';
+  String get tavernRegexEmptyMessage => '可以导入 SillyTavern 导出的正则 JSON，一条或一组';
 
   @override
   String get tavernRegexUnnamed => '未命名';
@@ -20715,7 +20925,7 @@ class L10nZh extends L10n {
   String get tavernLorebooksEmpty => '还没有独立世界书';
 
   @override
-  String get tavernLorebooksEmptyMessage => 'SillyTavern 导出的世界书 JSON 都能导入。设为全局后对所有对话生效；卡自带的世界书跟着卡走。';
+  String get tavernLorebooksEmptyMessage => '可以导入 SillyTavern 导出的世界书 JSON';
 
   @override
   String tavernLorebookCount(int count) {
@@ -20968,7 +21178,7 @@ class L10nZh extends L10n {
   String get tavernPersonasEmptyMessage => '人设是你在对话里扮演的人：一个名字和一段介绍，角色就知道你是谁。';
 
   @override
-  String get tavernPersonasNote => '长按设为默认或删除。没有单独选人设的对话用默认的。';
+  String get tavernPersonasNote => '长按可设为默认或删除';
 
   @override
   String get tavernPersonaUnsetDefault => '不再作为默认';
@@ -21000,13 +21210,13 @@ class L10nZh extends L10n {
   String get tavernPersonaNameHint => '角色怎么称呼你';
 
   @override
-  String get tavernPersonaDescriptionHelp => '模型会读到这段：你是谁、什么样子、和角色是什么关系。';
+  String get tavernPersonaDescriptionHelp => '你是谁、什么样子、和角色的关系';
 
   @override
   String get tavernPersonaDescriptionHint => '比如：镇上新来的医生，话不多，总拎着一个旧皮箱。';
 
   @override
-  String get tavernPersonaDefaultSubtitle => '新对话和没有单独选人设的对话都用它';
+  String get tavernPersonaDefaultSubtitle => '没单独选人设的对话都用它';
 
   @override
   String get tavernPersonaDelete => '删除人设';
@@ -21038,6 +21248,9 @@ class L10nZh extends L10n {
   String get tavernPersonaNotSet => '未设置';
 
   @override
+  String get tavernLibraryNone => '无';
+
+  @override
   String get tavernFieldName => '名字';
 
   @override
@@ -21050,7 +21263,7 @@ class L10nZh extends L10n {
   String get tavernExportPng => '导出角色卡（PNG）';
 
   @override
-  String get tavernExportPngSubtitle => '设定藏在图片里，SillyTavern 等酒馆都能导入';
+  String get tavernExportPngSubtitle => 'SillyTavern 等酒馆都能导入';
 
   @override
   String get tavernExportJson => '导出为 JSON';
@@ -21251,7 +21464,7 @@ class L10nZh extends L10n {
   String get tavernLorebook => '世界书';
 
   @override
-  String get tavernLorebookSubtitle => '这张卡自带的设定条目';
+  String get tavernLorebookSubtitle => '卡里自带的条目';
 
   @override
   String tavernLorebookEntries(int count) {
@@ -21279,13 +21492,13 @@ class L10nZh extends L10n {
   String get tavernImportFromFile => '从文件导入';
 
   @override
-  String get tavernImportFromFileSubtitle => '角色卡、预设、世界书、正则、快速回复或聊天记录，会自己认出来';
+  String get tavernImportFromFileSubtitle => '角色卡、预设、世界书等，自动识别';
 
   @override
   String get tavernImportFromLink => '从链接导入';
 
   @override
-  String get tavernImportFromLinkSubtitle => 'Chub、RisuRealm 的角色页，或卡文件的直链';
+  String get tavernImportFromLinkSubtitle => 'Chub、RisuRealm 或卡文件的链接';
 
   @override
   String get tavernLinkInvalid => '这不是一个网址';
@@ -21403,7 +21616,7 @@ class L10nZh extends L10n {
 
   @override
   String tavernStorybookWholeNote(int count) {
-    return '一共 $count 句，隐藏的消息不放进去。EPUB 能用微信读书、Apple 图书等打开。';
+    return '一共 $count 句，隐藏的消息不放进去';
   }
 
   @override
@@ -21460,7 +21673,7 @@ class L10nZh extends L10n {
   String get tavernLive2d => 'Live2D 形象';
 
   @override
-  String get tavernLive2dSubtitle => '视觉小说排版里用它代替卡面，会动、说话时会张嘴';
+  String get tavernLive2dSubtitle => '视觉小说排版里代替卡面';
 
   @override
   String get tavernLive2dNone => '未导入';
@@ -21628,14 +21841,13 @@ class L10nZh extends L10n {
   String get tavernStageStateEmpty => '这张卡还没有状态';
 
   @override
-  String get tavernStageStateNote => '卡里定义了状态以后，好感、属性、背包、时间地点都会在这里，每回合变了什么会标出来（「+5」），你也能直接改。没定义的老卡会在这里列出它的变量。';
+  String get tavernStageStateNote => '卡里定义了状态，好感、属性、背包等就会显示在这里。';
 
   @override
   String get tavernStageDirectorEmpty => '导演还没上场';
 
   @override
-  String get tavernStageDirectorNote =>
-      '打开导演后，它会在每回合之后在后台读剧情：给下一回合留一条看不见的提示，记下自己的笔记（默认藏着，怕剧透），再在输入框上方给你三个建议回复。它不替你说话，也不写正文。';
+  String get tavernStageDirectorNote => '导演会读剧情，给下一回合留提示，并在输入框上方给出三条建议。';
 
   @override
   String get tavernStageTurnNone => '还没有可看的回合';
@@ -21684,7 +21896,7 @@ class L10nZh extends L10n {
   }
 
   @override
-  String get tavernLorebookChatNote => '只在这段对话里用。标着「全局」的本来就对所有对话生效。';
+  String get tavernLorebookChatNote => '只对这段对话。「全局」的对所有对话都生效。';
 
   @override
   String get tavernLorebookCharacterNote => '这个角色的每段对话都会用，卡自带的世界书照常一起用。';
@@ -21738,7 +21950,7 @@ class L10nZh extends L10n {
   String get tavernPrefillReasoning => '思考';
 
   @override
-  String get tavernPrefillNote => '开着时，这段文字作为回复的开头发给模型，模型从这里接着写。放在「思考」只在开了思考时生效，没开就放进正文。「接着写」的回合不用它。';
+  String get tavernPrefillNote => '放在「思考」只在开了思考时生效，没开就放进正文。「接着写」的回合不用它。';
 
   @override
   String get tavernPresetPromptEmpty => '空着';
@@ -21916,13 +22128,7 @@ class L10nZh extends L10n {
   String get tavernSendOnly => '只发，不回复';
 
   @override
-  String get tavernSendOnlySubtitle => '这句放进故事，她先不接话';
-
-  @override
   String get tavernNarrate => '以旁白身份发';
-
-  @override
-  String get tavernNarrateSubtitle => '作为叙述插进故事，不算你说的话';
 
   @override
   String get tavernSendFailed => '没能发出去';
@@ -21931,7 +22137,7 @@ class L10nZh extends L10n {
   String get tavernStateVariables => '变量';
 
   @override
-  String get tavernStateVariablesNote => '卡和对话里 {{setvar}} 这类宏记下的变量，到当前这条为止。点一项看全部，也能直接改。';
+  String get tavernStateVariablesNote => '宏（如 {{setvar}}）记下的变量，到当前这条为止。点一项可查看或修改。';
 
   @override
   String get tavernData => '数据';
@@ -22272,7 +22478,7 @@ class L10nZh extends L10n {
 
   @override
   String tavernSessionUsageNote(int count) {
-    return '当前这条线上 $count 条回复的合计；换掉的备选不算';
+    return '当前分支 $count 条回复的合计，换掉的备选不算';
   }
 
   @override
@@ -22281,6 +22487,11 @@ class L10nZh extends L10n {
   @override
   String tavernSessionUsageCost(String usd) {
     return '约 $usd，按 DeepSeek 官方价，分高峰和低谷时段算；法定节假日全天是低谷价，那几天这里会算高一点';
+  }
+
+  @override
+  String tavernStageCost(String usd) {
+    return '约 $usd，按 DeepSeek 官方价估算';
   }
 
   @override
@@ -22295,7 +22506,7 @@ class L10nZh extends L10n {
   String get tavernWriteOwn => '自己写一个角色';
 
   @override
-  String get tavernWriteOwnSubtitle => '从一张空白卡开始，名字、设定和开场白都自己填';
+  String get tavernWriteOwnSubtitle => '从一张空白卡开始';
 
   @override
   String get tavernNewCharacterName => '新角色';
@@ -22379,10 +22590,10 @@ class L10nZh extends L10n {
   }
 
   @override
-  String get tavernStateNote => '卡定义的状态，到当前这条消息为止。这回合变了的标着「+5」这样的记号；点一项看全部，也能直接改，改动记在这条消息上，换回答、切分支会跟着回退。';
+  String get tavernStateNote => '到当前这条消息为止。点一项可查看或修改，改动随这条消息回退。';
 
   @override
-  String get tavernStatePreview => '还没开始记，下面是卡给的初始值。';
+  String get tavernStatePreview => '还没有记录，下面是初始值。';
 
   @override
   String get tavernStateChanged => '变了';
@@ -22420,7 +22631,7 @@ class L10nZh extends L10n {
   String get tavernDirectorAuto => '自动导演';
 
   @override
-  String get tavernDirectorAutoNote => '只对这段对话。开了以后每隔几个回合，在回复写完后多问一次模型：下一拍往哪走、给你三条可以做的事。每次都会多用一些额度。';
+  String get tavernDirectorAutoNote => '只对这段对话。每隔几个回合多请求一次模型，会多用一些额度。';
 
   @override
   String get tavernDirectorRun => '让导演想一想';
@@ -22435,13 +22646,13 @@ class L10nZh extends L10n {
   String get tavernDirectorSuggestions => '你可以…';
 
   @override
-  String get tavernDirectorSuggestionsNote => '点一条放进输入框，改不改、发不发由你。';
+  String get tavernDirectorSuggestionsNote => '点一条放进输入框';
 
   @override
   String get tavernDirectorNotes => '导演笔记';
 
   @override
-  String get tavernDirectorStale => '这是之前的情况下想的，现在不一定合适，只供参考。';
+  String get tavernDirectorStale => '基于之前的剧情，仅供参考。';
 
   @override
   String tavernDirectorFailed(String reason) {
@@ -22770,7 +22981,7 @@ class L10nZh extends L10n {
   String get tavernRegexFieldName => '名字';
 
   @override
-  String get tavernRegexFieldFindHelp => 'SillyTavern 的写法：/规则/标志，比如 /(早安|晚安)/gi';
+  String get tavernRegexFieldFindHelp => '写法 /规则/标志，如 /(早安|晚安)/gi';
 
   @override
   String get tavernRegexFieldReplaceHelp => '\$1 是第一组，{{match}} 是整段匹配';
@@ -22815,7 +23026,7 @@ class L10nZh extends L10n {
   String get tavernRegexPhaseBoth => '显示和发出';
 
   @override
-  String get tavernRegexPhaseNote => '原文：直接改写存下来的消息。只改显示：存档不变，只是看起来不同。只改发出：只改发给模型的那一份。';
+  String get tavernRegexPhaseNote => '原文：改写存下的消息；只改显示：存档不变；只改发出：只改发给模型的那份';
 
   @override
   String get tavernRegexMinDepth => '最浅';
@@ -22864,7 +23075,7 @@ class L10nZh extends L10n {
 
   @override
   String tavernCardScriptsHint(int count) {
-    return '这张卡带了 $count 个脚本，打开「整页画布（试用）」才会运行';
+    return '$count 个卡片脚本要在整页画布里运行';
   }
 
   @override
@@ -22874,7 +23085,7 @@ class L10nZh extends L10n {
   String get tavernRender => '显示方式';
 
   @override
-  String get tavernRenderSubtitle => '只管这个角色的单人对话：卡里的状态栏、美化要选网页或画布才显示，脚本只在画布里运行';
+  String get tavernRenderSubtitle => '只管这个角色的单人对话。状态栏、美化要选网页或画布，脚本只在画布里运行';
 
   @override
   String get tavernRenderText => '文字';
@@ -22891,6 +23102,12 @@ class L10nZh extends L10n {
 
   @override
   String get tavernCanvasReloaded => '画面重新加载了';
+
+  @override
+  String get tavernLowPower => '省电渲染';
+
+  @override
+  String get tavernLowPowerSubtitle => '去掉卡片网页里的模糊和循环动画，手机更流畅';
 
   @override
   String tavernGroupSpeaking(String name) {
@@ -22915,7 +23132,7 @@ class L10nZh extends L10n {
   String get tavernGroupMembers => '谁在里面';
 
   @override
-  String get tavernGroupMembersNote => '按点选的顺序排；第一个是主持，故事共用的状态记在它的卡上。';
+  String get tavernGroupMembersNote => '按点选的顺序排，第一个是主持';
 
   @override
   String get tavernGroupHost => '主持';
@@ -22942,7 +23159,7 @@ class L10nZh extends L10n {
   String get tavernGroupDirector => '导演';
 
   @override
-  String get tavernGroupNaturalNote => '像 SillyTavern：被点到名的先说，其余看各自的话多话少；每轮最多几个人说在群设置里改。';
+  String get tavernGroupNaturalNote => '像 SillyTavern：被点到名的先说，其余看各自的话多话少';
 
   @override
   String get tavernGroupListOrderNote => '每轮按名单从头轮一遍（静音的跳过）。';
@@ -22981,17 +23198,17 @@ class L10nZh extends L10n {
   String get tavernGroupSettings => '群聊设置';
 
   @override
-  String get tavernGroupMaxSpeakers => '每轮最多几人说';
+  String get tavernGroupMaxSpeakers => '每轮最多几人';
 
   @override
   String get tavernGroupSelfResponses => '可以接着自己说';
 
   @override
-  String get tavernGroupSelfResponsesNote => '上一句是谁说的，这一轮还能先轮到他。';
+  String get tavernGroupSelfResponsesNote => '刚说完的人这一轮还能再说';
 
   @override
   String tavernGroupHostNote(String name) {
-    return '主持是「$name」：故事共用的状态、导演和秘密记在它的卡上；它可以不在发言名单里。';
+    return '主持是「$name」，故事共用的状态记在它的卡上';
   }
 
   @override
@@ -23460,9 +23677,6 @@ class L10nZh extends L10n {
   String get tavernDraftsForCard => '用 AI 改这张卡';
 
   @override
-  String get tavernDraftsForCardSubtitle => '在草稿里改，挑好再应用';
-
-  @override
   String get tavernDraftsEmpty => '还没有草稿';
 
   @override
@@ -23745,14 +23959,14 @@ class L10nZh extends L10n {
   String get tavernImportFromDeepSeek => '从 DeepSeek 接回来';
 
   @override
-  String get tavernImportFromDeepSeekSubtitle => '在 DeepSeek 的设置里导出全部历史对话，再选那个 ZIP';
+  String get tavernImportFromDeepSeekSubtitle => '选 DeepSeek 设置里导出的 ZIP';
 
   @override
   String get tavernDeepSeekTitle => '接回 DeepSeek 的对话';
 
   @override
   String tavernDeepSeekFound(int count) {
-    return '找到 $count 段对话，聊得最多的排在前面。勾上想接着聊的。';
+    return '找到 $count 段对话，勾上要接回来的';
   }
 
   @override
@@ -23797,7 +24011,7 @@ class L10nZh extends L10n {
   String get tavernPacks => '玩法包';
 
   @override
-  String get tavernPacksSubtitle => '装进来的玩法包；装上不等于启用，要在全局、角色或对话里加上才生效';
+  String get tavernPacksSubtitle => '装上后要在全局、角色或对话里加上才生效';
 
   @override
   String get tavernPacksEmpty => '还没有玩法包';
@@ -23836,9 +24050,6 @@ class L10nZh extends L10n {
 
   @override
   String get tavernPackScopeGlobal => '全局启用';
-
-  @override
-  String get tavernPackScopeGlobalSubtitle => '所有对话都用的玩法包';
 
   @override
   String get tavernPackScopeCharacter => '这个角色的玩法包';
@@ -23905,13 +24116,13 @@ class L10nZh extends L10n {
   String get tavernPackAddGlobal => '加到全局';
 
   @override
-  String get tavernPackAddNote => '只给某个角色或对话用，在角色页或对话的舞台面板里加';
+  String get tavernPackAddNote => '只给某个角色或对话：在角色页或舞台面板里加';
 
   @override
   String get tavernPackCast => '角色';
 
   @override
-  String get tavernPackCastNote => '导入会新建一个角色，不改原来的卡，也不会自动加进群聊';
+  String get tavernPackCastNote => '导入会新建角色，不改原来的卡';
 
   @override
   String get tavernPackCastFromCard => '完整角色卡';
@@ -24109,6 +24320,77 @@ class L10nZh extends L10n {
 
   @override
   String get tavernPackExportChanged => '导出的来源或选项变了，请重新预览';
+
+  @override
+  String get tavernScripts => '脚本库';
+
+  @override
+  String get tavernScriptsEmpty => '还没有全局脚本';
+
+  @override
+  String get tavernScriptsEmptyMessage => '可以导入酒馆助手导出的脚本 JSON，打开的在整页画布里运行';
+
+  @override
+  String get tavernScriptsImport => '导入脚本';
+
+  @override
+  String tavernScriptsImported(int count) {
+    return '$count 个脚本加入了脚本库';
+  }
+
+  @override
+  String get tavernScriptsExportAll => '导出全部';
+
+  @override
+  String get tavernScriptsOrder => '调整顺序';
+
+  @override
+  String get tavernScriptsOrderNote => '从上到下依次运行，拖动右边的把手调整。';
+
+  @override
+  String tavernScriptCount(int count) {
+    return '$count 个';
+  }
+
+  @override
+  String get tavernScriptUnnamed => '未命名脚本';
+
+  @override
+  String get tavernScriptOpenFolder => '打开文件夹';
+
+  @override
+  String get tavernScriptExport => '导出';
+
+  @override
+  String get tavernScriptDelete => '删除';
+
+  @override
+  String tavernScriptDeleteTitle(String name) {
+    return '删除「$name」？';
+  }
+
+  @override
+  String get tavernScriptDeleteMessage => '它的变量和按钮会一起删除，找不回来。';
+
+  @override
+  String get tavernChatScripts => '脚本';
+
+  @override
+  String get tavernChatScriptsNote => '按运行顺序';
+
+  @override
+  String get tavernScriptSourceGlobal => '全局';
+
+  @override
+  String get tavernScriptSourcePreset => '预设';
+
+  @override
+  String get tavernScriptSourceCard => '卡';
+
+  @override
+  String tavernChatScriptsSkipped(int count) {
+    return '$count 个脚本没有运行';
+  }
 
   @override
   String get updateCheck => '检查更新';

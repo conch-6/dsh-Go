@@ -123,6 +123,7 @@ class SettingsTile extends StatelessWidget {
     this.danger = false,
     this.chevron,
     this.tinted = true,
+    this.titleMaxLines,
   }) : assert(title != null || spot != null);
 
   /// Null for a plain row that lines up with [InfoRow]s.
@@ -151,6 +152,9 @@ class SettingsTile extends StatelessWidget {
   /// False draws [icon] as a 20dp line icon ([SettingsLineIcon]) instead of a
   /// tinted disc: the default for rows on secondary pages.
   final bool tinted;
+
+  /// Lines the title may take, cut with an ellipsis; null: as many as it needs.
+  final int? titleMaxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -191,6 +195,8 @@ class SettingsTile extends StatelessWidget {
                     children: [
                       Text(
                         title,
+                        maxLines: titleMaxLines,
+                        overflow: titleMaxLines == null ? null : TextOverflow.ellipsis,
                         style: settingsTitleStyle(context)?.copyWith(color: danger ? colors.danger : scheme.onSurface),
                       ),
                       if (subtitle case final sub?) ...[
@@ -380,6 +386,94 @@ class SettingsSection extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// A title with its value at the right, the slider under it, the track running from the title's
+/// edge to the value's (16 from the card on both sides, as a switch track ends). Neutral, like
+/// every slider in settings: the page's accent stays with the switches.
+///
+/// ```
+/// |16| 模糊 …………………………………………………… 30% |16|
+/// |16| ━━━━━━━━━●──────────────────────── |16|
+/// ```
+///
+/// [value] is 0–1 and lands on [steps] even steps (no tick marks: the track stays one quiet
+/// line); [label] reads a value, a percent unless told otherwise. [onChanged] follows the
+/// finger, [onChangeEnd] is the value let go on.
+class SettingsSliderTile extends StatelessWidget {
+  const SettingsSliderTile({
+    super.key,
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    required this.onChangeEnd,
+    this.steps = defaultSteps,
+    this.label = percent,
+  });
+
+  final String title;
+
+  /// 0–1.
+  final double value;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
+  final int steps;
+  final String Function(double value) label;
+
+  /// 5% steps.
+  static const defaultSteps = 20;
+
+  /// `0.3` as `30%`.
+  static String percent(double v) => '${(v * 100).round()}%';
+
+  double _snap(double v) => (v * steps).round() / steps;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final v = value.clamp(0.0, 1.0);
+    return MergeSemantics(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(SettingsMetrics.inset, 14, SettingsMetrics.inset, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ExcludeSemantics(
+              child: Row(
+                children: [
+                  Expanded(child: Text(title, style: settingsTitleStyle(context))),
+                  const SizedBox(width: 12),
+                  Text(label(v), style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Semantics(
+              label: title,
+              child: Slider(
+                value: v,
+                // No inset for the thumb's halo: the track ends where the text does.
+                padding: EdgeInsets.zero,
+                activeColor: scheme.onSurfaceVariant,
+                inactiveColor: scheme.onSurface.withValues(alpha: 0.1),
+                // What the value is, not the step it would land on: a saved 37% reads 37%.
+                semanticFormatterCallback: label,
+                onChanged: (raw) {
+                  final next = _snap(raw);
+                  if (next == _snap(v)) return;
+                  HapticFeedback.selectionClick();
+                  onChanged(next);
+                },
+                onChangeEnd: (raw) => onChangeEnd(_snap(raw)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

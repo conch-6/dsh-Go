@@ -871,7 +871,7 @@ class PreviewTavern implements Tavern, TavernPreview {
         chat,
         node,
         i == 0 ? _cannedFor(text) : _canned[(_seq++) % _canned.length],
-        started: true,
+        fresh: true,
       )) {
         last = event;
         emit(TavernGroupMemberEvent(progress: speaking, characterId: actorId, event: event));
@@ -990,7 +990,7 @@ class PreviewTavern implements Tavern, TavernPreview {
   Stream<TavernEvent> continueReply(String chatId, String nodeId) {
     final chat = _chats[chatId]!;
     final node = chat.nodes[nodeId]!;
-    return _stream(chat, node, '\n\n她停顿了一下，又接着说：「还有一件事……我晚点再告诉你。」', started: false);
+    return _stream(chat, node, '\n\n她停顿了一下，又接着说：「还有一件事……我晚点再告诉你。」', fresh: false);
   }
 
   @override
@@ -1009,18 +1009,20 @@ class PreviewTavern implements Tavern, TavernPreview {
     final node = _Node(_id('n'), parent, TavernRole.character, c.name, '', _clock());
     chat.add(node);
     chat.chosen[parent] = node.id;
-    return _stream(chat, node, text, started: true);
+    return _stream(chat, node, text, fresh: true);
   }
 
-  Stream<TavernEvent> _stream(_Chat chat, _Node node, String text, {required bool started}) {
+  /// [fresh]: a new reply (it may think first); else one continued, which
+  /// starts, as the engine's do, from what it already says.
+  Stream<TavernEvent> _stream(_Chat chat, _Node node, String text, {required bool fresh}) {
     final out = StreamController<TavernEvent>();
     _running[chat.id] = out;
     var stopped = false;
     out.onCancel = () => stopped = true;
     unawaited(() async {
-      if (started) out.add(TavernTurnStarted(chat.message(node)));
+      out.add(TavernTurnStarted(chat.message(node)));
       chat.touch(_clock());
-      if (_thinking && started) {
+      if (_thinking && fresh) {
         for (final piece in _pieces(_sampleReasoning)) {
           await Future<void>.delayed(tick);
           if (stopped || out.isClosed) break;
@@ -1605,6 +1607,119 @@ class PreviewTavern implements Tavern, TavernPreview {
     if (_defaultPreset == presetId) _defaultPreset = null;
     _chatPresets.removeWhere((_, id) => id == presetId);
     _presetsChanged.add(null);
+  }
+
+  /// Global helper scripts, kept in memory as their tree; never run here.
+  final _scriptTree = <Map<String, Object?>>[];
+  final _scriptsChanged = StreamController<void>.broadcast();
+  var _scriptCount = 0;
+
+  List<TavernScriptLibraryEntry> _scriptEntries() => [for (final e in _scriptTree) TavernScriptLibraryEntry(e)];
+
+  /// The item [id] in [nodes] or under them, with the list it is in.
+  (List<Map<String, Object?>>, Map<String, Object?>)? _scriptItem(String id, List<Map<String, Object?>> nodes) {
+    for (final node in nodes) {
+      if (node['id'] == id) return (nodes, node);
+      if (node['type'] != 'folder') continue;
+      if (_scriptItem(id, _scriptChildren(node)) case final found?) return found;
+    }
+    return null;
+  }
+
+  static List<Map<String, Object?>> _scriptChildren(Map<String, Object?> folder) =>
+      (folder['scripts'] ??= <Map<String, Object?>>[]) as List<Map<String, Object?>>;
+
+  @override
+  Future<List<TavernScriptLibraryEntry>> listGlobalScripts() async => _scriptEntries();
+
+  @override
+  Stream<List<TavernScriptLibraryEntry>> watchGlobalScripts() async* {
+    yield _scriptEntries();
+    await for (final _ in _scriptsChanged.stream) {
+      yield _scriptEntries();
+    }
+  }
+
+  /// One script, one folder or a whole tree; each item gets an id of its own.
+  @override
+  Future<List<TavernScriptLibraryEntry>> importGlobalScripts(String text) async {
+    final json = jsonDecode(text);
+    Map<String, Object?> own(Object? node) {
+      final item = Map<String, Object?>.of(node! as Map<String, Object?>);
+      if (item['id'] is! String || _scriptItem(item['id']! as String, _scriptTree) != null) {
+        item['id'] = 'script-${_scriptCount++}';
+      }
+      if (item['type'] == 'folder') item['scripts'] = [for (final child in item['scripts']! as List) own(child)];
+      return item;
+    }
+
+    final added = [
+      for (final node in json is List ? json : [json]) own(node),
+    ];
+    _scriptTree.addAll(added);
+    _scriptsChanged.add(null);
+    return [for (final e in added) TavernScriptLibraryEntry(e)];
+  }
+
+  @override
+  Future<TavernScriptLibraryEntry> setGlobalScriptEnabled(String id, bool enabled) async {
+    final (_, item) = _scriptItem(id, _scriptTree)!;
+    item['enabled'] = enabled;
+    _scriptsChanged.add(null);
+    return TavernScriptLibraryEntry(item);
+  }
+
+  @override
+  Future<void> setGlobalScriptOrder(List<String> ids, {String? folderId}) async {
+    final list = folderId == null ? _scriptTree : _scriptChildren(_scriptItem(folderId, _scriptTree)!.$2);
+    final byId = {for (final e in list) e['id']: e};
+    list
+      ..clear()
+      ..addAll([for (final id in ids) byId[id]!]);
+    _scriptsChanged.add(null);
+  }
+
+  @override
+  Future<void> deleteGlobalScript(String id) async {
+    final (list, item) = _scriptItem(id, _scriptTree)!;
+    list.remove(item);
+    _scriptsChanged.add(null);
+  }
+
+  @override
+  Future<String> exportGlobalScripts({String? id}) async =>
+      jsonEncode(id == null ? _scriptTree : _scriptItem(id, _scriptTree)!.$2);
+
+  /// The global scripts that are on; the preview keeps no preset or card ones.
+  @override
+  Future<TavernChatScripts> chatScripts(String chatId, {String? characterId}) async {
+    final out = <TavernRunnableScript>[];
+    void visit(List<Map<String, Object?>> nodes) {
+      for (final node in nodes) {
+        if (node['type'] == 'folder') {
+          if (node['enabled'] != false) visit(_scriptChildren(node));
+        } else if (node['enabled'] == true && '${node['content'] ?? ''}'.trim().isNotEmpty) {
+          out.add(
+            TavernRunnableScript(
+              owner: TavernScriptOwner(kind: TavernScriptOwnerKind.global, scriptId: node['id']! as String),
+              name: '${node['name'] ?? ''}',
+              content: node['content']! as String,
+            ),
+          );
+        }
+      }
+    }
+
+    visit(_scriptTree);
+    return TavernChatScripts(chatId: chatId, characterId: characterId, scripts: out);
+  }
+
+  @override
+  Stream<TavernChatScripts> watchChatScripts(String chatId, {String? characterId}) async* {
+    yield await chatScripts(chatId, characterId: characterId);
+    await for (final _ in _scriptsChanged.stream) {
+      yield await chatScripts(chatId, characterId: characterId);
+    }
   }
 
   /// The preview files no import reports.
