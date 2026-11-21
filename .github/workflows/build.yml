@@ -55,9 +55,10 @@ jobs:
           python3 tool/l10n_merge.py
 
       - name: Build APK (arm64, release)
-        run: tooling/build-apk.sh
+        # remote-only fork: no bundled runtime, skip the manifest preflight;
+        # no licensed companion pack either
+        run: tooling/build-apk.sh --no-companion
         env:
-          # remote-only fork: no bundled runtime, skip the manifest preflight
           DSH_SKIP_RUNTIME_CHECK: "1"
 
       - name: Upload APK
