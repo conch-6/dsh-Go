@@ -8,6 +8,7 @@ import '../pets/overlay_channel.dart';
 import '../speech/speech_settings.dart' show companionEffectiveVoiceProvider;
 
 import '../state/companion_agent_state.dart';
+import '../state/models_state.dart' show modelSelectionScopeProvider;
 import 'companion_agent.dart';
 import 'companion_agent_task_ui.dart';
 import 'companion_float.dart';
@@ -61,6 +62,7 @@ class CompanionAlwaysOnOwner {
   late final CompanionSpeaker _speaker;
   late final CompanionScreenObserver _screen;
   CompanionScreenObserver get screen => _screen;
+  ProviderSubscription<Object>? _screenRoute;
   StreamSubscription<int>? _packChanges;
   void Function()? _removeBeforePack;
   CompanionAgentResident? _resident;
@@ -143,6 +145,8 @@ class CompanionAlwaysOnOwner {
     lease.setReducedPower(_status.reducedPower);
     await lease.openMemory();
     if (_closed || generation != _generation || !lease.active) return;
+    // A model change re-routes what she sees; heard only while she can look.
+    _screenRoute ??= ref.listen(modelSelectionScopeProvider, (_, _) => agent.modelRouteChanged());
     _screen.start();
     _changed();
   }
@@ -158,6 +162,7 @@ class CompanionAlwaysOnOwner {
       _resident!
           .submit(
             text,
+            fromFloat: fromFloat,
             onCommitted: (source) {
               if (!accepted.isCompleted) accepted.complete(true);
               _post(id: 'input:${source['id']}', text: text, user: true);
@@ -236,11 +241,59 @@ class CompanionAlwaysOnOwner {
     while (_spokenReplies.length > 64) {
       _spokenReplies.remove(_spokenReplies.first);
     }
-    unawaited(_presentLine(id: reply, text: visible, emotion: 'neutral', speak: speak));
-    _post(id: reply, text: visible);
+    final resident = _resident;
+    if (resident != null) {
+      unawaited(
+        resident.deliverReply(
+          reply,
+          visible,
+          (noticeEpoch) =>
+              _presentLine(id: reply, text: visible, emotion: 'neutral', speak: speak, noticeEpoch: noticeEpoch),
+        ),
+      );
+    }
+    _postReply(reply, visible);
+  }
+
+  /// The reply update still waiting in [_notificationQueue].
+  _ReplyUpdate? _replyUpdate;
+
+  /// A streaming reply reaches the notification a few times a second, its
+  /// latest text each time: Android drops updates to a notification beyond
+  /// about five a second (the last one too), and each update holds the
+  /// platform thread for two file locks and several system calls.
+  void _postReply(String id, String text) {
+    final waiting = _replyUpdate;
+    if (waiting != null &&
+        waiting.id == id &&
+        waiting.generation == _outputGeneration &&
+        waiting.epoch == _status.epoch) {
+      waiting.text = text;
+      return;
+    }
+    final update = _replyUpdate = _ReplyUpdate(id, text, _outputGeneration, _status.epoch);
+    _notificationQueue = _notificationQueue.catchError((Object _) {}).then((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      if (identical(_replyUpdate, update)) _replyUpdate = null;
+      if (!active || update.generation != _outputGeneration || update.epoch != _status.epoch) return;
+      final resident = _resident;
+      if (resident == null) return;
+      await resident.deliverReply(
+        update.id,
+        update.text,
+        (noticeEpoch) => channel.update(
+          epoch: update.epoch,
+          name: _name,
+          text: update.text,
+          id: update.id,
+          noticeEpoch: noticeEpoch,
+        ),
+      );
+    });
   }
 
   void _post({required String id, required String text, bool user = false}) {
+    _replyUpdate = null;
     final generation = _outputGeneration;
     final epoch = _status.epoch;
     _notificationQueue = _notificationQueue.catchError((Object _) {}).then((_) async {
@@ -267,6 +320,8 @@ class CompanionAlwaysOnOwner {
   void _retireLease() {
     final resident = _resident;
     _screen.stop();
+    _screenRoute?.close();
+    _screenRoute = null;
     _hush();
     ++_outputGeneration;
     unawaited(overlay.clearCompanion());
@@ -301,6 +356,7 @@ class CompanionAlwaysOnOwner {
     unawaited(_input.cancel());
     unawaited(_voiceEvents.cancel());
     _screen.dispose();
+    _screenRoute?.close();
   }
 
   Future<bool> _presentLine({
@@ -308,10 +364,19 @@ class CompanionAlwaysOnOwner {
     required String text,
     required String emotion,
     required bool speak,
+    int? noticeEpoch,
   }) async {
     final generation = _voiceGeneration;
-    final shown = await overlay.presentCompanion(id: id, text: text, emotion: emotion, speaking: false);
-    if (!shown || !speak || !active || generation != _voiceGeneration) return shown;
+    final shown = await overlay.presentCompanion(
+      id: id,
+      text: text,
+      emotion: emotion,
+      speaking: false,
+      noticeEpoch: noticeEpoch,
+    );
+    // Notice-derived words stay on the already-authorized text surface. A
+    // voice model warm-up cannot retain authority across a later lock.
+    if (!shown || noticeEpoch != null || !speak || !active || generation != _voiceGeneration) return shown;
     final settings = ref.read(companionEffectiveVoiceProvider);
     if (settings?.on != true) return shown;
     final ready = await _speaker.ready(settings!);
@@ -355,7 +420,12 @@ class CompanionAlwaysOnOwner {
 /// Background is not a visible/resumed room. It cannot manufacture a picker,
 /// a real frame acknowledgement, or a fresh foreground task capability.
 class _ResidentUi
-    implements CompanionAgentRoomUi, CompanionInitiativeRoom, CompanionAgentAmbientUi, CompanionAgentNotificationUi {
+    implements
+        CompanionAgentRoomUi,
+        CompanionInitiativeRoom,
+        CompanionAgentAmbientUi,
+        CompanionAgentNotificationUi,
+        CompanionAgentNoticeUi {
   _ResidentUi(this.owner);
   final CompanionAlwaysOnOwner owner;
   @override
@@ -369,6 +439,9 @@ class _ResidentUi
   Future<bool> deliverFollowup({required String id, required String text}) =>
       owner.channel.deliver(epoch: owner._status.epoch, name: owner._name, text: text, id: id);
   @override
+  Future<bool> deliverNotice({required String id, required String text, required int noticeEpoch}) => owner.channel
+      .deliver(epoch: owner._status.epoch, name: owner._name, text: text, id: id, noticeEpoch: noticeEpoch);
+  @override
   bool get mounted => !owner._closed && owner._status.enabled && owner._status.running;
   @override
   bool get stageReady => false;
@@ -380,7 +453,7 @@ class _ResidentUi
   CompanionInitiativeView get initiativeView => CompanionInitiativeView(
     visible: false,
     resumed: false,
-    blocked: owner.agent.running,
+    blocked: owner.agent.running && owner._resident?.preparingSignalId == null,
     accessible: false,
     enabled: owner.active && owner.ref.read(companionInitiativeEnabledProvider) == true,
     notificationAvailable: owner.active && owner._status.notificationAvailable,
@@ -411,11 +484,14 @@ class _ResidentUi
   @override
   void hideFollowup(String ticketId) {}
   @override
-  bool canPresent(CompanionInitiativeTicket ticket) =>
-      ticket.kind == CompanionPromptKind.signal &&
-      owner.active &&
-      owner._status.notificationAvailable &&
-      !owner.agent.running;
+  bool canPresent(CompanionInitiativeTicket ticket) {
+    final preparing = owner._resident?.preparingSignalId;
+    return ticket.kind == CompanionPromptKind.signal &&
+        owner.active &&
+        owner._status.notificationAvailable &&
+        (!owner.agent.running || (preparing != null && ticket.signalId == preparing));
+  }
+
   @override
   void show(CompanionInitiativeDisplay display) {}
   @override
@@ -488,4 +564,12 @@ class _ResidentTaskUi implements CompanionAgentTaskUi {
   void accepted(MemoryRow task) {}
   @override
   void startForeground(List<CompanionNotesForegroundCapture> captures, {required bool Function() isCurrent}) {}
+}
+
+final class _ReplyUpdate {
+  _ReplyUpdate(this.id, this.text, this.generation, this.epoch);
+  final String id;
+  String text;
+  final int generation;
+  final int epoch;
 }

@@ -19,6 +19,7 @@ extension CompanionMemoryMaintenanceStore on CompanionMemoryStore {
       String? character, {
       String? localDay,
       String? zoneId,
+      bool checked = false,
     }) => _planAgentMaintenanceContext(
       kind: kind,
       characterId: character,
@@ -26,6 +27,7 @@ extension CompanionMemoryMaintenanceStore on CompanionMemoryStore {
       zoneId: zoneId,
       sources: sources,
       cards: cards,
+      checked: checked,
       estimateTokens: estimateTokens,
       estimateContextTokens: estimateContextTokens,
     );
@@ -154,7 +156,7 @@ extension CompanionMemoryMaintenanceStore on CompanionMemoryStore {
           return null;
         }
         if (_agentContextTokens(
-              context(const [], const [], null, localDay: localDay, zoneId: 'offset:$offsetMinutes'),
+              context(const [], const [], null, localDay: localDay, zoneId: 'offset:$offsetMinutes', checked: true),
               estimateTokens,
               estimateContextTokens,
             ) >
@@ -181,6 +183,37 @@ extension CompanionMemoryMaintenanceStore on CompanionMemoryStore {
               ..clear()
               ..addAll(candidate);
           }
+        }
+        // No source of yesterday, every card checked, and no private role a
+        // parent left unserved still has a current captured source that no
+        // parent serving that role examined: no scope can have work. Skip the
+        // whole history and domain read that an idle tick would repeat.
+        if (sources.isEmpty &&
+            _db
+                .select("SELECT 1 FROM memory_cards WHERE status!='withdrawn' AND maintenance_row_rev!=row_rev LIMIT 1")
+                .isEmpty &&
+            _db
+                .select(
+                  '''
+              SELECT 1 FROM memory_agent_maintenance_claims p, json_each(p.scope_characters) r,
+                json_each(p.source_revisions) s JOIN memory_messages m ON m.id=s.key AND m.source_rev=s.value
+              WHERE p.kind='organize' AND p.archive_id=?1 AND p.state!='not_sent' AND EXISTS(
+                  SELECT value FROM json_each(p.scope_characters) WHERE type='text'
+                  EXCEPT SELECT value FROM json_each(p.completed_scopes)
+                )
+                AND r.type='text' AND NOT EXISTS(SELECT 1 FROM json_each(p.completed_scopes) c WHERE c.value=r.value)
+                AND m.scope='real' AND m.first_seq>?2 AND m.character_id=r.value AND NOT EXISTS(
+                  SELECT 1 FROM memory_agent_maintenance_claims q, json_each(q.completed_scopes) c,
+                    json_each(q.source_revisions) qs
+                  WHERE q.kind='organize' AND q.archive_id=?1 AND q.state!='not_sent' AND c.value=r.value
+                    AND qs.key=s.key AND qs.value=s.value
+                )
+              LIMIT 1
+            ''',
+                  [meta['id'], meta['history_after_seq']],
+                )
+                .isEmpty) {
+          return null;
         }
         // These are the original captured IDs/revisions, not another queue or
         // a replay of a closed turn. A served scope consumes only its sources.
@@ -252,15 +285,30 @@ extension CompanionMemoryMaintenanceStore on CompanionMemoryStore {
         final selected = <MemoryRow>[];
         final zoneId = localDay == null ? null : 'offset:$offsetMinutes';
         for (final card in _memoryDomainCards(character)) {
-          if ((kind == 'organize' ? !isMemoryContextEligible(card, nowMs: at) : card['status'] == 'withdrawn') ||
+          if (card['collection'] == 'recent' ||
+              (kind == 'organize' ? !isMemoryContextEligible(card, nowMs: at) : card['status'] == 'withdrawn') ||
               !_memoryReferencesCurrent(card['id'] as String)) {
             continue;
           }
-          final candidate = context(sources, [...selected, card], character, localDay: localDay, zoneId: zoneId);
+          final candidate = context(
+            sources,
+            [...selected, card],
+            character,
+            localDay: localDay,
+            zoneId: zoneId,
+            checked: true,
+          );
           if (_agentContextTokens(candidate, estimateTokens, estimateContextTokens) > memoryBatchInputTokens) continue;
           selected.add(card);
         }
-        final selectedContext = context(sources, selected, character, localDay: localDay, zoneId: zoneId);
+        final selectedContext = context(
+          sources,
+          selected,
+          character,
+          localDay: localDay,
+          zoneId: zoneId,
+          checked: true,
+        );
         if (kind == 'organize') {
           final sourceWork = (selectedContext['sources'] as List<MemoryRow>).any(
             (source) => examinedSources[character ?? '']?[source['id']] != source['source_rev'],
@@ -329,16 +377,25 @@ extension CompanionMemoryMaintenanceStore on CompanionMemoryStore {
     required List<MemoryRow> cards,
     required int Function(String) estimateTokens,
     required int Function(MemoryRow)? estimateContextTokens,
+    bool checked = false,
   }) {
     final scopedSources = _agentSourcesForScope(sources, characterId, kind, localDay: localDay);
-    final revisions = {for (final card in cards) card['id']: card['row_rev']};
-    final selected = [
-      for (final card in _memoryDomainCards(characterId))
-        if (revisions[card['id']] == card['row_rev'] &&
-            card['status'] != 'withdrawn' &&
-            _memoryReferencesCurrent(card['id'] as String))
-          card,
-    ];
+    // [checked]: the claim's own selection, already taken from this scope's
+    // domain in its order and filtered the same way, in this transaction.
+    // Reading the domain again per tried card made one selection O(cards²).
+    List<MemoryRow> current() {
+      final revisions = {for (final card in cards) card['id']: card['row_rev']};
+      return [
+        for (final card in _memoryDomainCards(characterId))
+          if (card['collection'] != 'recent' &&
+              revisions[card['id']] == card['row_rev'] &&
+              card['status'] != 'withdrawn' &&
+              _memoryReferencesCurrent(card['id'] as String))
+            card,
+      ];
+    }
+
+    final selected = checked ? cards : current();
     final context = _agentContext(characterId, localDay, zoneId, scopedSources, selected, const []);
     if (_agentContextTokens(context, estimateTokens, estimateContextTokens) > memoryBatchInputTokens) return context;
     final tickets = <MemoryRow>[];
@@ -662,7 +719,8 @@ extension CompanionMemoryMaintenanceStore on CompanionMemoryStore {
       ..._agentContext(character, claim['local_day'] as String?, claim['zone_id'] as String?, sources, [
         if (current)
           for (final card in _memoryDomainCards(character))
-            if (revisions[card['id']] == card['row_rev'] &&
+            if (card['collection'] != 'recent' &&
+                revisions[card['id']] == card['row_rev'] &&
                 card['status'] != 'withdrawn' &&
                 _memoryReferencesCurrent(card['id'] as String))
               card,

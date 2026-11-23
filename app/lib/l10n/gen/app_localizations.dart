@@ -9326,6 +9326,78 @@ abstract class L10n {
   /// **'语音'**
   String get companionVoice;
 
+  /// No description provided for @companionSystemAssistant.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统数字助理'**
+  String get companionSystemAssistant;
+
+  /// No description provided for @companionAssistantChoose.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择默认数字助理'**
+  String get companionAssistantChoose;
+
+  /// No description provided for @companionAssistantChooseHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'在 Android 设置选中 DSH Go 小屋伙伴，再用手机的助理手势或按键唤起。'**
+  String get companionAssistantChooseHint;
+
+  /// No description provided for @companionAssistantSelected.
+  ///
+  /// In zh, this message translates to:
+  /// **'小屋伙伴已设为默认助理。再次打开可切换回其他助理。'**
+  String get companionAssistantSelected;
+
+  /// No description provided for @companionAssistantSettingsMissing.
+  ///
+  /// In zh, this message translates to:
+  /// **'找不到助理选择页。请在系统设置搜索「默认数字助理」。'**
+  String get companionAssistantSettingsMissing;
+
+  /// No description provided for @companionAssistantSharePage.
+  ///
+  /// In zh, this message translates to:
+  /// **'带上唤起时的页面文字'**
+  String get companionAssistantSharePage;
+
+  /// No description provided for @companionAssistantSharePageHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'仅使用 Android 允许提供的文字，发送本轮问题时交给伙伴模型。你可以在发送前移除。'**
+  String get companionAssistantSharePageHint;
+
+  /// No description provided for @companionAssistantPageAttached.
+  ///
+  /// In zh, this message translates to:
+  /// **'已附当前页面文字'**
+  String get companionAssistantPageAttached;
+
+  /// No description provided for @companionAssistantCalendarAccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'允许读取日历'**
+  String get companionAssistantCalendarAccess;
+
+  /// No description provided for @companionAssistantCalendarHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'让伙伴和手机工具读取可见日程。查询结果会发给当前模型。'**
+  String get companionAssistantCalendarHint;
+
+  /// No description provided for @companionAssistantCalendarAllowed.
+  ///
+  /// In zh, this message translates to:
+  /// **'已授权读取。点此可在系统应用权限中撤回。'**
+  String get companionAssistantCalendarAllowed;
+
+  /// No description provided for @companionAssistantAppPermissions.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开系统应用权限'**
+  String get companionAssistantAppPermissions;
+
   /// No description provided for @companionStop.
   ///
   /// In zh, this message translates to:
@@ -10049,8 +10121,20 @@ abstract class L10n {
   /// No description provided for @companionNotConnectedTryLight.
   ///
   /// In zh, this message translates to:
-  /// **'现在连不上主机。只想聊天的话，可以在右上角菜单换成轻量模式。'**
+  /// **'现在连不上电脑那边。你可以检查连接，或在「对话方式」里换成轻量模式。'**
   String get companionNotConnectedTryLight;
+
+  /// No description provided for @companionHostModelUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'电脑那边还没选好模型。选好后我们再聊，或在「对话方式」里换成轻量模式。'**
+  String get companionHostModelUnavailable;
+
+  /// No description provided for @companionHostUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'电脑那边暂时接不了这次对话。检查连接和更新后再试，或在「对话方式」里换成轻量模式。'**
+  String get companionHostUnavailable;
 
   /// No description provided for @companionMenuRestartLightHint.
   ///
@@ -13290,6 +13374,54 @@ abstract class L10n {
   /// **'允许录屏'**
   String get companionScreenAllowProjection;
 
+  /// No description provided for @companionScreenVision.
+  ///
+  /// In zh, this message translates to:
+  /// **'允许发送屏幕图片'**
+  String get companionScreenVision;
+
+  /// No description provided for @companionScreenVisionHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'把最长边不超过 512 像素的屏幕图片发给你选的模型；图片不会保存'**
+  String get companionScreenVisionHint;
+
+  /// No description provided for @companionScreenVisionTextOnly.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前截图方式只能提供文字；图片需要能核实窗口来源的无障碍截图'**
+  String get companionScreenVisionTextOnly;
+
+  /// No description provided for @companionScreenVisionModel.
+  ///
+  /// In zh, this message translates to:
+  /// **'看图使用的模型'**
+  String get companionScreenVisionModel;
+
+  /// No description provided for @companionScreenVisionChoose.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择支持图片的模型'**
+  String get companionScreenVisionChoose;
+
+  /// No description provided for @companionScreenVisionAvailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'所选模型可接收通过检查、最长边不超过 512 像素的屏幕图片；图片不会保存'**
+  String get companionScreenVisionAvailable;
+
+  /// No description provided for @companionScreenVisionChecking.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在检查所选模型，屏幕图片尚未启用'**
+  String get companionScreenVisionChecking;
+
+  /// No description provided for @companionScreenVisionUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前连接或模型不能接收图片，看屏时继续使用文字'**
+  String get companionScreenVisionUnavailable;
+
   /// No description provided for @companionScreenFrequency.
   ///
   /// In zh, this message translates to:
@@ -13343,6 +13475,258 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'今天大概花了 ¥{amount}'**
   String companionScreenCost(String amount);
+
+  /// No description provided for @companionNotices.
+  ///
+  /// In zh, this message translates to:
+  /// **'她会留意你的通知'**
+  String get companionNotices;
+
+  /// No description provided for @companionNoticesHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'你选的 App 来了通知，她看一眼，值得说的才开口'**
+  String get companionNoticesHint;
+
+  /// No description provided for @companionNoticesNeedsAccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'还差一步：允许 DSH Go 读取通知'**
+  String get companionNoticesNeedsAccess;
+
+  /// No description provided for @companionNoticesAllow.
+  ///
+  /// In zh, this message translates to:
+  /// **'去授权'**
+  String get companionNoticesAllow;
+
+  /// No description provided for @companionNoticesApps.
+  ///
+  /// In zh, this message translates to:
+  /// **'她看哪些 App'**
+  String get companionNoticesApps;
+
+  /// No description provided for @companionNoticesAppsEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'开启后收到过通知的 App 会出现在这里'**
+  String get companionNoticesAppsEmpty;
+
+  /// No description provided for @companionNoticesAppCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'7 天内 {count} 条'**
+  String companionNoticesAppCount(int count);
+
+  /// No description provided for @companionNoticesQuiet.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近没来过通知'**
+  String get companionNoticesQuiet;
+
+  /// No description provided for @companionNoticesToday.
+  ///
+  /// In zh, this message translates to:
+  /// **'今天收到 {received} 条 · 她说了 {said} 次'**
+  String companionNoticesToday(int received, int said);
+
+  /// No description provided for @companionNoticesFooter.
+  ///
+  /// In zh, this message translates to:
+  /// **'通知会发给你给她配置的模型（现在是 DeepSeek），只发你选的 App 的。原文不存，只存她记下的那几句近况，在记忆页能看到、能删；本机另外只留条数、用量和防重复用的标记。锁屏时她不看。'**
+  String get companionNoticesFooter;
+
+  /// No description provided for @companionNoticesFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没改成，再试一次'**
+  String get companionNoticesFailed;
+
+  /// No description provided for @companionNoticeLevelOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'不看'**
+  String get companionNoticeLevelOff;
+
+  /// No description provided for @companionNoticeLevelOffHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个 App 的通知她不读'**
+  String get companionNoticeLevelOffHint;
+
+  /// No description provided for @companionNoticeLevelGlance.
+  ///
+  /// In zh, this message translates to:
+  /// **'看一眼'**
+  String get companionNoticeLevelGlance;
+
+  /// No description provided for @companionNoticeLevelGlanceHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'只用来决定要不要告诉你，看完就忘'**
+  String get companionNoticeLevelGlanceHint;
+
+  /// No description provided for @companionNoticeLevelRemember.
+  ///
+  /// In zh, this message translates to:
+  /// **'会记住'**
+  String get companionNoticeLevelRemember;
+
+  /// No description provided for @companionNoticeLevelRememberHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'值得记的近况，她会记下来'**
+  String get companionNoticeLevelRememberHint;
+
+  /// No description provided for @companionMemoryAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部'**
+  String get companionMemoryAll;
+
+  /// No description provided for @companionMemoryFromNotices.
+  ///
+  /// In zh, this message translates to:
+  /// **'从通知看到的'**
+  String get companionMemoryFromNotices;
+
+  /// No description provided for @companionMemoryNoticesClear.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部清掉'**
+  String get companionMemoryNoticesClear;
+
+  /// No description provided for @companionMemoryNoticesClearTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'让她忘掉通知里看到的事？'**
+  String get companionMemoryNoticesClearTitle;
+
+  /// No description provided for @companionMemoryNoticesClearBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'她从通知里记下的近况都会删掉，同样的事以后也不再记。'**
+  String get companionMemoryNoticesClearBody;
+
+  /// No description provided for @companionPanelCompany.
+  ///
+  /// In zh, this message translates to:
+  /// **'陪伴'**
+  String get companionPanelCompany;
+
+  /// No description provided for @companionPanelHer.
+  ///
+  /// In zh, this message translates to:
+  /// **'她'**
+  String get companionPanelHer;
+
+  /// No description provided for @companionPanelTalk.
+  ///
+  /// In zh, this message translates to:
+  /// **'对话'**
+  String get companionPanelTalk;
+
+  /// No description provided for @companionPanelMore.
+  ///
+  /// In zh, this message translates to:
+  /// **'更多'**
+  String get companionPanelMore;
+
+  /// No description provided for @companionDrawerHere.
+  ///
+  /// In zh, this message translates to:
+  /// **'她一直在'**
+  String get companionDrawerHere;
+
+  /// No description provided for @companionDrawerRoom.
+  ///
+  /// In zh, this message translates to:
+  /// **'伙伴小屋'**
+  String get companionDrawerRoom;
+
+  /// No description provided for @companionTabRoom.
+  ///
+  /// In zh, this message translates to:
+  /// **'小屋'**
+  String get companionTabRoom;
+
+  /// No description provided for @companionTabMemory.
+  ///
+  /// In zh, this message translates to:
+  /// **'记忆'**
+  String get companionTabMemory;
+
+  /// No description provided for @companionTabTasks.
+  ///
+  /// In zh, this message translates to:
+  /// **'交代'**
+  String get companionTabTasks;
+
+  /// No description provided for @companionTabHer.
+  ///
+  /// In zh, this message translates to:
+  /// **'她'**
+  String get companionTabHer;
+
+  /// No description provided for @companionDrawerReminderToday.
+  ///
+  /// In zh, this message translates to:
+  /// **'{time} 提醒你'**
+  String companionDrawerReminderToday(String time);
+
+  /// No description provided for @companionDrawerReminderTomorrow.
+  ///
+  /// In zh, this message translates to:
+  /// **'明天 {time}'**
+  String companionDrawerReminderTomorrow(String time);
+
+  /// No description provided for @companionDrawerReminderLater.
+  ///
+  /// In zh, this message translates to:
+  /// **'{date} 提醒你'**
+  String companionDrawerReminderLater(String date);
+
+  /// No description provided for @companionRawEraseAsk.
+  ///
+  /// In zh, this message translates to:
+  /// **'「{quote}」这句原话也一起删掉吗？删了就找不回来了。'**
+  String companionRawEraseAsk(String quote);
+
+  /// No description provided for @companionRawEraseAskMany.
+  ///
+  /// In zh, this message translates to:
+  /// **'「{quote}」等 {count} 句原话也一起删掉吗？删了就找不回来了。'**
+  String companionRawEraseAskMany(String quote, int count);
+
+  /// No description provided for @companionRawEraseYes.
+  ///
+  /// In zh, this message translates to:
+  /// **'删掉'**
+  String get companionRawEraseYes;
+
+  /// No description provided for @companionRawEraseNo.
+  ///
+  /// In zh, this message translates to:
+  /// **'留着'**
+  String get companionRawEraseNo;
+
+  /// No description provided for @companionRawErased.
+  ///
+  /// In zh, this message translates to:
+  /// **'好，原话也删掉了。'**
+  String get companionRawErased;
+
+  /// No description provided for @companionRawKept.
+  ///
+  /// In zh, this message translates to:
+  /// **'好，原话留着。'**
+  String get companionRawKept;
+
+  /// No description provided for @companionRawEraseGone.
+  ///
+  /// In zh, this message translates to:
+  /// **'这次来不及了，原话还留着。'**
+  String get companionRawEraseGone;
 
   /// No description provided for @automaticDiagnosticsRecover.
   ///
@@ -26718,185 +27102,377 @@ abstract class L10n {
   /// **'没连上；下次打开 App 或开始操控时再试'**
   String get phoneKeepFailed;
 
-  /// No description provided for @phoneSkillSectionTitle.
+  /// No description provided for @phoneSkillsTitle.
   ///
   /// In zh, this message translates to:
-  /// **'成功任务与技能'**
-  String get phoneSkillSectionTitle;
+  /// **'手机技能'**
+  String get phoneSkillsTitle;
 
-  /// No description provided for @phoneSkillAskAfterSuccess.
+  /// No description provided for @phoneSkillsSummaryNone.
   ///
   /// In zh, this message translates to:
-  /// **'任务成功后询问是否存成技能'**
-  String get phoneSkillAskAfterSuccess;
+  /// **'做过的事会在这里变成技能'**
+  String get phoneSkillsSummaryNone;
 
-  /// No description provided for @phoneSkillAskAfterSuccessHint.
+  /// No description provided for @phoneSkillsSummary.
   ///
   /// In zh, this message translates to:
-  /// **'默认关闭。此页可见时，新完成的任务会询问一次；也可随时手动选择。'**
-  String get phoneSkillAskAfterSuccessHint;
+  /// **'已学会 {count} 项'**
+  String phoneSkillsSummary(int count);
 
-  /// No description provided for @phoneSkillTask.
+  /// No description provided for @phoneSkillsSummaryDrafts.
   ///
   /// In zh, this message translates to:
-  /// **'任务 {taskId} · {steps} 步'**
-  String phoneSkillTask(int taskId, int steps);
+  /// **'已学会 {count} 项 · {drafts} 份待确认'**
+  String phoneSkillsSummaryDrafts(int count, int drafts);
 
-  /// No description provided for @phoneSkillCandidateHint.
+  /// No description provided for @phoneSkillsLearn.
   ///
   /// In zh, this message translates to:
-  /// **'请先核对实际结果；工具返回成功不等于目标已经完成。'**
-  String get phoneSkillCandidateHint;
+  /// **'从做过的事里学'**
+  String get phoneSkillsLearn;
 
-  /// No description provided for @phoneSkillSaveAction.
+  /// No description provided for @phoneSkillsLearnHint.
   ///
   /// In zh, this message translates to:
-  /// **'存成技能'**
-  String get phoneSkillSaveAction;
+  /// **'手机操控办成的事会起草成技能，你收下才会用'**
+  String get phoneSkillsLearnHint;
 
-  /// No description provided for @phoneSkillConfirmGoal.
+  /// No description provided for @phoneSkillsLearnOffHint.
   ///
   /// In zh, this message translates to:
-  /// **'这次任务达到了目标吗？'**
-  String get phoneSkillConfirmGoal;
+  /// **'关着时不再起草新技能，已收下的照常用'**
+  String get phoneSkillsLearnOffHint;
 
-  /// No description provided for @phoneSkillConfirmGoalBody.
+  /// No description provided for @phoneSkillsTabMine.
   ///
   /// In zh, this message translates to:
-  /// **'请核对实际结果。确认后才会起草，保存前仍可查看和编辑。'**
-  String get phoneSkillConfirmGoalBody;
+  /// **'我的技能'**
+  String get phoneSkillsTabMine;
 
-  /// No description provided for @phoneSkillGoalDone.
+  /// No description provided for @phoneSkillsTabDrafts.
   ///
   /// In zh, this message translates to:
-  /// **'目标已完成，查看草稿'**
-  String get phoneSkillGoalDone;
+  /// **'待确认 {count}'**
+  String phoneSkillsTabDrafts(int count);
 
-  /// No description provided for @phoneSkillPrivacyHint.
+  /// No description provided for @phoneSkillsTabDraftsNone.
   ///
   /// In zh, this message translates to:
-  /// **'草稿只在本机处理。不要填写密码、密钥或验证码。本阶段自由文字会替换成参数，删除和重排步骤会保留；以最终预览为准。'**
-  String get phoneSkillPrivacyHint;
+  /// **'待确认'**
+  String get phoneSkillsTabDraftsNone;
 
-  /// No description provided for @phoneSkillGoal.
+  /// No description provided for @phoneSkillsEmpty.
   ///
   /// In zh, this message translates to:
-  /// **'目标'**
-  String get phoneSkillGoal;
+  /// **'还没有学会的技能。手机操控办成一件事后，DSH 会起草一份，等你收下。'**
+  String get phoneSkillsEmpty;
 
-  /// No description provided for @phoneSkillPrerequisites.
+  /// No description provided for @phoneSkillsDraftsEmpty.
   ///
   /// In zh, this message translates to:
-  /// **'前提（应用、版本、登录态）'**
-  String get phoneSkillPrerequisites;
+  /// **'没有要确认的草稿'**
+  String get phoneSkillsDraftsEmpty;
 
-  /// No description provided for @phoneSkillStep.
+  /// No description provided for @phoneSkillsFootnote.
   ///
   /// In zh, this message translates to:
-  /// **'原步骤 {number}'**
-  String phoneSkillStep(int number);
+  /// **'技能是给 DSH 看的做事说明：下次做同类的事，它会先读一遍再动手。用得越多，它越熟练。'**
+  String get phoneSkillsFootnote;
 
-  /// No description provided for @phoneSkillCheckpoint.
+  /// No description provided for @phoneSkillStateActive.
   ///
   /// In zh, this message translates to:
-  /// **'这一步之后应看到什么'**
-  String get phoneSkillCheckpoint;
+  /// **'常用 · 用了 {uses} 次'**
+  String phoneSkillStateActive(int uses);
 
-  /// No description provided for @phoneSkillMoveUp.
+  /// No description provided for @phoneSkillStateTrial.
   ///
   /// In zh, this message translates to:
-  /// **'上移一步'**
-  String get phoneSkillMoveUp;
+  /// **'试用中 · 还没用它办成过事'**
+  String get phoneSkillStateTrial;
 
-  /// No description provided for @phoneSkillMoveDown.
+  /// No description provided for @phoneSkillStateSuspended.
   ///
   /// In zh, this message translates to:
-  /// **'下移一步'**
-  String get phoneSkillMoveDown;
+  /// **'已停用'**
+  String get phoneSkillStateSuspended;
 
-  /// No description provided for @phoneSkillUpdatePreview.
+  /// No description provided for @phoneSkillStateSuspendedMisses.
   ///
   /// In zh, this message translates to:
-  /// **'更新脱敏预览'**
-  String get phoneSkillUpdatePreview;
+  /// **'已停用 · 最近不灵'**
+  String get phoneSkillStateSuspendedMisses;
 
-  /// No description provided for @phoneSkillPreviewTitle.
+  /// No description provided for @phoneSkillSourceWritten.
   ///
   /// In zh, this message translates to:
-  /// **'将保存的完整内容'**
-  String get phoneSkillPreviewTitle;
+  /// **'你让 DSH 写的'**
+  String get phoneSkillSourceWritten;
 
-  /// No description provided for @phoneSkillParameterizedHint.
+  /// No description provided for @phoneSkillUse.
   ///
   /// In zh, this message translates to:
-  /// **'自由文字已替换成参数；使用技能时需要补充并重新核对。'**
-  String get phoneSkillParameterizedHint;
+  /// **'使用这项技能'**
+  String get phoneSkillUse;
 
-  /// No description provided for @phoneSkillFinalConfirmation.
+  /// No description provided for @phoneSkillLearnedTitle.
   ///
   /// In zh, this message translates to:
-  /// **'我已核对当前完整预览，同意保存这一版本。'**
-  String get phoneSkillFinalConfirmation;
+  /// **'DSH 学会了一个新做法'**
+  String get phoneSkillLearnedTitle;
 
-  /// No description provided for @phoneSkillSavedBody.
+  /// No description provided for @phoneSkillUpdateTitle.
   ///
   /// In zh, this message translates to:
-  /// **'文件已写入本机技能目录。尚未核实引擎技能列表是否已刷新；可在技能页检查。'**
-  String get phoneSkillSavedBody;
+  /// **'DSH 想改进「{name}」'**
+  String phoneSkillUpdateTitle(String name);
 
-  /// No description provided for @phoneSkillWriting.
+  /// No description provided for @phoneSkillAccept.
   ///
   /// In zh, this message translates to:
-  /// **'正在写入技能'**
-  String get phoneSkillWriting;
+  /// **'收下'**
+  String get phoneSkillAccept;
 
-  /// No description provided for @phoneSkillCannotCancel.
+  /// No description provided for @phoneSkillAcceptUpdate.
   ///
   /// In zh, this message translates to:
-  /// **'写入可能已进入提交阶段，无法保证撤回。关闭只关闭此页；已经提交的文件仍会保存。'**
-  String get phoneSkillCannotCancel;
+  /// **'收下这次修改'**
+  String get phoneSkillAcceptUpdate;
 
-  /// No description provided for @phoneSkillKeepWaiting.
+  /// No description provided for @phoneSkillEditDraft.
   ///
   /// In zh, this message translates to:
-  /// **'继续查看'**
-  String get phoneSkillKeepWaiting;
+  /// **'改一改'**
+  String get phoneSkillEditDraft;
 
-  /// No description provided for @phoneSkillCheckWrite.
+  /// No description provided for @phoneSkillDiscard.
   ///
   /// In zh, this message translates to:
-  /// **'检查写入结果'**
-  String get phoneSkillCheckWrite;
+  /// **'不要'**
+  String get phoneSkillDiscard;
 
-  /// No description provided for @phoneSkillStale.
+  /// No description provided for @phoneSkillDiscarded.
   ///
   /// In zh, this message translates to:
-  /// **'这份草稿已失效。请关闭后重新选择任务。'**
-  String get phoneSkillStale;
+  /// **'没有存这份草稿'**
+  String get phoneSkillDiscarded;
 
-  /// No description provided for @phoneSkillSensitive.
+  /// No description provided for @phoneSkillAccepted.
   ///
   /// In zh, this message translates to:
-  /// **'编辑中包含敏感内容，请移除后再更新预览。'**
-  String get phoneSkillSensitive;
+  /// **'已收下「{name}」，先试用'**
+  String phoneSkillAccepted(String name);
 
-  /// No description provided for @phoneSkillInvalid.
+  /// No description provided for @phoneSkillOpenSource.
   ///
   /// In zh, this message translates to:
-  /// **'编辑内容或步骤顺序不符合限制。请减少文字，至少保留一个步骤。'**
-  String get phoneSkillInvalid;
+  /// **'看那次对话'**
+  String get phoneSkillOpenSource;
 
-  /// No description provided for @phoneSkillWriteFailed.
+  /// No description provided for @phoneSkillLegacyTitle.
   ///
   /// In zh, this message translates to:
-  /// **'未能写入。请核对本机运行环境和存储；修改并更新预览后才能再次确认保存。'**
-  String get phoneSkillWriteFailed;
+  /// **'早期存下的'**
+  String get phoneSkillLegacyTitle;
 
-  /// No description provided for @phoneSkillUnavailable.
+  /// No description provided for @phoneSkillLegacyHint.
   ///
   /// In zh, this message translates to:
-  /// **'当前无法处理技能草稿。请检查本机引擎状态后重试。'**
-  String get phoneSkillUnavailable;
+  /// **'旧版存下的模板，DSH 不会用它们，可以删掉'**
+  String get phoneSkillLegacyHint;
+
+  /// No description provided for @phoneSkillDelete.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除技能'**
+  String get phoneSkillDelete;
+
+  /// No description provided for @phoneSkillDeleteTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除「{name}」？'**
+  String phoneSkillDeleteTitle(String name);
+
+  /// No description provided for @phoneSkillDeleteBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'删了以后 DSH 不再用它做事。'**
+  String get phoneSkillDeleteBody;
+
+  /// No description provided for @phoneSkillRestore.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复上一版'**
+  String get phoneSkillRestore;
+
+  /// No description provided for @phoneSkillRestored.
+  ///
+  /// In zh, this message translates to:
+  /// **'已恢复上一版'**
+  String get phoneSkillRestored;
+
+  /// No description provided for @phoneSkillUseInChat.
+  ///
+  /// In zh, this message translates to:
+  /// **'在对话里用'**
+  String get phoneSkillUseInChat;
+
+  /// No description provided for @phoneSkillSaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存'**
+  String get phoneSkillSaved;
+
+  /// No description provided for @phoneSkillSectionEntry.
+  ///
+  /// In zh, this message translates to:
+  /// **'入口'**
+  String get phoneSkillSectionEntry;
+
+  /// No description provided for @phoneSkillSectionSteps.
+  ///
+  /// In zh, this message translates to:
+  /// **'步骤'**
+  String get phoneSkillSectionSteps;
+
+  /// No description provided for @phoneSkillSectionPitfalls.
+  ///
+  /// In zh, this message translates to:
+  /// **'容易出错的地方'**
+  String get phoneSkillSectionPitfalls;
+
+  /// No description provided for @phoneSkillSectionSuccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'怎样算办成'**
+  String get phoneSkillSectionSuccess;
+
+  /// No description provided for @phoneSkillSectionHandoff.
+  ///
+  /// In zh, this message translates to:
+  /// **'什么时候停下交给你'**
+  String get phoneSkillSectionHandoff;
+
+  /// No description provided for @phoneSkillFieldName.
+  ///
+  /// In zh, this message translates to:
+  /// **'名字'**
+  String get phoneSkillFieldName;
+
+  /// No description provided for @phoneSkillFieldDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'做什么'**
+  String get phoneSkillFieldDescription;
+
+  /// No description provided for @phoneSkillFieldWhen.
+  ///
+  /// In zh, this message translates to:
+  /// **'什么时候用'**
+  String get phoneSkillFieldWhen;
+
+  /// No description provided for @phoneSkillEditHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'具体的人名、号码、内容写成 <参数>，DSH 做事时会按这次的要求填进去。'**
+  String get phoneSkillEditHint;
+
+  /// No description provided for @phoneSkillRecent.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近几次'**
+  String get phoneSkillRecent;
+
+  /// No description provided for @phoneSkillRecentNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没用过'**
+  String get phoneSkillRecentNone;
+
+  /// No description provided for @phoneSkillRecentOk.
+  ///
+  /// In zh, this message translates to:
+  /// **'办成'**
+  String get phoneSkillRecentOk;
+
+  /// No description provided for @phoneSkillRecentMiss.
+  ///
+  /// In zh, this message translates to:
+  /// **'不灵'**
+  String get phoneSkillRecentMiss;
+
+  /// No description provided for @phoneSkillRecentVoid.
+  ///
+  /// In zh, this message translates to:
+  /// **'不算'**
+  String get phoneSkillRecentVoid;
+
+  /// No description provided for @phoneSkillRecentSeparator.
+  ///
+  /// In zh, this message translates to:
+  /// **'、'**
+  String get phoneSkillRecentSeparator;
+
+  /// No description provided for @phoneSkillErrorChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'这项技能在你改的时候变了，这次修改没有覆盖它。回去重新看看。'**
+  String get phoneSkillErrorChanged;
+
+  /// No description provided for @phoneSkillErrorInvalid.
+  ///
+  /// In zh, this message translates to:
+  /// **'有一节是空的或格式不对，每一节都写上内容再存。'**
+  String get phoneSkillErrorInvalid;
+
+  /// No description provided for @phoneSkillErrorSensitive.
+  ///
+  /// In zh, this message translates to:
+  /// **'里面有密码、验证码这类内容，去掉再存。'**
+  String get phoneSkillErrorSensitive;
+
+  /// No description provided for @phoneSkillErrorUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机技能暂时用不了，稍后再试。'**
+  String get phoneSkillErrorUnavailable;
+
+  /// No description provided for @phoneSkillPromoted.
+  ///
+  /// In zh, this message translates to:
+  /// **'「{name}」用它办成了事，转为常用'**
+  String phoneSkillPromoted(String name);
+
+  /// No description provided for @phoneSkillSuspended.
+  ///
+  /// In zh, this message translates to:
+  /// **'「{name}」最近不灵，先停用了'**
+  String phoneSkillSuspended(String name);
+
+  /// No description provided for @phoneSkillTurnOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复'**
+  String get phoneSkillTurnOn;
+
+  /// No description provided for @phoneSkillApps.
+  ///
+  /// In zh, this message translates to:
+  /// **'用在 {apps}'**
+  String phoneSkillApps(String apps);
+
+  /// No description provided for @phoneSkillUndo.
+  ///
+  /// In zh, this message translates to:
+  /// **'撤销'**
+  String get phoneSkillUndo;
+
+  /// No description provided for @searchKwPhoneSkills.
+  ///
+  /// In zh, this message translates to:
+  /// **'技能、学会、熟练、沉淀、存成技能、做法'**
+  String get searchKwPhoneSkills;
 
   /// No description provided for @phoneModeTitle.
   ///

@@ -63,6 +63,12 @@ The companion room is a separate full page with an animated Live2D character. It
 
 Tap the **Switch mode** button at the top of the chat list, then **Companion room**; if you've set a startup mode, the app opens straight into it. When the app comes with her, she swims in by herself the first time; after you remove her from the menu at the top right of the room, you can bring her back or import another asset pack (zip). Her assets stay on this phone.
 
+### Open the room with your phone's assistant (Android)
+
+In the room, open the **Her** tab, or **More** in a standalone room window. Under **Conversation**, open **System digital assistant** and tap **Choose the default assistant**. Select “DSH Go Companion” in Android Settings. Your phone's default-assistant gesture or button now opens the room and starts listening. The gesture or button depends on the phone. On the lock screen, unlock when Android prompts you. You can type if the microphone is unavailable, and you can switch back to your previous assistant from the same settings.
+
+With **Include page text on wake** enabled, any text Android makes available appears as an attachment above the composer. You can remove it or send it to the companion model with your next message. To ask the companion what is on your calendar today or tomorrow, choose **Allow calendar access** on the same settings page. Query results go to the active model. You can revoke access in Android app permissions.
+
 What you can do:
 
 - Touch her: stroke her head to pat it, and tap her face, body or tail for different reactions. Three quick pokes make her dizzy. None of this calls a model or spends tokens.
@@ -81,7 +87,9 @@ What you can do:
 - Home-screen widget: add the Companion room widget to see what she's doing and the last thing she said. Tap it to visit.
 - Her invitations: when you sit quietly with her for a while, she may now and then ask, above the input bar, whether you'd like to rest on the cushion together. Tap **Sure** and she leans back on it; tap **Not now** or just leave it, and she waits a while before asking again. She asks silently. Choose how often in **How often she speaks up** in the menu at the top right: **Now and then** by default (at most twice a day, at least 6 hours apart), **Often** or **Chatty** for more, **Quiet** for none. Mentions of your other chats count toward the same allowance.
 
-She notices that you visit and pat her, and slowly gets more familiar with you; staying away for a few days doesn't upset her. Write down things you want her to remember in **What she remembers** in the menu. You can edit or delete them anytime. In Full mode they stay on the current host; in Light mode, on this phone. She doesn't bring these up by herself yet, and can't touch your files or phone.
+She notices that you visit and pat her, and slowly gets more familiar with you; staying away for a few days doesn't upset her. Write down things you want her to remember in **What she remembers** in the menu. You can edit or delete them anytime.
+
+On Android builds with notification settings, you can let her watch individual apps. The feature starts off with an empty list. Apps appear as notifications are observed after you turn it on. Grant notification access in Android, then choose which apps she may mention and which may also contribute a recent memory. Excerpts from selected apps go to the DeepSeek model you configured for her and count toward usage. The original text stays briefly in memory. She pauses on the lock screen and, after reconnecting, can catch up only on notifications still in the shade. Reminders follow her usual hours and speaking frequency. In both Light and Full mode, a recent memory from a notification stays on this phone and shows its app and observation time. It drops out of chat seven days after observation and you can delete it on the memory page. Answers that draw on notifications and any reply drafts stay out of chat history. The phone keeps app counts, usage receipts and identifiers for avoiding repeats. To get help replying, read the whole draft and confirm it. Sending still goes through phone control’s confirmation.
 
 If this host's engine is older, she runs on the default preset and may ask to use tools. When "Something needs your confirmation" appears, tap it and handle the request in the regular chat.
 

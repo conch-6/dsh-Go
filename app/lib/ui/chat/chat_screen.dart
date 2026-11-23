@@ -116,6 +116,7 @@ import 'widgets/permission_pill.dart';
 import 'widgets/plus_panel.dart';
 import 'widgets/quote_chip.dart';
 import 'widgets/read_only_bar.dart';
+import 'widgets/phone_skill_banner.dart';
 import 'widgets/unknown_results_banner.dart';
 
 /// 聊天页:玻璃顶栏 + 消息列表 + 玻璃输入条。
@@ -774,6 +775,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     // A new message: the reply being read aloud is old news.
     ref.read(readAloudProvider.notifier).stop();
     _input.clear();
+    // An already empty field does not notify, and the saved draft still holds the attachments.
+    _saveDraft();
     ref.read(composerQuoteProvider.notifier).clear(sessionId);
 
     // One open question and nothing else waiting: the text is its answer
@@ -1034,6 +1037,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     }
     if (_drafts.isEmpty && prompt.attachments.isNotEmpty) {
       setState(() => _drafts = prompt.attachments);
+      _saveDraft();
       restored = true;
     }
     if (restored) _focus.requestFocus();
@@ -2137,6 +2141,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                       padding: const EdgeInsets.only(bottom: 8),
                                     ),
                                   ),
+                                if (sessionId != null && !readOnly)
+                                  PhoneSkillBanner(sessionId: sessionId, padding: const EdgeInsets.only(bottom: 8)),
                                 SmoothSize(
                                   duration: AppMotion.of(context, AppMotion.standard),
                                   curve: AppMotion.std,

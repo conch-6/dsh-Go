@@ -1,6 +1,7 @@
-/// One phone-owned auxiliary attempt through the current full-mode provider.
+/// One phone-owned auxiliary attempt: full-mode text, a completed Agent message,
+/// or an explicitly selected optional screen-image route.
 /// This uses the existing authenticated HTTP connection, never Session RPC,
-/// tools, mux recovery, a provider fallback, or an automatic retry.
+/// Host tool execution, mux recovery, a provider fallback, or an automatic retry.
 library;
 
 import 'dart:convert';
@@ -9,13 +10,63 @@ import 'dart:typed_data';
 import 'carrier.dart';
 import 'connection.dart';
 import 'errors.dart';
+import 'models.dart';
 import 'session_api.dart';
 
 const _path = '/dsh-go/v1/companion/auxiliary';
 const _maxInputBytes = 65536;
+
+/// Maximum UTF-8 bytes of the complete encoded Agent request body.
+const companionAgentRequestMaxBytes = _maxInputBytes;
 const _maxLineBytes = 192 * 1024;
 const _maxStreamBytes = 8 * 1024 * 1024;
 const _maxSafe = 9007199254740991;
+
+/// Exact size of the same captured envelope used by callCompanionAgent.
+/// This does not reserve a request, dispatch HTTP, or report usage.
+int companionAgentRequestBytes(
+  CompanionAuxiliaryCapability host, {
+  required String requestId,
+  required String system,
+  required List<Map<String, Object?>> messages,
+  required List<Map<String, Object?>> tools,
+  required int maxTokens,
+}) => utf8.encode(jsonEncode(_companionAgentRequestBody(
+  host,
+  requestId: requestId,
+  system: system,
+  messages: messages,
+  tools: tools,
+  maxTokens: maxTokens,
+))).length;
+
+Map<String, Object?> _companionAgentRequestBody(
+  CompanionAuxiliaryCapability host, {
+  required String requestId,
+  required String system,
+  required List<Map<String, Object?>> messages,
+  required List<Map<String, Object?>> tools,
+  required int maxTokens,
+}) {
+  // Caller-owned nested maps must not change during the HTTP await.
+  try {
+    return _map(jsonDecode(jsonEncode({
+      'v': 1,
+      'instanceId': host.instanceId,
+      'requestId': requestId,
+      'sessionId': host.sessionId,
+      'provider': host.provider,
+      'model': host.model,
+      'kind': 'agent',
+      'system': system,
+      'messages': messages,
+      'tools': tools,
+      'maxTokens': maxTokens,
+    })))!;
+  } on JsonUnsupportedObjectError {
+    throw const CompanionAuxiliaryFailure(code: 'invalid-request', terminal: 'preflight_error', notSent: true);
+  }
+}
 
 /// The actual selection and bridge generation read for one full Session.
 /// Unknown physical dispatch/raw usage does not make a callable route unsupported.
@@ -30,6 +81,7 @@ class CompanionAuxiliaryCapability {
     required this.physicalDispatch,
     required this.rawUsage,
     required this.maxPhysicalRequests,
+    this.agentSupported = false,
   }) : _owner = owner;
 
   final DshClient _owner;
@@ -44,6 +96,65 @@ class CompanionAuxiliaryCapability {
   final String? physicalDispatch;
   final String? rawUsage;
   final int? maxPhysicalRequests;
+
+  /// The Host can return complete tool calls for execution by the phone.
+  /// Older Hosts retain their text-only capability and default to false.
+  final bool agentSupported;
+}
+
+/// One explicitly selected image route. It belongs to this client and bridge,
+/// not a Session or the companion's ordinary chat model.
+class CompanionScreenCapability {
+  const CompanionScreenCapability._({
+    required DshClient owner,
+    required this.instanceId,
+    required this.selection,
+    required this.supported,
+  }) : _owner = owner;
+
+  final DshClient _owner;
+  final String instanceId;
+  final ModelSelection selection;
+  final bool supported;
+}
+
+/// A single transient JPEG produced by the qualified native screen sampler.
+/// It is never submitted through session/attachment or written to a transcript.
+class CompanionScreenImage {
+  CompanionScreenImage._(Uint8List bytes, this.width, this.height) : _bytes = Uint8List.fromList(bytes);
+
+  final Uint8List _bytes;
+  final int width;
+  final int height;
+
+  static CompanionScreenImage? fromNative(Object? raw) {
+    if (raw is! Map) return null;
+    final bytes = raw['bytes'];
+    final width = raw['width'];
+    final height = raw['height'];
+    if (raw['mime_type'] != 'image/jpeg' ||
+        bytes is! Uint8List ||
+        bytes.length < 4 ||
+        bytes.length > 512 * 512 * 4 ||
+        bytes[0] != 0xff ||
+        bytes[1] != 0xd8 ||
+        width is! int ||
+        height is! int ||
+        width < 1 ||
+        width > 512 ||
+        height < 1 ||
+        height > 512) {
+      return null;
+    }
+    return CompanionScreenImage._(bytes, width, height);
+  }
+
+  Map<String, Object?> toJson() => {
+    'mediaType': 'image/jpeg',
+    'width': width,
+    'height': height,
+    'data': base64Encode(_bytes),
+  };
 }
 
 class CompanionAuxiliaryResult {
@@ -72,6 +183,33 @@ class CompanionAuxiliaryResult {
   /// The finish usage object, with the original Host dispatch timestamp added.
   /// Runtime-normalized observations keep their own names; they are not raw.
   final Map<String, Object?> usage;
+}
+
+/// A completed Host model message, separately from its physical receipt.
+/// Failure, truncation or cancellation can retain a receipt without granting
+/// an executable message. Thinking and replay metadata never enter [text].
+class DshCompanionAgentResult extends CompanionAuxiliaryResult {
+  DshCompanionAgentResult._(CompanionAuxiliaryResult receipt, {required Map<String, Object?>? message})
+    : message = message,
+      super._(
+        text: message == null
+            ? receipt.text
+            : (message['content']! as List<Map<String, Object?>>)
+                  .where((block) => block['type'] == 'text')
+                  .map((block) => block['text'] as String)
+                  .join(''),
+        terminal: receipt.terminal,
+        complete: receipt.complete,
+        dispatched: receipt.dispatched,
+        hostDispatchAtMs: receipt.hostDispatchAtMs,
+        httpStatus: receipt.httpStatus,
+        errorCode: receipt.errorCode,
+        usage: receipt.usage,
+      );
+
+  /// Anthropic-shaped content and stopReason with the actual Host source.
+  /// This becomes non-null only after the matching successful finish settles.
+  final Map<String, Object?>? message;
 }
 
 /// An exchange failure, as distinct from a complete but invalid model answer.
@@ -120,6 +258,14 @@ extension CompanionAuxiliaryApi on DshClient {
     // an error from an existing route, not an older Host without the route.
     if (response.statusCode == 404 && (discoveryCode == null || discoveryCode == 'companion/not-found')) return null;
     if (response.statusCode != 200) {
+      if (discoveryCode is String) {
+        throw CompanionAuxiliaryFailure(
+          code: discoveryCode,
+          terminal: 'preflight_error',
+          notSent: true,
+          httpStatus: response.statusCode,
+        );
+      }
       throw DshHttpException(response.statusCode, 'Auxiliary capability request failed');
     }
     if (map == null ||
@@ -132,6 +278,11 @@ extension CompanionAuxiliaryApi on DshClient {
     }
     final supported = map['supported'] as bool;
     final detail = _map(map['capability']);
+    final agent = _map(map['agent']);
+    if (map['agent'] != null &&
+        (agent == null || agent['v'] != 1 || agent['tools'] != 'return-only' || agent['streaming'] != true)) {
+      throw const DshProtocolException('invalid companion Agent capability');
+    }
     if (supported &&
         (detail == null ||
             detail['noTools'] != true ||
@@ -152,6 +303,74 @@ extension CompanionAuxiliaryApi on DshClient {
       physicalDispatch: supported ? detail!['physicalDispatch'] as String : null,
       rawUsage: supported ? detail!['rawUsage'] as String : null,
       maxPhysicalRequests: supported ? detail!['maxPhysicalRequests'] as int? : null,
+      agentSupported: supported && agent != null,
+    );
+  }
+
+  /// No model request or image is sent during this discovery. An unsupported
+  /// adapter/model may keep the existing text observation before any handoff.
+  Future<CompanionScreenCapability?> readCompanionScreenCapability(
+    ModelSelection selection, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    if (!_id(selection.provider) ||
+        !_id(selection.model) ||
+        (selection.reasoningEffort != null && !_id(selection.reasoningEffort))) {
+      throw ArgumentError('invalid companion screen selection');
+    }
+    final transport = carrier;
+    if (transport is! DshHttpCarrier) return null;
+    final response = await transport.connection.get(
+      _path,
+      query: {
+        'kind': 'screen',
+        'provider': selection.provider,
+        'model': selection.model,
+        if (selection.reasoningEffort != null) 'reasoningEffort': selection.reasoningEffort!,
+      },
+      timeout: timeout,
+      followRedirects: false,
+      maxResponseBytes: 4096,
+    );
+    Map<String, Object?>? map;
+    if (response.contentType == 'application/json') {
+      try {
+        map = _map(jsonDecode(utf8.decode(response.body)));
+      } on FormatException {
+        throw const DshProtocolException('invalid screen capability JSON');
+      }
+    }
+    final code = _map(map?['error'])?['code'];
+    if (response.statusCode == 404 && (code == null || code == 'companion/not-found')) return null;
+    if (response.statusCode != 200) {
+      throw DshHttpException(response.statusCode, 'Screen capability request failed');
+    }
+    if (map == null ||
+        map['v'] != 1 ||
+        map['kind'] != 'screen' ||
+        map['supported'] is! bool ||
+        !_id(map['instanceId']) ||
+        map['provider'] != selection.provider ||
+        map['model'] != selection.model ||
+        map['reasoningEffort'] != selection.reasoningEffort) {
+      throw const DshProtocolException('invalid screen capability');
+    }
+    final supported = map['supported'] as bool;
+    final detail = _map(map['capability']);
+    if (supported &&
+        (detail == null ||
+            detail['noTools'] != true ||
+            detail['transientImage'] != 'jpeg-512-inline' ||
+            detail['physicalDispatch'] != 'fetch-invoked' ||
+            !const {'deepseek-messages-cumulative', 'unavailable'}.contains(detail['rawUsage']) ||
+            detail['maxPhysicalRequests'] != 1)) {
+      throw const DshProtocolException('invalid screen observation capability');
+    }
+    return CompanionScreenCapability._(
+      owner: this,
+      instanceId: map['instanceId'] as String,
+      selection: selection,
+      supported: supported,
     );
   }
 
@@ -203,98 +422,259 @@ extension CompanionAuxiliaryApi on DshClient {
       'input': input,
       'maxTokens': maxTokens,
     };
-    if (utf8.encode(jsonEncode(body)).length > _maxInputBytes) {
-      throw const CompanionAuxiliaryFailure(code: 'request-limit', terminal: 'preflight_error', notSent: true);
+    return _postAuxiliary(
+      transport,
+      body: body,
+      instanceId: host.instanceId,
+      provider: host.provider,
+      model: host.model,
+      requestId: requestId,
+      abort: abort,
+      onDispatchUncertain: onDispatchUncertain,
+      onSent: onSent,
+      onUsage: onUsage,
+      headerTimeout: headerTimeout,
+      idleTimeout: idleTimeout,
+      maxRequestBytes: _maxInputBytes,
+      path: _path,
+    );
+  }
+
+  /// One model round on the full companion Session's captured Host selection.
+  /// Tools are returned to the phone, never executed by this endpoint. Text
+  /// deltas are immediate; a message is released only after its finish receipt.
+  Future<DshCompanionAgentResult> callCompanionAgent(
+    CompanionAuxiliaryCapability host, {
+    required String requestId,
+    required String system,
+    required List<Map<String, Object?>> messages,
+    required List<Map<String, Object?>> tools,
+    required int maxTokens,
+    required DshHttpAbort abort,
+    required void Function() onDispatchUncertain,
+    required void Function() onSent,
+    required void Function(Map<String, Object?> usage) onUsage,
+    required void Function(String text) onText,
+    Duration headerTimeout = const Duration(seconds: 10),
+    Duration idleTimeout = const Duration(seconds: 100),
+  }) async {
+    final transport = carrier;
+    if (!identical(host._owner, this) || transport is! DshHttpCarrier || !host.agentSupported) {
+      throw const CompanionAuxiliaryFailure(code: 'route-unavailable', terminal: 'preflight_error', notSent: true);
     }
-    if (abort.isAborted) {
-      throw const CompanionAuxiliaryFailure(code: 'cancelled', terminal: 'cancelled', notSent: true);
+    if (!_id(requestId) ||
+        !_text(system) ||
+        !_agentMessages(messages) ||
+        !_agentTools(tools) ||
+        maxTokens < 1 ||
+        maxTokens > 4000 ||
+        headerTimeout <= Duration.zero ||
+        idleTimeout <= Duration.zero) {
+      throw const CompanionAuxiliaryFailure(code: 'invalid-request', terminal: 'preflight_error', notSent: true);
     }
-    // The durable phone write must complete before this exact HTTP handoff.
-    // Callback exceptions propagate; they must prevent the POST.
-    onDispatchUncertain();
-    final receipt = _Receipt(host, requestId, onSent);
-    DshHttpStreamResponse? response;
-    var terminal = 'incomplete';
-    try {
-      response = await transport.connection.postJsonStream(
-        _path,
-        body,
-        abort: abort,
-        headerTimeout: headerTimeout,
-        idleTimeout: idleTimeout,
-      );
-      if (response.statusCode != 200) {
-        final bytes = await _boundedBytes(response.body, 16384);
-        if (response.contentType == 'application/json') {
-          final map = _map(jsonDecode(utf8.decode(bytes)));
-          final error = _map(map?['error']);
-          final code = error?['code'];
-          // These refer to an earlier request/generation. Even a malformed
-          // response claiming false may not release that earlier reservation.
-          final uncertainId = const {
-            'companion/auxiliary-instance-changed',
-            'companion/auxiliary-request-used',
-            'companion/auxiliary-request-conflict',
-            'companion/auxiliary-request-unknown',
-          }.contains(code);
-          final notSent =
-              response.statusCode >= 400 &&
-              code is String &&
-              code.startsWith('companion/auxiliary-') &&
-              map?['dispatched'] == false &&
-              !uncertainId;
-          throw CompanionAuxiliaryFailure(
-            code: code is String ? code : 'http-error',
-            terminal: notSent ? 'preflight_error' : 'http_error',
-            notSent: notSent,
-            httpStatus: response.statusCode,
-          );
-        }
+    final body = _companionAgentRequestBody(
+      host,
+      requestId: requestId,
+      system: system,
+      messages: messages,
+      tools: tools,
+      maxTokens: maxTokens,
+    );
+    final receipt = _AgentReceipt(host.instanceId, host.provider, host.model, requestId, onSent, abort, onText);
+    final result = await _postAuxiliary(
+      transport,
+      body: body,
+      instanceId: host.instanceId,
+      provider: host.provider,
+      model: host.model,
+      requestId: requestId,
+      abort: abort,
+      onDispatchUncertain: onDispatchUncertain,
+      onSent: onSent,
+      onUsage: onUsage,
+      headerTimeout: headerTimeout,
+      idleTimeout: idleTimeout,
+      maxRequestBytes: _maxInputBytes,
+      path: _path,
+      observation: receipt,
+    );
+    // onSent/onUsage can retire the owner while the final receipt settles.
+    return DshCompanionAgentResult._(result, message: abort.isAborted ? null : receipt.message);
+  }
+
+  /// One image attempt on the captured route. Failure, cancellation or unknown
+  /// dispatch never starts another text request; the same receipt still settles.
+  Future<CompanionAuxiliaryResult> callCompanionScreen(
+    CompanionScreenCapability host, {
+    required String requestId,
+    required String system,
+    required String input,
+    required CompanionScreenImage image,
+    required int maxTokens,
+    required DshHttpAbort abort,
+    required void Function() onDispatchUncertain,
+    required void Function() onSent,
+    required void Function(Map<String, Object?> usage) onUsage,
+    Duration headerTimeout = const Duration(seconds: 10),
+    Duration idleTimeout = const Duration(seconds: 100),
+  }) async {
+    final transport = carrier;
+    if (!identical(host._owner, this) || transport is! DshHttpCarrier || !host.supported) {
+      throw const CompanionAuxiliaryFailure(code: 'route-unavailable', terminal: 'preflight_error', notSent: true);
+    }
+    if (!_id(requestId) ||
+        !_text(system) ||
+        !_text(input) ||
+        utf8.encode(system).length + utf8.encode(input).length > _maxInputBytes ||
+        maxTokens < 1 ||
+        maxTokens > 3000 ||
+        headerTimeout <= Duration.zero ||
+        idleTimeout <= Duration.zero) {
+      throw const CompanionAuxiliaryFailure(code: 'invalid-request', terminal: 'preflight_error', notSent: true);
+    }
+    final body = <String, Object?>{
+      'v': 1,
+      'instanceId': host.instanceId,
+      'requestId': requestId,
+      'kind': 'screen',
+      'provider': host.selection.provider,
+      'model': host.selection.model,
+      if (host.selection.reasoningEffort != null) 'reasoningEffort': host.selection.reasoningEffort,
+      'system': system,
+      'input': input,
+      'image': image.toJson(),
+      'maxTokens': maxTokens,
+    };
+    return _postAuxiliary(
+      transport,
+      body: body,
+      instanceId: host.instanceId,
+      provider: host.selection.provider,
+      model: host.selection.model,
+      requestId: requestId,
+      abort: abort,
+      onDispatchUncertain: onDispatchUncertain,
+      onSent: onSent,
+      onUsage: onUsage,
+      headerTimeout: headerTimeout,
+      idleTimeout: idleTimeout,
+      maxRequestBytes: 2 * 1024 * 1024,
+      path: '$_path/screen',
+    );
+  }
+}
+
+Future<CompanionAuxiliaryResult> _postAuxiliary(
+  DshHttpCarrier transport, {
+  required Map<String, Object?> body,
+  required String instanceId,
+  required String provider,
+  required String model,
+  required String requestId,
+  required DshHttpAbort abort,
+  required void Function() onDispatchUncertain,
+  required void Function() onSent,
+  required void Function(Map<String, Object?> usage) onUsage,
+  required Duration headerTimeout,
+  required Duration idleTimeout,
+  required int maxRequestBytes,
+  required String path,
+  _Receipt? observation,
+}) async {
+  if (utf8.encode(jsonEncode(body)).length > maxRequestBytes) {
+    throw const CompanionAuxiliaryFailure(code: 'request-limit', terminal: 'preflight_error', notSent: true);
+  }
+  if (abort.isAborted) {
+    throw const CompanionAuxiliaryFailure(code: 'cancelled', terminal: 'cancelled', notSent: true);
+  }
+  // The durable phone write must complete before this exact HTTP handoff.
+  // Callback exceptions propagate; they must prevent the POST.
+  onDispatchUncertain();
+  final receipt = observation ?? _Receipt(instanceId, provider, model, requestId, onSent);
+  DshHttpStreamResponse? response;
+  var terminal = 'incomplete';
+  try {
+    response = await transport.connection.postJsonStream(
+      path,
+      body,
+      abort: abort,
+      headerTimeout: headerTimeout,
+      idleTimeout: idleTimeout,
+    );
+    if (response.statusCode != 200) {
+      final bytes = await _boundedBytes(response.body, 16384);
+      if (response.contentType == 'application/json') {
+        final map = _map(jsonDecode(utf8.decode(bytes)));
+        final error = _map(map?['error']);
+        final code = error?['code'];
+        // These refer to an earlier request/generation. Even a malformed
+        // response claiming false may not release that earlier reservation.
+        final uncertainId = const {
+          'companion/auxiliary-instance-changed',
+          'companion/auxiliary-request-used',
+          'companion/auxiliary-request-conflict',
+          'companion/auxiliary-request-unknown',
+        }.contains(code);
+        final notSent =
+            response.statusCode >= 400 &&
+            code is String &&
+            (code.startsWith('companion/auxiliary-') ||
+                (response.statusCode == 413 && code == 'companion/too-large')) &&
+            map?['dispatched'] == false &&
+            !uncertainId;
         throw CompanionAuxiliaryFailure(
-          code: 'http-error',
-          terminal: 'http_error',
-          notSent: false,
+          code: code is String ? code : 'http-error',
+          terminal: notSent ? 'preflight_error' : 'http_error',
+          notSent: notSent,
           httpStatus: response.statusCode,
         );
       }
-      if (response.contentType != 'application/x-ndjson') _protocol();
-      await for (final line in _lines(response.body)) {
-        final frame = _map(jsonDecode(line));
-        if (frame == null) _protocol();
-        final result = receipt.add(frame);
-        if (result != null) return result;
-      }
       throw CompanionAuxiliaryFailure(
-        code: abort.isAborted ? 'cancelled' : 'missing-finish',
-        terminal: abort.isAborted ? 'cancelled' : 'incomplete',
+        code: 'http-error',
+        terminal: 'http_error',
         notSent: false,
+        httpStatus: response.statusCode,
       );
-    } on CompanionAuxiliaryFailure catch (error) {
-      terminal = error.terminal;
-      rethrow;
-    } on DshClosedException {
-      terminal = 'cancelled';
-      throw const CompanionAuxiliaryFailure(code: 'cancelled', terminal: 'cancelled', notSent: false);
-    } on DshException {
-      terminal = 'network_error';
-      throw const CompanionAuxiliaryFailure(code: 'transport-error', terminal: 'network_error', notSent: false);
-    } on FormatException {
-      terminal = 'incomplete';
-      throw const CompanionAuxiliaryFailure(code: 'invalid-response', terminal: 'incomplete', notSent: false);
+    }
+    if (response.contentType != 'application/x-ndjson') _protocol();
+    await for (final line in _lines(response.body)) {
+      final frame = _map(jsonDecode(line));
+      if (frame == null) _protocol();
+      final result = receipt.add(frame);
+      if (result != null) return result;
+    }
+    throw CompanionAuxiliaryFailure(
+      code: abort.isAborted ? 'cancelled' : 'missing-finish',
+      terminal: abort.isAborted ? 'cancelled' : 'incomplete',
+      notSent: false,
+    );
+  } on CompanionAuxiliaryFailure catch (error) {
+    terminal = error.terminal;
+    rethrow;
+  } on DshClosedException {
+    terminal = 'cancelled';
+    throw const CompanionAuxiliaryFailure(code: 'cancelled', terminal: 'cancelled', notSent: false);
+  } on DshException {
+    terminal = 'network_error';
+    throw const CompanionAuxiliaryFailure(code: 'transport-error', terminal: 'network_error', notSent: false);
+  } on FormatException {
+    terminal = 'incomplete';
+    throw const CompanionAuxiliaryFailure(code: 'invalid-response', terminal: 'incomplete', notSent: false);
+  } finally {
+    try {
+      await response?.cancel();
     } finally {
-      try {
-        await response?.cancel();
-      } finally {
-        onUsage(receipt.usage(terminal));
-      }
+      onUsage(receipt.usage(terminal));
     }
   }
 }
 
 class _Receipt {
-  _Receipt(this.host, this.requestId, this.onSent);
+  _Receipt(this.instanceId, this.provider, this.model, this.requestId, this.onSent);
 
-  final CompanionAuxiliaryCapability host;
+  final String instanceId;
+  final String provider;
+  final String model;
   final String requestId;
   final void Function() onSent;
   final _textOutput = StringBuffer();
@@ -309,10 +689,7 @@ class _Receipt {
     if (frame['requestId'] != requestId || frame['type'] is! String) _protocol();
     final type = frame['type'];
     if (type == 'accepted') {
-      if (_accepted ||
-          frame['instanceId'] != host.instanceId ||
-          frame['provider'] != host.provider ||
-          frame['model'] != host.model) {
+      if (_accepted || frame['instanceId'] != instanceId || frame['provider'] != provider || frame['model'] != model) {
         _protocol();
       }
       _accepted = true;
@@ -367,8 +744,8 @@ class _Receipt {
           !frame.containsKey('httpStatus') ||
           (status != null && !_status(status)) ||
           value == null ||
-          value['provider'] != host.provider ||
-          value['model'] != host.model ||
+          value['provider'] != provider ||
+          value['model'] != model ||
           value['terminal'] != terminal ||
           value['complete'] != complete ||
           value['http_status'] != status ||
@@ -404,8 +781,8 @@ class _Receipt {
     if (finished != null) return finished;
     int? finalCount(String key) => _count(_finalUsage?[key]) ? _finalUsage![key] as int : null;
     return {
-      'provider': host.provider,
-      'model': host.model,
+      'provider': provider,
+      'model': model,
       'start_usage': _startUsage,
       'final_usage': _finalUsage,
       'start_event': _startUsage == null ? null : 'message_start',
@@ -427,6 +804,131 @@ class _Receipt {
       },
     };
   }
+}
+
+class _AgentReceipt extends _Receipt {
+  _AgentReceipt(super.instanceId, super.provider, super.model, super.requestId, super.onSent, this.abort, this.onText);
+
+  final DshHttpAbort abort;
+  final void Function(String) onText;
+  Map<String, Object?>? message, _pendingMessage;
+  var _messageSeen = false;
+  var _invalidMessage = false;
+
+  @override
+  CompanionAuxiliaryResult? add(Map<String, Object?> frame) {
+    // Validate the same accepted/request/route identity and settle usage first.
+    final result = super.add(frame);
+    if (frame['type'] == 'text') {
+      if (!abort.isAborted) onText(frame['text'] as String);
+    } else if (frame['type'] == 'message') {
+      if (_messageSeen) _invalidMessage = true;
+      _messageSeen = true;
+      _pendingMessage = _agentMessage(frame['message'], provider, model);
+      if (_pendingMessage == null) _invalidMessage = true;
+      // Keep reading the actual final usage even when the message is invalid.
+    }
+    if (result != null && result.complete && const {'complete', 'tool-calls'}.contains(result.terminal)) {
+      final candidate = _pendingMessage;
+      if (_invalidMessage ||
+          candidate == null ||
+          result.errorCode != null ||
+          result.dispatched == false ||
+          (result.httpStatus != null && (result.httpStatus! < 200 || result.httpStatus! >= 300))) {
+        _protocol();
+      }
+      final content = candidate['content']! as List<Map<String, Object?>>;
+      final hasCalls = content.any((block) => block['type'] == 'tool_use');
+      if ((result.terminal == 'tool-calls') != hasCalls ||
+          candidate['stopReason'] != (hasCalls ? 'tool_use' : 'end_turn')) {
+        _protocol();
+      }
+      message = candidate;
+    }
+    return result;
+  }
+}
+
+bool _agentSource(Object? value) {
+  final source = _map(value);
+  return source != null && source['kind'] == 'model' && _id(source['provider']) && _id(source['model']);
+}
+
+bool _agentBlocks(Object? value, String role) {
+  if (value is! List) return false;
+  final ids = <String>{};
+  for (final raw in value) {
+    final block = _map(raw);
+    if (block == null) return false;
+    switch (block['type']) {
+      case 'text':
+        if (block['text'] is! String) return false;
+      case 'thinking':
+        if (role != 'assistant' || block['thinking'] is! String) return false;
+      case 'tool_use':
+        if (role != 'assistant' ||
+            !_id(block['id']) ||
+            !_id(block['name']) ||
+            _map(block['input']) == null ||
+            !ids.add(block['id'] as String)) {
+          return false;
+        }
+      case 'tool_result':
+        final content = block['content'];
+        if (role != 'user' ||
+            !_id(block['tool_use_id']) ||
+            (block.containsKey('is_error') && block['is_error'] is! bool) ||
+            !(content is String ||
+                content is List &&
+                    content.every((part) => _map(part)?['type'] == 'text' && _map(part)?['text'] is String))) {
+          return false;
+        }
+      default:
+        return false;
+    }
+  }
+  return true;
+}
+
+bool _agentMessages(List<Map<String, Object?>> messages) =>
+    messages.isNotEmpty &&
+    messages.every((message) {
+      final role = message['role'];
+      if (role is! String || !const {'user', 'assistant'}.contains(role)) return false;
+      final content = message['content'];
+      if (content is! String && !_agentBlocks(content, role)) return false;
+      return !message.containsKey('source') || role == 'assistant' && _agentSource(message['source']);
+    });
+
+bool _agentTools(List<Map<String, Object?>> tools) {
+  final names = <String>{};
+  return tools.every(
+    (tool) =>
+        _id(tool['name']) &&
+        names.add(tool['name'] as String) &&
+        _map(tool['input_schema']) != null &&
+        (!tool.containsKey('description') || tool['description'] is String),
+  );
+}
+
+Map<String, Object?>? _agentMessage(Object? value, String provider, String model) {
+  final message = _map(value);
+  if (message == null ||
+      !_agentSource(message['source']) ||
+      !const {'end_turn', 'tool_use'}.contains(message['stopReason']) ||
+      !_agentBlocks(message['content'], 'assistant') ||
+      utf8.encode(jsonEncode(message)).length > _maxInputBytes) {
+    return null;
+  }
+  final source = _map(message['source'])!;
+  if (source['provider'] != provider || source['model'] != model) return null;
+  return Map<String, Object?>.unmodifiable({
+    'content': List<Map<String, Object?>>.unmodifiable([
+      for (final block in message['content'] as List) Map<String, Object?>.unmodifiable(_map(block)!),
+    ]),
+    'stopReason': message['stopReason'],
+    'source': Map<String, Object?>.unmodifiable(source),
+  });
 }
 
 Future<Uint8List> _boundedBytes(Stream<Uint8List> body, int limit) async {

@@ -52,7 +52,7 @@ extension CompanionAgentAmbient on CompanionAgent {
     final originalUserTime = visit.lastUserInteractionAt;
     final owner = await visit.openMemory();
     final revision = owner.store.archive['control_revision']! as int;
-    bool current() =>
+    bool baseCurrent() =>
         !_disposed &&
         generation == _asideGeneration &&
         visitCurrent() &&
@@ -63,16 +63,16 @@ extension CompanionAgentAmbient on CompanionAgent {
         visit.lastUserInteractionAt == originalUserTime &&
         owner.store.archive['control_revision'] == revision &&
         _run?.running != true;
-    if (!current()) return false;
+    if (!baseCurrent()) return false;
     final selected = await owner.selectForAgent(
       context['text'] as String? ?? '',
       characterId: role,
       offsetMinutes: visit.clock().offsetMinutes,
-      isCurrent: current,
+      isCurrent: baseCurrent,
     );
-    if (!current()) return false;
+    if (!baseCurrent()) return false;
     await visit.ref.read(companionPersonaProvider.notifier).ready;
-    if (!current()) return false;
+    if (!baseCurrent()) return false;
     final persona = visit.ref.read(companionPersonaProvider);
     final system =
         '${companionLightSystem(
@@ -105,12 +105,21 @@ extension CompanionAgentAmbient on CompanionAgent {
       context: snapshot,
       memory: selected,
     );
-    final key = _apiKey().trim();
-    if (key.isEmpty || !current()) return false;
+    final CompanionMemoryTransport? route;
+    try {
+      route = await _modelTransport(isCurrent: baseCurrent);
+    } on Object {
+      return false;
+    }
+    if (route is! CompanionAgentModelTransport || !route.agentConfigured) return false;
+    // Closures below keep this promoted type; the try-assigned local does not.
+    final agentRoute = route;
+    bool current() => baseCurrent() && agentRoute.current;
+    if (!current()) return false;
     final id = owner.store.reserveRequest(
       category: 'chat',
-      provider: 'deepseek',
-      model: companionLightModel,
+      provider: route.provider,
+      model: route.model,
       inputTokens: estimateTokens(
         jsonEncode(companionAgentRequestBody(system: system, messages: messages, maxTokens: 800)),
       ).ceil(),
@@ -129,32 +138,39 @@ extension CompanionAgentAmbient on CompanionAgent {
         request: () async {
           if (requested || !current()) return null;
           requested = true;
-          final client = request.client = _client();
-          final message = await request.read(
-            client: client,
-            apiKey: key,
+          if (!await isCurrentObservation() || !current()) return null;
+          final message = await agentRoute.readAgent(
+            request: request,
             system: system,
             messages: messages,
             tools: const [],
             isCurrent: current,
             onText: (text) => request.text += text,
+            onDispatchUncertain: () {
+              owner.store.markRequestUncertain(id);
+              request.uncertain = true;
+              recordScreenObservationCost(owner.store, id);
+            },
             onSent: () {
-              if (!current()) throw const DshClosedException('Screen observation changed');
+              // Keep a late Host dispatch on its original physical receipt.
               owner.store.markRequestSent(id);
               request.sent = true;
               recordScreenObservationCost(owner.store, id);
             },
             onUsage: (usage) {
-              owner.store.recordUsage(id, usage.toJson());
-              owner.store.finishRequest(id, terminal: usage.terminal);
+              owner.store.recordUsage(id, usage);
+              owner.store.finishRequest(id, terminal: usage['terminal']! as String);
               request.finalized = true;
               owner.changed();
-              if (!_disposed) _onUsage?.call(usage);
+              if (!_disposed) _onUsage?.call(CompanionUsage.fromReceipt(usage));
             },
             onUsageSettled: (usage, {required partial}) {
               if (!_disposed) _onUsageSettled?.call(usage, partial: partial);
             },
           );
+          if (message != null && route is CompanionHostMemoryTransport && current()) {
+            request.text = message.text;
+          }
           return message == null ? null : (message: message, requestId: id);
         },
       );
@@ -174,7 +190,11 @@ extension CompanionAgentAmbient on CompanionAgent {
         await request.drain();
       } finally {
         try {
-          if (!request.finalized) owner.store.finishRequest(id, terminal: request.sent ? 'cancelled' : 'not_sent');
+          if (request.notSentProven && !request.sent) {
+            owner.store.finishRequest(id, terminal: 'not_sent');
+          } else if (!request.finalized) {
+            owner.store.finishRequest(id, terminal: request.sent || request.uncertain ? 'cancelled' : 'not_sent');
+          }
           recordScreenObservationCost(owner.store, id);
         } finally {
           request.settled.complete();

@@ -200,7 +200,7 @@ void main() {
       final beforeArchive = store.archive;
       restoreOldMemorySchema(database, 6);
       reopen();
-      expect(database.select('PRAGMA user_version').single['user_version'], 16);
+      expect(database.select('PRAGMA user_version').single['user_version'], 17);
       expect(store.requests(), beforeRequests);
       expect(spends(), beforeSpends);
       expect(store.cards(), [
@@ -238,7 +238,7 @@ void main() {
       database.execute('DROP TRIGGER fail_line_cleanup');
       database.close();
       open();
-      expect(database.select('PRAGMA user_version').single['user_version'], 16);
+      expect(database.select('PRAGMA user_version').single['user_version'], 17);
     });
   });
 
@@ -259,7 +259,7 @@ void main() {
       final requests = store.requests();
       restoreOldMemorySchema(database, 5);
       reopen();
-      expect(database.select('PRAGMA user_version').single['user_version'], 16);
+      expect(database.select('PRAGMA user_version').single['user_version'], 17);
       expect(store.archive, before);
       expect(store.cards(), [
         for (final card in cards) {...card, 'cleanup_history_complete': 0},
@@ -719,6 +719,42 @@ void main() {
       store.editMessage(id: 'repeated', expectedSourceRev: 1, text: '那本册子的校对还没结束。');
       expect(store.nextFollowup(nowMs: now), isNull);
       expect(store.followups().single['support_quote'], isNull);
+
+      // Reuse the real D4 extraction path: a second current card can make an
+      // already reserved completion ambiguous without changing its identities.
+      submit('completed-once-more', '那本册子的校对结束了。');
+      final reservedOpportunity = store.nextFollowup(nowMs: now)!;
+      expect(reservedOpportunity['support_message_id'], 'completed-once-more');
+      final reservation = reserve(opportunity: reservedOpportunity)!;
+      expect(store.isFollowupCurrent(reservedOpportunity, nowMs: now), isTrue);
+      final second = invite(
+        id: 'second-book-invitation',
+        raw: '册子校对的事，等我说结束再问我想不想聊。',
+        text: '我在校对册子',
+        keyword: '册子',
+        wording: '等我说结束再问我想不想聊',
+        date: null,
+        precision: 'unspecified',
+      );
+      expect(second['id'], isNot(reservedOpportunity['card_id']));
+      expect(store.archive['control_revision'], reservedOpportunity['control_revision']);
+      expect(
+        store.cards().singleWhere((card) => card['id'] == reservedOpportunity['card_id'])['row_rev'],
+        reservedOpportunity['card_rev'],
+      );
+      expect(
+        store.isFollowupCurrent(reservedOpportunity, nowMs: now),
+        isFalse,
+        reason: 'currentness must reject ambiguity before any next-followup poll',
+      );
+      expect(store.nextFollowup(nowMs: now), isNull);
+      expect(store.isFollowupCurrent(reservedOpportunity, nowMs: now), isFalse);
+      store.settleInitiative(reservation, outcome: 'released');
+      expect(spends().single['state'], 'released');
+      expect(store.initiativeRecord()!['signalAtMs'], isEmpty);
+      expect(store.nextFollowup(nowMs: now), isNull);
+      expect(store.followups(), hasLength(2));
+      expect(store.followups().every((row) => row['state'] == 'waiting'), isTrue);
     });
 
     test('D5 retains the missing-name restriction for generation without inventing a local line', () {

@@ -108,10 +108,24 @@ internal object CompanionConversationNotification {
         lines.any { it.id == id }
     }
 
-    fun build(context: Context): Notification = locked(context) {
+    /** A plain resident notification for when the conversation one can't be built. */
+    fun fallback(context: Context): Notification {
+        val builder = if (Build.VERSION.SDK_INT >= 26) {
+            context.getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(NotificationChannel(CHANNEL, "Companion", NotificationManager.IMPORTANCE_LOW))
+            Notification.Builder(context, CHANNEL)
+        } else {
+            @Suppress("DEPRECATION") Notification.Builder(context)
+        }
+        return builder.setSmallIcon(R.drawable.ic_stat_dsh).setContentTitle(name).setContentText("Companion is here")
+            .setOngoing(true).build()
+    }
+
+
+    fun startForeground(context: Context, start: (Notification) -> Unit) = locked(context) {
         val epoch = CompanionAlwaysOnState.read(context).epoch
         readDisplay(context, epoch)
-        render(context, epoch = epoch)
+        start(render(context, epoch = epoch))
     }
 
     @Suppress("DEPRECATION")
@@ -138,7 +152,7 @@ internal object CompanionConversationNotification {
         val action = Notification.Action.Builder(android.R.drawable.ic_menu_send, "Reply", reply)
             .addRemoteInput(RemoteInput.Builder(CompanionAlwaysOnService.INPUT).setLabel("Reply").build()).build()
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, channel) else Notification.Builder(context)
-        builder.setSmallIcon(context.applicationInfo.icon)
+        builder.setSmallIcon(R.drawable.ic_stat_dsh)
             .setContentTitle(name).setContentText(lines.lastOrNull()?.text ?: "Always here")
             .setContentIntent(open).setOngoing(resident).setAutoCancel(!resident).setOnlyAlertOnce(quiet)
             .setCategory(if (reminder) Notification.CATEGORY_REMINDER else Notification.CATEGORY_MESSAGE)
@@ -167,7 +181,7 @@ internal object CompanionConversationNotification {
             builder.setContentText("Companion is here")
         }
         val neutral = (if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, channel) else Notification.Builder(context))
-            .setSmallIcon(context.applicationInfo.icon).setContentTitle(name).setContentText("Companion is here").build()
+            .setSmallIcon(R.drawable.ic_stat_dsh).setContentTitle(name).setContentText("Companion is here").build()
         builder.setPublicVersion(neutral)
         builder.setExtras(Bundle().apply {
             putString("companionMessageId", lines.lastOrNull()?.id)

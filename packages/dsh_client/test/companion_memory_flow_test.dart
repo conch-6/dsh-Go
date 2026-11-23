@@ -2090,7 +2090,7 @@ void main() {
       final originalArchive = store.archive;
       restoreOldMemorySchema(database, 2);
       reopen();
-      expect(database.select('PRAGMA user_version').single['user_version'], 16);
+      expect(database.select('PRAGMA user_version').single['user_version'], 17);
       expect(store.archive, originalArchive);
       expect(store.cards().single, {...card, 'cleanup_history_complete': 0});
       expect(store.messages().single['text'], '我学长笛');
@@ -2207,7 +2207,7 @@ void main() {
         throwsA(isA<DshRemoteException>()),
       );
       expect(store.requests(), isEmpty);
-      expect(database.select('PRAGMA user_version').single['user_version'], 16);
+      expect(database.select('PRAGMA user_version').single['user_version'], 17);
     });
 
     test('v3 upgrade preserves sources and existing once-only local receipts', () {
@@ -2691,6 +2691,11 @@ void main() {
       expect(receipt['input_uncached'], isNull);
       expect(receipt['output_tokens'], isNull);
       expect(receipt['estimated_cny'], isNull);
+      expect(store.localRequestCost(request), {
+        for (final key in ['sent_at_ms', 'uncertain_at_ms', 'state', 'reserved_at_ms', 'estimated_cny', 'reserved_cny'])
+          key: receipt[key],
+      });
+      expect(store.localRequestCost('missing'), isNull);
     });
 
     test('frozen final SSE usage survives storage unchanged, even without stop, and a replay is idempotent', () {

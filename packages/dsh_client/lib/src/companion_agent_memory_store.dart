@@ -1,5 +1,24 @@
 part of 'companion_memory_store.dart';
 
+class CompanionPendingRawErase {
+  const CompanionPendingRawErase({
+    required this.id,
+    required this.previewText,
+    required this.rawMessageCount,
+    required this.expiresAtUtcMs,
+  });
+  final String id, previewText;
+  final int rawMessageCount;
+  final int? expiresAtUtcMs;
+}
+
+class CompanionRawEraseResult {
+  CompanionRawEraseResult({required this.id, required this.state, Iterable<String> changedCardIds = const []})
+    : changedCardIds = List.unmodifiable(changedCardIds.toList()..sort());
+  final String id, state;
+  final List<String> changedCardIds;
+}
+
 /// A receipt contains identities and effects, never a second copy of a reply.
 class CompanionAgentMemoryResult {
   const CompanionAgentMemoryResult({
@@ -17,17 +36,22 @@ class CompanionAgentMemoryResult {
     this.taskId,
     this.taskRev,
     this.recallSelection,
+    this.recalledControl,
     this.relatedCards,
+    this.pendingRawEraseId,
+    this.rawEraseState,
   });
 
   final String turnId, callId, state;
   final String? code, targetId, taskId;
+  final String? pendingRawEraseId, rawEraseState;
   final int itemNo, beforeControlRevision, controlRevision;
   final int? taskRev;
   final bool replayed;
   final List<String> changedCardIds;
   final Map<String, int> currentCardRevisions;
   final MemorySelection? recallSelection;
+  final MemoryRow? recalledControl;
   final List<MemoryRow>? relatedCards;
   bool get applied => state == 'applied';
 }
@@ -38,39 +62,355 @@ class _AgentMemoryRejected implements Exception {
 }
 
 class _AgentEntryWrite {
-  const _AgentEntryWrite({
+  _AgentEntryWrite({
     required this.id,
-    required this.previous,
+    required MemoryRow? previous,
     required this.collection,
     required this.characterId,
     required this.text,
     required this.kind,
-    required this.keywords,
-    required this.proofGroups,
-    required this.cleanupSources,
-    required this.references,
-    required this.aliases,
+    required List<String> keywords,
+    required List<List<MemoryRow>> proofGroups,
+    required List<MemoryRow> cleanupSources,
+    required Map<String, int> references,
+    required List<String> aliases,
     required this.basis,
     required this.sourceAt,
     required this.cleanupComplete,
     this.localDay,
     this.zoneId,
-    this.eventTime,
+    MemoryRow? eventTime,
     this.controlledTopic,
-  });
+  }) : previous = previous == null ? null : Map.unmodifiable(previous),
+       keywords = List.unmodifiable(keywords),
+       proofGroups = List.unmodifiable([
+         for (final group in proofGroups)
+           List<MemoryRow>.unmodifiable([for (final proof in group) Map<String, Object?>.unmodifiable(proof)]),
+       ]),
+       cleanupSources = List.unmodifiable([for (final source in cleanupSources) Map<String, Object?>.unmodifiable(source)]),
+       references = Map.unmodifiable(references),
+       aliases = List.unmodifiable(aliases),
+       eventTime = eventTime == null ? null : Map.unmodifiable(_orderedJson(eventTime) as MemoryRow);
   final String id, collection, text, kind;
   final String? characterId, localDay, zoneId, controlledTopic;
-  final MemoryRow? eventTime;
-  final Row? previous;
+  final MemoryRow? eventTime, previous;
   final List<String> keywords, aliases;
   final List<List<MemoryRow>> proofGroups;
   final List<MemoryRow> cleanupSources;
   final Map<String, int> references;
   final int basis, sourceAt;
   final bool cleanupComplete;
+
+  _AgentEntryWrite withReferences(Map<String, int> values) => _AgentEntryWrite(
+    id: id, previous: previous, collection: collection, characterId: characterId,
+    text: text, kind: kind, keywords: keywords, proofGroups: proofGroups, cleanupSources: cleanupSources,
+    references: values, aliases: aliases, basis: basis, sourceAt: sourceAt,
+    cleanupComplete: cleanupComplete, localDay: localDay, zoneId: zoneId, eventTime: eventTime,
+    controlledTopic: controlledTopic,
+  );
 }
 
+class _AgentControlPlan {
+  _AgentControlPlan({
+    required this.affected, required this.deleted, required this.writes, required this.target,
+    required this.rawMessages, required this.erasedSources, required this.withdrawnGroups,
+    required this.refreshValues, required this.seeds,
+  });
+  final Set<String> affected, deleted, erasedSources;
+  final List<_AgentEntryWrite> writes;
+  final String target;
+  final List<MemoryRow> rawMessages, seeds;
+  final Map<String, Set<String>> withdrawnGroups;
+  final Map<String, MemoryRow> refreshValues;
+}
+
+class _RawErasePlan {
+  _RawErasePlan(this.raw, _AgentControlPlan ordinary) {
+    final previous = {for (final write in ordinary.writes) write.id: _entrySignature(write)};
+    final changing = {
+      ...raw.refreshValues.keys,
+      for (final write in raw.writes)
+        if (_entrySignature(write) != previous[write.id]) write.id,
+    };
+    var expanded = true;
+    while (expanded) {
+      expanded = false;
+      for (final write in raw.writes) {
+        if (write.references.keys.any(changing.contains) && changing.add(write.id)) expanded = true;
+      }
+    }
+    writes = List.unmodifiable(raw.writes.where((write) => changing.contains(write.id)));
+    changed = Set.unmodifiable(changing);
+  }
+  final _AgentControlPlan raw;
+  late final List<_AgentEntryWrite> writes;
+  late final Set<String> changed;
+}
+
+class _PendingRawErase {
+  _PendingRawErase({
+    required this.id, required this.turnId, required this.callId, required this.archiveId,
+    required this.messageId, required this.sourceRev, required this.characterId,
+    required this.controlRevision, required this.fingerprint, required this.plan,
+  });
+  final String id, turnId, callId, archiveId, messageId, fingerprint;
+  final String? characterId;
+  final int sourceRev, controlRevision;
+  _RawErasePlan? plan;
+  String state = 'deferred';
+  int? expiresAtUtcMs;
+
+  void finish(String value) {
+    state = value;
+    plan = null;
+  }
+}
+
+List<String> _rawEraseRows(Iterable<MemoryRow> rows) => rows.map(_canonicalJson).toList()..sort();
+
+String _entrySignature(_AgentEntryWrite write) => _canonicalJson({
+  'text': write.text, 'kind': write.kind, 'keywords': write.keywords,
+  // Group UUIDs are allocation identities, not proof meaning. Keep duplicate
+  // complete groups as a multiset and every member within its original AND.
+  'proof': [for (final group in write.proofGroups)
+    _canonicalJson(_rawEraseRows(group.map((proof) => {
+      'message_id': proof['message_id'], 'source_rev': proof['source_rev'], 'quote': proof['quote'],
+    }))) ]..sort(),
+  'cleanup': _rawEraseRows(write.cleanupSources), 'references': write.references,
+  'aliases': [...write.aliases]..sort(), 'basis': write.basis, 'sourceAt': write.sourceAt,
+  'cleanupComplete': write.cleanupComplete, 'localDay': write.localDay, 'zoneId': write.zoneId,
+  'eventTime': write.eventTime, 'controlledTopic': write.controlledTopic,
+});
+
 extension CompanionAgentMemoryStore on CompanionMemoryStore {
+  /// This is a projection, not an offer or permission to erase. In particular,
+  /// reading it during build never starts a deadline or notifies an observer.
+  CompanionPendingRawErase? pendingRawErase({required String? characterId}) {
+    final pending = _pendingRawErase;
+    if (pending == null) return null;
+    final state = _rawEraseState(pending, characterId);
+    if (state != 'deferred' && state != 'awaiting') {
+      pending.finish(state);
+      return null;
+    }
+    final messages = [...pending.plan!.raw.rawMessages]
+      ..sort((left, right) => (left['first_seq'] as int).compareTo(right['first_seq'] as int));
+    return CompanionPendingRawErase(
+      id: pending.id,
+      previewText: messages.map((message) => message['text'] as String).join('\n\n'),
+      rawMessageCount: messages.length,
+      expiresAtUtcMs: pending.expiresAtUtcMs,
+    );
+  }
+
+  CompanionRawEraseResult markRawEraseOffered(String id, {required String? characterId}) {
+    final pending = _pendingRawErase;
+    if (pending == null || pending.id != id) return CompanionRawEraseResult(id: id, state: 'not_found');
+    final state = _rawEraseState(pending, characterId);
+    if (state == 'deferred') {
+      pending.state = 'awaiting';
+      pending.expiresAtUtcMs = _checkedNow() + const Duration(minutes: 5).inMilliseconds;
+    } else if (state != 'awaiting') {
+      pending.finish(state);
+    }
+    return CompanionRawEraseResult(id: id, state: pending.state);
+  }
+
+  CompanionRawEraseResult declineRawErase(String id, {required String? characterId}) {
+    final pending = _pendingRawErase;
+    if (pending == null || pending.id != id) return CompanionRawEraseResult(id: id, state: 'not_found');
+    final state = _rawEraseState(pending, characterId);
+    pending.finish(state == 'deferred' || state == 'awaiting' ? 'declined' : state);
+    return CompanionRawEraseResult(id: id, state: pending.state);
+  }
+
+  bool invalidateRawErase() {
+    final pending = _pendingRawErase;
+    if (pending == null || (pending.state != 'deferred' && pending.state != 'awaiting')) return false;
+    pending.finish('invalidated');
+    return true;
+  }
+
+  CompanionRawEraseResult confirmRawErase(String id, {required String? characterId}) {
+    final pending = _pendingRawErase;
+    if (pending == null || pending.id != id) return CompanionRawEraseResult(id: id, state: 'not_found');
+    if (pending.state != 'deferred' && pending.state != 'awaiting') {
+      return CompanionRawEraseResult(id: id, state: pending.state);
+    }
+    final result = _transaction(() {
+      // Every database fence, including newly related members, is read under
+      // this same write lock. The original model turn may already be closed.
+      final state = _rawEraseState(pending, characterId);
+      if (state != 'awaiting') return CompanionRawEraseResult(id: id, state: state);
+      final plan = pending.plan!;
+      final next = <String, int>{
+        for (final row in _db.select(
+          'SELECT id,row_rev FROM memory_cards WHERE id IN (SELECT value FROM json_each(?))',
+          [jsonEncode(plan.changed.toList())],
+        )) row['id'] as String: (row['row_rev'] as int) + 1,
+      };
+      final writes = [
+        for (final write in plan.writes)
+          write.withReferences({for (final edge in write.references.entries) edge.key: next[edge.key] ?? edge.value}),
+      ];
+      for (final write in writes) {
+        for (final edge in write.references.entries) {
+          final parent = _db.select('SELECT row_rev FROM memory_cards WHERE id=?', [edge.key]);
+          if (parent.isEmpty || edge.value != (next[edge.key] ?? parent.single['row_rev'])) {
+            return CompanionRawEraseResult(id: id, state: 'invalidated');
+          }
+        }
+      }
+      try {
+        _agentValidateReferencePlan({for (final write in writes) write.id: write.references}, plan.raw.deleted);
+      } on _AgentMemoryRejected {
+        return CompanionRawEraseResult(id: id, state: 'invalidated');
+      }
+      // The first forget has already written ordinary clauses. Only frozen
+      // raw-dependent changes run now, using actual post-forget revisions.
+      for (final entry in plan.raw.refreshValues.entries) {
+        for (final group in plan.raw.withdrawnGroups[entry.key] ?? const <String>{}) {
+          _withdrawSourceGroup(entry.key, group);
+        }
+        _db.execute(
+          'DELETE FROM memory_card_cleanup_sources WHERE card_id=? AND message_id IN (SELECT value FROM json_each(?))',
+          [entry.key, jsonEncode(plan.raw.erasedSources.toList())],
+        );
+        _applySourceRefresh(entry.key, entry.value);
+      }
+      _agentApplyEntries(writes);
+      for (final write in writes) {
+        _closeAgentFollowups(write.id, 'revised');
+      }
+      // All surviving raw proof/cleanup owners were in the validated plan.
+      // Their complete groups have been withdrawn or replaced before erasure.
+      for (final message in plan.raw.rawMessages) {
+        _eraseMessage(message);
+      }
+      _bumpMemory();
+      _bumpControl(); // The first forget set its cutoff; a click is not new chat.
+      return CompanionRawEraseResult(id: id, state: 'confirmed', changedCardIds: plan.changed);
+    });
+    // An exception, including COMMIT failure, leaves the live plan unconsumed.
+    if (result.state != 'deferred' && result.state != 'awaiting') pending.finish(result.state);
+    return result;
+  }
+
+  String _rawEraseState(_PendingRawErase pending, String? characterId) {
+    if (pending.state != 'deferred' && pending.state != 'awaiting') return pending.state;
+    if (pending.characterId != characterId) return 'invalidated';
+    if (pending.expiresAtUtcMs != null && _checkedNow() >= pending.expiresAtUtcMs!) return 'expired';
+    final meta = archive;
+    if (meta['id'] != pending.archiveId || meta['control_revision'] != pending.controlRevision) return 'invalidated';
+    final owner = _db.select('SELECT * FROM memory_messages WHERE id=?', [pending.messageId]);
+    if (owner.isEmpty || owner.single['source_rev'] != pending.sourceRev ||
+        owner.single['character_id'] != pending.characterId || owner.single['role'] != 'user' ||
+        owner.single['scope'] != 'real') {
+      return 'invalidated';
+    }
+    return _rawEraseFingerprint(pending.plan!, characterId, pending.messageId) == pending.fingerprint
+        ? pending.state : 'invalidated';
+  }
+
+  String _rawEraseFingerprint(_RawErasePlan plan, String? characterId, String ownerId) {
+    final rawIds = jsonEncode(plan.raw.erasedSources.toList()..sort());
+    final domain = _memoryDomainCards(characterId);
+    final affected = {...plan.raw.affected};
+    // Deleted roots remain literal matching seeds, never new raw selectors.
+    // Both old and surviving rewritten bodies participate; duplicate IDs do
+    // not collapse proof groups or grant a card. This is the literal-only plan.
+    final snapshot = [...domain, ...plan.raw.seeds];
+    for (final seed in plan.raw.seeds) {
+      final role = seed['character_id'];
+      affected.addAll(_planFactRelations(
+        {seed['id'] as String},
+        domainSnapshot: role == null ? snapshot : snapshot.where((card) => card['character_id'] == role).toList(),
+      ).cards);
+    }
+    for (final row in _db.select(
+      '''SELECT card_id FROM memory_card_sources WHERE message_id IN (SELECT value FROM json_each(?))
+        UNION SELECT card_id FROM memory_card_cleanup_sources WHERE message_id IN (SELECT value FROM json_each(?))''',
+      [rawIds, rawIds],
+    )) {
+      affected.add(row['card_id'] as String);
+    }
+    final edges = _db.select('SELECT * FROM memory_card_references');
+    var expanded = true;
+    while (expanded) {
+      expanded = false;
+      for (final edge in edges) {
+        if (affected.contains(edge['parent_card_id']) && affected.add(edge['card_id'] as String)) expanded = true;
+      }
+    }
+    final read = {...affected};
+    expanded = true;
+    while (expanded) {
+      expanded = false;
+      for (final edge in edges) {
+        if (read.contains(edge['card_id']) && read.add(edge['parent_card_id'] as String)) expanded = true;
+      }
+    }
+    final readIds = jsonEncode(read.toList()..sort());
+    final cards = _db.select('SELECT * FROM memory_cards WHERE id IN (SELECT value FROM json_each(?))', [readIds]);
+    final proofs = _db.select(
+      'SELECT * FROM memory_card_sources WHERE card_id IN (SELECT value FROM json_each(?)) '
+      'OR message_id IN (SELECT value FROM json_each(?))', [readIds, rawIds],
+    );
+    final cleanup = _db.select(
+      'SELECT * FROM memory_card_cleanup_sources WHERE card_id IN (SELECT value FROM json_each(?)) '
+      'OR message_id IN (SELECT value FROM json_each(?))', [readIds, rawIds],
+    );
+    final sources = <String>{ownerId, ...plan.raw.erasedSources,
+      for (final row in proofs) row['message_id'] as String,
+      for (final row in cleanup) row['message_id'] as String,
+    };
+    final topics = <String>{
+      for (final card in cards) card['topic_id'] as String,
+      for (final card in plan.raw.seeds) card['topic_id'] as String,
+      for (final write in plan.raw.writes) if (write.controlledTopic != null) write.controlledTopic!,
+    };
+    return sha256.convert(utf8.encode(_canonicalJson({
+      'members': affected.toList()..sort(),
+      'cards': _rawEraseRows(cards.map((row) => {
+        for (final entry in row.entries) if (entry.key != 'maintenance_row_rev') entry.key: entry.value,
+      })),
+      'proofs': _rawEraseRows(proofs), 'cleanup': _rawEraseRows(cleanup),
+      'references': _rawEraseRows(edges.where((edge) => read.contains(edge['card_id']) || affected.contains(edge['parent_card_id']))),
+      'sources': _rawEraseRows(_db.select('SELECT * FROM memory_messages WHERE id IN (SELECT value FROM json_each(?))',
+        [jsonEncode(sources.toList())])),
+      'topics': _rawEraseRows(_db.select('SELECT * FROM memory_topics WHERE id IN (SELECT value FROM json_each(?))',
+        [jsonEncode(topics.toList())])),
+      'aliases': _rawEraseRows(_db.select('SELECT * FROM memory_person_aliases WHERE card_id IN (SELECT value FROM json_each(?))',
+        [readIds])),
+    }))).toString();
+  }
+
+  CompanionAgentMemoryResult _rawEraseResult(CompanionAgentMemoryResult result, {String? fallback}) {
+    if (!result.applied) return result;
+    var state = fallback;
+    String? pendingId;
+    final pending = _pendingRawErase;
+    if (pending != null && pending.turnId == result.turnId && pending.callId == result.callId) {
+      final actual = _rawEraseState(pending, pending.characterId);
+      if (actual == 'deferred' || actual == 'awaiting') {
+        state = 'pending';
+        pendingId = pending.id;
+      } else {
+        pending.finish(actual);
+        state = actual;
+      }
+    }
+    if (state == null) return result;
+    return CompanionAgentMemoryResult(
+      turnId: result.turnId, callId: result.callId, itemNo: result.itemNo, state: result.state,
+      code: result.code, replayed: result.replayed, beforeControlRevision: result.beforeControlRevision,
+      controlRevision: result.controlRevision, changedCardIds: result.changedCardIds,
+      currentCardRevisions: result.currentCardRevisions, targetId: result.targetId, taskId: result.taskId,
+      taskRev: result.taskRev, recallSelection: result.recallSelection, recalledControl: result.recalledControl,
+      relatedCards: result.relatedCards, pendingRawEraseId: pendingId, rawEraseState: state,
+    );
+  }
+
   /// One source revision owns one budget across all model continuation calls.
   /// Reading an existing closed turn does not grant a new execution opportunity.
   MemoryRow beginAgentTurn({
@@ -125,7 +465,7 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
 
   CompanionAgentMemoryResult? agentToolCall({required String turnId, required String callId}) {
     final rows = _db.select('SELECT * FROM memory_agent_calls WHERE turn_id=? AND call_id=?', [turnId, callId]);
-    return rows.isEmpty ? null : _agentResult(rows.single, replayed: true);
+    return rows.isEmpty ? null : _rawEraseResult(_agentResult(rows.single, replayed: true));
   }
 
   /// This transaction is the shared path for chat and the memory keeper.
@@ -136,132 +476,173 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
     required String toolName,
     required MemoryRow input,
     List<String>? rankedRecallIds,
-  }) => _transaction(() {
-    final turn = _agentTurn(turnId);
-    final (call, repeated) = _agentCall(turn, callId, toolName, input);
-    if (repeated) {
-      MemorySelection? selection;
-      List<MemoryRow>? related;
-      if (toolName == 'recall' && call['state'] == 'applied') {
-        try {
-          _agentCheckCurrent(turn);
-          selection = _agentRecallSelection(turn, input, rankedRecallIds);
-          _grantAgentSelection(turn, selection);
-        } on _AgentMemoryRejected {
-          // A saved read receipt is not permission to revive a closed turn.
+  }) {
+    _PendingRawErase? candidate;
+    String? runtimeState;
+    final result = _transaction(() {
+      final turn = _agentTurn(turnId);
+      if (toolName == 'forget' && input['deleteChat'] == true) {
+        runtimeState = turn['origin_kind'] == 'chat' ? 'unavailable' : 'maintenance';
+      }
+      final (call, repeated) = _agentCall(turn, callId, toolName, input);
+      if (repeated) {
+        MemorySelection? selection;
+        MemoryRow? control;
+        List<MemoryRow>? related;
+        if (toolName == 'recall' && call['state'] == 'applied') {
+          try {
+            _agentCheckCurrent(turn);
+            selection = _agentRecallSelection(turn, input, rankedRecallIds);
+            _grantAgentSelection(turn, selection);
+            control = _agentRecallControl(turn, input, replayedCall: call);
+          } on _AgentMemoryRejected {
+            // A saved read receipt is not permission to revive a closed turn.
+          }
         }
-      }
-      if (toolName == 'related' && call['state'] == 'applied') {
-        try {
-          _agentCheckCurrent(turn);
-          related = _agentRelated(turn, input);
-        } on _AgentMemoryRejected {
-          /* A saved read is not a new grant. */
+        if (toolName == 'related' && call['state'] == 'applied') {
+          try {
+            _agentCheckCurrent(turn);
+            related = _agentRelated(turn, input);
+          } on _AgentMemoryRejected {
+            /* A saved read is not a new grant. */
+          }
         }
+        return _agentResult(
+          call,
+          replayed: true,
+          recallSelection: selection,
+          recalledControl: control,
+          relatedCards: related,
+        );
       }
-      return _agentResult(call, replayed: true, recallSelection: selection, relatedCards: related);
-    }
-    final before = archive['control_revision']! as int;
-    MemorySelection? recallSelection;
-    List<MemoryRow>? relatedCards;
-    var forgotten = false;
-    try {
-      _agentCheckCurrent(turn);
-      final ({Set<String> changed, String? target}) effect;
-      switch (toolName) {
-        case 'remember':
-          effect = _agentRemember(turn, input);
-        case 'forget':
-          final result = _agentControlGroup(turn, input, forgetting: true);
-          effect = (changed: result.changed, target: result.target);
-          forgotten = result.forgotten;
-        case 'revise':
-          final result = _agentControlGroup(turn, input, forgetting: false);
-          effect = (changed: result.changed, target: result.target);
-          forgotten = result.forgotten;
-        case 'person':
-          effect = _agentRemember(turn, {...input, 'collection': 'person'});
-        case 'diary':
-          effect = _agentRemember(turn, {...input, 'collection': 'diary'});
-        case 'impression':
-          effect = _agentRemember(turn, {...input, 'collection': 'impression'});
-        case 'merge':
-          effect = _agentMerge(turn, input);
-        case 'related':
-          relatedCards = _agentRelated(turn, input);
-          effect = (changed: <String>{}, target: null);
-        case 'relationship':
-          effect = _agentRelationship(turn, input);
-        case 'quiet':
-          effect = _agentQuiet(turn, input);
-        case 'cancel' || 'postpone':
-          final card = _agentCard(turn, _agentText(input, 'card'));
-          final id = card['id']! as String;
-          final state = toolName == 'cancel' ? 'cancelled' : 'postponed';
-          _agentBudget(turn, {id});
-          _db.execute(
-            'UPDATE memory_cards SET plan_state=?,followup=NULL,row_rev=row_rev+1,updated_at_ms=? WHERE id=?',
-            [state, _checkedNow(), id],
-          );
-          _closeAgentFollowups(id, state);
-          _bumpMemory();
-          _bumpControl();
-          effect = (changed: {id}, target: id);
-        case 'ask_later':
-          effect = _agentAskLater(turn, _agentToolSource(turn, input), callId, input);
-        case 'recall':
-          recallSelection = _agentRecallSelection(turn, input, rankedRecallIds);
-          effect = (changed: <String>{}, target: null);
-        default:
-          throw const _AgentMemoryRejected('unknown_memory_tool');
-      }
-      final changed = {..._agentIds(turn['changed_cards'] as String), ...effect.changed};
-      // A read tool can grant a fresh related set in this same transaction.
-      final shown = _agentRevisions(_agentTurn(turnId)['shown_cards'] as String);
-      if (recallSelection != null) {
-        for (final id in recallSelection.ids) {
-          shown[id] = _db.select('SELECT row_rev FROM memory_cards WHERE id=?', [id]).single['row_rev']! as int;
+      final before = archive['control_revision']! as int;
+      MemorySelection? recallSelection;
+      MemoryRow? recalledControl;
+      List<MemoryRow>? relatedCards;
+      var forgotten = false;
+      _RawErasePlan? rawPlan;
+      try {
+        _agentCheckCurrent(turn);
+        final ({Set<String> changed, String? target}) effect;
+        switch (toolName) {
+          case 'remember':
+            effect = _agentRemember(turn, input);
+          case 'forget':
+            final result = _agentControlGroup(turn, input, forgetting: true);
+            effect = (changed: result.changed, target: result.target);
+            forgotten = result.forgotten;
+            rawPlan = result.raw;
+            if (runtimeState == 'unavailable' && rawPlan == null) runtimeState = 'no_originals';
+          case 'revise':
+            final result = _agentControlGroup(turn, input, forgetting: false);
+            effect = (changed: result.changed, target: result.target);
+            forgotten = result.forgotten;
+          case 'person':
+            effect = _agentRemember(turn, {...input, 'collection': 'person'});
+          case 'diary':
+            effect = _agentRemember(turn, {...input, 'collection': 'diary'});
+          case 'impression':
+            effect = _agentRemember(turn, {...input, 'collection': 'impression'});
+          case 'merge':
+            effect = _agentMerge(turn, input);
+          case 'related':
+            relatedCards = _agentRelated(turn, input);
+            effect = (changed: <String>{}, target: null);
+          case 'relationship':
+            effect = _agentRelationship(turn, input);
+          case 'quiet':
+            effect = _agentQuiet(turn, input);
+          case 'cancel' || 'postpone':
+            final card = _agentCard(turn, _agentText(input, 'card'));
+            final id = card['id']! as String;
+            final state = toolName == 'cancel' ? 'cancelled' : 'postponed';
+            _agentBudget(turn, {id});
+            _db.execute(
+              'UPDATE memory_cards SET plan_state=?,followup=NULL,row_rev=row_rev+1,updated_at_ms=? WHERE id=?',
+              [state, _checkedNow(), id],
+            );
+            _closeAgentFollowups(id, state);
+            _bumpMemory();
+            _bumpControl();
+            effect = (changed: {id}, target: id);
+          case 'ask_later':
+            effect = _agentAskLater(turn, _agentToolSource(turn, input), callId, input);
+          case 'recall':
+            recallSelection = _agentRecallSelection(turn, input, rankedRecallIds);
+            recalledControl = _agentRecallControl(turn, input);
+            effect = (changed: <String>{}, target: recalledControl?['topic_id'] as String?);
+          default:
+            throw const _AgentMemoryRejected('unknown_memory_tool');
         }
-      }
-      for (final id in effect.changed) {
-        final card = _db.select('SELECT row_rev FROM memory_cards WHERE id=?', [id]);
-        if (card.isEmpty) {
-          shown.remove(id);
-        } else {
-          shown[id] = card.single['row_rev']! as int;
+        final changed = {..._agentIds(turn['changed_cards'] as String), ...effect.changed};
+        // A read tool can grant a fresh related set in this same transaction.
+        final shown = _agentRevisions(_agentTurn(turnId)['shown_cards'] as String);
+        if (recallSelection != null) {
+          for (final id in recallSelection.ids) {
+            shown[id] = _db.select('SELECT row_rev FROM memory_cards WHERE id=?', [id]).single['row_rev']! as int;
+          }
         }
+        for (final id in effect.changed) {
+          final card = _db.select('SELECT row_rev FROM memory_cards WHERE id=?', [id]);
+          if (card.isEmpty) {
+            shown.remove(id);
+          } else {
+            shown[id] = card.single['row_rev']! as int;
+          }
+        }
+        final after = archive['control_revision']! as int;
+        _advanceAgentMaintenanceCommit(turn, effect.changed);
+        _db.execute(
+          'UPDATE memory_agent_turns SET control_revision=?,memory_revision=?,shown_cards=?,changed_cards=? WHERE id=?',
+          [after, archive['memory_revision'], _canonicalJson(shown), jsonEncode(changed.toList()..sort()), turnId],
+        );
+        _finishAgentCall(
+          turnId,
+          callId,
+          state: 'applied',
+          before: before,
+          after: after,
+          changed: effect.changed,
+          targetId: effect.target,
+          code: forgotten ? 'forgotten' : null,
+        );
+      } on _AgentMemoryRejected catch (error) {
+        _finishAgentCall(turnId, callId, state: 'ignored', before: before, after: before, code: error.code);
       }
-      final after = archive['control_revision']! as int;
-      _advanceAgentMaintenanceCommit(turn, effect.changed);
-      _db.execute(
-        'UPDATE memory_agent_turns SET control_revision=?,memory_revision=?,shown_cards=?,changed_cards=? WHERE id=?',
-        [after, archive['memory_revision'], _canonicalJson(shown), jsonEncode(changed.toList()..sort()), turnId],
+      if (rawPlan != null) {
+        final character = turn['character_id'] as String?;
+        final message = turn['source_message_id'] as String;
+        candidate = _PendingRawErase(
+          id: _createId(), turnId: turnId, callId: callId, archiveId: archive['id'] as String,
+          messageId: message, sourceRev: turn['source_rev'] as int, characterId: character,
+          controlRevision: archive['control_revision'] as int,
+          fingerprint: _rawEraseFingerprint(rawPlan, character, message), plan: rawPlan,
+        );
+      }
+      return _agentResult(
+        _agentStoredCall(turnId, callId),
+        replayed: false,
+        recallSelection: recallSelection,
+        recalledControl: recalledControl,
+        relatedCards: relatedCards,
       );
-      _finishAgentCall(
-        turnId,
-        callId,
-        state: 'applied',
-        before: before,
-        after: after,
-        changed: effect.changed,
-        targetId: effect.target,
-        code: forgotten ? 'forgotten' : null,
-      );
-    } on _AgentMemoryRejected catch (error) {
-      _finishAgentCall(turnId, callId, state: 'ignored', before: before, after: before, code: error.code);
-    }
-    return _agentResult(
-      _agentStoredCall(turnId, callId),
-      replayed: false,
-      recallSelection: recallSelection,
-      relatedCards: relatedCards,
-    );
-  });
+    });
+    // A read-only rejection or rollback never replaces another valid pending.
+    // Only this successfully committed ordinary forget publishes its raw plan.
+    if (candidate != null) _pendingRawErase = candidate;
+    return _rawEraseResult(result, fallback: runtimeState);
+  }
 
   MemorySelection _agentRecallSelection(Row turn, MemoryRow input, List<String>? rankedIds) {
     final query = _agentText(input, 'query');
-    final candidates = memoryRetrievalCandidates(characterId: turn['character_id'] as String?, input: query);
-    final explicit = explicitMemoryTopics(query, candidates);
+    final candidates = [
+      for (final card in memoryRetrievalCandidates(characterId: turn['character_id'] as String?, input: query))
+        if (turn['origin_kind'] == 'chat' || card['collection'] != 'recent') card,
+    ];
+    final explicit = <String>{
+      for (final card in candidates)
+        if (card['topic_mode'] == 'never') card['topic_id']! as String,
+    };
     final revision = archive['control_revision']! as int;
     return rankedIds == null
         ? selectMemoryContext(
@@ -278,6 +659,38 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
             controlRevision: revision,
             explicitTopicIds: explicit,
           );
+  }
+
+  MemoryRow? _agentRecallControl(Row turn, MemoryRow input, {Row? replayedCall}) {
+    final target = replayedCall?['target_id'] as String?;
+    if (replayedCall != null &&
+        (target == null || replayedCall['after_control_revision'] != archive['control_revision'])) {
+      return null;
+    }
+    final controls = <MemoryRow>[
+      for (final row in _db.select(
+        '''
+        SELECT t.id,t.mode,t.control_anchors,t.character_id FROM memory_topics t
+        WHERE t.mode IN ('less','never') AND (t.character_id IS NULL OR t.character_id IS ?)
+          AND (? IS NULL OR t.id=?)
+      ''',
+        [turn['character_id'], target, target],
+      ))
+        {
+          'topic_id': row['id'],
+          'mode': row['mode'],
+          'anchors': (jsonDecode(row['control_anchors'] as String) as List<Object?>).cast<String>(),
+          'character_id': row['character_id'],
+        },
+    ];
+    final matches = _controlledTopics({
+      'text': _agentText(input, 'query'),
+      'evidence': const <Object?>[],
+    }, controls: controls);
+    if (matches.isEmpty) return null;
+    // One actual read target is bound to the existing durable call receipt.
+    // A replay can only reread that target at its original control revision.
+    return controls.singleWhere((control) => control['topic_id'] == matches.first);
   }
 
   void _grantAgentSelection(Row turn, MemorySelection selection) {
@@ -476,10 +889,45 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
 
   /// The read phase contains every refusal. No public transaction is called
   /// from the write phase and no later _AgentMemoryRejected can commit a prefix.
-  ({Set<String> changed, String? target, bool forgotten}) _agentControlGroup(
+  ({Set<String> changed, String? target, bool forgotten, _RawErasePlan? raw}) _agentControlGroup(
     Row turn,
     MemoryRow input, {
     required bool forgetting,
+  }) {
+    if (forgetting && input['deleteChat'] != null && input['deleteChat'] is! bool) {
+      throw const _AgentMemoryRejected('invalid_delete_chat');
+    }
+    final wantsRaw = forgetting && input['deleteChat'] == true;
+    // Maintenance may forget cards, but it has no present owner's permission
+    // to queue or execute a physical source erase.
+    final raw = wantsRaw && turn['origin_kind'] == 'chat'
+        ? _agentPlanControlGroup(turn, input, forgetting: forgetting, deleteChat: true)
+        : null;
+    final ordinary = _agentPlanControlGroup(turn, input, forgetting: forgetting, deleteChat: false);
+    final pending = raw == null || raw.rawMessages.isEmpty ? null : _RawErasePlan(raw, ordinary);
+    _deleteCards(
+      ordinary.deleted,
+      retainTopics: ordinary.writes.map((write) => write.controlledTopic).whereType<String>().toSet(),
+    );
+    _agentApplyEntries(ordinary.writes);
+    for (final write in ordinary.writes) {
+      _closeAgentFollowups(write.id, 'revised');
+    }
+    _bumpMemory();
+    _bumpControl(historyAfterSeq: ordinary.deleted.isEmpty ? null : _sequence());
+    return (
+      changed: ordinary.affected,
+      target: raw?.target ?? ordinary.target,
+      forgotten: ordinary.deleted.isNotEmpty,
+      raw: pending,
+    );
+  }
+
+  _AgentControlPlan _agentPlanControlGroup(
+    Row turn,
+    MemoryRow input, {
+    required bool forgetting,
+    required bool deleteChat,
   }) {
     final raw = input['changes'];
     final List<MemoryRow> changes;
@@ -509,9 +957,85 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
       }
     }
     final affected = _agentEffectSet(turn, originals.keys.toSet());
+    final requiredEffects = {...affected};
+    final erasedSources = <String>{};
+    final rawMessages = <Row>[];
+    final rawAffected = <String>{};
+    final withdrawnGroups = <String, Set<String>>{};
+    if (deleteChat) {
+      final primaryId = _agentText(input, 'card');
+      if (!deleted.contains(primaryId)) throw const _AgentMemoryRejected('invalid_raw_target');
+      final ownRole = originals[primaryId]!['character_id'];
+      // Keep an actually granted stale primary in the snapshot. Other deleted
+      // changes are effects, not permission to erase their independent originals.
+      final domain = _memoryDomainCards(turn['character_id'] as String?);
+      final removal = _planFactRelations(
+        {primaryId},
+        deleteChat: true,
+        domainSnapshot: ownRole == null ? domain : domain.where((card) => card['character_id'] == ownRole).toList(),
+      );
+      requiredEffects.addAll(removal.cards);
+      erasedSources.addAll(removal.rawSources);
+      // The current chat source owns this turn/call through ON DELETE CASCADE.
+      // Maintenance has no source FK; it keeps its existing claim/current gates.
+      if (turn['origin_kind'] == 'chat' && erasedSources.contains(turn['source_message_id'])) {
+        throw const _AgentMemoryRejected('current_source');
+      }
+      for (final sourceId in erasedSources) {
+        rawMessages.addAll(_db.select('SELECT * FROM memory_messages WHERE id=?', [sourceId]));
+        rawAffected.addAll(
+          _db
+              .select('SELECT card_id FROM memory_card_cleanup_sources WHERE message_id=?', [sourceId])
+              .map((row) => row['card_id'] as String),
+        );
+        // Deleting a message removes every revision's proof rows. Capture whole
+        // AND groups, including cards outside the current role, before any write.
+        for (final group in _db.select(
+          'SELECT DISTINCT card_id,support_group FROM memory_card_sources WHERE message_id=?',
+          [sourceId],
+        )) {
+          final id = group['card_id'] as String;
+          rawAffected.add(id);
+          (withdrawnGroups[id] ??= {}).add(group['support_group'] as String);
+        }
+      }
+      for (final id in rawAffected) {
+        // Per-root subtraction keeps A -> B required even when both cards have
+        // raw effects. Such a dependency needs an explicit rewrite or deletion.
+        requiredEffects.addAll(_agentEffectSet(turn, {id}).difference({id}));
+      }
+      affected.addAll({...rawAffected, ...requiredEffects});
+    }
     _agentBudget(turn, affected);
-    if (!originals.keys.toSet().containsAll(affected)) {
+    if (!originals.keys.toSet().containsAll(requiredEffects)) {
       throw const _AgentMemoryRejected('incomplete_effect_set');
+    }
+    final sourceOnly = rawAffected.difference(originals.keys.toSet());
+    final refreshValues = <String, MemoryRow>{};
+    final refreshedRevisions = <String, int>{};
+    final refreshedValues = <String, ({int basis, int sourceAt})>{};
+    for (final id in sourceOnly) {
+      final card = _db.select('SELECT * FROM memory_cards WHERE id=?', [id]).single;
+      final withdrawn = withdrawnGroups[id] ?? const <String>{};
+      final sources = _db
+          .select(
+            '''
+            SELECT s.support_group,m.first_seq,m.text,COALESCE(m.edited_at_utc,m.said_at_utc) AS at
+            FROM memory_card_sources s JOIN memory_messages m ON m.id=s.message_id AND m.source_rev=s.source_rev
+            WHERE s.card_id=?
+          ''',
+            [id],
+          )
+          .where((source) => !withdrawn.contains(source['support_group']))
+          .toList();
+      final values = _sourceRefreshValues(card, sources, eraseUnsupported: true);
+      if (values == null) throw const _AgentMemoryRejected('incomplete_effect_set');
+      refreshValues[id] = Map.unmodifiable(values);
+      refreshedRevisions[id] = (card['row_rev'] as int) + 1;
+      refreshedValues[id] = (
+        basis: values['current_basis_seq'] as int? ?? 0,
+        sourceAt: values['source_at_ms'] as int,
+      );
     }
     final planned = {for (final id in revised.keys) id: (originals[id]!['row_rev'] as int) + 1};
     final prepared = <String, _AgentEntryWrite>{};
@@ -532,9 +1056,11 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
         planned,
         deleted,
         preserveProof: deleted.isNotEmpty && raw != null,
+        erasedSources: erasedSources,
+        refreshedRevisions: refreshedRevisions,
         plannedReference: (reference) {
           final parent = prepare(reference);
-          return parent == null ? null : (basis: parent.basis, sourceAt: parent.sourceAt);
+          return parent == null ? refreshedValues[reference] : (basis: parent.basis, sourceAt: parent.sourceAt);
         },
       );
       preparing.remove(id);
@@ -543,16 +1069,22 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
 
     final writes = [for (final id in revised.keys) prepare(id)!];
     _agentValidateReferencePlan({for (final write in writes) write.id: write.references}, deleted);
-    // Every ID/revision, retained nonempty body, reference and shared budget
-    // above is settled before the first card is touched.
-    _deleteCards(deleted);
-    _agentApplyEntries(writes);
-    for (final id in revised.keys) {
-      _closeAgentFollowups(id, 'revised');
-    }
-    _bumpMemory();
-    _bumpControl(historyAfterSeq: deleted.isEmpty ? null : _sequence());
-    return (changed: affected, target: originals.keys.first, forgotten: deleted.isNotEmpty);
+    return _AgentControlPlan(
+      affected: Set.unmodifiable(affected), deleted: Set.unmodifiable(deleted),
+      writes: List.unmodifiable(writes),
+      target: deleteChat ? input['card'] as String : originals.keys.first,
+      rawMessages: List.unmodifiable([for (final row in rawMessages) Map<String, Object?>.unmodifiable(row)]),
+      erasedSources: Set.unmodifiable(erasedSources),
+      withdrawnGroups: Map.unmodifiable({for (final entry in withdrawnGroups.entries)
+        entry.key: Set<String>.unmodifiable(entry.value)}),
+      refreshValues: Map.unmodifiable(refreshValues),
+      seeds: deleteChat ? List.unmodifiable([
+        for (final id in affected)
+          Map<String, Object?>.unmodifiable(_orderedJson(_card(
+            _db.select('SELECT * FROM memory_cards WHERE id=?', [id]).single,
+          )) as MemoryRow),
+      ]) : const [],
+    );
   }
 
   Set<String> _agentEffectSet(Row turn, Set<String> roots) {
@@ -584,7 +1116,10 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
 
   List<MemoryRow> _agentRelated(Row turn, MemoryRow input) {
     final character = turn['character_id'] as String?;
-    final domain = _memoryDomainCards(character);
+    final domain = [
+      for (final card in _memoryDomainCards(character))
+        if (turn['origin_kind'] == 'chat' || card['collection'] != 'recent') card,
+    ];
     final wanted = <String>{};
     final requiredEffects = <String>{};
     final root = input['card'];
@@ -609,6 +1144,8 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
     final result = <MemoryRow>[];
     for (final card in domain) {
       final id = card['id'] as String;
+      final expiredNotice = card['collection'] == 'recent' && (card['expires_at_ms'] as int) <= _checkedNow();
+      if (expiredNotice) continue;
       final stale = !_memoryReferencesCurrent(id);
       if (card['status'] == 'withdrawn' || (!wanted.contains(id) && !stale)) continue;
       shown[id] = card['row_rev'] as int;
@@ -620,6 +1157,7 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
         'stale': stale,
         'required_effect': requiredEffects.contains(id),
         if (stale) 'reason': 'reference_changed',
+        if (card['collection'] == 'recent') 'source': _noticeSource(id),
         if (!stale) ...{
           'text': card['text'],
           'keywords': card['keywords'],
@@ -644,8 +1182,13 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
     Map<String, int> planned,
     Set<String> deleted, {
     bool preserveProof = false,
+    Set<String> erasedSources = const {},
+    Map<String, int> refreshedRevisions = const {},
     ({int basis, int sourceAt})? Function(String)? plannedReference,
   }) {
+    if (previous?['collection'] == 'recent' || input['collection'] == 'recent') {
+      throw const _AgentMemoryRejected('notice_requires_user_source');
+    }
     final text = _agentText(input, 'text');
     final collection = previous?['collection'] as String? ?? input['collection'] as String? ?? 'about_you';
     final private = const ['our_story', 'impression'].contains(collection);
@@ -682,11 +1225,12 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
     for (final reference in rawRefs.cast<String>()) {
       if (reference == id || deleted.contains(reference)) throw const _AgentMemoryRejected('invalid_reference');
       final card = _agentCard(turn, reference);
+      if (card['collection'] == 'recent') throw const _AgentMemoryRejected('notice_requires_user_source');
       if ((card['character_id'] != null && card['character_id'] != character) ||
           (!planned.containsKey(reference) && !_memoryReferencesCurrent(reference))) {
         throw const _AgentMemoryRejected('reference_not_current');
       }
-      references[reference] = planned[reference] ?? card['row_rev'] as int;
+      references[reference] = planned[reference] ?? refreshedRevisions[reference] ?? card['row_rev'] as int;
       cleanup = cleanup && card['cleanup_history_complete'] == 1;
       final preparedReference = plannedReference?.call(reference);
       basis = math.max(basis, preparedReference?.basis ?? card['current_basis_seq'] as int? ?? 0);
@@ -706,6 +1250,7 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
               : <String>[]
         : (rawSources as List).cast<String>();
     for (final sourceId in wanted.toSet()) {
+      if (erasedSources.contains(sourceId)) throw const _AgentMemoryRejected('source_not_in_turn');
       final matches = available.where((row) => row['id'] == sourceId);
       if (matches.length != 1) throw const _AgentMemoryRejected('source_not_in_turn');
       final source = matches.single;
@@ -730,7 +1275,12 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
       // Only this already-read card's current proofs are retained. Keep each
       // AND group and each OR alternative; the control utterance is not Y's
       // evidence. No old source body is returned to the model by this path.
+      final withdrawnSources = <String>{};
       for (final group in _supportGroups(_card(retained)).values) {
+        if (group.any((proof) => erasedSources.contains(proof['message_id']))) {
+          withdrawnSources.addAll(group.map((proof) => proof['message_id'] as String));
+          continue;
+        }
         for (final proof in group) {
           final actual = _db.select('SELECT * FROM memory_messages WHERE id=? AND source_rev=? AND scope=?', [
             proof['message_id'],
@@ -743,6 +1293,10 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
               (private && actual.single['character_id'] != character)) {
             throw const _AgentMemoryRejected('retained_proof_not_current');
           }
+          if (erasedSources.isNotEmpty) {
+            basis = math.max(basis, actual.single['first_seq'] as int);
+            sourceAt = math.max(sourceAt, (actual.single['edited_at_utc'] ?? actual.single['said_at_utc']) as int);
+          }
         }
         proofGroups.add([for (final proof in group) Map<String, Object?>.from(proof)]);
       }
@@ -751,11 +1305,14 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
           'SELECT message_id,proof_withdrawn FROM memory_card_cleanup_sources WHERE card_id=?',
           [id],
         ))
-          Map<String, Object?>.from(row),
+          if (!erasedSources.contains(row['message_id']))
+            {...row, if (withdrawnSources.contains(row['message_id'])) 'proof_withdrawn': 1},
       ]);
       cleanup = cleanup && retained['cleanup_history_complete'] == 1;
-      basis = math.max(basis, retained['current_basis_seq'] as int? ?? 0);
-      sourceAt = math.max(sourceAt, retained['source_at_ms'] as int);
+      if (erasedSources.isEmpty) {
+        basis = math.max(basis, retained['current_basis_seq'] as int? ?? 0);
+        sourceAt = math.max(sourceAt, retained['source_at_ms'] as int);
+      }
     }
     if (proofGroups.isEmpty && references.isEmpty) throw const _AgentMemoryRejected('source_not_in_turn');
     if (previous != null &&
@@ -799,22 +1356,8 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
       }
       eventTime = Map<String, Object?>.from(input['event_time'] as MemoryRow);
     }
-    final controlled = previous == null
-        ? _controlledTopics(
-            // A full source can contain several independent facts. Only this card's
-            // wording may match a saved control, not another clause in that source.
-            {'text': text, 'evidence': const <MemoryRow>[]},
-            controls: [
-              for (final row in _db.select(
-                "SELECT id,control_anchors FROM memory_topics WHERE character_id IS ? AND mode IN ('less','never')",
-                [character],
-              ))
-                {
-                  'topic_id': row['id'],
-                  'anchors': (jsonDecode(row['control_anchors'] as String) as List).cast<String>(),
-                },
-            ],
-          )
+    final controlled = previous == null || previous['text'] != text
+        ? _bodyControlledTopics(text, characterId: character)
         : const <String>[];
     if (controlled.length > 1) throw const _AgentMemoryRejected('ambiguous_controlled_topic');
     var keywords = _agentKeywords(input, text);
@@ -890,7 +1433,7 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
       // cleanup origins follow another member's planned final revision.
       final ready = remaining.values.firstWhere((write) => !write.references.keys.any(remaining.containsKey));
       final previous = ready.previous;
-      final topic = previous?['topic_id'] as String? ?? ready.controlledTopic ?? _createId();
+      final topic = ready.controlledTopic ?? (previous?['topic_id'] as String?) ?? _createId();
       if (previous == null) {
         if (ready.controlledTopic == null) {
           _db.execute('INSERT INTO memory_topics(id,character_id) VALUES(?,?)', [topic, ready.characterId]);
@@ -923,11 +1466,12 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
       } else {
         _db.execute(
           '''
-          UPDATE memory_cards SET row_rev=row_rev+1,kind=?,text=?,keywords=?,scope='real',eligible=1,status='current',
+          UPDATE memory_cards SET row_rev=row_rev+1,topic_id=?,kind=?,text=?,keywords=?,scope='real',eligible=1,status='current',
             manual=0,current_basis_seq=?,source_at_ms=?,event_time=?,followup=NULL,plan_state=NULL,expires_at_ms=NULL,
             maintenance_row_rev=0,updated_at_ms=?,cleanup_history_complete=? WHERE id=?
         ''',
           [
+            topic,
             ready.kind,
             ready.text,
             jsonEncode(ready.keywords),
@@ -1001,7 +1545,8 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
     };
     final target = rows[targetId]!;
     for (final row in rows.values) {
-      if (row['collection'] != target['collection'] ||
+      if (row['collection'] == 'recent' ||
+          row['collection'] != target['collection'] ||
           row['character_id'] != target['character_id'] ||
           !_memoryReferencesCurrent(row['id'] as String)) {
         throw const _AgentMemoryRejected('merge_domain_changed');
@@ -1028,6 +1573,14 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
       for (final id in updateInputs.keys) id: (rows[id]!['row_rev'] as int) + 1,
     };
     final mergedRows = [target, for (final id in fromIds) rows[id]!];
+    final mergedTopics = [
+      for (final row in mergedRows)
+        _db.select('SELECT id,mode FROM memory_topics WHERE id=?', [row['topic_id']]).single,
+    ];
+    var topic = mergedTopics.firstWhere(
+      (topic) => topic['mode'] == 'never',
+      orElse: () => mergedTopics.firstWhere((topic) => topic['mode'] == 'less', orElse: () => mergedTopics.first),
+    );
     final basis = mergedRows.map((row) => row['current_basis_seq'] as int? ?? 0).reduce(math.max);
     final sourceAt = mergedRows.map((row) => row['source_at_ms'] as int).reduce(math.max);
     final writes = {
@@ -1056,10 +1609,18 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
     final referencePlan = {targetId: targetRefs, for (final write in writes.values) write.id: write.references};
     _agentValidateReferencePlan(referencePlan, fromIds);
     final text = input['text'] == null ? target['text'] as String : _agentText(input, 'text');
+    if (text != target['text']) {
+      final controlled = _bodyControlledTopics(text, characterId: target['character_id'] as String?);
+      final participants = mergedTopics.map((row) => row['id']).toSet();
+      if (controlled.any((id) => !participants.contains(id))) {
+        if (controlled.length > 1) throw const _AgentMemoryRejected('ambiguous_controlled_topic');
+        topic = _db.select('SELECT id,mode FROM memory_topics WHERE id=?', [controlled.single]).single;
+      }
+    }
+    final quiet = topic['mode'] != 'normal';
     final words = input['keywords'] == null
-        ? <String>{
-            for (final row in mergedRows) ...(jsonDecode(row['keywords'] as String) as List).cast<String>(),
-          }.toList()
+        ? <String>{for (final row in mergedRows) ...(jsonDecode(row['keywords'] as String) as List).cast<String>()}
+              .toList()
         : _agentKeywords(input, text);
     final aliases = <String>{
       for (final row in mergedRows)
@@ -1089,11 +1650,12 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
       }
       _db.execute(
         '''
-        UPDATE memory_cards SET row_rev=?,text=?,keywords=?,pinned=?,current_basis_seq=?,source_at_ms=?,
-          updated_at_ms=?,maintenance_row_rev=0,cleanup_history_complete=? WHERE id=?
+        UPDATE memory_cards SET row_rev=?,topic_id=?,text=?,keywords=?,pinned=?,current_basis_seq=?,source_at_ms=?,
+          updated_at_ms=?,maintenance_row_rev=0,cleanup_history_complete=?,followup=? WHERE id=?
       ''',
         [
           planned[targetId],
+          topic['id'],
           text,
           jsonEncode(words),
           mergedRows.any((row) => row['pinned'] == 1) ? 1 : 0,
@@ -1101,6 +1663,7 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
           sourceAt,
           at,
           mergedRows.every((row) => row['cleanup_history_complete'] == 1) ? 1 : 0,
+          quiet ? null : target['followup'],
           targetId,
         ],
       );
@@ -1139,16 +1702,18 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
           id,
         ]);
       }
+      if (quiet) _closeAgentFollowups(targetId, 'quiet');
       for (final fromId in fromIds) {
         _db.execute('DELETE FROM memory_cards WHERE id=?', [fromId]);
-        final topic = rows[fromId]!['topic_id'];
+      }
+      // Preserve every quiet control's identity and anchors, even when empty.
+      for (final topicId in {for (final row in mergedRows) row['topic_id']}) {
         _db.execute(
-          'DELETE FROM memory_topics WHERE id=? AND NOT EXISTS(SELECT 1 FROM memory_cards WHERE topic_id=?)',
-          [topic, topic],
+          "DELETE FROM memory_topics WHERE id=? AND mode='normal' "
+          'AND NOT EXISTS(SELECT 1 FROM memory_cards WHERE topic_id=?)',
+          [topicId, topicId],
         );
       }
-      // Keep the selected target's topic and anchors. In particular, a
-      // surviving from-topic never donates its independent anchors to it.
     }
 
     final pending = referencePlan.keys.toSet();
@@ -1224,22 +1789,60 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
   }
 
   ({Set<String> changed, String? target}) _agentQuiet(Row turn, MemoryRow input) {
+    if (input.containsKey('card') == input.containsKey('topic')) {
+      throw const _AgentMemoryRejected('invalid_quiet_target');
+    }
+    if (input.containsKey('topic')) {
+      final topic = _agentText(input, 'topic');
+      if (input['mode'] != 'normal') throw const _AgentMemoryRejected('invalid_mode');
+      final reads = _db.select(
+        '''
+        SELECT 1 FROM memory_agent_calls WHERE turn_id=? AND tool_name='recall'
+          AND state='applied' AND target_id=? AND after_control_revision=? LIMIT 1
+      ''',
+        [turn['id'], topic, archive['control_revision']],
+      );
+      if (reads.isEmpty) throw const _AgentMemoryRejected('topic_not_in_turn');
+      final rows = _db.select('SELECT mode,character_id FROM memory_topics WHERE id=?', [topic]);
+      if (rows.isEmpty ||
+          !const ['less', 'never'].contains(rows.single['mode']) ||
+          (rows.single['character_id'] != null && rows.single['character_id'] != turn['character_id'])) {
+        throw const _AgentMemoryRejected('topic_changed');
+      }
+      _db.execute("UPDATE memory_topics SET mode='normal',control_anchors='[]' WHERE id=?", [topic]);
+      _bumpMemory();
+      _bumpControl();
+      return (changed: <String>{}, target: topic);
+    }
     final selected = _agentCard(turn, _agentText(input, 'card'));
     final topic = selected['topic_id']! as String;
     final mode = input['mode'];
-    if (mode != 'less' && mode != 'never') throw const _AgentMemoryRejected('invalid_mode');
+    if (mode != 'less' && mode != 'never' && mode != 'normal') throw const _AgentMemoryRejected('invalid_mode');
     final cards = _db.select('SELECT id FROM memory_cards WHERE topic_id=?', [topic]);
     if (cards.isEmpty) throw const _AgentMemoryRejected('topic_not_in_turn');
     final ids = cards.map((row) => row['id']! as String).toSet();
     _agentBudget(turn, ids);
-    final anchors = _controlAnchors(topic);
+    if (mode == 'normal') {
+      // Match the existing normal control without revising cards or
+      // retiring live invitations.
+      _db.execute(
+        '''
+        UPDATE memory_cards SET maintenance_row_rev=0 WHERE topic_id=?
+          AND EXISTS(SELECT 1 FROM memory_topics WHERE id=? AND mode!='normal')
+      ''',
+        [topic, topic],
+      );
+    }
+    final anchors = mode == 'normal' ? <String>[] : _controlAnchors(topic);
     _db.execute('UPDATE memory_topics SET mode=?,control_anchors=? WHERE id=?', [mode, jsonEncode(anchors), topic]);
-    _db.execute(
-      'UPDATE memory_cards SET followup=NULL,maintenance_row_rev=0,row_rev=row_rev+1,updated_at_ms=? WHERE topic_id=?',
-      [_checkedNow(), topic],
-    );
-    for (final id in ids) {
-      _closeAgentFollowups(id, 'quiet');
+    if (mode != 'normal') {
+      _db.execute(
+        'UPDATE memory_cards SET followup=NULL,maintenance_row_rev=0,row_rev=row_rev+1,updated_at_ms=? WHERE topic_id=?',
+        [_checkedNow(), topic],
+      );
+      for (final id in ids) {
+        _closeAgentFollowups(id, 'quiet');
+      }
     }
     _bumpMemory();
     _bumpControl(historyAfterSeq: mode == 'never' ? _sequence() : null);
@@ -1369,6 +1972,7 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
     Row call, {
     required bool replayed,
     MemorySelection? recallSelection,
+    MemoryRow? recalledControl,
     List<MemoryRow>? relatedCards,
   }) {
     final ids = _agentIds(call['changed_cards'] as String);
@@ -1392,6 +1996,7 @@ extension CompanionAgentMemoryStore on CompanionMemoryStore {
       taskId: call['task_id'] as String?,
       taskRev: call['task_rev'] as int?,
       recallSelection: recallSelection,
+      recalledControl: recalledControl,
       relatedCards: relatedCards,
     );
   }
