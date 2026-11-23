@@ -1,5 +1,5 @@
-// 酒馆设置 (docs/design/roleplay-ui.md §1; grouped as the optimization doc's
-// §3.4 has it): 模型与连接, 生成, 显示, 安全, 数据, 你.
+// 酒馆设置 (docs/design/roleplay-ui.md §1): 模型与连接, 生成, 工具, 显示,
+// 安全, 数据, 你.
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -372,6 +372,19 @@ List<Widget> tavernSettingsGroups(BuildContext context, WidgetRef ref) {
         value: settings.islandOffline,
         onChanged: (on) => unawaited(controller.setIslandOffline(on)),
       ),
+      // A preset's SPreset: the engine's own, unless the person lets the
+      // preset load its own from the web.
+      SettingsSwitchTile(
+        key: const ValueKey('tavern-spreset-external'),
+        icon: AppIcons.code,
+        title: l10n.tavernSPresetExternal,
+        subtitle: l10n.tavernSPresetExternalSubtitle,
+        value: ref.watch(tavernSPresetExternalProvider).value ?? false,
+        onChanged: (on) => unawaited(() async {
+          await ref.read(tavernProvider).setSettings({'spresetRuntimeMode': on ? 'external' : 'native'});
+          ref.invalidate(tavernSPresetExternalProvider);
+        }()),
+      ),
     ],
   );
   final startupGroup = SettingsSection(
@@ -491,3 +504,9 @@ class _ValueText extends StatelessWidget {
     child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
   );
 }
+
+/// Whether presets load their own SPreset from the web (the engine's
+/// setting), instead of the engine's.
+final tavernSPresetExternalProvider = FutureProvider<bool>(
+  (ref) async => (await ref.watch(tavernProvider).readSettings())['spresetRuntimeMode'] == 'external',
+);

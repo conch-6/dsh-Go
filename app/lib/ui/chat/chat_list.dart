@@ -347,9 +347,15 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
   /// ([_deriveRows]), the motion duration and the language ([build]), the
   /// fork / regenerate marks ([_clearBuiltRows]) and which callbacks are given
   /// ([didUpdateWidget]).
-  final Map<String, ({ChatRow row, double gap, Widget widget})> _built = {};
+  final Map<String, ({ChatRow row, double gap, bool divided, Widget widget})> _built = {};
   Duration? _builtMotion;
   Locale? _builtLocale;
+  ThemeShapeSpec _builtShapes = const ThemeShapeSpec();
+
+  /// The pack's mark between turns and its colour (null without one), which
+  /// [_rowFrame] paints into the gap above a turn's first message.
+  ThemeTurnDivider _builtDivider = ThemeTurnDivider.none;
+  Color? _builtDividerColor;
   ChatState? _builtState;
 
   /// A streaming draft has words, not only thinking: earlier rows read that
@@ -368,11 +374,6 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
 
   /// 正在准备重新回答的那条回复(读原图、分叉;挡连点)。
   String? _regeneratingId;
-
-  // 一轮在眼前结束时怎么收起过程(开着「收起过程」时):贴底看着的,先按原样
-  // 画一帧再平滑收起;往上翻着看的,下一次派生里直接收掉,不保留展开。
-  // 冷打开、重新加载时已结束的轮照旧直接收着。
-  Set<int> _runningTurns = const {};
 
   /// 要播收起动画的过程行;第一次建出来就拿掉(同 [_fresh])。
   final Set<String> _settling = {};
@@ -630,24 +631,22 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
   // 行与分界
 
   void _deriveRows(ChatState s, {required bool foldTurns, List<TurnArtifacts> artifacts = const []}) {
+    final previous = _builtState;
     if (s.loading || !foldTurns) {
       _settling.clear();
-    } else {
+    } else if (_pinned && previous != null && !previous.loading && !identical(previous.turns, s.turns)) {
+      // 只在眼前这一轮结束时平滑收起；冷打开、加载历史和往上翻时直接收起。
+      final runningTurns = {
+        for (final turn in previous.turns)
+          if (turn.running) turn.startSeq,
+      };
       for (final turn in s.turns) {
-        if (turn.running || !_runningTurns.contains(turn.startSeq) || !(turn.endReason?.isCompleted ?? false)) {
-          continue;
+        if (!turn.running && runningTurns.contains(turn.startSeq) && (turn.endReason?.isCompleted ?? false)) {
+          _settling.add('tp${turn.startSeq}');
         }
-        // 贴底看着的一轮:先按原样画一帧,再平滑收成摘要。往上翻着看的
-        // 不播动画,直接收 —— 过程一律收起来,不再有"读过就不收"。
-        if (_pinned) _settling.add('tp${turn.startSeq}');
       }
     }
-    _runningTurns = {
-      if (!s.loading)
-        for (final turn in s.turns)
-          if (turn.running) turn.startSeq,
-    };
-    final changed = !identical(s, _builtState);
+    final changed = !identical(s, previous);
     _builtState = s;
     final inputs = (
       foldTurns,
@@ -692,7 +691,6 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     final oldestTurn = s.turns.firstOrNull?.startSeq;
     if (oldestTurn != null) _oldestRowSeq = math.min(_oldestRowSeq ?? oldestTurn, oldestTurn);
     final prepended = previousOldest != null && _oldestRowSeq != null && _oldestRowSeq! < previousOldest;
-    final hadPending = _rows.any((r) => r is PendingRow);
     _rows = _rowCache.update(s, foldTurns: foldTurns, artifacts: artifacts);
     _index = _rowCache.index;
     // Only a draft streaming on keeps the other rows' widgets: anything else
@@ -703,18 +701,22 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     _draftSays = draftSays;
     // 被插话切开的轮:前几片的摘要行(`tp<轮起点>@<插话>`)跟最后一片一起收。
     // 这一帧没建出来的(在屏幕外)不留到以后:翻回去时不该再播一遍。
-    for (final row in _rows) {
-      if (row is TurnProcessRow &&
-          row.cut != null &&
-          _settling.contains('tp${row.trace.startSeq}') &&
-          _settling.add(row.key)) {
-        final key = row.key;
-        _afterFrame(() => _settling.remove(key));
+    if (_settling.isNotEmpty) {
+      for (final row in _rows) {
+        if (row is TurnProcessRow &&
+            row.cut != null &&
+            _settling.contains('tp${row.trace.startSeq}') &&
+            _settling.add(row.key)) {
+          final key = row.key;
+          _afterFrame(() => _settling.remove(key));
+        }
       }
+      _settling.removeWhere((key) => !_index.containsKey(key));
     }
-    _settling.removeWhere((key) => !_index.containsKey(key));
     _autoAnswered = s.autoAnswered;
-    _markFresh(previousKeys, hadPending: hadPending, loading: s.loading);
+    if (!identical(previousKeys, _index)) {
+      _markFresh(previousKeys, hadPending: previousRows.any((row) => row is PendingRow), loading: s.loading);
+    }
 
     if (s.pending.length > _lastPendingCount) {
       // 自己刚发了消息:无论之前翻到哪,都回到底部。
@@ -942,9 +944,20 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     // A language switch rebuilds every element (app.dart) without an
     // inherited change; rows hold [appL10n] strings in their arguments.
     final locale = AppLocale.current;
-    if (motion != _builtMotion || locale != _builtLocale) {
+    final themeStyle = DshThemeStyle.of(context);
+    final shapes = themeStyle.shapes;
+    final divider = themeStyle.components.turnDivider;
+    final dividerColor = divider == ThemeTurnDivider.none ? null : Theme.of(context).colorScheme.outlineVariant;
+    if (motion != _builtMotion ||
+        locale != _builtLocale ||
+        shapes != _builtShapes ||
+        divider != _builtDivider ||
+        dividerColor != _builtDividerColor) {
       _builtMotion = motion;
       _builtLocale = locale;
+      _builtShapes = shapes;
+      _builtDivider = divider;
+      _builtDividerColor = dividerColor;
       _built.clear();
     }
 
@@ -1071,23 +1084,27 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
   Widget _buildRow(int index) {
     final row = _rows[index];
     final previous = index > 0 ? _rows[index - 1] : null;
-    final gap = _gapBefore(row, previous);
+    final gap = _gapBefore(row, previous, _builtShapes);
+    final divided = _builtDivider != ThemeTurnDivider.none && previous != null && _isUser(row) && !_isUser(previous);
     final fresh = _fresh.remove(row.key);
     // A row's first appearance (fade in, settle) plays once: that build is
     // not kept, or scrolling back to the row would play it again.
     if (fresh != null || _settling.contains(row.key)) {
       _built.remove(row.key);
-      return _rowFrame(row, gap, fresh);
+      return _rowFrame(row, gap, fresh, divided);
     }
     final built = _built[row.key];
-    if (built != null && identical(built.row, row) && built.gap == gap) return built.widget;
-    final frame = _rowFrame(row, gap, null);
-    _built[row.key] = (row: row, gap: gap, widget: frame);
+    if (built != null && identical(built.row, row) && built.gap == gap && built.divided == divided) {
+      return built.widget;
+    }
+    final frame = _rowFrame(row, gap, null, divided);
+    _built[row.key] = (row: row, gap: gap, divided: divided, widget: frame);
     return frame;
   }
 
-  Widget _rowFrame(ChatRow row, double gap, int? fresh) {
-    final padding = EdgeInsets.fromLTRB(AppSpace.gutter, gap, AppSpace.gutter, 0);
+  Widget _rowFrame(ChatRow row, double gap, int? fresh, [bool divided = false]) {
+    final gutter = _builtShapes.gutter;
+    final padding = EdgeInsets.fromLTRB(gutter, gap, gutter, 0);
     final body = StreamFadeIn(
       enabled: fresh != null,
       index: fresh ?? 0,
@@ -1108,7 +1125,15 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
                   padding: padding,
                   child: SizedBox(width: double.infinity, child: body),
                 )
-              : Container(width: double.infinity, padding: padding, child: body),
+              : Container(
+                  width: double.infinity,
+                  padding: padding,
+                  // Painted over the gap this row already has: its height stays.
+                  foregroundDecoration: divided
+                      ? _TurnDividerDecoration(_builtDivider, _builtDividerColor!, gap, gutter)
+                      : null,
+                  child: body,
+                ),
         ),
       ),
     );
@@ -1129,16 +1154,17 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     _ => false,
   };
 
-  /// 换轮 24、同一轮 8、相邻过程行 0、卡片 12、脚注 4(全是 4 的倍数)。
-  static double _gapBefore(ChatRow row, ChatRow? previous) {
+  /// 换轮 24、同一轮 8、相邻过程行 0、卡片 12、脚注 4(全是 4 的倍数),
+  /// 启用主题包时遵循主题声明的 [ThemeShapeSpec.turnGap] 与 [ThemeShapeSpec.inTurnGap]。
+  static double _gapBefore(ChatRow row, ChatRow? previous, [ThemeShapeSpec shapes = const ThemeShapeSpec()]) {
     if (previous == null) return 0;
-    if (_isUser(row)) return _isUser(previous) ? AppSpace.sm : AppSpace.xxl;
+    if (_isUser(row)) return _isUser(previous) ? shapes.inTurnGap : shapes.turnGap;
     if (_isProcess(row) && _isProcess(previous)) return 0;
     if (row is ApprovalRow || row is QuestionRow || row is ChangeCardRow || row is ArtifactCardRow) {
       return AppSpace.md;
     }
     if (row is TurnFootnoteRow) return AppSpace.xs;
-    return AppSpace.sm;
+    return shapes.inTurnGap;
   }
 
   Widget _pendingBubble(PendingPrompt prompt) {
@@ -1236,8 +1262,10 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
 
   Widget _reply(AssistantChatItem item, bool showActions, TurnTrace? footnote) {
     // A picture a media card shows is not drawn again in the reply.
-    if (withoutShownImages(item.text, ref.read(sessionMediaPathsProvider(widget.sessionId))) case final text?) {
-      item = replyWithText(item, text);
+    if (item.text.contains('![')) {
+      if (withoutShownImages(item.text, ref.read(sessionMediaPathsProvider(widget.sessionId))) case final text?) {
+        item = replyWithText(item, text);
+      }
     }
     final chat = ref.read(chatProvider(widget.sessionId).notifier);
     final branchable = chat.branchPointAfter(item) != null;
@@ -1509,7 +1537,7 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
         row: row,
         settle: _settling.remove(row.key),
         buildRow: _rowWidget,
-        gapBefore: _gapBefore,
+        gapBefore: (r, prev) => _gapBefore(r, prev, _builtShapes),
       ),
       NoticeRowData(:final item) => NoticeRow(item: item, action: _noticeAction(item)),
       ChangeCardRow(:final files) => ChangeCard(files: files),
@@ -1826,4 +1854,60 @@ class StatusBarTop extends ScrollController {
 
   @override
   Future<void> animateTo(double offset, {required Duration duration, required Curve curve}) async => onTap?.call();
+}
+
+/// A theme pack's mark between two turns, in the middle of the gap above the
+/// turn's first message and as wide as the reading column's text.
+class _TurnDividerDecoration extends Decoration {
+  const _TurnDividerDecoration(this.style, this.color, this.gap, this.gutter);
+
+  final ThemeTurnDivider style;
+  final Color color;
+  final double gap;
+  final double gutter;
+
+  @override
+  BoxPainter createBoxPainter([VoidCallback? onChanged]) => _TurnDividerPainter(this);
+
+  @override
+  bool operator ==(Object other) =>
+      other is _TurnDividerDecoration &&
+      other.style == style &&
+      other.color == color &&
+      other.gap == gap &&
+      other.gutter == gutter;
+
+  @override
+  int get hashCode => Object.hash(style, color, gap, gutter);
+}
+
+class _TurnDividerPainter extends BoxPainter {
+  _TurnDividerPainter(this._mark);
+
+  final _TurnDividerDecoration _mark;
+
+  @override
+  void paint(Canvas canvas, Offset offset, ImageConfiguration configuration) {
+    final y = offset.dy + _mark.gap / 2;
+    final left = offset.dx + _mark.gutter;
+    final right = offset.dx + configuration.size!.width - _mark.gutter;
+    final paint = Paint()
+      ..color = _mark.color
+      ..strokeWidth = 1;
+    switch (_mark.style) {
+      case ThemeTurnDivider.none:
+        break;
+      case ThemeTurnDivider.hairline:
+        canvas.drawLine(Offset(left, y), Offset(right, y), paint);
+      case ThemeTurnDivider.dashed:
+        for (var x = left; x < right; x += 8) {
+          canvas.drawLine(Offset(x, y), Offset(math.min(x + 4, right), y), paint);
+        }
+      case ThemeTurnDivider.dots:
+        final centre = (left + right) / 2;
+        for (final dx in const [-8.0, 0.0, 8.0]) {
+          canvas.drawCircle(Offset(centre + dx, y), 1.5, paint);
+        }
+    }
+  }
 }

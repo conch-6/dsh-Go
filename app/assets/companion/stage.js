@@ -18,6 +18,7 @@
   const Fw = window.CubismFw;
   const query = new URLSearchParams(location.search);
   const FLOAT = query.get('mode') === 'float';
+  const COVER = query.get('mode') === 'cover';
   const floatAbort = FLOAT ? new AbortController() : null;
   let floatDisposed = false;
   let loadingModel = null;
@@ -28,8 +29,10 @@
   let REDUCED = query.get('reduceMotion') === '1';
   // Both draw at the screen's own density (phones are about 3x): a 2x buffer
   // stretched over a 3x screen reads as out of focus. The room sheds resolution
-  // itself when frames can't keep up (`quality` below).
-  const DPR_CAP = FLOAT ? 4 : 3;
+  // itself when frames can't keep up (`quality` below). A device budget from the
+  // app (`dpr`, iOS) caps both canvases, this one and scene.js's.
+  const BUDGET_DPR = Number(query.get('dpr'));
+  const DPR_CAP = Math.min(FLOAT ? 4 : 3, BUDGET_DPR > 0 ? Math.max(0.5, BUDGET_DPR) : Infinity);
   // Clip masks: the renderer packs them into textures of four channels, at
   // most 36 different masks in one texture, 32 each when there are several.
   // A model that needs more (a detailed one: 49 for 大肥鱼 4096) gets more
@@ -49,6 +52,8 @@
   const reefFar = document.querySelector('.reef.far');
   const reefNear = document.querySelector('.reef.near');
   const sun = document.querySelector('.sun');
+  const shafts = [...(document.querySelectorAll?.('.shafts i') ?? [])];
+  const whale = document.querySelector('.whale');
   const props = {
     snack: document.getElementById('prop-snack'),
     play: document.getElementById('prop-play'),
@@ -571,7 +576,6 @@
     tick(dt, animate) {
       const core = this._model;
       core.loadParameters();
-      core.saveParameters();
       animate.before(this, dt);
       // One of its own motions, while it plays, takes over from the pose she
       // keeps herself; expressions and physics still come after.
@@ -1780,6 +1784,9 @@
       home.beckon = prop && props[prop] ? { prop, next: 0 } : null;
     },
     prop: ({ name }) => showProp(name),
+    covered: ({ on }) => {
+      covered = on === true;
+    },
     pause: () => {
       nativePaused = true;
       pause();
@@ -1806,10 +1813,27 @@
   // (an old phone, a heavy model), never below half, and back up once they
   // keep time again. A frame is late against the rate asked when it was drawn,
   // so a second that is part busy (60) and part idle (30) isn't counted slow.
-  let quality = 1;
+  // It starts where it last settled on this phone (`quality`, kept by the app),
+  // so a phone that can't hold full resolution doesn't stutter down to it on
+  // every visit, and one that can is never held back by a guess.
+  let quality = clamp(Number(query.get('quality')) || 1, 0.5, 1);
+  // The app keeps the level that held: a step down at once, a step up once it
+  // has kept time for a minute's worth of seconds at the full rate.
+  let holdSeconds = 0;
+  const settled = () => post({ type: 'quality', value: Math.round(quality * 100) / 100 });
   let slowSeconds = 0;
   let quickSeconds = 0;
   let late = 0;
+  // A second with frames asked at twelve (asleep, under the log) can say she's
+  // slow but not that she keeps up: twelve frames are easy at any resolution.
+  let easySecond = false;
+  // Ten quiet seconds earn the next step up; a step up that turns slow again
+  // before it has held makes the next try wait twice as long (to five minutes),
+  // so a phone that only keeps up while she idles doesn't stutter every time she
+  // moves just to find that out again.
+  let upAfter = 10;
+  // Flutter's full-screen blur over her (the log): she's barely seen, so drawn slowly.
+  let covered = false;
   // Loading the model (texture upload, mipmaps) stalls a few frames; not the phone's pace.
   let settleUntil = 0;
 
@@ -1821,6 +1845,61 @@
     canvas.width = width;
     canvas.height = height;
     model?.setRenderTargetSize(width, height);
+  }
+
+  function drawCharacter(view) {
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    model.draw(view, [0, 0, canvas.width, canvas.height]);
+  }
+
+  // Frame the actual visible drawables, not the room's camera or model canvas.
+  function coverView() {
+    const { core, matrix } = model;
+    let left = Infinity, right = -Infinity, bottom = Infinity, top = -Infinity;
+    for (let i = 0; i < core.getDrawableCount(); i++) {
+      if (core.getDrawableOpacity(i) <= 0 || !core.getDrawableDynamicFlagIsVisible(i)) continue;
+      const vertices = core.getDrawableVertices(i);
+      for (let j = 0; j < vertices.length; j += 2) {
+        const x = matrix.transformX(vertices[j]);
+        const y = matrix.transformY(vertices[j + 1]);
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+        bottom = Math.min(bottom, y);
+        top = Math.max(top, y);
+      }
+    }
+    const span = Math.max(right - left, top - bottom);
+    if (!Number.isFinite(span) || span <= 0) throw new Error('cover bounds');
+    const s = 1.8 / span;
+    return new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1, 0, -(left + right) * s / 2, -(top + bottom) * s / 2, 0, 1]);
+  }
+
+  async function captureCover() {
+    const framing = coverView();
+    const view = new Fw.CubismMatrix44();
+    const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+    // Cubism loads shaders asynchronously. Probe only this neutral pose, not
+    // an animation, and return the first draw that actually contains pixels.
+    for (let i = 0; i < 25; i++) {
+      if (gl.isContextLost()) throw new Error('cover context');
+      view.setMatrix(framing); // StageModel.draw multiplies in the model matrix.
+      drawCharacter(view);
+      gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      if (pixels.some((value, index) => (index & 3) === 3 && value !== 0)) {
+        // It must be serialized in the draw task, before WebGL clears it.
+        const prefix = 'data:image/png;base64,';
+        const image = canvas.toDataURL('image/png');
+        if (!image.startsWith(prefix)) throw new Error('cover png');
+        post({ type: 'cover', png: image.slice(prefix.length) });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    throw new Error('cover empty');
   }
 
   function render(ts) {
@@ -1839,25 +1918,22 @@
       life.patting ||
       home.show !== null ||
       scene.busy();
-    const target = life.sleep > 0.9 ? 12 : busy ? 60 : 30;
+    const target = life.sleep > 0.9 || covered ? 12 : busy ? 60 : 30;
     if (ts - last < 1000 / target - 2) return;
     // Over half a second is a gap (paused, hidden, waking), not a late frame.
     const gap = ts - last;
     if (gap > 1500 / target && gap < 500) late++;
+    if (target < 30) easySecond = true;
     const dt = clamp((ts - last) / 1000, 0.001, 0.05);
     last = ts;
     life.hop.step(0, dt);
     resize();
     model.tick(dt, animate);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    model.draw(projection(), [0, 0, canvas.width, canvas.height]);
+    drawCharacter(projection());
     moodMarks(ts);
     scene.step(dt, life.body.x.x + tilt.sx * 0.8);
     parallax(dt);
+    water(ts);
     drawn++;
     if (ts - fpsAt > 1000) {
       // A gap (paused, hidden) says nothing about how fast she draws.
@@ -1868,25 +1944,33 @@
           slowSeconds = share > 0.3 ? slowSeconds + 1 : 0;
           // A handful of frames can say she's slow (a very slow phone draws only
           // a few a second) but not that she keeps time.
-          quickSeconds = drawn >= 5 && share < 0.1 ? quickSeconds + 1 : 0;
+          quickSeconds = drawn >= 5 && share < 0.1 && !easySecond ? quickSeconds + 1 : 0;
           if (slowSeconds >= 3 && quality > 0.5) {
             quality = Math.max(0.5, quality - 0.15);
             slowSeconds = 0;
-          } else if (quickSeconds >= 10 && quality < 1) {
+            // Once per step up that didn't hold, however far it then falls.
+            if (holdSeconds > 0) upAfter = Math.min(upAfter * 2, 300);
+            holdSeconds = 0;
+            settled();
+          } else if (quickSeconds >= upAfter && quality < 1) {
             quality = Math.min(1, quality + 0.15);
             quickSeconds = 0;
+            holdSeconds = 60;
+          } else if (holdSeconds > 0 && quickSeconds > 0 && --holdSeconds === 0) {
+            settled();
           }
         }
       }
       drawn = 0;
       late = 0;
+      easySecond = false;
       fpsAt = ts;
     }
   }
 
   const floatGate = FLOAT ? new window.CompanionFloat.FrameGate() : null;
+  const floatBounds = FLOAT ? new window.CompanionFloat.BoundsFollower() : null;
   let floatPixels = null;
-  let floatBoundsKey = '';
   let floatState = null;
   let floatEmotion = 'calm';
   let floatGazeUntil = 0;
@@ -1913,19 +1997,15 @@
   function renderFloat(ts) {
     if (paused || floatDisposed || document.hidden || !model) return;
     frame = requestAnimationFrame(render);
-    if (!floatGate.take(ts)) return;
+    // Asleep on the desktop she breathes slowly: twelve frames, as in the room.
+    if (!floatGate.take(ts, life.sleep > 0.9 ? 12 : 30)) return;
     try {
       const dt = clamp((ts - last) / 1000, 0.001, 0.05);
       last = ts;
       resize();
       if (floatGazeUntil && ts > floatGazeUntil) { floatGazeUntil = 0; life.pointer = null; }
       model.tick(dt, animate);
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-      model.draw(projection(), [0, 0, canvas.width, canvas.height]);
+      drawCharacter(projection());
       // Read in this draw task; preserveDrawingBuffer is unnecessary. The native
       // viewport is fixed and small, so the buffer stays small at device density.
       const length = canvas.width * canvas.height * 4;
@@ -1933,9 +2013,8 @@
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, floatPixels);
       const bounds = window.CompanionFloat.opaqueBounds(floatPixels, canvas.width, canvas.height);
-      const message = { type: 'floatBounds', width: canvas.width, height: canvas.height, bounds };
-      const key = JSON.stringify(message);
-      if (key !== floatBoundsKey) { floatBoundsKey = key; post(message); }
+      const box = floatBounds.next(bounds, canvas.width, canvas.height);
+      if (box !== undefined) post({ type: 'floatBounds', width: canvas.width, height: canvas.height, bounds: box });
       drawn++;
       if (ts - fpsAt >= 1000) { fps = drawn * 1000 / (ts - fpsAt); drawn = 0; fpsAt = ts; }
     } catch (_) { floatFailed('companion_render_failed'); }
@@ -2072,6 +2151,63 @@
     sun.style.transform = `translate3d(${x * 0.4}px, ${y * 0.3}px, 0)`;
   }
 
+  // The light shafts and the whale move on the frames she's drawn anyway. As CSS
+  // animations they kept their own clock, and with it the whole page, and the
+  // frosted glass Flutter lays over it, redrawing at the screen's full rate
+  // (up to 120) while she idles at thirty. A shaft sways three degrees in about
+  // twenty seconds and the whale crosses in thirty-seven: thirty steps a second,
+  // or twelve while she sleeps, look the same.
+  const SHAFTS = [
+    // tilt (deg), period (s), how far into its sway it starts (s)
+    [13, 21, 0],
+    [6, 27, 9],
+    [-3, 17, 4],
+    [-11, 24, 15],
+  ];
+  const WHALE_S = 74;
+  const looks = new Map();
+  // The app's reduced motion and a bare page are fixed at load; the system's own
+  // setting can change while she's open, so that one is asked on every frame.
+  const stillPage = FLOAT || REDUCED || document.documentElement.dataset.bare === '1';
+  const reduceQuery = (!FLOAT && window.matchMedia?.('(prefers-reduced-motion: reduce)')) || null;
+
+  function look(el, transform, opacity) {
+    if (!el?.style) return;
+    const was = looks.get(el);
+    if (was?.[0] === transform && was[1] === opacity) return;
+    looks.set(el, [transform, opacity]);
+    el.style.transform = transform;
+    el.style.opacity = opacity;
+  }
+
+  function water(ts) {
+    if (stillPage || reduceQuery?.matches) {
+      // Turned off while she's here: the water rests as it does without motion.
+      for (const el of looks.keys()) {
+        el.style.transform = '';
+        el.style.opacity = '';
+      }
+      looks.clear();
+      return;
+    }
+    const s = ts / 1000;
+    shafts.forEach((el, i) => {
+      const [tilt, period, start] = SHAFTS[i % SHAFTS.length];
+      // An ease in and out each way, back and forth.
+      const k = 0.5 - 0.5 * Math.cos((Math.PI * (s + start)) / period);
+      look(el, `rotate(${Math.round((tilt - 1.6 + 3.2 * k) * 20) / 20}deg)`, `${Math.round((0.55 + 0.45 * k) * 100) / 100}`);
+    });
+    // Out across the water in the first half of its round, then gone for the second.
+    const p = (((s + 38) % WHALE_S) + WHALE_S) % WHALE_S / WHALE_S;
+    const k = Math.min(1, p / 0.5);
+    const shown = p < 0.04 ? p / 0.04 : p < 0.46 ? 1 : p < 0.5 ? (0.5 - p) / 0.04 : 0;
+    look(
+      whale,
+      `translate3d(${Math.round((-24 + 144 * k) * 10) / 10}vw, ${Math.round((16 - 38 * k) * 4) / 4}px, 0)`,
+      `${Math.round(shown * 50) / 100}`,
+    );
+  }
+
   function discardTransient() {
     transientEpoch++;
     pointers.clear();
@@ -2119,6 +2255,7 @@
   }
 
   document.addEventListener('visibilitychange', () => {
+    if (COVER) return;
     if (FLOAT) {
       if (document.hidden) releaseFloat();
       else if (floatDisposed) post({ type: 'floatResume' });
@@ -2128,12 +2265,13 @@
   if (FLOAT) window.addEventListener('pagehide', releaseFloat);
 
   canvas.addEventListener('webglcontextlost', (e) => {
+    if (COVER) return;
     e.preventDefault();
     if (FLOAT) {
       if (!floatDisposed) floatFailed('companion_context_lost');
     } else pause();
   });
-  canvas.addEventListener('webglcontextrestored', () => { if (!FLOAT) location.reload(); });
+  canvas.addEventListener('webglcontextrestored', () => { if (!FLOAT && !COVER) location.reload(); });
 
   /** The water follows the hour. */
   function timeOfDay(hour) {
@@ -2160,16 +2298,21 @@
   async function boot() {
     const started = performance.now();
     if (REDUCED) document.documentElement.dataset.motion = 'reduced';
-    applyTimeOfDay();
-    if (!FLOAT) {
+    if (!COVER) applyTimeOfDay();
+    if (!FLOAT && !COVER) {
       scene.resize();
       window.addEventListener('resize', () => scene.resize());
+      // The water already where it will be on her first frame.
+      water(performance.now());
     }
+    let coverModel = null;
     try {
       const response = await fetch(`${CHARACTER}character.json`, { signal: floatAbort?.signal });
       character = response.ok ? await response.json() : {};
-      adapter = await loadAdapter();
-      applyCharacter();
+      if (!COVER) {
+        adapter = await loadAdapter();
+        applyCharacter();
+      }
       if (floatDisposed) return;
 
       Fw.CubismFramework.startUp(Object.assign(new Fw.Option(), { logFunction: () => {}, loggingLevel: Fw.LogLevel?.LogLevel_Off ?? 5 }));
@@ -2178,15 +2321,27 @@
       // MSAA costs a lot of fill on a phone (13 → 24 fps on an old one) and
       // shows little on a dense screen, where the canvas is drawn at 2×.
       const antialias = query.get('antialias') === '1' || (query.get('antialias') !== '0' && (window.devicePixelRatio || 1) < 1.5);
-      const options = { alpha: true, premultipliedAlpha: true, antialias, preserveDrawingBuffer: query.get('capture') === '1' };
+      // Cubism never depth-tests, so no depth buffer.
+      const options = { alpha: true, depth: false, premultipliedAlpha: true, antialias, preserveDrawingBuffer: !COVER && query.get('capture') === '1' };
       gl = canvas.getContext('webgl2', options) || canvas.getContext('webgl', options);
-      if (!gl || (FLOAT && !gl.getContextAttributes()?.alpha)) throw new Error('webgl');
-      canvas.width = canvas.height = 0;
-      resize();
+      if (!gl || ((FLOAT || COVER) && !gl.getContextAttributes()?.alpha)) throw new Error('webgl');
+      if (COVER) {
+        const side = clamp(Math.floor(Number(query.get('coverSide')) || 512), 1, 512);
+        canvas.width = canvas.height = side;
+      } else {
+        canvas.width = canvas.height = 0;
+        resize();
+      }
 
       const next = new StageModel();
+      if (COVER) coverModel = next;
       if (FLOAT) loadingModel = next;
       await next.load(gl, character);
+      if (COVER) {
+        model = next;
+        await captureCover();
+        return;
+      }
       if (floatDisposed) { loadingModel = null; next.release(); return; }
       next.adapt(character, adapter);
       model = next;
@@ -2228,6 +2383,11 @@
       post({ type: 'error', message: String(error?.message ?? error) });
       document.documentElement.dataset.ready = 'error';
       document.documentElement.dataset.error = String(error?.stack ?? error);
+    } finally {
+      if (COVER) {
+        try { coverModel?.release(); }
+        finally { gl?.getExtension('WEBGL_lose_context')?.loseContext(); }
+      }
     }
   }
 
@@ -2243,6 +2403,7 @@
 
   window.stage = {
     command(message) {
+      if (COVER) return;
       if (FLOAT) {
         if (message?.type === 'dispose' || message?.type === 'pause') releaseFloat();
         else if (!floatDisposed && model && message?.type === 'freeze') pause();

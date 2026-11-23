@@ -221,6 +221,9 @@ class ChatTranscript {
 
   Iterable<SessionLogEvent> get events => _log.values;
 
+  /// Loaded events at or after [seq], in sequence order.
+  Iterable<SessionLogEvent> eventsFrom(int seq) => _traceEventsAfter(seq - 1);
+
   /// Where each loaded turn's time went ([traceTurns] over the merged log).
   /// Finished turns keep their [TurnTrace] instance across later events.
   List<TurnTrace> get turns => _traces ??= _buildTraces();
@@ -289,7 +292,11 @@ class ChatTranscript {
     // Only these appended events change the two projections. Snapshots,
     // history and replacements still invalidate both through appended == null.
     if (appended == null || appended is TodoWriteEvent || appended is TurnStartedEvent) _todos = null;
-    if (appended == null || appended.type == 'goal/change' || appended.type == 'user/message') _goal = null;
+    if (appended == null ||
+        appended.type == 'goal/change' ||
+        (appended.type == 'user/message' && asMap(appended.data['source'])?['kind'] == 'goal')) {
+      _goal = null;
+    }
   }
 
   List<ChatItem> get items {
@@ -298,12 +305,13 @@ class ChatTranscript {
     if (_items case final cached?) return cached;
     // A draft shares its step's row key with the message it commits to; keys stay unique when a step
     // is already committed or has more than one live attempt (the latest keeps the key).
-    final used = {for (final item in durable) item.key};
     final latest = {for (final draft in _drafts.values) draft.rowKey: draft};
+    for (final item in durable.whereType<AssistantChatItem>()) {
+      latest.remove(item.key);
+    }
     return _items = [
       ...durable,
-      for (final draft in _drafts.values)
-        ...draft.items(useRowKey: !used.contains(draft.rowKey) && identical(latest[draft.rowKey], draft)),
+      for (final draft in _drafts.values) ...draft.items(useRowKey: identical(latest[draft.rowKey], draft)),
     ];
   }
 
@@ -515,7 +523,9 @@ class _DurableFold {
           ),
         );
       case AssistantMessageEvent(:final message):
-        if (message.text.trim().isNotEmpty || message.reasoning.trim().isNotEmpty || event.interrupted) {
+        final text = message.text;
+        final reasoning = message.reasoning;
+        if (text.trim().isNotEmpty || reasoning.trim().isNotEmpty || event.interrupted) {
           final rowKey = 'm${event.turn}.${event.step}';
           items.add(
             AssistantChatItem(
@@ -523,8 +533,8 @@ class _DurableFold {
               rowKey: messageKeys.add(rowKey) ? rowKey : null,
               seq: event.seq,
               time: event.time,
-              text: message.text,
-              reasoning: message.reasoning,
+              text: text,
+              reasoning: reasoning,
               interrupted: event.interrupted,
               isFinalAnswer: message.isFinalAnswer,
               usage: event.usage,
@@ -1148,9 +1158,9 @@ class _TurnTracer {
             lastToken: bounds.last,
             retries: failures.length,
             retryFailures: List.unmodifiable(failures.where((f) => f.isNotEmpty)),
-            hasText: message.text.trim().isNotEmpty,
-            hasReasoning: message.reasoning.trim().isNotEmpty,
-            toolCalls: message.toolCalls.length,
+            hasText: message.parts.any((p) => p is TextPart && p.text.trim().isNotEmpty),
+            hasReasoning: message.parts.any((p) => p is ReasoningPart && p.text.trim().isNotEmpty),
+            toolCalls: message.parts.whereType<ToolCallPart>().length,
             interrupted: event.interrupted,
           ),
         );

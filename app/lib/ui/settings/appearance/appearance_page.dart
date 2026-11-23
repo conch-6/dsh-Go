@@ -23,10 +23,14 @@ import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 import '../settings_widgets.dart';
 import 'app_icon_picker.dart';
+import 'hue_slider.dart';
 import 'icon_shortcut_sheet.dart';
 import 'launch_screen_section.dart';
+import 'theme_packs_section.dart';
 import 'tile_style_picker.dart';
 import 'wallpaper_section.dart';
+
+export 'hue_slider.dart' show HueSlider;
 
 /// 设置首页「外观」组的第一行:当前配色的色点 + 名字 · 明暗,点开 [AppearancePage]。
 class AppearanceEntryTile extends ConsumerWidget {
@@ -68,7 +72,11 @@ class AppearanceEntryTile extends ConsumerWidget {
 /// 选什么都即时生效:整个 App 的主题随之交叉淡变(`AppMotion.standard`),
 /// 这一页本身就是预览。
 class AppearancePage extends ConsumerWidget {
-  const AppearancePage({super.key});
+  const AppearancePage({super.key, this.showThemePacks});
+
+  /// Whether to show the declarative Theme Packs & Workshop section.
+  /// Defaults to true inside the real app shell ([ThemeRevealHost]).
+  final bool? showThemePacks;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -77,6 +85,7 @@ class AppearancePage extends ConsumerWidget {
     final wallpaper = ref.watch(wallpaperAccentProvider).value;
     // A picture as a launcher shortcut: Android and HarmonyOS, not iOS.
     final pictureShortcut = ref.watch(operatingSystemProvider) != 'ios';
+    final includeThemePacks = showThemePacks ?? ThemeRevealHost.presentIn(context);
     return AppPage.list(
       title: l10n.pluginsTheme,
       children: [
@@ -113,6 +122,11 @@ class AppearancePage extends ConsumerWidget {
           footer: Text(l10n.wallpaperFooter),
           children: [SpotAnchor(spot: Spots.wallpaper, child: const WallpaperSection())],
         ),
+        if (includeThemePacks)
+          SettingsSection(
+            title: AppLocale.isEnglish ? 'Theme Packs & Workshop' : '主题包与创意工坊',
+            children: const [ThemePacksSection()],
+          ),
       ],
     );
   }
@@ -152,7 +166,7 @@ class ThemeModePicker extends ConsumerWidget {
       (ThemeMode.system, l10n.commonFollowSystem),
     ];
     final mode = ref.watch(uiThemeModeProvider);
-    final (light, dark) = _themesFor(ref.watch(accentProvider));
+    final (light, dark) = _themesFor(ref.watch(accentProvider), ref.watch(activeThemePackProvider));
     // The ring sits outside each preview, in [_ModeTile.room]: the padding
     // and gap leave room for it, so previews land 16 from the card and 12
     // apart, column for column with the tile styles below.
@@ -198,15 +212,19 @@ class ThemeModePicker extends ConsumerWidget {
   }
 }
 
-/// Light and dark themes of [accent], built once per palette.
-(ThemeData, ThemeData) _themesFor(AppAccent accent) {
-  final hit = _themeCache[accent];
+/// Light and dark themes of [accent] and optional [pack], built once per pair.
+(ThemeData, ThemeData) _themesFor(AppAccent accent, [ThemePack? pack]) {
+  final key = (accent, pack);
+  final hit = _themeCache[key];
   if (hit != null) return hit;
-  if (_themeCache.length > 4) _themeCache.clear();
-  return _themeCache[accent] = (buildLightTheme(accent: accent), buildDarkTheme(accent: accent));
+  if (_themeCache.length > 6) _themeCache.clear();
+  return _themeCache[key] = (
+    buildLightTheme(accent: accent, themePack: pack),
+    buildDarkTheme(accent: accent, themePack: pack),
+  );
 }
 
-final _themeCache = <AppAccent, (ThemeData, ThemeData)>{};
+final _themeCache = <(AppAccent, ThemePack?), (ThemeData, ThemeData)>{};
 
 class _ModeTile extends StatelessWidget {
   const _ModeTile({
@@ -553,7 +571,7 @@ class _Swatch extends StatelessWidget {
                   painter: _SwatchPainter(
                     color: color,
                     ring: t,
-                    wheel: wheel ? _wheelColors(theme.brightness) : null,
+                    wheel: wheel ? hueWheelColors(theme.brightness) : null,
                     hole: _cardColor(context),
                     edge: scheme.onSurface.withValues(alpha: 0.08),
                   ),
@@ -581,13 +599,6 @@ Color _cardColor(BuildContext context) {
   final s = DshSurfaces.of(context);
   return Color.alphaBlend(s.card.fill, Color.lerp(s.backdropTop, s.backdropBottom, 0.5)!);
 }
-
-/// The hue wheel and the hue track: guarded colours every 15°, per brightness.
-List<Color> _wheelColors(Brightness brightness) => _wheels[brightness] ??= [
-  for (var h = 0; h <= 360; h += 15) AppAccent.guardedSeed(AppAccent.hueColor(h % 360.0), brightness),
-];
-
-final _wheels = <Brightness, List<Color>>{};
 
 class _SwatchPainter extends CustomPainter {
   _SwatchPainter({required this.color, required this.ring, required this.hole, required this.edge, this.wheel});
@@ -773,138 +784,6 @@ class _ChipPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ChipPainter old) => old.color != color || old.ring != ring || old.edge != edge;
-}
-
-/// 色相条:一条守卫后的色相渐变,一颗圆钮(里面是当前色)。拖动时圆钮
-/// 跟手,主题每 ~100ms 跟一次,松手落定。
-class HueSlider extends StatefulWidget {
-  const HueSlider({super.key, required this.hue, required this.brightness, required this.onChanged});
-
-  final double hue;
-  final Brightness brightness;
-  final ValueChanged<double> onChanged;
-
-  static const height = 36.0;
-  static const track = 12.0;
-  static const knob = 26.0;
-
-  @override
-  State<HueSlider> createState() => _HueSliderState();
-}
-
-class _HueSliderState extends State<HueSlider> {
-  double? _dragging;
-  double _lastDx = 0;
-  DateTime _sent = DateTime(0);
-
-  double get _hue => _dragging ?? widget.hue;
-
-  double _hueAt(double dx, double width) {
-    const pad = HueSlider.knob / 2;
-    return ((dx - pad) / (width - 2 * pad)).clamp(0.0, 1.0) * 360;
-  }
-
-  void _drag(double dx, double width, {bool end = false}) {
-    final hue = _hueAt(dx, width);
-    setState(() => _dragging = end ? null : hue);
-    final now = DateTime.now();
-    if (end || now.difference(_sent) > const Duration(milliseconds: 100)) {
-      _sent = now;
-      widget.onChanged(hue);
-    }
-  }
-
-  void _step(double by) => widget.onChanged((widget.hue + by) % 360);
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final hue = _hue;
-    final colors = _wheelColors(widget.brightness);
-    final current = AppAccent.guardedSeed(AppAccent.hueColor(hue % 360), widget.brightness);
-    return Semantics(
-      slider: true,
-      label: l10n.pluginsHue,
-      value: '${hue.round()}°',
-      increasedValue: '${((hue + 15) % 360).round()}°',
-      decreasedValue: '${((hue - 15) % 360).round()}°',
-      onIncrease: () => _step(15),
-      onDecrease: () => _step(-15),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.maxWidth;
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTapUp: (d) => _drag(d.localPosition.dx, width, end: true),
-            onHorizontalDragStart: (d) => _drag(_lastDx = d.localPosition.dx, width),
-            onHorizontalDragUpdate: (d) => _drag(_lastDx = d.localPosition.dx, width),
-            onHorizontalDragEnd: (_) => _drag(_lastDx, width, end: true),
-            child: SizedBox(
-              height: HueSlider.height,
-              width: width,
-              child: CustomPaint(
-                painter: _HuePainter(
-                  colors: colors,
-                  hue: hue,
-                  current: current,
-                  knob: Theme.of(context).brightness == Brightness.dark
-                      ? Theme.of(context).colorScheme.onSurface
-                      : Colors.white,
-                  shadow: Theme.of(context).colorScheme.shadow,
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _HuePainter extends CustomPainter {
-  _HuePainter({
-    required this.colors,
-    required this.hue,
-    required this.current,
-    required this.knob,
-    required this.shadow,
-  });
-
-  final List<Color> colors;
-  final double hue;
-  final Color current;
-  final Color knob;
-  final Color shadow;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const pad = HueSlider.knob / 2;
-    final track = Rect.fromLTWH(
-      pad - HueSlider.track / 2,
-      (size.height - HueSlider.track) / 2,
-      size.width - 2 * pad + HueSlider.track,
-      HueSlider.track,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(track, const Radius.circular(99)),
-      Paint()..shader = LinearGradient(colors: colors).createShader(track),
-    );
-    final x = pad + (hue / 360).clamp(0.0, 1.0) * (size.width - 2 * pad);
-    final c = Offset(x, size.height / 2);
-    canvas.drawCircle(
-      c.translate(0, 1),
-      HueSlider.knob / 2,
-      Paint()
-        ..color = shadow.withValues(alpha: 0.22)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
-    );
-    canvas.drawCircle(c, HueSlider.knob / 2, Paint()..color = knob);
-    canvas.drawCircle(c, HueSlider.knob / 2 - 4, Paint()..color = current);
-  }
-
-  @override
-  bool shouldRepaint(_HuePainter old) =>
-      old.hue != hue || old.current != current || old.knob != knob || old.colors != colors || old.shadow != shadow;
 }
 
 // ── 跟随壁纸 ─────────────────────────────────────────────────────────────

@@ -126,6 +126,8 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
 
   Future<void> _onResume() async {
     unawaited(ref.read(phoneLinkProvider.notifier).refresh());
+    // Notifications, 实时活动 or the vendor's permission may have changed in the system settings.
+    ref.invalidate(phoneSystemIslandProvider);
     final read = ++_resumeRead;
     setState(() => _skillPromptsReady = false);
     final ready = await _phone.refreshStatus();
@@ -523,6 +525,8 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
               initiallyOpen: [
                 Spots.phoneA11yRestore,
                 Spots.phoneAutoCollapse,
+                Spots.phoneEdgeGlow,
+                Spots.phoneSystemIsland,
                 Spots.phoneReturn,
                 Spots.phoneBackgroundGuide,
               ].any((spot) => spot.id == targetSpot),
@@ -783,10 +787,17 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
 
   Future<void> _setAutoCollapse(bool on) => ref.read(phoneOverlayPrefsProvider.notifier).setAutoCollapse(on);
 
-  /// 悬浮条: 闲置时不透明度, 闲置时自动收起, 完成后返回 dsh-go.
+  Future<void> _setEdgeGlow(bool on) => ref.read(phoneOverlayPrefsProvider.notifier).setEdgeGlow(on);
+
+  Future<void> _setSystemIsland(bool on) => ref.read(phoneOverlayPrefsProvider.notifier).setSystemIsland(on);
+
+  /// 悬浮条: 闲置时不透明度, 闲置时自动收起, 屏幕边缘光效, 用系统灵动岛显示, 完成后返回 dsh-go.
   Widget _floatingBar() {
     final overlay = ref.watch(phoneOverlayPrefsProvider);
     final returnAfterDone = ref.watch(phoneReturnPrefProvider);
+    // The switch works only where the phone has its own island; elsewhere the row says why not.
+    final island = ref.watch(phoneSystemIslandProvider).value ?? (vendor: false, shows: false);
+    final islandOn = island.vendor && overlay.systemIsland;
     return ListPageCard(
       title: context.l10n.phoneFloatingBar,
       children: [
@@ -801,6 +812,32 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
             subtitle: context.l10n.phoneAutoCollapseHint,
             onTap: () => unawaited(_setAutoCollapse(!overlay.autoCollapse)),
             trailing: Switch.adaptive(value: overlay.autoCollapse, onChanged: (v) => unawaited(_setAutoCollapse(v))),
+          ),
+        ),
+        MergeSemantics(
+          child: ListPageRow(
+            icon: AppIcons.edgeGlow,
+            spot: Spots.phoneEdgeGlow,
+            subtitle: context.l10n.phoneEdgeGlowHint,
+            onTap: () => unawaited(_setEdgeGlow(!overlay.edgeGlow)),
+            trailing: Switch.adaptive(value: overlay.edgeGlow, onChanged: (v) => unawaited(_setEdgeGlow(v))),
+          ),
+        ),
+        MergeSemantics(
+          child: ListPageRow(
+            icon: AppIcons.systemIsland,
+            spot: Spots.phoneSystemIsland,
+            subtitle: !island.vendor
+                ? context.l10n.phoneSystemIslandUnsupported
+                : islandOn && !island.shows
+                ? context.l10n.phoneSystemIslandOff
+                : context.l10n.phoneSystemIslandHint,
+            subtitleMaxLines: 3,
+            onTap: island.vendor ? () => unawaited(_setSystemIsland(!overlay.systemIsland)) : null,
+            trailing: Switch.adaptive(
+              value: islandOn,
+              onChanged: island.vendor ? (v) => unawaited(_setSystemIsland(v)) : null,
+            ),
           ),
         ),
         MergeSemantics(

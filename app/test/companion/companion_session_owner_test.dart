@@ -152,14 +152,77 @@ void _savedA() => SharedPreferences.setMockInitialValues({
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('a legacy untagged session is replaced before phone memory enters its context', () async {
+    _savedA();
+    final room = _Room();
+    await room.loaded();
+    final binding = await room.sessions.ensure(memoryArchiveId: 'phone-archive', memoryControlRevision: 0);
+    expect(binding.sessionId, 'a-created');
+    expect(binding.memoryArchiveId, 'phone-archive');
+    expect(binding.memoryControlRevision, 0);
+    expect(room.a.argsOf('session/create'), hasLength(1));
+    expect(room.a.argsOf('session/projections'), isEmpty);
+    final prefs = await SharedPreferences.getInstance();
+    final saved = jsonDecode(prefs.getString('companion_sessions')!) as Map;
+    expect((saved['local:local'] as Map)['memoryArchiveId'], 'phone-archive');
+  });
+
+  test('only the matching archive and control revision can reuse a full session', () async {
+    SharedPreferences.setMockInitialValues({
+      'companion_sessions': jsonEncode({
+        'local:local': {
+          'id': 'a-existing',
+          'full': true,
+          'memoryArchiveId': 'phone-archive',
+          'memoryControlRevision': 2,
+        },
+      }),
+    });
+    final room = _Room();
+    await room.loaded();
+    expect(
+      (await room.sessions.ensure(memoryArchiveId: 'phone-archive', memoryControlRevision: 2)).sessionId,
+      'a-existing',
+    );
+    expect(room.a.argsOf('session/create'), isEmpty);
+    expect(
+      (await room.sessions.ensure(memoryArchiveId: 'phone-archive', memoryControlRevision: 3)).sessionId,
+      'a-created',
+    );
+    expect(room.a.argsOf('session/create'), hasLength(1));
+  });
+
+  test('forgetAll during startup prevents a delayed preference read from restoring old bindings', () async {
+    _savedA();
+    final room = _Room();
+    await room.sessions.forgetAll();
+    await _flush();
+    expect(room.sessions.of(HostRef.local), isNull);
+    final prefs = await SharedPreferences.getInstance();
+    expect(jsonDecode(prefs.getString('companion_sessions')!), isEmpty);
+  });
+
   test('a startup intent does not move to B while preferences load', () async {
+    SharedPreferences.setMockInitialValues({
+      'companion_sessions': jsonEncode({
+        'local:local': {'id': 'a-existing', 'full': true},
+        '${_Room.bHost.kind.name}:${_Room.bHost.id}': {'id': 'b-existing', 'full': true},
+      }),
+    });
     final room = _Room();
     final pending = _outcome(room.sessions.ensure());
     room.host.change(_Room.bHost);
     final result = await pending;
     expect(room.b.argsOf('session/create'), isEmpty);
     expect(result, isA<DshClosedException>());
-    expect(room.sessions.of(_Room.bHost), isNull);
+    expect(room.sessions.of(HostRef.local)?.sessionId, 'a-existing');
+    expect(room.sessions.of(_Room.bHost)?.sessionId, 'b-existing');
+    expect((await room.sessions.ensure()).sessionId, 'b-existing');
+    expect(room.b.calls.map((call) => call.$1), ['session/projections']);
+    room.host.change(HostRef.local);
+    await _flush();
+    expect((await room.sessions.ensure()).sessionId, 'a-existing');
+    expect(room.a.calls.map((call) => call.$1), ['session/projections']);
   });
 
   test('a missing-session reply from A cannot create on B or bind its id to A', () async {

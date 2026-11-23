@@ -24,6 +24,10 @@ import '../theme/surfaces.dart';
 const companionEdge = 12.0;
 const _barHeight = 44.0;
 
+// Over her stage (companion_page.dart): every glass here but the log's close
+// button sits in one BackdropGroup and shares one backdrop read between them
+// (`grouped: true`). They never overlap one another, so it looks the same.
+
 /// Deep water behind her words and the input: reply text has to stay readable
 /// over a white apron and a bright midday sky alike.
 GlassStyle companionDeepGlass(BuildContext context) =>
@@ -35,11 +39,20 @@ GlassStyle companionDeepGlass(BuildContext context) =>
 enum CompanionActivity { idle, listening, thinking, speaking, sleeping, away, snacking, playing, resting }
 
 class CompanionRoundButton extends StatelessWidget {
-  const CompanionRoundButton({super.key, required this.icon, required this.label, required this.onTap});
+  const CompanionRoundButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.grouped = false,
+  });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+
+  /// In the room's top bar; not over the log, which has to blur the log.
+  final bool grouped;
 
   @override
   Widget build(BuildContext context) => Pressable(
@@ -47,6 +60,7 @@ class CompanionRoundButton extends StatelessWidget {
     semanticLabel: label,
     child: GlassSurface(
       tier: GlassTier.chrome,
+      grouped: grouped,
       circle: true,
       child: SizedBox.square(
         dimension: _barHeight,
@@ -93,6 +107,7 @@ class CompanionNamePlate extends StatelessWidget {
       child: ExcludeSemantics(
         child: GlassSurface(
           tier: GlassTier.chrome,
+          grouped: true,
           stadium: true,
           child: SizedBox(
             height: _barHeight,
@@ -138,9 +153,10 @@ class CompanionNamePlate extends StatelessWidget {
 
 /// Fades in and rises a little; every floating piece of text uses this.
 class _Rise extends StatelessWidget {
-  const _Rise({required this.child});
+  const _Rise({required this.child, this.onFrame});
 
   final Widget? child;
+  final VoidCallback? onFrame;
 
   @override
   Widget build(BuildContext context) {
@@ -149,19 +165,31 @@ class _Rise extends StatelessWidget {
       duration: duration,
       curve: AppMotion.std,
       alignment: Alignment.bottomCenter,
+      onEnd: onFrame,
       child: AnimatedSwitcher(
         duration: duration,
         switchInCurve: AppMotion.enter,
         switchOutCurve: AppMotion.exit,
         layoutBuilder: (current, previous) =>
             Stack(alignment: Alignment.bottomCenter, children: [...previous, ?current]),
-        transitionBuilder: (child, animation) => FadeTransition(
-          opacity: animation,
-          child: SlideTransition(
-            position: Tween(begin: const Offset(0, 0.06), end: Offset.zero).animate(animation),
-            child: child,
-          ),
-        ),
+        transitionBuilder: (child, animation) {
+          final transition = FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween(begin: const Offset(0, 0.06), end: Offset.zero).animate(animation),
+              child: child,
+            ),
+          );
+          if (onFrame == null) return transition;
+          return AnimatedBuilder(
+            animation: animation,
+            child: transition,
+            builder: (_, child) {
+              onFrame!();
+              return child!;
+            },
+          );
+        },
         child: child ?? const SizedBox(key: ValueKey('nothing'), width: double.infinity),
       ),
     );
@@ -171,11 +199,23 @@ class _Rise extends StatelessWidget {
 /// What she says. Long replies scroll inside, newest at the bottom, and fade out
 /// at the top edge instead of being cut.
 class CompanionSpeech extends StatelessWidget {
-  const CompanionSpeech({super.key, this.text, this.thinking = false, this.error = false, this.onPullBack});
+  const CompanionSpeech({
+    super.key,
+    this.text,
+    this.thinking = false,
+    this.error = false,
+    this.onPullBack,
+    this.textKey,
+    this.onFrame,
+  });
 
   final String? text;
   final bool thinking;
   final bool error;
+  final Key? textKey;
+
+  /// Schedules a read after this frame's paint, including a scroll or fade.
+  final VoidCallback? onFrame;
 
   /// Pulling down past the top of what she just said: read further back.
   final VoidCallback? onPullBack;
@@ -192,6 +232,7 @@ class CompanionSpeech extends StatelessWidget {
         child: GlassSurface(
           tier: GlassTier.card,
           style: companionDeepGlass(context),
+          grouped: true,
           borderRadius: BorderRadius.circular(20),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
           child: TypingIndicator(color: theme.colorScheme.onSurfaceVariant),
@@ -207,6 +248,7 @@ class CompanionSpeech extends StatelessWidget {
           child: GlassSurface(
             tier: GlassTier.card,
             style: companionDeepGlass(context),
+            grouped: true,
             borderRadius: BorderRadius.circular(22),
             padding: const EdgeInsets.fromLTRB(18, 13, 18, 14),
             child: ConstrainedBox(
@@ -221,6 +263,7 @@ class CompanionSpeech extends StatelessWidget {
                 ).createShader(rect),
                 child: _PullBack(
                   onPull: onPullBack,
+                  onFrame: onFrame,
                   child: SingleChildScrollView(
                     reverse: true,
                     // Even a short line can be pulled on.
@@ -231,6 +274,7 @@ class CompanionSpeech extends StatelessWidget {
                       padding: const EdgeInsets.only(top: 6),
                       child: Text(
                         words,
+                        key: textKey,
                         style: theme.textTheme.bodyLarge?.copyWith(
                           height: 1.5,
                           color: error ? theme.colorScheme.error : theme.colorScheme.onSurface,
@@ -245,17 +289,18 @@ class CompanionSpeech extends StatelessWidget {
         ),
       );
     }
-    return _Rise(child: bubble);
+    return _Rise(onFrame: onFrame, child: bubble);
   }
 }
 
 /// A finger dragging past the oldest end of a reversed scroll view, far enough
 /// to mean it: [onPull], once per drag.
 class _PullBack extends StatefulWidget {
-  const _PullBack({required this.onPull, required this.child});
+  const _PullBack({required this.onPull, required this.child, this.onFrame});
 
   final VoidCallback? onPull;
   final Widget child;
+  final VoidCallback? onFrame;
 
   @override
   State<_PullBack> createState() => _PullBackState();
@@ -267,6 +312,7 @@ class _PullBackState extends State<_PullBack> {
   bool _fired = false;
 
   bool _onNotification(ScrollNotification notification) {
+    if (notification.depth == 0) widget.onFrame?.call();
     final pull = widget.onPull;
     if (pull == null) return false;
     switch (notification) {
@@ -291,8 +337,13 @@ class _PullBackState extends State<_PullBack> {
   }
 
   @override
-  Widget build(BuildContext context) =>
-      NotificationListener<ScrollNotification>(onNotification: _onNotification, child: widget.child);
+  Widget build(BuildContext context) => NotificationListener<ScrollMetricsNotification>(
+    onNotification: (notification) {
+      if (notification.depth == 0) widget.onFrame?.call();
+      return false;
+    },
+    child: NotificationListener<ScrollNotification>(onNotification: _onNotification, child: widget.child),
+  );
 }
 
 /// What the person just said, until she starts answering.
@@ -353,6 +404,7 @@ class CompanionPill extends StatelessWidget {
     final pill = GlassSurface(
       tier: GlassTier.pill,
       style: companionDeepGlass(context),
+      grouped: true,
       stadium: true,
       padding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
       child: Row(
@@ -464,6 +516,7 @@ class CompanionInvite extends StatelessWidget {
               child: GlassSurface(
                 tier: GlassTier.card,
                 style: companionDeepGlass(context),
+                grouped: true,
                 borderRadius: BorderRadius.circular(22),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -634,8 +687,12 @@ class CompanionComposer extends StatelessWidget {
   static const _keySize = 40.0;
   static const _keyInset = 6.0;
 
+  /// Text changes rebuild the composer, not her room.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      ListenableBuilder(listenable: input, builder: (context, _) => _buildComposer(context));
+
+  Widget _buildComposer(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final colors = DshColors.of(context);
@@ -673,6 +730,7 @@ class CompanionComposer extends StatelessWidget {
     return GlassSurface(
       tier: GlassTier.chrome,
       style: companionDeepGlass(context),
+      grouped: true,
       borderRadius: BorderRadius.circular(_keySize / 2 + _keyInset),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, _keyInset, _keyInset, _keyInset),

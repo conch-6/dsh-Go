@@ -7,7 +7,6 @@ import java.io.*
 import java.nio.file.Files
 import java.util.concurrent.*
 import java.util.zip.CRC32
-import kotlin.concurrent.thread
 
 class ParallelXZInputStreamTest {
     private class Fixture : AutoCloseable {
@@ -67,6 +66,26 @@ class ParallelXZInputStreamTest {
             assertEquals(1, stream.read()); assertEquals(3, field(stream, "nextBlock")); assertEquals(1, pending.count())
         }
         f.allClosed()
+    }
+
+    @Test fun exhaustedBlocksAreReusedOnlyForMatchingSizes() = Fixture().use { f ->
+        val blocks = listOf(1024, 1024, 1024, 1024, 97).mapIndexed { i, size -> pattern(i, size) }
+        f.archive(blocks)
+        ParallelXZInputStream.open(f::factory).use { stream ->
+            val buffers = mutableListOf<ByteArray>()
+            for (expected in blocks) {
+                val actual = ByteArray(expected.size)
+                assertEquals(1, stream.read(actual, 0, 1))
+                buffers += field(stream, "current") as ByteArray
+                assertEquals(actual.size - 1, stream.read(actual, 1, actual.size - 1))
+                assertArrayEquals(expected, actual)
+            }
+            assertSame(buffers[0], buffers[2])
+            assertSame(buffers[1], buffers[3])
+            assertNotSame(buffers[0], buffers[1])
+            assertNotSame(buffers[2], buffers[4])
+            assertEquals(-1, stream.read())
+        }
     }
 
     @Test fun crcFailureAtEveryBlockEndPropagatesAndClosesAllReaders() {

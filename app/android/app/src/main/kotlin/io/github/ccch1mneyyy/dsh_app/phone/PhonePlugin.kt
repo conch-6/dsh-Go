@@ -18,6 +18,7 @@ import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillReplayApps
 import io.github.ccch1mneyyy.dsh_app.runtime.RuntimeController
 import io.github.ccch1mneyyy.dsh_app.runtime.PhoneSkillBundleReader
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.OverlayPrefs
+import io.github.ccch1mneyyy.dsh_app.notify.LiveActivity
 import io.github.ccch1mneyyy.dsh_app.phone.background.PrivilegedActionGate
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -54,6 +55,8 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
     }
     private lateinit var appContext: Context
     private lateinit var control: PhoneControl
+    private lateinit var companion: CompanionPhoneBridge
+    private lateinit var companionScreen: CompanionScreenBridge
     private var activity: ActivityPluginBinding? = null
     private var sink: ((Map<String, Any?>) -> Unit)? = null
     private val main = Handler(Looper.getMainLooper())
@@ -76,8 +79,10 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         (appContext as Application).registerActivityLifecycleCallbacks(previewLifecycle)
         promptOwner = Any()
         attached = true
+        companion = CompanionPhoneBridge(control, main, io, controlIo) { attached }
         control.background.restoreKeptChannel()
         methods = MethodChannel(binding.binaryMessenger, "dsh/phone").also { it.setMethodCallHandler(this) }
+        companionScreen = CompanionScreenBridge(appContext, control, binding.binaryMessenger)
         events = EventChannel(binding.binaryMessenger, "dsh/phone/events").also { it.setStreamHandler(this) }
         previewEvents = EventChannel(binding.binaryMessenger, "dsh/phone/preview").also { channel ->
             channel.setStreamHandler(object : EventChannel.StreamHandler {
@@ -106,6 +111,8 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         control.selfCheck.stop(promptOwner)
         attached = false
+        companion.detach()
+        companionScreen.close()
         skillSelectionRequest = Any()
         skillInspection = null
         skillClient?.let { control.skillReplaySelections.retireClient(it); control.skillDrafts.retireClient(it) }
@@ -188,7 +195,10 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        if (companion.handle(call, result)) return
         when (call.method) {
+            "companionScreenState" -> result.success(companionScreen.state(call.arguments as? Map<*, *>))
+            "companionScreenSample" -> async(result) { companionScreen.sample(call.arguments as? Map<*, *>) }
             "status" -> control.status { complete(result, it) }
             "androidShellStatus" -> async(result, shortControl = true) { control.shell.status() }
             "configureAndroidShell" -> {
@@ -341,9 +351,17 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                 val id = call.argument<String>("requestId")
                 result.success(id != null && id.length in 1..200 && control.prompts.cancel(id))
             }
-            // 设置 → 手机操控 → 悬浮条: {idleOpacity 0.3–1, autoCollapse}; a showing overlay follows at once.
+            // 设置 → 手机操控 → 悬浮条: {idleOpacity 0.3–1, autoCollapse, edgeGlow, systemIsland}; a showing overlay follows at once.
             "overlayPrefs" -> result.success(OverlayPrefs.read(appContext).toMap())
             "setOverlayPrefs" -> result.success(OverlayPrefs.write(appContext, call.arguments as? Map<*, *>).toMap())
+            // Whether the phone has its own island for the task (「用系统灵动岛显示」 shows only then). Off the main thread: a binder call on HyperOS.
+            "systemIsland" -> async(result) { LiveActivity.islandSupport(appContext) }
+            // {sessionId, text}: what DSH last said in the conversation driving the phone, for the island's card; null text forgets it.
+            "setPhoneThought" -> {
+                val session = call.argument<String>("sessionId")?.takeIf { it.length in 1..200 }
+                if (session != null) PhoneThoughts.set(session, call.argument<String>("text"))
+                result.success(session != null)
+            }
             else -> result.notImplemented()
         }
         if (call.method == "setBackgroundMode" || call.method == "adbConnect" || call.method == "requestShizukuPermission") {

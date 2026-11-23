@@ -58,6 +58,19 @@ void main() {
     }
   });
 
+  test("an assistant message's reasoning goes to OpenRouter and is dropped for other generic services", () {
+    final body = {
+      'messages': [
+        {'role': 'assistant', 'content': 'a', 'reasoning': 'r', 'reasoning_content': 'x'},
+      ],
+    };
+    Map<String, Object?> sent(String url) =>
+        (prepareModelRequestBody(config(deepseek: false, baseUrl: url), body)['messages']! as List).single
+            as Map<String, Object?>;
+    expect(sent('https://openrouter.ai/api/v1'), {'role': 'assistant', 'content': 'a', 'reasoning': 'r'});
+    expect(sent('https://example.test/v1'), {'role': 'assistant', 'content': 'a'});
+  });
+
   test('streams reasoning and text, then reads usage with empty choices', () async {
     late http.BaseRequest captured;
     final client = _Client((request) async {
@@ -98,9 +111,13 @@ void main() {
         {'role': 'assistant', 'content': '她说：', 'prefix': true},
       ],
     };
+    final settlements = <(ModelUsageReport?, bool)>[];
     final events = await TavernModelClient(
       clientFactory: () => client,
+      onUsageSettled: (report, {required partial}) => settlements.add((report, partial)),
     ).generate(config: config(), body: body, cancellation: ModelCancellation()).toList();
+    expect(settlements.single.$2, isFalse);
+    expect(settlements.single.$1!.fields['completion_tokens'], containsPair('value', 9));
     expect(captured.url.path, '/beta/chat/completions');
     expect(captured.headers['Authorization'], 'Bearer test-key');
     final sent = jsonDecode(utf8.decode(await captured.finalize().toBytes())) as Map<String, dynamic>;

@@ -118,9 +118,29 @@ internal class CompanionFloatView(
     }
 
     fun state(next: String, reduceMotion: Boolean) {
+        if (state == next && reduced == reduceMotion) return
         state = next
         reduced = reduceMotion
-        if (ready) command(JSONObject().put("type", "petState").put("state", next).put("reduceMotion", reduced))
+        if (ready) sendState()
+    }
+
+    private fun sendState() {
+        command(JSONObject().put("type", "petState").put("state", state).put("reduceMotion", reduced))
+    }
+
+    /** Same stage commands used by the room; no script text is interpolated. */
+    fun companionLine(emotion: String, chars: Int, speaking: Boolean) {
+        if (!ready || closed) return
+        command(JSONObject().put("type", "emotion").put("name", emotion).put("hold", 2600))
+        command(JSONObject().put("type", "mood").put("mood", if (speaking) "speaking" else "idle"))
+        if (speaking) command(JSONObject().put("type", "say").put("chars", chars))
+    }
+
+    fun speech(chars: Int, speaking: Boolean) {
+        if (!ready || closed) return
+        command(JSONObject().put("type", "mood").put("mood", if (speaking) "speaking" else "idle"))
+        if (speaking) command(JSONObject().put("type", "say").put("chars", chars))
+        else command(JSONObject().put("type", "quiet"))
     }
 
     /** A tap at ([x], [y]) in 0–1 of the viewport. */
@@ -145,7 +165,7 @@ internal class CompanionFloatView(
         when (json.optString("type")) {
             "floatReady" -> {
                 ready = true
-                state(state, reduced)
+                sendState()
                 freezeCommand(freezing.onReady())
             }
             "floatBounds" -> {

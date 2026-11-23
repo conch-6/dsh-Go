@@ -10,6 +10,7 @@ import { cropPng, validatePng, type PngInfo, type PngRegion } from './workshop-p
 
 const SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const COMPANION_PREVIEW = 'character/preview.png';
+const THEME_PREVIEW = 'preview.png';
 function previewHeader(bytes: Uint8Array): void {
   need(bytes.length <= PREVIEW_CONTRACT.maxBytes, 'preview_size');
   need(bytes.length >= 33 && SIGNATURE.every((b, i) => bytes[i] === b), 'png_header');
@@ -27,6 +28,11 @@ function companionBytes(zip: WorkshopArchive): Uint8Array {
   need(member.size <= PREVIEW_CONTRACT.maxBytes, 'preview_size');
   return zip.read(COMPANION_PREVIEW, PREVIEW_CONTRACT.maxBytes);
 }
+function themeBytes(zip: WorkshopArchive): Uint8Array {
+  const member = zip.files.get(THEME_PREVIEW); need(member, 'preview_missing');
+  need(member.size <= PREVIEW_CONTRACT.maxBytes, 'preview_size');
+  return zip.read(THEME_PREVIEW, PREVIEW_CONTRACT.maxBytes);
+}
 function petCell(zip: WorkshopArchive): { path: string; region: PngRegion } {
   const candidates = [...zip.files.keys()].filter(name => /^(?:[^/]+\/)?pack\.json$/.test(name));
   need(candidates.length === 1, 'archive_pack_count');
@@ -35,9 +41,10 @@ function petCell(zip: WorkshopArchive): { path: string; region: PngRegion } {
   const name = pack.states.idle[0];
   need(typeof name === 'string' && record(pack.animations) && Object.hasOwn(pack.animations, name), 'pack_reference');
   const animation = pack.animations[name]; need(record(animation) && typeof animation.sheet === 'string', 'pack_animations');
-  need(previewDimensions(animation.frameW, animation.frameH), 'preview_dimensions');
-  need(whole(animation.cols, 1, 4096) && Array.isArray(animation.frames) && record(animation.frames[0]) && whole(animation.frames[0].i, 0, 1 << 30), 'pack_frames');
-  const width = animation.frameW as number, height = animation.frameH as number, first = animation.frames[0].i;
+  const { frameW: width, frameH: height } = animation;
+  need(whole(width, 1, PET_LIMITS.sheetSide) && whole(height, 1, PET_LIMITS.sheetSide) && width * height * 4 <= PET_LIMITS.sheetDecodedBytes, 'preview_dimensions');
+  need(whole(animation.cols, 1, PET_LIMITS.sheetSide) && Array.isArray(animation.frames) && record(animation.frames[0]) && whole(animation.frames[0].i, 0, 1 << 30), 'pack_frames');
+  const first = animation.frames[0].i;
   return { path: manifest.slice(0, -'pack.json'.length) + animation.sheet,
     region: { x: first % animation.cols * width, y: Math.floor(first / animation.cols) * height, width, height } };
 }
@@ -45,6 +52,7 @@ export function checkPreviewRequest(bytes: Uint8Array, meta: SubmissionMeta): vo
   if (meta.previewSource === undefined) return;
   const zip = new WorkshopArchive(bytes, meta.kind === 'pet' ? PET_LIMITS.archiveEntries : 1000);
   if (meta.kind === 'pet') petCell(zip);
+  else if (meta.kind === 'theme') previewHeader(themeBytes(zip));
   else previewHeader(companionBytes(zip));
 }
 export async function derivePreview(bytes: Uint8Array, meta: SubmissionMeta): Promise<{ bytes: Uint8Array; descriptor: PublicPreview } | undefined> {
@@ -52,8 +60,15 @@ export async function derivePreview(bytes: Uint8Array, meta: SubmissionMeta): Pr
   const zip = new WorkshopArchive(bytes, meta.kind === 'pet' ? PET_LIMITS.archiveEntries : 1000);
   let image: Uint8Array;
   if (meta.kind === 'pet') {
-    const cell = petCell(zip), rgba = cropPng(zip.read(cell.path, PET_LIMITS.sheetBytes), cell.region);
-    image = encodePreviewPng(rgba, cell.region.width, cell.region.height);
+    const { path, region } = petCell(zip);
+    const longest = Math.max(region.width, region.height);
+    const limit = PREVIEW_CONTRACT.maxWidth; // Both public sides have the same cap.
+    const fit = (size: number) => longest <= limit ? size : Math.max(1, Math.round(size * limit / longest));
+    const width = fit(region.width), height = fit(region.height);
+    const rgba = cropPng(zip.read(path, PET_LIMITS.sheetBytes), region, width, height);
+    image = encodePreviewPng(rgba, width, height);
+  } else if (meta.kind === 'theme') {
+    image = themeBytes(zip);
   } else image = companionBytes(zip);
   const info = validatePublicPng(image), sha = await sha256(image);
   return { bytes: image, descriptor: { path: previewUrl(meta, sha), sha256: sha, size: image.length, width: info.width, height: info.height } };

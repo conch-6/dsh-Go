@@ -9,12 +9,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../companion/companion_adapt.dart';
 import '../../companion/companion_moves.dart';
 import '../../companion/companion_pack.dart';
 import '../../companion/companion_server.dart';
+import '../../pets/pet_pack_validator.dart' show pngIntact, pngSize;
+import '../../workshop/workshop_models.dart' show workshopPreviewBytes, workshopPreviewSide;
 import '../plugins/islands/island_platform.dart';
 import '../web/web_view_guard.dart';
 
@@ -23,6 +26,40 @@ import '../web/web_view_guard.dart';
 // Physical memory reported by iOS is slightly below the marketed RAM size;
 // this separates the 4 GB and 6 GB device classes without a model-name list.
 const _bigTextureFromBytes = 5 * 1024 * 1024 * 1024;
+
+/// At or below this, the smallest budget: a 3 GB iPhone reports a little less.
+const _lowMemoryBytes = 3 * 1024 * 1024 * 1024;
+
+/// Where her stage's resolution last settled on this phone (stage.js `quality`).
+const _qualityKey = 'companion_stage_quality';
+
+/// The page's start-up options for this phone (stage.js and scene.js read them).
+///
+/// Memory sets what the page can't take back once WebKit or the GPU has run out
+/// (the page is killed, a white screen): how big her textures are and, on the
+/// smallest iPhones, how dense the canvases are and whether blur layers exist.
+/// How fast the phone draws isn't guessed from it: the stage measures that and
+/// sheds resolution itself, starting where it settled last time ([quality]).
+@visibleForTesting
+Map<String, String> companionStageQuery({
+  required bool ios,
+  required int totalMem,
+  double? quality,
+  bool reduceMotion = false,
+  bool bare = false,
+}) {
+  // WebKit's GPU-process budget is separate from the phone's RAM.
+  final small = totalMem > 0 ? totalMem < _bigTextureFromBytes : ios;
+  final lowMemory = totalMem <= 0 || totalMem <= _lowMemoryBytes;
+  return {
+    if (small) 'maxTexture': ios && lowMemory ? '1024' : '2048',
+    if (ios) 'antialias': '0',
+    if (ios && lowMemory) ...{'dpr': '1.5', 'gpuBudget': 'low'},
+    if (quality != null && quality >= 0.5 && quality < 1) 'quality': quality.toStringAsFixed(2),
+    if (reduceMotion) 'reduceMotion': '1',
+    if (bare) 'bare': '1',
+  };
+}
 
 /// Why a stage left for good on its own account ([CompanionStageEvents.onFailed]):
 /// her renderer died, or the pack under her was about to change. Not for the
@@ -61,9 +98,13 @@ class CompanionStageEvents {
     required this.onActivity,
     this.onModel,
     this.onProbe,
+    this.onCover,
   });
 
   final VoidCallback onReady;
+
+  /// If set, load the one-shot cover stage instead of the interactive room.
+  final ValueChanged<Uint8List>? onCover;
 
   /// What the model is (stage.js `probeReport`), when it loads and whenever
   /// an adapter is worn or taken off (companion_adapt.dart).
@@ -123,6 +164,8 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
   bool _routeVisible = true;
   bool? _appliedPause;
 
+  bool get _cover => widget.events.onCover != null;
+
   @override
   void initState() {
     super.initState();
@@ -155,6 +198,7 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
   }
 
   Future<void> _start() async {
+    final cover = _cover;
     final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     final generation = _generation;
     bool stale() => generation != _generation;
@@ -162,6 +206,16 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
     // store from this hook: it runs inside the store's queue.
     _unhook = widget.store.beforeChanges(() => _retire(companionStagePackChanged));
     try {
+      if (cover) {
+        // A picked ZIP can borrow a runtime. Check the actual code and model
+        // references before giving this pack a WebView with a bridge.
+        final reason = await widget.store.coverUnavailableReason();
+        if (stale()) return;
+        if (reason != null) {
+          _fail(reason);
+          return;
+        }
+      }
       final server = await CompanionServer.start(rootBundle, widget.store.pack);
       if (stale()) {
         await server.close();
@@ -169,18 +223,35 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
       }
       _server = server;
       final device = await IslandPlatform.instance.device();
+      final quality = cover ? null : await _rememberedQuality();
       if (stale()) return;
-      // WebKit's GPU-process budget is separate from the phone's RAM.
-      final ios = defaultTargetPlatform == TargetPlatform.iOS;
-      final small = device.totalMem > 0 ? device.totalMem < _bigTextureFromBytes : ios;
-      final lowMemory = device.totalMem <= 0 || device.totalMem <= 3 * 1024 * 1024 * 1024;
+      final query = companionStageQuery(
+        ios: defaultTargetPlatform == TargetPlatform.iOS,
+        totalMem: device.totalMem,
+        quality: quality,
+        reduceMotion: reduceMotion || cover,
+        bare: widget.bare || cover,
+      );
+      if (cover) {
+        query['mode'] = 'cover';
+        query['coverSide'] = '$workshopPreviewSide';
+        query.putIfAbsent('maxTexture', () => '2048');
+      }
+      final page = server.pageUrl(query: query);
       final web = WebViewController(onPermissionRequest: (request) => unawaited(request.deny()));
+      final android = defaultTargetPlatform == TargetPlatform.android;
+      final needsGuard = android || (cover && defaultTargetPlatform != TargetPlatform.iOS);
+      if (cover && needsGuard) _webId = WebViewGuard.identifierOf(web);
       await web.setJavaScriptMode(JavaScriptMode.unrestricted);
-      await web.setBackgroundColor(widget.bare ? const Color(0x00000000) : const Color(0xFF0D2F55));
+      await web.setBackgroundColor(widget.bare || cover ? const Color(0x00000000) : const Color(0xFF0D2F55));
       await web.setNavigationDelegate(
         NavigationDelegate(
-          onNavigationRequest: (request) =>
-              server.ownsUrl(request.url) ? NavigationDecision.navigate : NavigationDecision.prevent,
+          onNavigationRequest: (request) {
+            final allowed = cover
+                ? request.isMainFrame && Uri.tryParse(request.url) == page
+                : server.ownsUrl(request.url);
+            return allowed ? NavigationDecision.navigate : NavigationDecision.prevent;
+          },
           onWebResourceError: (error) {
             if (generation == _generation && (error.isForMainFrame ?? false)) _fail('load ${error.errorCode}');
           },
@@ -197,7 +268,11 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
       // Her renderer is the floating window's too; unguarded, its death takes
       // the app with it, so she doesn't load without the guard. (The page has
       // no text and its own colours: nothing else of the attach applies.)
-      final id = defaultTargetPlatform == TargetPlatform.android ? WebViewGuard.identifierOf(web) : null;
+      final id = cover ? _webId : (android ? WebViewGuard.identifierOf(web) : null);
+      if (cover && needsGuard && id == null) {
+        _fail('guard');
+        return;
+      }
       if (id != null) {
         final guarded = await IslandPlatform.instance.attach(id, dark: false, textZoom: 100);
         if (stale()) return;
@@ -212,24 +287,7 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
         widget.controller._web = web;
       });
       _timeout = Timer(_readyTimeout, () => _fail('timeout'));
-      await web.loadRequest(
-        server.pageUrl(
-          query: {
-            if (small) 'maxTexture': ios && lowMemory ? '1024' : '2048',
-            if (ios) ...{
-              'dpr': lowMemory
-                  ? '1'
-                  : small
-                  ? '1.5'
-                  : '2',
-              'antialias': '0',
-              'gpuBudget': 'low',
-            },
-            if (reduceMotion) 'reduceMotion': '1',
-            if (widget.bare) 'bare': '1',
-          },
-        ),
-      );
+      await web.loadRequest(page);
     } on Object catch (error) {
       if (generation == _generation) _fail('$error');
     }
@@ -246,22 +304,29 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
       widget.controller
         .._web = null
         .._ready = false;
-      final id = _webId;
-      _webId = null;
       if (_web != null) setState(() => _web = null);
-      // Destroyed once the frame without its widget is drawn, as the other
-      // pages do. Not awaited: no frame comes while the app is hidden, and
-      // the store's queue must not wait for one.
-      if (id != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(IslandPlatform.instance.destroy(id)));
-      }
+      _destroyWebView();
     }
     await _server?.close();
     _fail(why);
   }
 
+  void _destroyWebView() {
+    final id = _webId;
+    _webId = null;
+    // Never destroy the native view before Flutter has detached its widget.
+    if (id != null) {
+      final platform = IslandPlatform.instance;
+      WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(platform.destroy(id)));
+    }
+  }
+
   void _onMessage(String raw) {
     if (!mounted) return;
+    if (_cover && raw.length > (workshopPreviewBytes + 2) ~/ 3 * 4 + 32) {
+      _fail('cover size');
+      return;
+    }
     final Object? message;
     try {
       message = jsonDecode(raw);
@@ -270,6 +335,30 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
     }
     if (message is! Map) return;
     final events = widget.events;
+    if (events.onCover case final onCover?) {
+      switch (message['type']) {
+        case 'cover':
+          final data = message['png'];
+          if (data is! String) {
+            _fail('cover format');
+            return;
+          }
+          try {
+            final png = base64Decode(data);
+            if (png.length > workshopPreviewBytes ||
+                pngSize(png) != (workshopPreviewSide, workshopPreviewSide) || !pngIntact(png)) {
+              _fail('cover png');
+              return;
+            }
+            onCover(png);
+          } on FormatException {
+            _fail('cover format');
+          }
+        case 'error':
+          _fail('cover render');
+      }
+      return;
+    }
     switch (message['type']) {
       case 'ready':
         _timeout?.cancel();
@@ -299,6 +388,25 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
       case 'activity':
         final name = message['name'];
         if (name is String) events.onActivity(name);
+      case 'quality':
+        final value = message['value'];
+        if (value is num && value >= 0.5 && value <= 1) unawaited(_rememberQuality(value.toDouble()));
+    }
+  }
+
+  static Future<double?> _rememberedQuality() async {
+    try {
+      return (await SharedPreferences.getInstance()).getDouble(_qualityKey);
+    } on Object {
+      return null; // A first visit's full resolution.
+    }
+  }
+
+  static Future<void> _rememberQuality(double value) async {
+    try {
+      await (await SharedPreferences.getInstance()).setDouble(_qualityKey, value);
+    } on Object {
+      // Kept for next time when it can be; this visit already has it.
     }
   }
 
@@ -322,6 +430,7 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
     widget.controller
       .._web = null
       .._ready = false;
+    if (_cover) _destroyWebView();
     // The hook stays until the server has closed: a pack change that races
     // leaving the room waits for the last handler too.
     final unhook = _unhook;
@@ -337,7 +446,7 @@ class _CompanionStageState extends State<CompanionStage> with WidgetsBindingObse
       controller: web,
       // Her touch handling lives in the page: strokes must not become scrolls
       // or the back gesture's competitors.
-      gestureRecognizers: {Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new)},
+      gestureRecognizers: _cover ? const {} : {Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new)},
     );
   }
 }

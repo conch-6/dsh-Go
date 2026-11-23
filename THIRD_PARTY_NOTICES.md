@@ -68,7 +68,7 @@ used under the MIT License with the author's permission.
 - `chat/`：`chat_header.dart`、`chat_list.dart`、`chat_screen.dart`、`composer.dart`、`model_sheet.dart`
 - `chat/render/`：`ansi_text.dart`、`code_block.dart`、`diff_view.dart`、`markdown_body.dart`
 - `chat/widgets/`：`approval_card.dart`、`assistant_message.dart`、`question_card.dart`、`thinking_pill.dart`、`tool_row.dart`、`user_bubble.dart`
-- `common/`：`app_sheet.dart`、`glass_pill.dart`、`overscroll_forwarder.dart`、`sheet_navigator.dart`、`status_dot.dart`、`streaming_cursor.dart`、`tool_glyph.dart`
+- `common/`：`app_sheet.dart`、`overscroll_forwarder.dart`、`sheet_navigator.dart`、`status_dot.dart`、`streaming_cursor.dart`、`tool_glyph.dart`
 - `settings/`：`diagnostics_page.dart`、`settings_widgets.dart`
 - `shell/`：`drawer_drag.dart`、`home_shell.dart`、`sessions_drawer.dart`
 - `theme/`：`accent.dart`、`app_theme.dart`、`backdrop.dart`、`highlight_theme.dart`、`motion.dart`、`palette.dart`、`semantic_colors.dart`、`shapes.dart`、`squircle.dart`、`typography.dart`
@@ -134,19 +134,21 @@ DS Bot 的 NOTICE 原文附在文末。
 | 版权人 | Copyright (c) 2026 DSH Remote contributors |
 | 许可 | MIT（全文另见 `packages/dsh_remote/LICENSE-ds-harness-remote`） |
 | 用途 | 远程连接：协议、分帧、校验、加密信道、直连（WebRTC）与连接逻辑 |
-| 对应上游版本 | `7e387df`（Host 插件 0.6.0）；工作区上传协议参考 `479b94341c0d0de63846f21d0fcca26997d158d1`（Host 插件 0.6.2） |
+| 对应上游版本 | `7e387df`（Host 插件 0.6.0）；工作区上传协议参考 `479b94341c0d0de63846f21d0fcca26997d158d1`（Host 插件 0.6.2）；Control 协议、lease 与恢复行为对齐 `77604776fbbc626caa9f95850bb3d5a3fd1248ba`（2026-11-22 main），Dart 移植保留本地 RPC 不重放语义 |
 
 路径均相对 `packages/dsh_remote/`：
 
 | 本仓库文件 | 上游来源 |
 |---|---|
 | `lib/src/server/server_api.dart` | `apps/android/src/services/api.ts`（`RemoteServerApi`，含 `turnCredentials`）、`docs/protocol.md`、`docs/plugin-integration.md` |
-| `lib/src/account/remote_account.dart` | `apps/android/src/services/server-session-manager.ts`、`device-directory.ts`、`connection.ts`（含直连失败后另开纯 Relay 连接）、`packages/plugin/src/cli.ts` |
+| `lib/src/account/remote_account.dart` | `apps/android/src/services/server-session-manager.ts`、`device-directory.ts`、`connection.ts`、`packages/plugin/src/cli.ts`；初次选路失败在同一 tunnel 回落、已确认 lease 的 Control 恢复参考当前 `adaptive-transport.ts`、`server-connection.ts` |
 | `lib/src/carrier/tunnel_carrier.dart` | `packages/client-core/src/remote-gateway.ts`；白名单来自 `packages/plugin/src/harness-remote-bridge.ts`、`terminal-policy.ts`；工作区上传协议与文件名校验参考 `docs/protocol.md`、`packages/plugin/src/workspace-upload.ts`、`rpc-router.ts`（`479b943`），Dart 重写，遵守协议绝对上限，具体路径/版本限制以主机回复为准 |
 | `lib/src/crypto/noise_ik.dart` | `packages/crypto/src/noise.ts`、`packages/crypto/src/index.ts`（会话封装）；Noise IK 状态机为本项目自行实现，经上游作者同意 |
 | `lib/src/channel/secure_channel.dart` | `packages/plugin/src/client-secure-transport.ts`、`packages/plugin/src/server-connection.ts` |
 | `lib/src/channel/rpc_client.dart` | `packages/client-core/src/index.ts`（`RemoteClientCore`） |
 | `lib/src/protocol/control.dart` | `packages/protocol/src/index.ts`（信封、校验、限额、协商、Relay data frame） |
+| `lib/src/protocol/close_semantics.dart` | `packages/protocol/src/close-semantics.ts`（按 code/reason 分类） |
+| `lib/src/transport/control_lease.dart` | `packages/webrtc/src/control-lease.ts`（授权期限、票据轮换、及时确认；Dart 版限制并发续租） |
 | `lib/src/protocol/messages.dart` | `packages/protocol/src/index.ts`（`RemoteMessage`、`SecureMessageCodec`、RPC 载荷） |
 | `lib/src/transport/relay_transport.dart` | `packages/webrtc/src/index.ts`（`RelayTransport`，含 Relay data socket 的 attach）；attach 后发送 `transport.selected`、直连能力协商与 signaling 收发来自 `packages/webrtc/src/adaptive-transport.ts` |
 | `lib/src/transport/webrtc_transport.dart` | `packages/webrtc/src/adaptive-transport.ts`（`negotiate`、`tryWebRtc`、ICE 服务器获取与超时）、`packages/webrtc/src/rtc-data-channel.ts`（发起方、远端候选缓存、选路重试） |
@@ -164,9 +166,9 @@ DS Bot 的 NOTICE 原文附在文末。
 | 项目 | Libraries.dev，https://github.com/Jakubantalik/Libraries.dev （基于提交 `387b049`） |
 | 版权人 | Copyright (c) 2026 Jakub Antalik |
 | 许可 | MIT（只用代码；`LICENSE-MODEL.md` 管的模型文件 `Magnet.mfxl`、`VoicePosition.mfxl` 和 Pro 内容都没有用） |
-| 用途 | 界面特效：思考光球、边框流光、语音辉光、语音光环、机器人头像等，从作者的 TypeScript / Swift / Metal 源码翻译成 Dart、Flutter 着色器和 Kotlin；手机操控时屏幕边缘的色带取自 Distortion waves（`packages/distortion-waves`）着色器里留在屏幕边缘的那部分颜色（rim）和 `WaveRim.lumps` |
+| 用途 | 界面特效：思考光球、边框流光、语音辉光、语音光环、机器人头像等，从作者的 TypeScript / Swift / Metal 源码翻译成 Dart、Flutter 着色器和 Kotlin；手机操控时屏幕边缘的色带取自 Distortion waves（`packages/distortion-waves`）着色器里留在屏幕边缘的那部分颜色（rim）和 `WaveRim.lumps`，叠加的贴边亮线、外晕和绕圈光束取自 Border beam（`packages/border-beam`）的 stroke、bloom 和 rotate |
 
-本仓库位置：`app/lib/ui/fx/`（每个文件第一行注明出处）及其 `app/shaders/fx/` 下的着色器；手机操控的边缘色带在 `app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/phone/a11y/EdgeBeam.kt`、`EdgeBeamModel.kt`（同样在文件第一行注明出处）。
+本仓库位置：`app/lib/ui/fx/`（每个文件第一行注明出处）及其 `app/shaders/fx/` 下的着色器；手机操控的边缘色带在 `app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/phone/a11y/EdgeBeam.kt`、`EdgeBeamModel.kt`，悬浮条（灵动岛）边上的光束在同目录的 `OverlayLook.kt`（同样在文件第一行注明出处）。
 
 金属质感的着色器 `app/shaders/fx/metal_liquid.frag` 是 metal-fx 用的 Paper Shaders `liquidMetal`（Apache-2.0，Paper Design, Inc.，`@paper-design/shaders` 0.0.80）的 GLSL 翻译，按 metal-fx 的 NOTICE 原文保留：
 
@@ -342,7 +344,7 @@ Libraries.dev metal-fx, translated to Flutter GLSL.
 
 ### tawcroot（tawc，MIT）
 
-「tawcroot 加速启动」（设置 → 开发者选项，默认关闭）用的 `libtawcroot.so`，由 `runtime/tawcroot/build.py` 从 [tawc](https://github.com/wmww/tawc) 固定提交 `a49a4075228f4801dadc1eee584aed33fe8ea4ce`（源码归档 SHA-256 `74487243bde86c303e786e79cd4a13e98c3279cae4ab7725dcf5fa51c0b530c1`）的 `tawcroot/src`、`tawcroot/include` 原样编译，没有修改上游源码。tawc 的 README 写明 `deps/` 以外的代码都是 MIT（[LICENSE.MIT](https://github.com/wmww/tawc/blob/a49a4075228f4801dadc1eee584aed33fe8ea4ce/LICENSE.MIT)）；整个项目因 `deps/` 里的 GPLv3 代码按 GPLv3 发布，那部分我们不编译、不分发。
+「tawcroot 加速启动」（设置 → 开发者选项，默认关闭）用的 `libtawcroot.so`，由 `runtime/tawcroot/build.py` 从 [tawc](https://github.com/wmww/tawc) 固定提交 `a49a4075228f4801dadc1eee584aed33fe8ea4ce`（源码归档 SHA-256 `74487243bde86c303e786e79cd4a13e98c3279cae4ab7725dcf5fa51c0b530c1`）的 `tawcroot/src`、`tawcroot/include` 编译；编译前打上本地覆片 `runtime/tawcroot/bind-aware-oracle.diff`（`prod_readlink` 遇到已生效的绑定边界即停，修手机存储快捷链接子路径误报 EACCES），其余是上游原样。tawc 的 README 写明 `deps/` 以外的代码都是 MIT（[LICENSE.MIT](https://github.com/wmww/tawc/blob/a49a4075228f4801dadc1eee584aed33fe8ea4ce/LICENSE.MIT)）；整个项目因 `deps/` 里的 GPLv3 代码按 GPLv3 发布，那部分我们不编译、不分发。
 
 - 版权：Copyright (c) 2026 Sophie Winter
 - 许可：MIT（全文见文末「MIT License」），App 内「开源许可」页的 `tawcroot (tawc)` 条目附全文

@@ -27,6 +27,8 @@ class CallTranscript extends StatefulWidget {
 
 class _CallTranscriptState extends State<CallTranscript> {
   final _scroll = ScrollController();
+  final _spoken = Expando<String>();
+  late List<CallTurn> _turns;
 
   /// The reader is at the bottom, following the words: only their own
   /// scrolling changes it, not the words growing under an animation.
@@ -40,6 +42,7 @@ class _CallTranscriptState extends State<CallTranscript> {
   @override
   void initState() {
     super.initState();
+    _turns = widget.call.turns;
     widget.call.addListener(_changed);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
@@ -48,7 +51,10 @@ class _CallTranscriptState extends State<CallTranscript> {
 
   void _changed() {
     if (!mounted) return;
-    setState(() {});
+    // The audio levels notify too. The list changes only with its last turn:
+    // turns are appended, or the last one replaced (each one never changes).
+    final turns = widget.call.turns;
+    if (!identical(turns.lastOrNull, _turns.lastOrNull)) setState(() => _turns = turns);
     if (!_following) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // The reader may have scrolled away since.
@@ -74,7 +80,7 @@ class _CallTranscriptState extends State<CallTranscript> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
-    final turns = widget.call.turns;
+    final turns = _turns;
     return Column(
       children: [
         SheetHeader(l10n.speechCallTranscript),
@@ -97,7 +103,11 @@ class _CallTranscriptState extends State<CallTranscript> {
                     controller: _scroll,
                     padding: const EdgeInsets.fromLTRB(kSheetGutter, 4, kSheetGutter, 28),
                     itemCount: turns.length,
-                    itemBuilder: (context, i) => _Turn(turns[i]),
+                    itemBuilder: (context, i) {
+                      final turn = turns[i];
+                      final her = _spoken[turn] ??= speakable(turn.her).trim();
+                      return _Turn(turn, her);
+                    },
                   ),
                 ),
         ),
@@ -107,15 +117,15 @@ class _CallTranscriptState extends State<CallTranscript> {
 }
 
 class _Turn extends StatelessWidget {
-  const _Turn(this.turn);
+  const _Turn(this.turn, this.her);
 
   final CallTurn turn;
+  final String her;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final surfaces = DshSurfaces.of(context);
-    final her = speakable(turn.her).trim();
     return Padding(
       padding: const EdgeInsets.only(bottom: 22),
       child: Column(

@@ -1,8 +1,7 @@
 // 伙伴小屋: a whole page for the companion (docs/design/companion.md). She fills
 // the screen in a WebView; on top of it, in Flutter, her words and a small input.
-// Touches are answered on the spot without a model call. Talking goes, in full
-// mode, through an ordinary session on the active host (companion_state.dart);
-// in light mode, straight from the phone to the model (companion_light.dart).
+// Touches are answered on the spot. Both modes subscribe to the process phone
+// Agent; full mode adds the real captured Host tools to that same loop.
 
 import 'dart:async';
 import 'dart:io';
@@ -11,23 +10,27 @@ import 'dart:math';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../companion/companion_residency.dart';
 import '../../companion/companion_adapt.dart';
-import '../../companion/companion_bond.dart';
-import '../../companion/companion_context.dart';
+import '../../companion/companion_agent.dart';
+import '../../companion/companion_agent_task_ui.dart';
+import '../../companion/companion_always_on.dart' show companionAlwaysOnOwnerProvider;
+import '../../state/companion_agent_state.dart';
 import '../../companion/companion_initiative.dart';
 import '../../companion/companion_initiative_owner.dart';
-import '../../companion/companion_keeper.dart';
+import '../../companion/companion_memory.dart';
+import '../../companion/companion_host_tasks.dart';
+import '../../companion/companion_maps.dart';
 import '../../companion/companion_late_use.dart';
 import '../../companion/companion_moves.dart';
 import '../../companion/companion_light.dart';
 import '../../companion/companion_pack.dart';
-import '../../companion/companion_recall_prefs.dart';
 import '../../companion/companion_reply.dart';
 import '../../companion/companion_signal_consent.dart';
 import '../../companion/companion_signals.dart';
@@ -43,8 +46,6 @@ import '../../pets/pet_state.dart';
 import '../../speech/speech_settings.dart';
 import '../../speech/voice_cloud.dart';
 import '../../state/app_mode_state.dart';
-import '../../state/app_notes.dart';
-import '../../state/chat_state.dart';
 import '../../state/connection_state.dart';
 import '../../state/hosts_state.dart';
 import '../../state/sessions_state.dart';
@@ -59,17 +60,22 @@ import '../common/app_sheet.dart';
 import '../common/sheet_title_bar.dart';
 import '../modes/mode_switch.dart';
 import '../settings/settings_widgets.dart';
+import '../theme/accent.dart';
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import '../theme/surfaces.dart';
 import '../workshop/workshop_screen.dart';
-import 'companion_ask.dart';
+import '../workspace/directory_picker.dart';
 import 'companion_chrome.dart';
+import 'companion_draft_inputs.dart';
+import 'companion_receipt_inputs.dart';
 import 'companion_log.dart';
 import 'companion_memory_page.dart';
+import 'companion_memory_model_dialog.dart';
 import 'companion_persona_page.dart';
 import 'companion_voice_page.dart';
 import 'companion_stage.dart';
+import 'companion_tasks_page.dart';
 
 /// The person removed her pack: the one inside the app waits to be asked for.
 const _packRemovedKey = 'companion_pack_removed';
@@ -81,7 +87,6 @@ final _sentenceEnd = RegExp(r'[。！？!?…~～]');
 enum _Phase { checking, setup, stage, failed }
 
 typedef CompanionStageBuilder = Widget Function(CompanionStageController controller, CompanionStageEvents events);
-typedef _ReplyPart = ({AssistantChatItem item, int? retry});
 
 class CompanionPage extends ConsumerStatefulWidget {
   const CompanionPage({super.key, this.storeOverride, this.stageBuilder, this.stageController, this.bundledPack});
@@ -101,7 +106,10 @@ class CompanionPage extends ConsumerStatefulWidget {
   ConsumerState<CompanionPage> createState() => _CompanionPageState();
 }
 
-class _CompanionPageState extends ConsumerState<CompanionPage> implements CompanionInitiativeRoom {
+class _CompanionPageState extends ConsumerState<CompanionPage>
+    implements CompanionInitiativeRoom, CompanionAgentRoomUi {
+  void _update(VoidCallback change) => setState(change);
+
   late final _stage = widget.stageController ?? CompanionStageController();
   final _input = TextEditingController();
   final _focus = FocusNode();
@@ -109,6 +117,10 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   late final VoiceInputController _voice;
 
   CompanionPackStore? _store;
+  String? _characterSourceKey;
+  String? _affinityCharacter;
+  int _bondTier = 0;
+  Object? _affinitySettledDay;
   CompanionCharacter _character = const CompanionCharacter();
   _Phase _phase = _Phase.checking;
 
@@ -133,26 +145,22 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   bool _showHomeHint = false;
   bool _homeHintDone = true;
 
-  // The conversation.
-  String? _sessionId;
-  ProviderSubscription<ChatState>? _chat;
-  late HostRef _bindingHost;
-  DshClient? _bindingClient;
+  // The process Agent owns conversation and receipts. This window retains its
+  // original attachment, including while a newer room is already present.
+  late final CompanionAgent _agent;
+  late final Future<Directory> _packRoot;
+  late final CompanionAgentAttachment _attachment;
   int _bindingEpoch = 0;
-
-  /// Light or full when the page last bound (see _bindingChanged).
   late bool _boundLight;
+  String? get _sessionId => ref.read(companionSessionsProvider.notifier).of(ref.read(activeHostProvider))?.sessionId;
   bool _sending = false;
   bool _running = false;
   bool _needsAttention = false;
   bool _asleep = false;
 
-  /// What her session waits on the person for (an approval or a question),
-  /// already looked up at: she reacts once to each.
-  String? _askingSeen;
-
   /// The backlog is over her (companion_log.dart).
   bool _logOpen = false;
+  ({(CompanionMemoryStore, int, int, String?, String) key, List<CompanionLogEntry> entries})? _savedLightLog;
 
   /// What she's doing in her corner (the stage's word for it).
   String _home = 'idle';
@@ -160,57 +168,31 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   bool _baselineSet = false;
   int _marksHandled = 0;
   int _wordsSpoken = 0;
-  List<_ReplyPart> _replyParts = const [];
   String _replyWords = '';
 
-  /// What happened in the room since she last heard from the person (C905):
-  /// data for her next turn, never part of what the person said.
-  List<CompanionContextEvent> _contextEvents = const [];
-  int _eventSerial = 0;
+  /// The reply [_onReply] last read, for the frames that show it.
+  ({String text, bool streaming, CompanionReply reply})? _lastReply;
 
-  /// Light mode: when the person last spoke, when she was last told the time,
-  /// and the context the reply on its way was asked with.
-  DateTime? _lastSpokenAt;
-  DateTime? _lastClockAt;
-  CompanionTurnContext? _lightContext;
-
-  /// Full mode: one plan per request id (a retried send reuses it, never a
-  /// fresh one under the same id); its events are spent once the person's
-  /// own message with that id is in the session.
-  final Map<String, ({CompanionFullContextPlan plan, String profile})> _fullPlans = {};
-
-  /// The profile this host last acknowledged, and for which connection,
-  /// instance, session and host revision: anything else changing (another
-  /// client writing its own, too) sends it again.
-  ({Object client, String instanceId, String sessionId, int revision, String profile})? _ackProfile;
-
-  /// This host can't take her context: said once per visit.
-  bool _contextUnsupportedSaid = false;
-
-  // Light mode: her conversation on this phone, and the reply on its way.
+  // The log can still display the phone's pre-Agent history. New messages in
+  // both modes use the original SQLite phone conversation.
   CompanionLightHistory? _lightHistory;
-  StreamSubscription<String>? _lightReply;
-  http.Client? _lightClient;
-  String _lightTurn = '';
-  String _lightText = '';
-  String _lightAsked = '';
-  int _lightTurns = 0;
-
-  // Her state on the Host (null: this host can't keep it).
+  CompanionMemoryOwner? get _memoryOwner => _attachment.memory;
   CompanionSnapshot? _vitals;
-  CompanionKeeper? _keeper;
-
-  /// Light mode's keeper: her state and memories on this phone.
-  CompanionKeeper? _phone;
-  CompanionKeeper get _phoneKeeper => _phone ??= ref.read(companionPhoneKeeperProvider)(_store!.root);
-  Future<void> _vitalsQueue = Future.value();
 
   // What's on screen.
   String? _bubble;
+  String? _bubbleReplyId;
+  var _bubbleTextKey = GlobalKey();
+  List<({String taskId, String placeName})> _lookupResults = const [];
+  List<String> _notesResults = const [];
+  List<String> _mapResults = const [];
+  late final CompanionMapHandoff _mapHandoff;
+  bool _mapChoosing = false;
   bool _bubbleIsError = false;
   String? _myLine;
   String? _lastLine;
   Timer? _bubbleTimer;
+  String? _memoryFollowupTicket;
   Timer? _settleTimer;
   Timer? _objectTimer;
 
@@ -259,13 +241,6 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   final _lateUse = CompanionLateUseTracker();
   Timer? _lateUseTimer;
 
-  // Automatic recall (Pro C902), full mode only: on only while the host says
-  // the binding for the conversation in front is ready.
-  ({DshClient client, CompanionRecallCapabilities caps})? _recallCaps;
-  bool _recallOn = false;
-  bool _recallWorking = false;
-  final _recallChanged = ValueNotifier<int>(0);
-
   // Her voice (companion_voice.dart): what is queued, and how far into the
   // current reply she has read aloud. Her mouth follows the engine when it
   // reports what it is reading, else the text's own rhythm.
@@ -275,10 +250,12 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   Timer? _voiceNoticeTimer;
   bool _fallbackNoted = false;
   bool _ttsReady = false;
+  CompanionVoiceSource? _ttsSource;
   bool _ttsRanges = false;
   int _ttsSerial = 0;
   int _spokenTo = 0;
   final Map<String, int> _ttsPending = {};
+  bool _replyClearedWidget = false;
 
   // Her invitation to rest (Pro C451/C452): the installation's owner decides,
   // this page shows it and says what the person really does.
@@ -293,20 +270,20 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   /// The invitation shown, until it is answered or the page moves on.
   String? _inviteOpen;
   bool _routeShown = true;
+  int _notesForegroundEpoch = 0;
+  final _notesSelectionRoutes = <ModalRoute<Object?>>{};
   bool _accessible = false;
-  bool _entered = false;
   bool _leaving = false;
   bool _observeQueued = false;
 
   @override
   void initState() {
     super.initState();
+    _mapHandoff = CompanionMapHandoff(ref.read(companionMapsProvider));
     // Anonymous usage statistics: the room was opened once more.
     ref.read(usageStatsProvider.notifier).count(UsageCount.room);
     _initiative = ref.read(companionInitiativeProvider);
     // How often she may speak up: the person's pick, followed as it changes.
-    _initiative.pace = ref.read(companionInitiativePaceProvider);
-    ref.listenManual(companionInitiativePaceProvider, (_, pace) => _initiative.pace = pace);
     // The gate keeps the owner's clocks, so a line's deadline means the same to both.
     _clock = ref.read(companionInitiativeClockProvider);
     _signals = CompanionSignalGate(
@@ -314,15 +291,24 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       utcNow: () => DateTime.fromMillisecondsSinceEpoch(_clock().wallMs, isUtc: true),
     );
     _lifecycle = AppLifecycleListener(
-      onStateChange: (_) {
+      onStateChange: (state) {
+        if (state != AppLifecycleState.resumed) {
+          _notesForegroundEpoch++;
+          _mapHandoff.close();
+        } else if (mounted) {
+          // A reply can finish while this window is paused. Its next actual
+          // frame, even without another Agent notification, may present it.
+          setState(() {});
+        }
         _observeInitiative();
         _observeLateUse();
       },
     );
-    _lateUseTimer = Timer.periodic(const Duration(minutes: 1), (_) => _observeLateUse());
+    _lateUseTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      _observeLateUse();
+      _observeInitiative();
+    });
     ref.listenManual(companionSignalConsentProvider, (_, _) => _syncSignals());
-    _bindingHost = ref.read(activeHostProvider);
-    _bindingClient = ref.read(activeConnectionProvider).value?.client;
     _boundLight = _light;
     _voice = VoiceInputController(
       input: _input,
@@ -348,6 +334,18 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     _agentEvents = ref.read(petEventBusProvider).events.listen(_onAgentEvent);
     _speaker = ref.read(companionSpeakerProvider);
     _ttsEvents = _speaker.events.listen(_onTts);
+    _agent = ref.read(companionAgentProvider);
+    _packRoot = widget.storeOverride != null
+        ? Future.value(widget.storeOverride!.root)
+        : getApplicationSupportDirectory().then((directory) => Directory('${directory.path}/companion'));
+    _attachment = _agent.attach(
+      root: _packRoot,
+      character: _character,
+      moves: _moves,
+      ui: this,
+      mapHandoff: _mapHandoff,
+    );
+    _agent.addListener(_onAgentChanged);
     ref.listenManual(companionEffectiveVoiceProvider, (_, settings) {
       if (settings != null) unawaited(_prepareVoice(settings));
     }, fireImmediately: true);
@@ -357,20 +355,20 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   }
 
   Future<void> _prepare() async {
-    final store =
-        widget.storeOverride ??
-        CompanionPackStore(Directory('${(await getApplicationSupportDirectory()).path}/companion'));
+    final store = widget.storeOverride ?? CompanionPackStore(await _packRoot);
     final installed = await store.installed();
-    final character = installed ? await store.character() : const CompanionCharacter();
+    final identity = await store.characterIdentity();
     final bundled = await _hasBundled();
     final removed = (await SharedPreferences.getInstance()).getBool(_packRemovedKey) ?? false;
-    if (!mounted) return;
+    if (!mounted || !_attachment.isAttached) return;
     setState(() {
       _store = store;
-      _character = character;
+      _setCharacter(identity.character, identity.key);
       _bundledHere = bundled;
       _phase = installed ? _Phase.stage : _Phase.setup;
     });
+    _attachment.updateCharacter(_character, _moves, sourceKey: _characterSourceKey);
+    unawaited(_prepareMemory());
     // The first time, the pack inside the app is unpacked while she swims over.
     // After the person removed it, it waits on the setup screen to be asked for.
     if (!installed && bundled && !removed) await _installBundled(arriving: true);
@@ -388,15 +386,12 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
 
   @override
   void dispose() {
+    _mapHandoff.close();
     // Leaving her: no invitation follows, and nothing comes back to this page.
     _leaving = true;
-    _initiative.leave(this);
+    _agent.removeListener(_onAgentChanged);
+    _attachment.detach();
     _lifecycle.dispose();
-    unawaited(companionMarkSeen(DateTime.now()));
-    // Leaving: drop the light request without touching the page any more.
-    _lightClient?.close();
-    unawaited(_lightReply?.cancel().catchError((Object _) {}));
-    _chat?.close();
     _bubbleTimer?.cancel();
     _settleTimer?.cancel();
     _objectTimer?.cancel();
@@ -406,9 +401,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     unawaited(_muxGenerations?.cancel());
     unawaited(_muxStates?.cancel());
     _signals.leave();
-    _recallChanged.dispose();
     unawaited(_ttsEvents?.cancel());
-    if (_ttsPending.isNotEmpty) _speaker.stop();
     _voiceNoticeTimer?.cancel();
     _agentPillTimer?.cancel();
     _voice.removeListener(_voiceChanged);
@@ -418,6 +411,146 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     super.dispose();
   }
 
+  Future<void> _openMemories() async {
+    try {
+      final memory = await _openMemory();
+      if (!mounted || !_attachment.isAttached) return;
+      final characterId = _attachment.characterId;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => CompanionMemoryPage(memory: memory, characterId: characterId),
+        ),
+      );
+    } on Object {
+      if (mounted && _attachment.isAttached) _notice(context.l10n.companionMemoryLoadFailed);
+    }
+  }
+
+  Future<void> _openTasks() async {
+    try {
+      final memory = await _openMemory();
+      if (!mounted || !_attachment.isAttached) return;
+      await Navigator.of(context)
+          .push(MaterialPageRoute<void>(builder: (_) => CompanionTasksPage(memory: memory, allSessions: true)));
+    } on Object {
+      if (mounted && _attachment.isAttached) _notice(context.l10n.companionMemoryLoadFailed);
+    }
+  }
+
+  Future<void> _openMemorySearch() async {
+    try {
+      final memory = await _openMemory();
+      if (!mounted || !_attachment.isAttached) return;
+      await showCompanionMemoryModelDialog(context, memory.embeddings);
+    } on Object {
+      if (mounted && _attachment.isAttached) _notice(context.l10n.companionMemoryLoadFailed);
+    }
+  }
+
+  Future<void> _prepareMemory() async {
+    try {
+      await _openMemory();
+    } on Object {
+      if (mounted && _attachment.isAttached) _notice(context.l10n.companionMemoryLoadFailed);
+    }
+  }
+
+  Future<CompanionMemoryOwner> _openMemory() => _attachment.openMemory();
+
+  void _onAgentChanged() {
+    if (!mounted || !_attachment.isAttached) return;
+    _sending = _attachment.preparing;
+    _syncAffinity();
+    final id = _attachment.replyId;
+    if (id == null) {
+      setState(() {});
+      return;
+    }
+    _baselineSet = true;
+    _onReply(
+      id,
+      _attachment.text,
+      running: _attachment.running,
+      error: _attachment.error == null ? null : _failureText(_attachment.error!),
+    );
+    _queueObserve();
+  }
+
+  @override
+  bool get stageReady => _stageReady;
+  @override
+  String get forgottenNotice => context.l10n.companionMemoryForgotten;
+  @override
+  CompanionInitiativeRoom get initiativeRoom => this;
+  @override
+  CompanionInitiativeView get initiativeView => _initiativeView();
+  @override
+  bool get hasInvitation => _invite != null || _memoryFollowupTicket != null;
+  @override
+  CompanionAgentTaskUi tasks({required bool Function() isCurrent}) => _CompanionPageTaskUi(this, isCurrent);
+  @override
+  void committed(String raw) {
+    if (!mounted || !_attachment.isAttached) return;
+    _replyClearedWidget = false;
+    if (_input.text == raw) _input.clear();
+    _retireGreeting();
+  }
+
+  @override
+  void failed(Object error, {String? retry}) {
+    if (!mounted || !_attachment.isAttached) return;
+    if (retry != null && _input.text.isEmpty) _input.text = retry;
+    _stage.command('emotion', {'name': 'worried', 'hold': 3000});
+    // The line did not become her conversation: it must not stay above her.
+    _myLine = null;
+    _showBubble(_failureText(error), hold: const Duration(seconds: 6), error: true, clearTasks: false);
+  }
+
+  @override
+  void controlChanged({required bool own}) {
+    if (!mounted || !_attachment.isAttached) return;
+    _replyClearedWidget = true;
+    _lastLine = null;
+    if (!own) setState(_resetConversation);
+  }
+
+  @override
+  void connectionChanged() {
+    if (!mounted || !_attachment.isAttached) return;
+    _notesForegroundEpoch++;
+    _boundLight = _light;
+    setState(_resetConversation);
+  }
+
+  @override
+  void detached() {
+    // Retire this window while it still owns the speaker queue. A later
+    // dispose must not stop the shared speaker after another visit attached.
+    _notesForegroundEpoch++;
+    _mapHandoff.close();
+    _hush();
+    _ttsReady = false;
+    _voice.removeListener(_voiceChanged);
+    unawaited(_voice.cancel());
+  }
+
+  @override
+  void widgetClearPending() => _notice(context.l10n.companionMemoryWidgetPending);
+  @override
+  void vitalsChanged(CompanionSnapshot snapshot) => _applyVitals(snapshot);
+  @override
+  Future<void> greet(DateTime? lastVisit, bool Function() isCurrent) => _greet(lastVisit, isCurrent);
+  @override
+  bool presentFollowup(CompanionInitiativeDisplay display, String line) {
+    if (!mounted || !_attachment.isAttached) return false;
+    _say(line, widgetLine: false);
+    _memoryFollowupTicket = display.ticket.id;
+    return true;
+  }
+
+  @override
+  void hideFollowup(String ticketId) => _hideMemoryFollowup(ticketId);
+
   // ── Stage events ─────────────────────────────────────────────────────────
 
   void _onReady() {
@@ -426,12 +559,10 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       // A new view of her: nothing shown on the last one carries over.
       _stageEpoch++;
     });
+    // A stage started again under the open log is under its blur too.
+    if (_logOpen) _stage.command('covered', {'on': true});
     unawaited(_arrive());
     unawaited(_loadHint());
-    if (!_light) {
-      final binding = ref.read(companionSessionsProvider.notifier).of(ref.read(activeHostProvider));
-      if (binding != null) _bind(binding.sessionId);
-    }
     _syncSignals();
   }
 
@@ -455,80 +586,65 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
 
   /// Her state first (it knows when the person was last here, on any phone),
   /// then the greeting, then this visit.
-  Future<void> _arrive({bool greet = true}) async {
-    final current = _currentRoom();
-    // Light mode keeps her on this phone and asks no host for anything.
-    final client = ref.read(activeConnectionProvider).value?.client;
-    final CompanionKeeper? keeper = _light ? _phoneKeeper : (client == null ? null : HostKeeper(client));
-    CompanionSnapshot? snapshot;
-    if (keeper != null) {
-      try {
-        snapshot = await keeper.snapshot().timeout(const Duration(seconds: 3));
-      } on Object {
-        // Not this host, or not now: she's still here, just without memory of it.
-      }
-    }
-    if (!current()) return;
-    if (snapshot != null) {
-      _keeper = keeper;
-      _applyVitals(snapshot);
-    }
-    if (greet) await _greet(snapshot?.vitals.lastVisitAt, current);
-    if (current() && snapshot != null) _event('visit');
-  }
+  Future<void> _arrive({bool greet = true}) => _attachment.arrive(greet: greet);
 
   void _applyVitals(CompanionSnapshot snapshot) {
-    final before = _vitals;
     _vitals = snapshot;
     final v = snapshot.vitals;
-    _stage.command('vitals', {'valence': v.valence, 'energy': v.energy, 'closeness': v.closeness});
+    _stage.command('vitals', {'valence': v.valence, 'energy': v.energy, 'closeness': _stageCloseness});
     _stage.command('activity', {'name': v.activity, 'remainingMs': snapshot.activityLeft.inMilliseconds});
     _widgetUpdate();
-    // A step closer while the person is here: a small moment, once, as it
-    // happens. Arriving with it already reached is not news.
-    if (before != null && before.storeId == snapshot.storeId) {
-      final step = companionBond(v.closeness);
-      if (step > companionBond(before.vitals.closeness)) _closer(step);
+  }
+
+  // These are display-only projections for the existing stage (0..1) and
+  // widget (four dots), never another score or source of relationship growth.
+  double get _stageCloseness => const [0.0, 0.03, 0.03, 0.10, 0.10, 0.30][_bondTier];
+  int get _widgetBond => const [0, 1, 1, 2, 2, 3][_bondTier];
+
+  void _syncAffinity() {
+    final role = _attachment.characterId;
+    final affinity = _attachment.affinity;
+    final tier = affinity?['tier'] as int? ?? 0;
+    final settledDay = affinity?['settled_through_day'];
+    final previousRole = _affinityCharacter;
+    final previousTier = _bondTier;
+    final previousDay = _affinitySettledDay;
+    if (role == previousRole && tier == previousTier && settledDay == previousDay) return;
+    _affinityCharacter = role;
+    _bondTier = tier;
+    _affinitySettledDay = settledDay;
+    if (role != null &&
+        role == previousRole &&
+        tier > previousTier &&
+        settledDay != null &&
+        settledDay != previousDay) {
+      _closer(tier);
     }
+    if (_vitals case final snapshot?) {
+      final vitals = snapshot.vitals;
+      _stage.command('vitals', {'valence': vitals.valence, 'energy': vitals.energy, 'closeness': _stageCloseness});
+    }
+    _widgetUpdate();
   }
 
   void _closer(int step) {
     _stage.command('emotion', {'name': 'happy', 'hold': 3200});
     _stage.command('action', {'name': 'hop'});
     _remember('pet', '你觉得和对方又亲近了一些');
-    if (!mounted || _running || _sending) return;
+    if (!mounted || _attachment.running || _attachment.preparing || _ttsPending.isNotEmpty) return;
     final l10n = context.l10n;
     _say(switch (step) {
       1 => l10n.companionCloser1,
       2 => l10n.companionCloser2,
-      _ => l10n.companionCloser3,
+      3 => l10n.companionCloser3,
+      4 => l10n.companionCloser4,
+      _ => l10n.companionCloser5,
     });
   }
 
   /// One event at a time, against the state last read. A conflict reads again;
   /// it never sends the same event twice.
-  void _event(String type) {
-    final keeper = _keeper;
-    if (keeper == null) return;
-    final current = _currentRoom();
-    _vitalsQueue = _vitalsQueue.then((_) async {
-      if (!current() || !identical(keeper, _keeper)) return;
-      final read = _vitals;
-      if (read == null) return;
-      try {
-        try {
-          final next = await keeper.event(read, type);
-          if (current()) _applyVitals(next);
-        } on DshRemoteException catch (error) {
-          if (!current() || (!error.code.endsWith('conflict') && !error.code.endsWith('store-changed'))) return;
-          final again = await keeper.snapshot();
-          if (current() && again != null) _applyVitals(again);
-        }
-      } on Object {
-        // The refresh can fail too. Keep the queue usable; never retry a write.
-      }
-    });
-  }
+  void _event(String type) => _attachment.event(type);
 
   /// A later intent owns this visit's response, even before it has words.
   void _retireGreeting() => _greetingPending = false;
@@ -571,8 +687,8 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       unawaited(SharedPreferences.getInstance().then((p) => p.setBool(_hintDoneKey, true)));
     }
     final l10n = context.l10n;
-    // Once they're close she has a fonder word too.
-    final close = companionBond(_vitals?.vitals.closeness ?? 0) >= 2;
+    // At the v2 Close tier she has a fonder word too.
+    final close = _bondTier >= 3;
     final lines = switch ((zone, kind)) {
       (_, 'hug') => [l10n.companionHug1, l10n.companionHug2, l10n.companionHug3, if (close) l10n.companionHugClose],
       (_, 'tease') => [l10n.companionTease1, l10n.companionTease2, l10n.companionTease3],
@@ -879,32 +995,30 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
 
   /// Something that just happened, for her next turn (C905 kinds: pet, feed,
   /// task-finished, renamed). Kept for half an hour, eight at most.
-  void _remember(String kind, String? note) {
-    if (note == null) return;
-    final now = DateTime.now();
-    _contextEvents = companionRecentEvents([
-      ..._contextEvents,
-      CompanionContextEvent(id: 'e-${now.microsecondsSinceEpoch}-${++_eventSerial}', kind: kind, at: now, detail: note),
-    ], now: now);
-  }
+  void _remember(String kind, String? note) => _attachment.remember(kind, note);
 
-  /// A short line without the model. [aloud]: with her voice, when it is on.
-  void _say(String line, {bool aloud = true}) {
+  /// Present one short line. [aloud]: with her voice, when it is on.
+  void _say(String line, {bool aloud = true, bool widgetLine = true}) {
+    if (!mounted || !_attachment.isAttached) return;
     _objectTimer?.cancel();
     if (!aloud || !_speakAloud(line, flush: true)) _stage.command('say', {'chars': line.length});
     _showBubble(line, hold: Duration(milliseconds: 2400 + line.length * 90));
-    _widgetUpdate(line: line);
+    if (widgetLine) _widgetUpdate(line: line);
   }
 
   /// The home-screen widget: who she is, what she's doing, how well she knows
   /// the person, and [line] when she has just said something.
   void _widgetUpdate({String? line}) {
-    if (!mounted) return;
+    if (!mounted || !_attachment.isAttached) return;
     final l10n = context.l10n;
     final snapshot = _vitals;
     final activity = snapshot?.vitals.activity ?? _home;
     unawaited(
       ref.read(companionWidgetProvider).update({
+        if (_memoryOwner case final memory?) ...{
+          'memoryArchiveId': memory.store.archive['id'],
+          'memoryControlRevision': memory.store.archive['control_revision'],
+        },
         'name': _name(l10n),
         'activity': activity,
         'status': switch (activity) {
@@ -918,7 +1032,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
             : DateTime.now().millisecondsSinceEpoch + snapshot.activityLeft.inMilliseconds,
         'statusAsleep': l10n.companionStatusSleeping,
         'statusWaiting': l10n.companionWidgetWaiting,
-        'bond': snapshot == null ? null : companionBond(snapshot.vitals.closeness),
+        'bond': _affinityCharacter == null ? null : _widgetBond,
         if (line != null) ...{'line': line, 'saidAt': DateTime.now().millisecondsSinceEpoch},
       }),
     );
@@ -932,17 +1046,6 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     final name? => l10n.companionGreetFirst(name),
     null => l10n.companionGreetFirstNameless,
   };
-
-  /// Her persona as the person has it, under the name she goes by.
-  String _persona() {
-    final persona = ref.read(companionPersonaProvider);
-    return companionPersona(
-      custom: persona.custom,
-      name: ref.read(companionNameProvider) ?? _character.name,
-      callMe: persona.callMe,
-      moves: _moves.rules(),
-    );
-  }
 
   /// A model that still needs judgement gets fitted once, on its own, with
   /// the person's model; after that only when they ask (menu).
@@ -1022,8 +1125,18 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
         probe: probe,
         note: note,
         current: probe.adapted ? await companionAdapterRead(store.pack) : null,
-        onUsage: (input, output) {
-          if (mounted) ref.read(usageStatsProvider.notifier).tokens(input, output);
+        onUsage: (usage) {
+          final input = usage.reportedInputTokens;
+          if (mounted && (input != null || usage.outputTokens != null)) {
+            // Add only reported components; zero here means no telemetry
+            // increment. The usage receipt retains unknown fields as null.
+            ref.read(usageStatsProvider.notifier).tokens(input ?? 0, usage.outputTokens ?? 0);
+          }
+        },
+        onUsageSettled: (usage, {required partial}) {
+          if (mounted) {
+            ref.read(usageStatsProvider.notifier).tokenUsage(UsageTokenSource.companion, usage, partial: partial);
+          }
         },
       );
       await companionAdapterWrite(store.pack, probe, adapter);
@@ -1098,13 +1211,14 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       _moves = CompanionMoves.from(info, saved);
       _rebaseMarks();
     });
+    _attachment.updateCharacter(_character, _moves, sourceKey: _characterSourceKey);
   }
 
   /// Her own moves just became known: marks already in the reply on screen
   /// that only now read as marks were said before, not news to play.
   void _rebaseMarks() {
     if (!_baselineSet) return;
-    final text = _light ? _lightText : _replyParts.map((part) => part.item.text).join('\n');
+    final text = _attachment.text;
     final reply = parseCompanionReply(
       text,
       streaming: _running,
@@ -1116,6 +1230,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
 
   void _changeMove(CompanionMove next) {
     setState(() => _moves = _moves.replaced(next));
+    _attachment.updateCharacter(_character, _moves, sourceKey: _characterSourceKey);
     unawaited(companionMovesSave(_movesKey, _moves));
   }
 
@@ -1214,21 +1329,34 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
 
   /// Ready to speak with [settings] (or silent when they are off).
   Future<void> _prepareVoice(CompanionVoiceSettings settings) async {
+    final current = _currentRoom();
+    if (!current()) return;
     if (!settings.on) {
       _ttsReady = false;
       _hush();
       return;
     }
-    final ready = await _speaker.ready(settings);
-    if (mounted) _ttsReady = ready;
+    final previous = _ttsSource;
+    _ttsSource = settings.source;
+    final preparing = _speaker.ready(settings);
+    // ready's source setter already stops the old queue. Retire this page's
+    // IDs too, including fetched lines that never reached the native player.
+    if (previous != null && previous != settings.source && _ttsPending.isNotEmpty) {
+      _ttsPending.clear();
+      _stage.command('quiet');
+    }
+    final ready = await preparing;
+    if (current()) _ttsReady = ready;
   }
 
   /// Reads [text] aloud when her voice is on; false when it isn't (then her
   /// mouth keeps the text's rhythm). [flush] replaces whatever she is saying.
   bool _speakAloud(String text, {bool flush = false}) {
-    if (!_voiceOn || text.trim().isEmpty) return false;
+    if (!_attachment.isAttached || !_voiceOn || text.trim().isEmpty) return false;
     if (flush) _ttsPending.clear();
-    final id = 'v${++_ttsSerial}';
+    // Native completion can follow the old window's stop after a new window
+    // speaks. Reuse the room identity so its receipt cannot consume our ID.
+    final id = 'v$_page-${++_ttsSerial}';
     _ttsPending[id] = text.length;
     _speaker.speak(id, text, flush: flush);
     return true;
@@ -1243,7 +1371,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   }
 
   void _onTts(CompanionVoiceEvent event) {
-    if (!mounted || !_ttsPending.containsKey(event.id)) return;
+    if (!mounted || !_attachment.isAttached || !_ttsPending.containsKey(event.id)) return;
     switch (event.type) {
       case CompanionVoiceEventType.start:
         final external = ref.read(companionEffectiveVoiceProvider)?.source != CompanionVoiceSource.system;
@@ -1271,15 +1399,26 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     }
   }
 
-  void _showBubble(String text, {Duration? hold, bool error = false}) {
+  void _showBubble(String text, {Duration? hold, bool error = false, bool clearTasks = true, String? replyId}) {
     _retireGreeting();
     _bubbleTimer?.cancel();
+    _memoryFollowupTicket = null;
     setState(() {
+      // AnimatedSwitcher can still retain the outgoing words while a new
+      // bubble arrives. Never give those two Text elements the same GlobalKey.
+      if (_bubble == null) _bubbleTextKey = GlobalKey();
       _bubble = text;
+      _bubbleReplyId = replyId;
       _bubbleIsError = error;
+      if (clearTasks) {
+        _lookupResults = const [];
+        _notesResults = const [];
+        _mapResults = const [];
+      }
     });
     if (hold != null) {
       _bubbleTimer = Timer(hold, () {
+        // The owner still owns any pending speech until its ticket ends.
         if (mounted) setState(() => _bubble = null);
       });
     }
@@ -1299,8 +1438,9 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     _refreshMood();
   }
 
+  /// Text changes tell only the initiative gate; the composer rebuilds itself (companion_chrome.dart).
   void _inputChanged() {
-    if (mounted) setState(() {});
+    if (mounted) _queueObserve();
   }
 
   CompanionActivity get _activity {
@@ -1328,14 +1468,16 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     stageReady: _stageReady && _phase == _Phase.stage,
     resumed: WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
     inputBusy: _focus.hasFocus || _input.text.trim().isNotEmpty,
-    generating: _sending || _running || _lightReply != null,
+    generating: _sending || _running,
     // Her mouth still settling counts: the words may still be on their way out.
-    audioBusy: _voice.active || (_settleTimer?.isActive ?? false) || _ttsPending.isNotEmpty,
+    audioBusy:
+        _voice.active || (_settleTimer?.isActive ?? false) || (_ttsPending.isNotEmpty && _memoryFollowupTicket == null),
     activityBusy: _home != 'idle' || _asleep || (_objectTimer?.isActive ?? false),
     approvalPending: _needsAttention,
     // The "take a look" pill is not here: it comes with the very signal she may
     // mention, and would drop it. It still keeps invitations away (canPresent).
-    externalPromptBusy: _bubble != null || _myLine != null || _logOpen || _adaptOffer != null,
+    externalPromptBusy:
+        (_bubble != null && _memoryFollowupTicket == null) || _myLine != null || _logOpen || _adaptOffer != null,
     quietHoursBlocked: false,
     enabled: ref.read(companionInitiativeEnabledProvider) ?? false,
     accessible: _accessible,
@@ -1355,19 +1497,24 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   }
 
   void _observeInitiative() {
-    if (!mounted || _leaving) return;
-    final view = _initiativeView();
-    if (_entered) {
-      _initiative.observe(this, view);
-    } else {
-      _entered = true;
-      _initiative.enter(this, view);
-    }
+    if (!mounted || _leaving || !_attachment.isAttached) return;
+    _attachment.observe(_initiativeView());
+  }
+
+  void _hideMemoryFollowup(String ticketId) {
+    if (_memoryFollowupTicket != ticketId) return;
+    _memoryFollowupTicket = null;
+    _bubbleTimer?.cancel();
+    _hush();
+    _stage.command('quiet');
+    if (mounted) setState(() => _bubble = null);
   }
 
   /// Something the person really did here: no invitation this visit.
   void _acted() {
-    _initiative.activate(this);
+    // A failed preparation may try again after a real new interaction, never
+    // once per idle tick while the same room opportunity stays unchanged.
+    _attachment.acted();
     _observeLateUse(interaction: true);
   }
 
@@ -1435,54 +1582,21 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   // ── Talking ──────────────────────────────────────────────────────────────
 
   /// Work belongs to this visit to this host and client, even after A→B→A.
-  bool Function() _currentRoom() {
-    final epoch = _bindingEpoch;
-    // A light conversation belongs to no host: only leaving the page or
-    // switching modes (an unbind) ends what it started.
-    if (_light) return () => mounted && epoch == _bindingEpoch;
-    final host = ref.read(activeHostProvider);
-    final client = ref.read(activeConnectionProvider).value?.client;
-    return () =>
-        mounted &&
-        epoch == _bindingEpoch &&
-        host == ref.read(activeHostProvider) &&
-        identical(client, ref.read(activeConnectionProvider).value?.client);
-  }
+  bool Function() _currentRoom() => _attachment.captureCurrent();
 
-  void _bindingChanged() {
-    final host = ref.read(activeHostProvider);
-    final client = ref.read(activeConnectionProvider).value?.client;
-    if (host == _bindingHost && identical(client, _bindingClient)) return;
-    _bindingHost = host;
-    _bindingClient = client;
-    // Signals come from the active connection in either mode.
-    _syncSignals();
-    // With no mode picked, a host coming or going turns her light or full.
-    final light = _light;
-    if (light != _boundLight) {
-      _modeChanged();
-      return;
+  void _setCharacter(CompanionCharacter character, String? sourceKey) {
+    if (_characterSourceKey != sourceKey) {
+      _affinityCharacter = null;
+      _affinitySettledDay = null;
+      _bondTier = 0;
+      _resetConversation();
     }
-    // A light conversation isn't on any host: nothing to rebind.
-    if (light) return;
-    setState(_unbind);
-    final binding = ref.read(companionSessionsProvider.notifier).of(host);
-    if (binding != null && _stageReady) _bind(binding.sessionId);
-    if (_stageReady) unawaited(_arrive());
+    _character = character;
+    _characterSourceKey = sourceKey;
   }
 
-  /// Talks to her conversation [sessionId]. [verify]: ask the host about a
-  /// recall binding stored for it (callers that check themselves skip it).
-  void _bind(String sessionId, {bool verify = true}) {
-    if (_sessionId == sessionId && _chat != null) return;
-    _chat?.close();
-    _sessionId = sessionId;
-    _baselineSet = false;
-    _chat = ref.listenManual(chatProvider(sessionId), (_, next) => _onChat(next), fireImmediately: true);
-    if (verify && !_light) unawaited(_verifyRecall(sessionId, _currentRoom()));
-  }
-
-  void _unbind() {
+  void _resetConversation() {
+    _mapHandoff.close();
     _bindingEpoch++;
     _greetingPending = true;
     _hush();
@@ -1491,117 +1605,24 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     _settleTimer?.cancel();
     _objectTimer?.cancel();
     _vitals = null;
-    _keeper = null;
-    _vitalsQueue = Future.value();
-    _chat?.close();
-    _chat = null;
-    _sessionId = null;
     _sending = false;
     _running = false;
     _needsAttention = false;
-    _askingSeen = null;
     _baselineSet = false;
     _marksHandled = 0;
     _wordsSpoken = 0;
-    _replyParts = const [];
     _replyWords = '';
-    _contextEvents = const [];
-    _fullPlans.clear();
-    _ackProfile = null;
-    _recallOn = false;
-    _recallChanged.value++;
     _bubble = null;
+    _memoryFollowupTicket = null;
     _myLine = null;
     _home = 'idle';
     _asleep = false;
     _stage.command('quiet');
     _stage.command('activity', {'name': 'idle', 'remainingMs': 0});
-    _stage.command('vitals', {'valence': 0.25, 'energy': 0.75, 'closeness': 0});
+    _stage.command('vitals', {'valence': 0.25, 'energy': 0.75, 'closeness': _stageCloseness});
     _refreshMood();
     // A new room for the gate: what the old one let in goes with it.
     _syncSignals();
-  }
-
-  /// The words after the latest thing the person said.
-  (String?, List<_ReplyPart>) _latestReply(ChatState state) {
-    final tail = <ChatItem>[];
-    String? user;
-    for (final item in state.items.reversed) {
-      if (item is UserChatItem) {
-        user = item.key;
-        break;
-      }
-      tail.add(item);
-    }
-    final parts = <_ReplyPart>[];
-    int? retry;
-    for (final item in tail.reversed) {
-      if (item is NoticeChatItem && item.kind == 'retry') retry = item.seq;
-      if (item is AssistantChatItem && item.text.isNotEmpty) parts.add((item: item, retry: retry));
-    }
-    return (user, parts);
-  }
-
-  void _onChat(ChatState state) {
-    if (!mounted) return;
-    _spendCommitted(state);
-    final asking = state.openApproval?.eventId ?? state.questions.firstOrNull?.eventId;
-    if (asking != _askingSeen) {
-      // Something already waiting when the page opened is not news.
-      if (asking != null && _baselineSet) {
-        _stage.command('emotion', {'name': 'surprised', 'hold': 1600});
-        _stage.command('action', {'name': 'lookUp'});
-      }
-      _askingSeen = asking;
-    }
-    final (user, parts) = _latestReply(state);
-    _onReply(
-      user,
-      parts.map((part) => part.item.text).join('\n'),
-      parts: parts,
-      running: state.running || state.pending.isNotEmpty,
-      attention: state.openApproval != null || state.questions.isNotEmpty,
-      error: state.error,
-      loading: state.loading,
-    );
-  }
-
-  /// Keep progress only for the same full-mode assistant segments. A retry
-  /// can replace a draft without publishing its empty interval to this page.
-  void _retainReplyProgress(List<_ReplyPart> next) {
-    final prefix = <String>[];
-    for (var i = 0; i < min(_replyParts.length, next.length); i++) {
-      final old = _replyParts[i];
-      final current = next[i];
-      // FinishChunk makes a draft nonstreaming too; only seq identifies a
-      // durable message. Its row key is shared with the draft it commits.
-      final commitsDraft = old.item.seq == null && current.item.seq != null && old.item.key == current.item.key;
-      if (old.retry != current.retry || (old.item.id != current.item.id && !commitsDraft)) break;
-      final before = old.item.text;
-      final after = current.item.text;
-      if (before == after) {
-        prefix.add(before);
-        continue;
-      }
-      var end = 0;
-      while (end < min(before.length, after.length) && before.codeUnitAt(end) == after.codeUnitAt(end)) {
-        end++;
-      }
-      prefix.add(before.substring(0, end));
-      break;
-    }
-    final retainedText = prefix.join('\n');
-    if (retainedText != _replyParts.map((part) => part.item.text).join('\n')) {
-      final retained = parseCompanionReply(
-        retainedText,
-        streaming: true,
-        emotions: _moves.emotionLabels,
-        actions: _moves.actionLabels,
-      );
-      _marksHandled = min(_marksHandled, retained.marks.length);
-      _wordsSpoken = min(_wordsSpoken, retained.words.length);
-    }
-    _replyParts = next;
   }
 
   /// The current text owns the subtitle, even when a failed attempt is
@@ -1615,7 +1636,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       _bubbleIsError = false;
     } else {
       _myLine = null;
-      _showBubble(words);
+      _showBubble(words, clearTasks: false, replyId: _baselineUser);
     }
   }
 
@@ -1629,7 +1650,6 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     bool attention = false,
     String? error,
     bool loading = false,
-    List<_ReplyPart>? parts,
   }) {
     if (!_baselineSet) {
       // What's already in the conversation has been said; only news moves her.
@@ -1640,7 +1660,6 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       _marksHandled = old.marks.length;
       _wordsSpoken = old.words.length;
       _spokenTo = old.words.length;
-      _replyParts = parts ?? const [];
       _replyWords = old.words;
       if (!running) {
         setState(() => _needsAttention = attention);
@@ -1654,16 +1673,15 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       _marksHandled = 0;
       _wordsSpoken = 0;
       _spokenTo = 0;
-      _replyParts = const [];
     }
 
-    if (parts != null) _retainReplyProgress(parts);
     final reply = parseCompanionReply(
       text,
       streaming: running,
       emotions: _moves.emotionLabels,
       actions: _moves.actionLabels,
     );
+    _lastReply = (text: text, streaming: running, reply: reply);
     for (final mark in reply.marks.skip(_marksHandled)) {
       _retireGreeting();
       switch (mark.kind) {
@@ -1703,9 +1721,11 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       _settleTimer = Timer(Duration(milliseconds: min(4000, 600 + max(fresh, 0) * 90)), _refreshMood);
       _myLine = null;
       if (error != null) {
-        _showBubble(error, hold: const Duration(seconds: 6), error: true);
+        _showBubble(error, hold: const Duration(seconds: 6), error: true, clearTasks: false);
       } else if (reply.words.isNotEmpty) {
-        _widgetUpdate(line: reply.words.length > 80 ? '${reply.words.substring(0, 79)}…' : reply.words);
+        if (!_replyClearedWidget) {
+          _widgetUpdate(line: reply.words.length > 80 ? '${reply.words.substring(0, 79)}…' : reply.words);
+        }
         _bubbleTimer?.cancel();
         _bubbleTimer = Timer(Duration(milliseconds: 9000 + reply.words.length * 60), () {
           if (mounted) setState(() => _bubble = null);
@@ -1719,173 +1739,153 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     });
   }
 
+  /// Capture the reply rendered by this frame. Returning to this room can
+  /// show words whose Agent notifications all finished while it was hidden.
+  void _queueReplyPresentation() {
+    final attachment = _attachment;
+    final user = attachment.replyId;
+    final text = attachment.text;
+    if (!attachment.isAttached || user == null || _baselineUser != user || attachment.error != null) return;
+    final running = attachment.running;
+    final last = _lastReply;
+    // Every build and every frame of the bubble's rise lands here; the words
+    // and their offsets do not depend on the mark labels.
+    final reply = last != null && last.streaming == running && last.text == text
+        ? last.reply
+        : parseCompanionReply(text, streaming: running);
+    if (reply.words.isEmpty || _bubbleReplyId != user || _bubbleIsError || _bubble != reply.words) return;
+    final current = attachment.captureCurrent();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          current() &&
+          identical(_attachment, attachment) &&
+          _notesForegroundHere &&
+          _phase == _Phase.stage &&
+          _stageReady &&
+          _baselineUser == user &&
+          _bubbleReplyId == user &&
+          attachment.error == null &&
+          !_bubbleIsError &&
+          _bubble == reply.words) {
+        final sources = _visibleReplySources(attachment, reply);
+        if (sources.isNotEmpty) attachment.presentedReply(user, text, sourceIds: sources);
+      }
+    });
+    // Scroll metrics may arrive after a frame, without an Agent notification.
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  Set<String> _visibleReplySources(CompanionAgentAttachment attachment, CompanionReply reply) {
+    final pending = attachment.pendingReplyRanges;
+    if (pending.isEmpty) return const {};
+    final textObject = _bubbleTextKey.currentContext?.findRenderObject();
+    if (textObject == null || !textObject.attached) return const {};
+    RenderParagraph? findParagraph(RenderObject object) {
+      if (object is RenderParagraph) return object;
+      RenderParagraph? found;
+      object.visitChildren((child) {
+        found ??= findParagraph(child);
+      });
+      return found;
+    }
+
+    // Text may have a selection/semantics wrapper. Search only that Text's
+    // render subtree, never another bubble or another page's paragraph.
+    final paragraph = findParagraph(textObject);
+    if (paragraph == null ||
+        !paragraph.attached ||
+        !paragraph.hasSize ||
+        paragraph.size.isEmpty ||
+        paragraph.text.toPlainText() != reply.words) {
+      return const {};
+    }
+    final RenderBox viewport;
+    switch (RenderAbstractViewport.maybeOf(paragraph)) {
+      case final RenderBox box when box.attached && box.hasSize && !box.size.isEmpty:
+        viewport = box;
+      default:
+        return const {};
+    }
+    var visible = MatrixUtils.transformRect(
+      viewport.getTransformTo(null),
+      Offset.zero & viewport.size,
+    ).intersect(Offset.zero & MediaQuery.sizeOf(context));
+    RenderObject child = paragraph;
+    for (var parent = child.parent; parent != null; parent = child.parent) {
+      // A nonzero transform does not prove that an offstage/zero-opacity child
+      // was painted. Respect the actual render parents before reading boxes.
+      if (!parent.paintsChild(child)) return const {};
+      if (parent is RenderAnimatedOpacity && Color.getAlphaFromOpacity(parent.opacity.value) == 0) return const {};
+      final clip = parent.describeApproximatePaintClip(child);
+      if (clip != null) {
+        visible = visible.intersect(MatrixUtils.transformRect(parent.getTransformTo(null), clip));
+      }
+      child = parent;
+    }
+    if (!visible.isFinite || visible.isEmpty) return const {};
+    final transform = paragraph.getTransformTo(null);
+    final sources = <String>{};
+    for (final entry in pending.entries) {
+      for (final range in reply.wordRangesFrom(entry.value.start, entry.value.end)) {
+        final boxes = paragraph.getBoxesForSelection(TextSelection(baseOffset: range.start, extentOffset: range.end));
+        if (boxes.any((box) => !MatrixUtils.transformRect(transform, box.toRect()).intersect(visible).isEmpty)) {
+          sources.add(entry.key);
+          break;
+        }
+      }
+    }
+    return sources;
+  }
+
   Future<void> _send() async {
-    // What the person typed, exactly; trimmed only to see it isn't empty.
     final raw = _input.text;
-    final text = raw.trim();
-    if (text.isEmpty || _sending || _lightReply != null) return;
+    if (raw.trim().isEmpty || _attachment.preparing || !_attachment.isAttached) return;
     _acted();
     _hush();
     _retireGreeting();
     if (_voice.active) unawaited(_voice.cancel());
-    final current = _currentRoom();
-    _input.clear();
+    _notesSelectionRoutes.clear();
     _bubbleTimer?.cancel();
     _objectTimer?.cancel();
     setState(() {
-      _sending = true;
       _bubble = null;
-      _myLine = text;
+      _myLine = raw.trim();
+      _lookupResults = const [];
+      _notesResults = const [];
+      _mapResults = const [];
     });
     _stage.command('mood', {'mood': 'thinking'});
-    try {
-      if (_light) {
-        await _sendLight(raw, current);
-        return;
+    await _attachment.submit(raw);
+  }
+
+  void _checkNotesSelectionRoute() {
+    // Ordinary route widgets also report their observed current/ticker state.
+    // Owned sheet/browser coverage is latched synchronously in selectionRoute;
+    // this fallback is not proof of transitions with no intervening build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          (!TickerMode.valuesOf(context).enabled || !(ModalRoute.of(context)?.isCurrent ?? false)) &&
+          !_notesSelectionRoutes.any((route) => route.isActive && route.isCurrent)) {
+        _notesForegroundEpoch++;
       }
-      final sessions = ref.read(companionSessionsProvider.notifier);
-      // A conversation bound for recall that the host has since retired can't
-      // take this line: the check lets it go, and ensure() opens a new one.
-      final known = sessions.of(ref.read(activeHostProvider));
-      if (known != null) await _verifyRecall(known.sessionId, current, rebind: false);
-      if (!current()) return;
-      final binding = await sessions.ensure();
-      if (!current()) return;
-      _bind(binding.sessionId, verify: false);
-      final chat = ref.read(chatProvider(binding.sessionId).notifier);
-      if (!await chat.waitForSync(isCurrent: current)) throw const DshClosedException('not synced');
-      if (!current()) return;
-      // A host without her preset at all: the persona goes once, in front of
-      // the first line, or she'd be no one (the oldest hosts only).
-      final firstInline = binding.inlinePersona && ref.read(chatProvider(binding.sessionId)).items.isEmpty;
-      final client = ref.read(activeConnectionProvider).value?.client;
-      // Her name, persona and moves go to the host as context (C905), sent
-      // only when they change; the time and what just happened go beside the
-      // message under its own id. A host without that gets the text alone.
-      // Nor does a conversation without her preset take context later on.
-      final capability = binding.inlinePersona || client == null
-          ? null
-          : await client.companionPromptCapability(binding.sessionId);
-      if (!current()) return;
-      if (capability == null && !firstInline) _contextUnsupported();
-      final profile = _contextProfile();
-      final sent = await chat.send(
-        firstInline ? '${appNote('（从现在起请扮演下面的角色，直接开始，不要复述这段设定。）\n${_persona()}')}\n$raw' : raw,
-        verbatim: true,
-        beforeDeliver: capability == null || client == null
-            ? null
-            : (requestId) => _prepareContext(client, capability, binding.sessionId, requestId, raw, profile, current),
-      );
-      if (!current()) return;
-      if (!sent) throw StateError(ref.read(chatProvider(binding.sessionId)).error ?? 'send');
-    } on Object catch (error) {
-      if (!current()) return;
-      if (_input.text.isEmpty) _input.text = text;
-      _stage.command('emotion', {'name': 'worried', 'hold': 3000});
-      setState(() => _myLine = null);
-      _showBubble(_failureText(error), hold: const Duration(seconds: 6), error: true);
-    } finally {
-      if (current()) {
-        setState(() => _sending = false);
-        _refreshMood();
-      }
-    }
+    });
   }
 
-  /// Who she is to this host: persona, name, what she calls the person, her
-  /// own moves. Sent when it differs from what the host acknowledged.
-  CompanionContextProfile _contextProfile() {
-    final persona = ref.read(companionPersonaProvider);
-    String cap(String text, int most) {
-      if (text.runes.length <= most) return text;
-      final cut = String.fromCharCodes(text.runes.take(most));
-      final space = cut.lastIndexOf(' ');
-      return space > 0 ? cut.substring(0, space) : cut;
-    }
+  bool get _notesForegroundHere =>
+      mounted &&
+      !_leaving &&
+      !_logOpen &&
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+      TickerMode.valuesOf(context).enabled &&
+      (ModalRoute.of(context)?.isCurrent ?? false);
 
-    return CompanionContextProfile(
-      persona: cap(persona.custom.trim(), 4000),
-      name: cap((ref.read(companionNameProvider) ?? _character.name ?? '').replaceAll(RegExp(r'\s+'), ' ').trim(), 24),
-      callMe: cap(persona.callMe.replaceAll(RegExp(r'\s+'), ' ').trim(), 40),
-      moves: cap(_moves.rules() ?? '', 1024),
-    );
-  }
-
-  /// Runs inside the send, once its request id is chosen: the plan for that
-  /// id (kept for a retry), and the host told what changed. False: the room
-  /// left this conversation meanwhile, so the line is not sent there.
-  Future<bool> _prepareContext(
-    DshClient client,
-    CompanionPromptCapability capability,
-    String sessionId,
-    String requestId,
-    String raw,
-    CompanionContextProfile profile,
-    bool Function() current,
-  ) async {
-    if (!current()) return false;
-    final ack = _ackProfile;
-    // A retry sends the plan it made first, and the profile in it.
-    final entry = _fullPlans[requestId] ??= (
-      plan: companionFullContextPlan(
-        text: raw,
-        sessionId: sessionId,
-        requestId: requestId,
-        profile: profile,
-        supported: true,
-        now: DateTime.now(),
-        instanceId: capability.instanceId,
-        profileRevision: capability.profileRevision,
-        acknowledgedProfile:
-            ack != null &&
-                identical(ack.client, client) &&
-                ack.instanceId == capability.instanceId &&
-                ack.sessionId == sessionId &&
-                ack.revision == capability.profileRevision
-            ? ack.profile
-            : null,
-        events: _contextEvents,
-        memoryMode: capability.memoryMode,
-      ),
-      profile: profile.fingerprint,
-    );
-    while (_fullPlans.length > 8) {
-      _fullPlans.remove(_fullPlans.keys.first);
-    }
-    final update = entry.plan.update;
-    if (update == null) return true;
-    final answer = await client.prepareCompanionPromptContext(update);
-    if (answer.profileAccepted == true && update.containsKey('profile')) {
-      _ackProfile = (
-        client: client,
-        instanceId: answer.instanceId,
-        sessionId: sessionId,
-        revision: answer.profileRevision,
-        profile: entry.profile,
-      );
-    }
-    return current();
-  }
-
-  /// The person's own message with a plan's id is in the session: what that
-  /// plan carried is spent. Events that came since stay for the next one.
-  void _spendCommitted(ChatState state) {
-    if (_fullPlans.isEmpty) return;
-    final committed = {
-      for (final item in state.items)
-        if (item is UserChatItem && item.sourceKind == 'user' && item.requestId != null) item.requestId!,
-    };
-    for (final id in [..._fullPlans.keys]) {
-      if (!committed.contains(id)) continue;
-      _contextEvents = companionConsumeEvents(_contextEvents, _fullPlans.remove(id)!.plan.eventIds);
-    }
-  }
-
-  void _contextUnsupported() {
-    if (_contextUnsupportedSaid || !mounted) return;
-    _contextUnsupportedSaid = true;
-    _notice(context.l10n.companionContextUnsupported);
-  }
+  bool get _mapHere =>
+      mounted &&
+      !_leaving &&
+      _routeShown &&
+      !_logOpen &&
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+      (ModalRoute.of(context)?.isCurrent ?? true);
 
   /// A word from the app (not from her) in the pill above her words.
   void _notice(String text) {
@@ -1897,218 +1897,14 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     });
   }
 
-  // ── Automatic recall (Pro C902, full mode) ───────────────────────────────
-
-  String get _recallHostKey => companionHostKey(ref.read(activeHostProvider));
-
-  void _recallUpdate(VoidCallback change) {
-    if (!mounted) return;
-    setState(change);
-    _recallChanged.value++;
-  }
-
-  /// What this host says about recall, read when the menu opens.
-  Future<void> _readRecallCaps() async {
-    final client = ref.read(activeConnectionProvider).value?.client;
-    if (client == null || _light) return;
-    try {
-      final caps = await client.readCompanionRecallCapabilities();
-      if (!mounted || !identical(client, ref.read(activeConnectionProvider).value?.client)) return;
-      _recallUpdate(() => _recallCaps = caps == null ? null : (client: client, caps: caps));
-    } on Object {
-      // Not now: the switch shows up when the host answers.
-    }
-  }
-
-  /// The binding this phone stored for her conversation [sessionId], checked
-  /// with the host. Ready: shown as on. Retired (her memories changed), gone or
-  /// switched off: the conversation is let go, since a bound one never goes
-  /// back to ordinary chat, and the person is told once. [rebind]: the page
-  /// also drops it at once (a send that is under way opens the new one itself).
-  Future<void> _verifyRecall(String sessionId, bool Function() current, {bool rebind = true}) async {
-    if (_light || _recallWorking) return;
-    final client = ref.read(activeConnectionProvider).value?.client;
-    final hostKey = _recallHostKey;
-    final stored = await companionRecallStored(hostKey);
-    if (!current() || _recallWorking) return;
-    if (stored == null || client == null) {
-      if (_recallOn) _recallUpdate(() => _recallOn = false);
-      return;
-    }
-    if (stored.sessionId != sessionId) {
-      // Only about the conversation she is in now: a late check about an
-      // older one must not touch a binding made since.
-      if (ref.read(companionSessionsProvider.notifier).of(ref.read(activeHostProvider))?.sessionId != sessionId) return;
-      // Made for a conversation she has left since (started over): let it go.
-      await companionRecallClear(hostKey, stored.bindingId);
-      unawaited(_revokeQuietly(client, stored.bindingId));
-      return;
-    }
-    bool? ready;
-    if (stored.off) {
-      ready = false;
-    } else {
-      try {
-        final caps = await client.readCompanionRecallCapabilities();
-        ready = caps != null && (await client.readCompanionRecallBinding(caps, stored.bindingId)).isReady;
-      } on DshRemoteException catch (error) {
-        // Unknown to the host now, or retired: not coming back. Anything else may pass.
-        if (error.code.endsWith('not-found') || error.code.endsWith('retired')) ready = false;
-      } on Object {
-        // No answer: nothing decided either way.
-      }
-    }
-    if (!current() || _recallWorking || ready == null) return;
-    // A check that took longer than another one (which may have opened a new
-    // conversation since) has nothing more to say.
-    final sessions = ref.read(companionSessionsProvider.notifier);
-    if (sessions.of(ref.read(activeHostProvider))?.sessionId != sessionId) return;
-    if (ready) {
-      if (!_recallOn) _recallUpdate(() => _recallOn = true);
-      return;
-    }
-    // The bound conversation goes first; only then is the record dropped, so
-    // a page that moved on meanwhile finds it again on its next visit here.
-    final forgetting = sessions.forget();
-    await companionRecallClear(hostKey, stored.bindingId);
-    await forgetting;
-    if (!mounted || !current()) return;
-    if (!stored.off) _notice(context.l10n.companionRecallStopped);
-    _recallUpdate(() {
-      _recallOn = false;
-      if (rebind) _unbind();
-    });
-    if (rebind) unawaited(_arrive(greet: false));
-  }
-
-  Future<void> _revokeQuietly(DshClient client, String bindingId) async {
-    try {
-      final caps = await client.readCompanionRecallCapabilities();
-      if (caps != null) {
-        await client.revokeCompanionRecall(caps, operationId: newCompanionRecallId(), bindingId: bindingId);
-      }
-    } on Object {
-      // Best effort: any memory change retires it on the host anyway.
-    }
-  }
-
-  /// Switching it on: said plainly first, then a new clean conversation bound
-  /// with the host. Shown as on only when the host says the binding is ready.
-  Future<void> _enableRecall() async {
-    final l10n = context.l10n;
-    final ok = await _confirm(
-      l10n.companionRecallTitle,
-      l10n.companionRecallConfirm,
-      confirm: l10n.companionRecallTurnOn,
-    );
-    if (!ok || !mounted || _light || _recallWorking) return;
-    var current = _currentRoom();
-    final client = ref.read(activeConnectionProvider).value?.client;
-    final hostKey = _recallHostKey;
-    if (client == null) return _notice(l10n.companionNotConnected);
-    _recallUpdate(() => _recallWorking = true);
-    try {
-      final caps = await client.readCompanionRecallCapabilities();
-      if (!current()) return;
-      if (caps == null || !caps.supported) return _notice(l10n.companionRecallUnsupported);
-      final stored = await companionRecallStored(hostKey);
-      if (!current()) return;
-      if (caps.busy) {
-        final ours = stored != null && !stored.off && caps.activeBindingId == stored.bindingId;
-        // Already on for this very conversation (an earlier check went unanswered).
-        if (ours && stored.sessionId == _sessionId) return _recallUpdate(() => _recallOn = true);
-        // Another conversation has it: never taken over from here.
-        if (!ours) return _notice(l10n.companionRecallBusy);
-        // This phone's own, left behind by a conversation she started over.
-        await client.revokeCompanionRecall(caps, operationId: newCompanionRecallId(), bindingId: stored.bindingId);
-        if (!current()) return;
-      }
-      if (stored != null) await companionRecallClear(hostKey, stored.bindingId);
-      final consumer = await companionRecallConsumerId();
-      if (!current()) return;
-      // A clean conversation: the old one stays on the host, in the main chat list.
-      final sessions = ref.read(companionSessionsProvider.notifier);
-      await sessions.forget();
-      if (!current()) return;
-      setState(_unbind);
-      unawaited(_arrive(greet: false));
-      current = _currentRoom();
-      final binding = await sessions.ensure();
-      if (!current()) return;
-      _bind(binding.sessionId, verify: false);
-      if (!await ref.read(chatProvider(binding.sessionId).notifier).waitForSync(isCurrent: current)) {
-        throw const DshClosedException('not synced');
-      }
-      if (!current()) return;
-      final snapshot = await client.companionSnapshot();
-      if (!current()) return;
-      if (snapshot == null) return _notice(l10n.companionRecallUnsupported);
-      final bound = await client.bindCompanionRecall(
-        caps,
-        operationId: newCompanionRecallId(),
-        storeId: snapshot.storeId,
-        expectedMemoryRevision: snapshot.memoryRevision,
-        sessionId: binding.sessionId,
-        consumerId: consumer,
-        consent: companionRecallSelector,
-      );
-      // Kept whatever the page does next: a ready binding must not be lost track of.
-      if (bound.isReady) await companionRecallSave(hostKey, CompanionRecallRecord(bound.bindingId, bound.sessionId));
-      if (!current()) return;
-      if (!bound.isReady) return _notice(l10n.companionRecallFailed);
-      _recallUpdate(() => _recallOn = true);
-      _stage.command('emotion', {'name': 'happy', 'hold': 2600});
-      _say(l10n.companionRecallOn);
-    } on Object {
-      if (current()) _notice(l10n.companionRecallFailed);
-    } finally {
-      _recallUpdate(() => _recallWorking = false);
-    }
-  }
-
-  /// Switching it off: the host retires the binding, and the next line opens
-  /// a new ordinary conversation (the bound one never goes back).
-  Future<void> _disableRecall() async {
-    final l10n = context.l10n;
-    final client = ref.read(activeConnectionProvider).value?.client;
-    if (!mounted || _recallWorking || client == null) return;
-    final current = _currentRoom();
-    final hostKey = _recallHostKey;
-    _recallUpdate(() => _recallWorking = true);
-    try {
-      final stored = await companionRecallStored(hostKey);
-      if (stored != null && !stored.off) {
-        final caps = await client.readCompanionRecallCapabilities();
-        if (caps == null) throw const DshClosedException('no recall');
-        try {
-          await client.revokeCompanionRecall(caps, operationId: newCompanionRecallId(), bindingId: stored.bindingId);
-        } on DshRemoteException catch (error) {
-          // Already gone on the host is off too; anything else is a failure.
-          if (!error.code.contains('not-found')) rethrow;
-        }
-        await companionRecallSave(hostKey, CompanionRecallRecord(stored.bindingId, stored.sessionId, off: true));
-      }
-      if (!current()) return;
-      final forgetting = ref.read(companionSessionsProvider.notifier).forget();
-      if (stored != null) await companionRecallClear(hostKey, stored.bindingId);
-      await forgetting;
-      if (!current()) return;
-      setState(_unbind);
-      unawaited(_arrive(greet: false));
-      _notice(l10n.companionRecallOff);
-    } on Object {
-      if (current()) _notice(l10n.companionRecallOffFailed);
-    } finally {
-      _recallUpdate(() => _recallWorking = false);
-    }
-  }
-
   String _failureText(Object error) {
     final l10n = context.l10n;
     return switch (error) {
       CompanionLightError(failure: CompanionLightFailure.noKey) => l10n.companionLightNoKey,
       CompanionLightError(failure: CompanionLightFailure.badKey) => l10n.companionLightBadKey,
       CompanionLightError(failure: CompanionLightFailure.busy) => l10n.companionLightBusy,
+      DshRemoteException(code: 'companion/agent-retry-closed') => l10n.companionAgentRetryClosed,
+      DshRemoteException(code: 'companion/cleanup-source-unknown') => l10n.companionMemoryCleanupUnknown,
       // Full mode only because nobody picked a mode yet: light would work without a host.
       DshClosedException() when ref.read(companionModeProvider) == null => l10n.companionNotConnectedTryLight,
       DshClosedException() => l10n.companionNotConnected,
@@ -2116,190 +1912,98 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     };
   }
 
-  /// Light mode: the reply comes straight from the model, and the conversation
-  /// stays on this phone.
-  Future<void> _sendLight(String raw, bool Function() current) async {
-    final text = raw.trim();
-    final key = ref.read(settingsProvider).apiKey.trim();
-    if (key.isEmpty) throw const CompanionLightError(CompanionLightFailure.noKey);
-    final history = _lightHistory ??= CompanionLightHistory.at(_store!.root);
-    await history.load();
-    // What she has been asked to remember, kept on this phone. Unreadable
-    // memories only mean she talks without them this time.
-    var memories = const <CompanionMemory>[];
-    try {
-      memories = (await _phoneKeeper.memories().timeout(const Duration(seconds: 2))).memories;
-    } on Object {
-      // Nothing to bring up this time.
-    }
-    // Switched to full (or away) while the history was read: this line is not
-    // light mode's any more.
-    if (!current()) return;
-    final now = DateTime.now();
-    final turnContext = _lightContext = companionTurnContext(
-      now: now,
-      utcOffsetMinutes: now.timeZoneOffset.inMinutes,
-      lastSpokenAt: _lastSpokenAt,
-      lastClockAt: _lastClockAt,
-      events: _contextEvents,
-    );
-    _lastSpokenAt = now;
-    history.add(CompanionLine.user(raw));
-    // Nothing said before this page counts as news.
-    _baselineSet = true;
-    final turn = _lightTurn = 'light-${++_lightTurns}';
-    _lightText = '';
-    _lightAsked = text;
-    final client = _lightClient = ref.read(companionLightClientProvider)();
-    _lightReply =
-        streamCompanionReply(
-          client: client,
-          apiKey: key,
-          system: companionLightSystem(memories, persona: _persona()),
-          lines: history.context(),
-          context: turnContext,
-          onUsage: (input, output) {
-            if (mounted) ref.read(usageStatsProvider.notifier).tokens(input, output);
-          },
-        ).listen(
-          (delta) {
-            if (!mounted || turn != _lightTurn) return;
-            _lightText += delta;
-            _onReply(turn, _lightText, running: true);
-          },
-          onError: (Object error) => _endLight(turn, error: error),
-          onDone: () => _endLight(turn),
-          cancelOnError: true,
-        );
-    _onReply(turn, '', running: true);
-  }
-
-  /// The light reply [turn] is over: finished, failed or stopped. What she
-  /// said is kept; a line she never answered goes back into the input.
-  void _endLight(String turn, {Object? error}) {
-    if (turn != _lightTurn || _lightReply == null) return;
-    _lightReply = null;
-    _lightTurn = '';
-    _lightClient?.close();
-    _lightClient = null;
-    final history = _lightHistory;
-    final answered = _lightText.trim().isNotEmpty;
-    final asked = _lightContext;
-    _lightContext = null;
-    if (answered) {
-      history?.add(CompanionLine.her(_lightText));
-      // She heard it: what this turn carried is spent.
-      if (asked != null) {
-        _contextEvents = companionConsumeEvents(_contextEvents, asked.eventIds);
-        if (asked.hasClock) _lastClockAt = asked.sampledAt;
-      }
-    } else if (error != null) {
-      history?.dropUnanswered();
-    }
-    if (history != null) unawaited(history.save());
-    if (!mounted) return;
-    if (!answered && error != null) {
-      if (_input.text.isEmpty) _input.text = _lightAsked;
-      _stage.command('emotion', {'name': 'worried', 'hold': 3000});
-    }
-    _onReply(turn, _lightText, running: false, error: error == null ? null : _failureText(error));
-  }
-
-  /// Ends the light reply on its way, at once: what she has said so far is
-  /// kept, the request is dropped (its client closed first), and nothing it
-  /// does later reaches the page. Cancelling can itself fail late (a timeout
-  /// already under way); that is swallowed, not let loose.
-  void _retireLight() {
-    final reply = _lightReply;
-    if (reply == null) return;
-    _endLight(_lightTurn);
-    unawaited(reply.cancel().catchError((Object _) {}));
-  }
-
   Future<void> _stop() async {
     _acted();
     _hush();
-    if (_lightReply != null) {
-      _retireLight();
-      return;
-    }
-    final id = _sessionId;
-    if (id == null) return;
-    await ref.read(chatProvider(id).notifier).cancel();
-  }
-
-  /// Switching modes on the page: drop the reply on its way and the other
-  /// mode's conversation, then arrive again.
-  void _modeChanged() {
-    _boundLight = _light;
-    _retireLight();
-    setState(_unbind);
-    if (!_stageReady) return;
-    if (!_light) {
-      final binding = ref.read(companionSessionsProvider.notifier).of(ref.read(activeHostProvider));
-      if (binding != null) _bind(binding.sessionId);
-    }
-    // She is already here: no second hello.
-    unawaited(_arrive(greet: false));
+    _attachment.stop();
   }
 
   /// The backlog over her: this room's whole conversation, in either mode.
   Future<void> _openLog() async {
+    _notesForegroundEpoch++;
+    _mapHandoff.close();
     _acted();
-    if (_light && _store != null) {
+    if (_store != null) {
       final history = _lightHistory ??= CompanionLightHistory.at(_store!.root);
       await history.load();
     }
     if (!mounted) return;
     _focus.unfocus();
     setState(() => _logOpen = true);
+    // Under the log's blur she's barely seen: her stage draws slowly meanwhile.
+    _stage.command('covered', {'on': true});
   }
 
   void _closeLog() {
-    if (mounted && _logOpen) setState(() => _logOpen = false);
+    if (!mounted || !_logOpen) return;
+    setState(() {
+      _logOpen = false;
+      _savedLightLog = null;
+    });
+    _stage.command('covered', {'on': false});
   }
 
-  Widget _log(String name) {
-    final sessionId = _sessionId;
-    if (_light) {
-      return CompanionLog(
-        key: const ValueKey('log-light'),
-        entries: companionLogFromLight(
-          _lightHistory?.lines ?? const [],
-          emotions: _moves.emotionLabels,
-          actions: _moves.actionLabels,
-          // What she is saying right now, already in her bubble.
-          speaking: _lightReply != null && _lightText.isNotEmpty ? _lightText : null,
-        ),
-        name: name,
-        onClose: _closeLog,
+  List<CompanionLogEntry> get _visibleLightEntries {
+    List<CompanionLogEntry> read(List<CompanionLine> lines, {bool legacy = false, String? speaking}) => [
+      for (final entry in companionLogFromLight(
+        lines,
+        emotions: _moves.emotionLabels,
+        actions: _moves.actionLabels,
+        speaking: speaking,
+      ))
+        if (legacy && entry.speaker == CompanionLogSpeaker.her)
+          CompanionLogEntry.her(entry.text, who: context.l10n.companionLegacyConversation)
+        else
+          entry,
+    ];
+    List<CompanionLogEntry> saved() {
+      final store = _memoryOwner?.store;
+      if (store == null) return const [];
+      final role = _attachment.characterId;
+      List<CompanionLogEntry> project() => [
+        for (final row in store.messages())
+          if ((row['session_id']! as String).startsWith('light:') &&
+              (row['character_id'] == null || row['character_id'] == role))
+            ...read([
+              row['role'] == 'user'
+                  ? CompanionLine.user(row['text']! as String)
+                  : CompanionLine.her(row['text']! as String),
+            ], legacy: row['character_id'] == null),
+      ];
+      if (!_logOpen) return project();
+      // New/edited messages advance next_seq. Forget can remove older messages
+      // under an existing sequence and advances control_revision instead.
+      final archive = store.archive;
+      final key = (
+        store,
+        archive['next_seq']! as int,
+        archive['control_revision']! as int,
+        role,
+        context.l10n.companionLegacyConversation,
       );
+      final previous = _savedLightLog;
+      if (previous != null && previous.key == key) return previous.entries;
+      final entries = project();
+      _savedLightLog = (key: key, entries: entries);
+      return entries;
     }
-    // Full mode before her conversation there has begun: nothing said yet.
-    if (sessionId == null) {
-      return CompanionLog(key: const ValueKey('log-none'), entries: const [], name: name, onClose: _closeLog);
-    }
-    return Consumer(
-      key: ValueKey('log-$sessionId'),
-      builder: (context, ref, _) {
-        final chat = ref.watch(
-          chatProvider(sessionId).select((s) => (items: s.items, more: s.hasMoreHistory, loading: s.loadingOlder)),
-        );
-        return CompanionLog(
-          entries: companionLogFromChat(chat.items, emotions: _moves.emotionLabels, actions: _moves.actionLabels),
-          name: name,
-          onClose: _closeLog,
-          loadingOlder: chat.loading,
-          history: chat.items.length,
-          onLoadOlder: chat.more ? ref.read(chatProvider(sessionId).notifier).loadOlder : null,
-          onOpenChat: () {
-            _closeLog();
-            _openFullChat();
-          },
-        );
-      },
-    );
+
+    return [
+      ...read(_lightHistory?.lines ?? const [], legacy: true),
+      ...saved(),
+      ...read(const [], speaking: _attachment.pendingText),
+    ];
   }
+
+  Widget _log(String name) => CompanionLog(
+    key: const ValueKey('log-phone'),
+    entries: _visibleLightEntries,
+    name: name,
+    onClose: _closeLog,
+    // An explicit action still reaches the saved Host conversation. It is not
+    // subscribed as the ordinary phone Agent's live reply source.
+    onOpenChat: _sessionId == null ? null : _openFullChat,
+  );
 
   void _openFullChat() {
     final id = _sessionId;
@@ -2329,13 +2033,17 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
 
   /// The pack inside the app, through the same checks as any other.
   /// [arriving]: the first time, she swims over while it unpacks.
-  Future<void> _installBundled({bool arriving = false}) => _installFrom((claim) async {
-    final bytes = await _bundled();
-    if (bytes == null) throw const CompanionPackException(CompanionPackProblem.notAPack);
-    final zip = claim('${_store!.root.parent.path}/companion-bundled-${DateTime.now().microsecondsSinceEpoch}.zip');
-    await zip.writeAsBytes(bytes, flush: true);
-    return zip;
-  }, arriving: arriving);
+  Future<void> _installBundled({bool arriving = false}) => _installFrom(
+    (claim) async {
+      final bytes = await _bundled();
+      if (bytes == null) throw const CompanionPackException(CompanionPackProblem.notAPack);
+      final zip = claim('${_store!.root.parent.path}/companion-bundled-${DateTime.now().microsecondsSinceEpoch}.zip');
+      await zip.writeAsBytes(bytes, flush: true);
+      return zip;
+    },
+    arriving: arriving,
+    builtIn: true,
+  );
 
   /// [bring] makes the zip to install, through `claim` for its temporary
   /// file: claimed before anything is written, so a write that fails halfway
@@ -2343,6 +2051,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   Future<void> _installFrom(
     Future<File?> Function(File Function(String path) claim) bring, {
     bool arriving = false,
+    bool builtIn = false,
   }) async {
     final store = _store;
     if (store == null || _installing) return;
@@ -2356,7 +2065,11 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       final zip = await bring((path) => temp = File(path));
       if (zip == null) return;
       try {
-        await store.install(zip.path);
+        if (builtIn) {
+          await store.installBundled(zip.path);
+        } else {
+          await store.install(zip.path);
+        }
       } on CompanionPackException catch (error) {
         // A model on its own needs the runtime, which the pack inside the app
         // brings: unpack that first, then the model over it.
@@ -2367,23 +2080,28 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
         );
         try {
           await runtime.writeAsBytes(bundled, flush: true);
-          await store.install(runtime.path);
+          await store.installBundled(runtime.path);
         } finally {
           if (await runtime.exists()) await runtime.delete();
         }
-        await store.install(zip.path);
+        if (builtIn) {
+          await store.installBundled(zip.path);
+        } else {
+          await store.install(zip.path);
+        }
       }
-      final character = await store.character();
+      final identity = await store.characterIdentity();
       // She's back: the pack inside the app may come by itself again.
       unawaited(SharedPreferences.getInstance().then((p) => p.remove(_packRemovedKey)));
       if (!mounted) return;
       setState(() {
-        _character = character;
+        _setCharacter(identity.character, identity.key);
         _failure = null;
         _stageReady = false;
         _stageRun++;
         _phase = _Phase.stage;
       });
+      _attachment.updateCharacter(_character, _moves, sourceKey: _characterSourceKey);
     } on CompanionPackException catch (error) {
       if (mounted) setState(() => _installError = _problemText(error.problem));
     } on Object {
@@ -2414,15 +2132,16 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
   Future<void> _retryStage() async {
     final store = _store;
     if (store == null) return;
-    final character = await store.character();
+    final identity = await store.characterIdentity();
     if (!mounted || _phase != _Phase.failed) return;
     setState(() {
-      _character = character;
+      _setCharacter(identity.character, identity.key);
       _failure = null;
       _stageReady = false;
       _stageRun++;
       _phase = _Phase.stage;
     });
+    _attachment.updateCharacter(_character, _moves, sourceKey: _characterSourceKey);
   }
 
   /// Back from the workshop. A companion installed or uninstalled there
@@ -2440,7 +2159,9 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       _phase = _Phase.setup;
       _failure = null;
       _stageReady = false;
+      _setCharacter(const CompanionCharacter(), null);
     });
+    _attachment.updateCharacter(_character, _moves, sourceKey: _characterSourceKey);
     _syncSignals();
   }
 
@@ -2652,11 +2373,98 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     );
   }
 
+  /// 陪你看屏幕: the resident observer's settings. Native state is the authority;
+  /// the sheet only mirrors it and sends changes back.
+  void _openScreen() {
+    final screen = ref.read(companionAlwaysOnOwnerProvider).screen;
+    unawaited(screen.refresh());
+    unawaited(
+      showAppSheet<void>(
+        context,
+        builder: (sheet) => ValueListenableBuilder<Map<String, Object?>>(
+          valueListenable: screen.state,
+          builder: (sheet, state, _) {
+            final l10n = sheet.l10n;
+            final enabled = state['enabled'] == true;
+            final canSee = state['accessibility'] == true || state['projection_active'] == true;
+            final frequency = state['frequency'] as String? ?? 'normal';
+            final cost = (state['today_estimated_cny'] as num?)?.toDouble() ?? 0;
+            final caption = Theme.of(sheet).textTheme.bodySmall;
+            // A channel failure leaves the mirrored state as it was.
+            void send(Future<void> change) => unawaited(change.catchError((Object _) {}));
+            return SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SheetTitleBar(l10n.companionScreen),
+                    SheetGroup(
+                      margin: const EdgeInsets.fromLTRB(SheetTitleBar.inset, 0, SheetTitleBar.inset, 12),
+                      children: [
+                        SettingsSwitchTile(
+                          tinted: false,
+                          title: l10n.companionScreen,
+                          subtitle: enabled && !canSee ? l10n.companionScreenNeedsAccess : l10n.companionScreenHint,
+                          value: enabled,
+                          onChanged: (on) => send(screen.configure(enabled: on)),
+                        ),
+                        if (enabled && !canSee)
+                          SettingsTile(
+                            tinted: false,
+                            title: l10n.companionScreenAllowProjection,
+                            onTap: () => send(screen.requestProjection()),
+                          ),
+                        if (state['usage_access'] == false)
+                          SettingsTile(
+                            tinted: false,
+                            title: l10n.companionScreenUsageAccess,
+                            onTap: () => send(screen.requestUsageAccess()),
+                          ),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(SheetTitleBar.inset + 8, 0, SheetTitleBar.inset + 8, 8),
+                      child: Text(l10n.companionScreenFrequency, style: caption),
+                    ),
+                    SheetGroup(
+                      margin: const EdgeInsets.fromLTRB(SheetTitleBar.inset, 0, SheetTitleBar.inset, 12),
+                      children: [
+                        for (final (value, title, hint) in [
+                          ('quiet', l10n.companionScreenQuiet, l10n.companionScreenQuietHint),
+                          ('normal', l10n.companionScreenNormal, l10n.companionScreenNormalHint),
+                          ('chatty', l10n.companionScreenChatty, l10n.companionScreenChattyHint),
+                        ])
+                          SettingsTile(
+                            tinted: false,
+                            title: title,
+                            subtitle: hint,
+                            chevron: false,
+                            trailing: value == frequency ? const Icon(AppIcons.selected, size: 20) : null,
+                            onTap: value == frequency ? null : () => send(screen.configure(frequency: value)),
+                          ),
+                      ],
+                    ),
+                    if (cost > 0)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(SheetTitleBar.inset + 8, 0, SheetTitleBar.inset + 8, 16),
+                        child: Text(l10n.companionScreenCost(cost.toStringAsFixed(2)), style: caption),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   void _openMenu() {
     _acted();
     final l10n = context.l10n;
     final light = _light;
-    if (!light) unawaited(_readRecallCaps());
     final credit = [
       if (_character.author case final author?) l10n.companionCreditAuthor(author),
       ?_character.license,
@@ -2713,21 +2521,19 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                         _openMoves();
                       },
                     ),
-                    // Only where her state is kept: otherwise there is nothing to show.
-                    if (_vitals case final vitals?)
+                    if (_affinityCharacter != null)
                       SettingsTile(
                         icon: AppIcons.postLike,
                         tinted: false,
                         title: l10n.companionBondTitle,
-                        value: CompanionBondMeter(
-                          step: companionBond(vitals.vitals.closeness),
-                          label: switch (companionBond(vitals.vitals.closeness)) {
-                            0 => l10n.companionBond0,
-                            1 => l10n.companionBond1,
-                            2 => l10n.companionBond2,
-                            _ => l10n.companionBond3,
-                          },
-                        ),
+                        value: Text(switch (_bondTier) {
+                          0 => l10n.companionBond0,
+                          1 => l10n.companionBond1,
+                          2 => l10n.companionBond2,
+                          3 => l10n.companionBond3,
+                          4 => l10n.companionBond4,
+                          _ => l10n.companionBond5,
+                        }),
                       ),
                     SettingsTile(
                       icon: light ? AppIcons.engineStarting : AppIcons.engine,
@@ -2745,20 +2551,25 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                       title: l10n.companionMemoryTitle,
                       onTap: () {
                         Navigator.of(sheet).pop();
-                        final current = _currentRoom();
-                        unawaited(
-                          Navigator.of(context)
-                              .push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => CompanionMemoryPage(phone: light ? _phoneKeeper : null),
-                                ),
-                              )
-                              .then((_) {
-                                // A change to her memories retires recall on the host: look again.
-                                final session = _sessionId;
-                                if (!light && session != null && current()) unawaited(_verifyRecall(session, current));
-                              }),
-                        );
+                        unawaited(_openMemories());
+                      },
+                    ),
+                    SettingsTile(
+                      icon: AppIcons.search,
+                      tinted: false,
+                      title: l10n.companionMemorySearchTitle,
+                      onTap: () {
+                        Navigator.of(sheet).pop();
+                        unawaited(_openMemorySearch());
+                      },
+                    ),
+                    SettingsTile(
+                      icon: AppIcons.reminder,
+                      tinted: false,
+                      title: l10n.companionTasksTitle,
+                      onTap: () {
+                        Navigator.of(sheet).pop();
+                        unawaited(_openTasks());
                       },
                     ),
                     Consumer(
@@ -2805,6 +2616,41 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                         },
                       ),
                     ),
+                    Consumer(
+                      builder: (context, ref, _) {
+                        final status = ref.watch(companionResidencyProvider);
+                        if (!status.available) return const SizedBox.shrink();
+                        return SettingsSwitchTile(
+                          icon: AppIcons.pet,
+                          tinted: false,
+                          title: l10n.companionAlwaysOn,
+                          subtitle: switch (status) {
+                            CompanionAlwaysOnStatus(failure: _?) => l10n.companionAlwaysOnFailed,
+                            CompanionAlwaysOnStatus(enabled: true, notificationAvailable: false) =>
+                              l10n.companionAlwaysOnNoNotify,
+                            CompanionAlwaysOnStatus(enabled: true, running: true) => l10n.companionAlwaysOnRunning,
+                            _ => l10n.companionAlwaysOnHint,
+                          },
+                          value: status.enabled,
+                          onChanged: (on) => unawaited(ref.read(companionResidencyProvider.notifier).setEnabled(on)),
+                        );
+                      },
+                    ),
+                    Consumer(
+                      builder: (context, ref, _) {
+                        final status = ref.watch(companionResidencyProvider);
+                        if (!status.available || !status.enabled || !status.running) return const SizedBox.shrink();
+                        return SettingsTile(
+                          icon: AppIcons.preview,
+                          tinted: false,
+                          title: l10n.companionScreen,
+                          onTap: () {
+                            Navigator.of(sheet).pop();
+                            _openScreen();
+                          },
+                        );
+                      },
+                    ),
                     SettingsTile(
                       icon: AppIcons.notifications,
                       tinted: false,
@@ -2814,33 +2660,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                         _openSignals();
                       },
                     ),
-                    if (!light)
-                      ValueListenableBuilder<int>(
-                        valueListenable: _recallChanged,
-                        builder: (_, _, _) {
-                          final caps = _recallCaps;
-                          final here =
-                              caps != null &&
-                              identical(caps.client, ref.read(activeConnectionProvider).value?.client) &&
-                              caps.caps.supported;
-                          // Shown where the host can do it, and wherever it is on (to switch off).
-                          if (!here && !_recallOn) return const SizedBox.shrink();
-                          return SettingsSwitchTile(
-                            icon: AppIcons.bookmarkActive,
-                            tinted: false,
-                            title: l10n.companionRecallTitle,
-                            subtitle: l10n.companionRecallHint,
-                            value: _recallOn,
-                            onChanged: _recallWorking
-                                ? null
-                                : (on) {
-                                    Navigator.of(sheet).pop();
-                                    unawaited(on ? _enableRecall() : _disableRecall());
-                                  },
-                          );
-                        },
-                      ),
-                    if (light && (_lightHistory?.lines.isNotEmpty ?? false))
+                    if (_visibleLightEntries.isNotEmpty)
                       SettingsTile(
                         icon: AppIcons.newChat,
                         tinted: false,
@@ -2851,7 +2671,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                           unawaited(_restart());
                         },
                       ),
-                    if (_sessionId != null || (light && (_lightHistory?.lines.isNotEmpty ?? false)))
+                    if (_sessionId != null || _visibleLightEntries.isNotEmpty)
                       SettingsTile(
                         icon: AppIcons.history,
                         tinted: false,
@@ -2859,17 +2679,6 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                         onTap: () {
                           Navigator.of(sheet).pop();
                           unawaited(_openLog());
-                        },
-                      ),
-                    if (_sessionId != null)
-                      SettingsTile(
-                        icon: AppIcons.newChat,
-                        tinted: false,
-                        title: l10n.companionMenuRestart,
-                        subtitle: l10n.companionMenuRestartHint,
-                        onTap: () {
-                          Navigator.of(sheet).pop();
-                          unawaited(_restart());
                         },
                       ),
                     // 创意工坊: companions other people made. Only where this build has one to open.
@@ -2946,31 +2755,18 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
 
   Future<void> _restart() async {
     final l10n = context.l10n;
-    final light = _light;
-    final ok = await _confirm(
-      l10n.companionMenuRestart,
-      light ? l10n.companionMenuRestartLightConfirm : l10n.companionMenuRestartConfirm,
-    );
-    if (!ok || !mounted) return;
-    if (light) {
-      // The reply still on its way would otherwise write itself back after the clear.
-      _retireLight();
-      await _lightHistory?.clear();
-      if (!mounted) return;
-      _say(_firstHello(l10n));
-      return;
-    }
-    final client = ref.read(activeConnectionProvider).value?.client;
-    final hostKey = _recallHostKey;
-    await ref.read(companionSessionsProvider.notifier).forget();
-    if (!mounted) return;
-    setState(_unbind);
+    final ok = await _confirm(l10n.companionMenuRestart, l10n.companionMenuRestartLightConfirm);
+    if (!ok || !mounted || !_attachment.isAttached) return;
+    _hush();
+    _settleTimer?.cancel();
+    await _attachment.restart();
+    if (!mounted || !_attachment.isAttached) return;
+    setState(() {
+      _running = false;
+      _myLine = null;
+    });
+    _refreshMood();
     _say(_firstHello(l10n));
-    // Recall was bound to the conversation she just left: it goes with it.
-    final stored = await companionRecallStored(hostKey);
-    if (stored == null) return;
-    await companionRecallClear(hostKey, stored.bindingId);
-    if (client != null && !stored.off) unawaited(_revokeQuietly(client, stored.bindingId));
   }
 
   Future<void> _removePack() async {
@@ -2991,6 +2787,9 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     _syncSignals();
     try {
       await _store?.remove();
+      if (!mounted || !_attachment.isAttached) return;
+      setState(() => _setCharacter(const CompanionCharacter(), null));
+      _attachment.updateCharacter(_character, _moves, sourceKey: _characterSourceKey);
     } on CompanionPackException catch (error) {
       // Something still reads her files (a floating window that wouldn't let
       // go): they stay, and the setup screen says so.
@@ -3004,21 +2803,22 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
 
   @override
   Widget build(BuildContext context) {
-    // Changing host while here: her conversation is per host.
-    ref.listen(activeHostProvider, (_, _) => _bindingChanged());
-    ref.listen(activeConnectionProvider.select((value) => value.value?.client), (_, _) => _bindingChanged());
-    // A refreshed host (name, folder) keeps its client but not the wrapper
-    // her signals are tied to.
+    // Keep the process provider active while this real window is attached.
+    // Host/mode business listeners live in the Agent visit; this only refreshes
+    // the original signal lane's window rendering.
+    ref.watch(companionAgentProvider);
+    ref.listen(activeHostProvider, (_, _) => _syncSignals());
     ref.listen(activeConnectionProvider.select((value) => value.value), (_, _) => _syncSignals());
-    ref.listen(companionModeProvider, (before, now) {
-      // The saved pick arriving after the page opened changes nothing if it is what she already does.
-      bool light(CompanionMode? mode) =>
-          mode == CompanionMode.light || (mode == null && ref.read(activeConnectionProvider).value == null);
-      if (light(before) != light(now)) _modeChanged();
-    });
     // What her invitation depends on that only a build can see: this page in
     // front (a sheet or another page over her isn't), a screen reader, the switch.
-    _routeShown = TickerMode.valuesOf(context).enabled && (ModalRoute.isCurrentOf(context) ?? true);
+    final routeShown = TickerMode.valuesOf(context).enabled && (ModalRoute.isCurrentOf(context) ?? true);
+    if (_routeShown && !routeShown) {
+      _checkNotesSelectionRoute();
+    }
+    if (_routeShown && !routeShown && !_mapChoosing) {
+      _mapHandoff.close();
+    }
+    _routeShown = routeShown;
     _accessible = MediaQuery.accessibleNavigationOf(context);
     ref.watch(companionInitiativeEnabledProvider);
     ref.watch(companionNameProvider);
@@ -3040,13 +2840,15 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       ),
       // The water is dark at every hour, whatever the app's own theme.
       child: Theme(
-        data: buildDarkTheme(accent: surfaces.accent, glassBlur: surfaces.blurEnabled),
+        data: _darkTheme(surfaces.accent, surfaces.blurEnabled),
         child: PopScope(
           canPop: !_logOpen,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) _closeLog();
           },
-          child: Builder(builder: _buildPage),
+          // Her top bar, words and input blur what's behind them once between
+          // them (they never overlap), not once each, each time her stage draws.
+          child: BackdropGroup(child: Builder(builder: _buildPage)),
         ),
       ),
     );
@@ -3058,6 +2860,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
     final padding = MediaQuery.paddingOf(context);
     final store = _store;
     final showStage = _phase == _Phase.stage && store != null;
+    if (showStage && _stageReady) _queueReplyPresentation();
     final name = _name(l10n);
     // Shown only while it still belongs here and nothing else has the floor,
     // in this very frame (the owner hears about it right after).
@@ -3142,6 +2945,7 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                 CompanionRoundButton(
                   icon: AppIcons.back,
                   label: MaterialLocalizations.of(context).backButtonTooltip,
+                  grouped: true,
                   onTap: () {
                     _acted();
                     unawaited(Navigator.of(context).maybePop());
@@ -3154,9 +2958,14 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                   ),
                 ),
                 if (_stageReady) ...[
-                  CompanionRoundButton(icon: AppIcons.history, label: l10n.companionLogTitle, onTap: _openLog),
+                  CompanionRoundButton(
+                    icon: AppIcons.history,
+                    label: l10n.companionLogTitle,
+                    grouped: true,
+                    onTap: _openLog,
+                  ),
                   const SizedBox(width: 8),
-                  CompanionRoundButton(icon: AppIcons.more, label: l10n.companionMenu, onTap: _openMenu),
+                  CompanionRoundButton(icon: AppIcons.more, label: l10n.companionMenu, grouped: true, onTap: _openMenu),
                 ] else
                   const SizedBox(width: 96),
               ],
@@ -3187,14 +2996,72 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                         _openAgent(pill.sessionId);
                       },
                     ),
-                  if (!_light && _sessionId != null) CompanionAsk(sessionId: _sessionId!),
                   CompanionMyLine(text: _myLine),
                   CompanionSpeech(
                     text: _bubble,
+                    textKey: _bubbleTextKey,
+                    onFrame: _queueReplyPresentation,
                     error: _bubbleIsError,
                     thinking: _sending || (_running && _bubble == null),
                     onPullBack: _openLog,
                   ),
+                  if (_bubble != null)
+                    for (final result in _lookupResults)
+                      CompanionPill(
+                        icon: AppIcons.search,
+                        label: l10n.companionLookupViewSources(result.placeName),
+                        onTap: () {
+                          if (_bubble == null || !_lookupResults.contains(result)) {
+                            return;
+                          }
+                          _acted();
+                          unawaited(
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => CompanionTasksPage(memory: _memoryOwner!, taskId: result.taskId),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                  if (_bubble != null)
+                    for (final id in _notesResults)
+                      CompanionPill(
+                        icon: AppIcons.document,
+                        label: l10n.companionNotesView,
+                        onTap: () {
+                          if (_bubble == null || !_notesResults.contains(id)) {
+                            return;
+                          }
+                          _acted();
+                          unawaited(
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => CompanionTasksPage(memory: _memoryOwner!, taskId: id),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                  if (_bubble != null)
+                    for (final id in _mapResults)
+                      CompanionPill(
+                        icon: AppIcons.plan,
+                        label: l10n.companionMapView,
+                        onTap: () {
+                          if (_bubble == null || !_mapResults.contains(id)) {
+                            return;
+                          }
+                          _acted();
+                          unawaited(
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => CompanionTasksPage(memory: _memoryOwner!, taskId: id),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
                   CompanionInvite(
                     ticket: _adaptOffer == null || inviting ? null : 'adapt-${_adaptOffer!.moc}',
                     mark: const Icon(AppIcons.configure, size: 20, color: Color(0xFFFFD27A)),
@@ -3215,27 +3082,30 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
                     onDecline: () => _answerInvite(yes: false),
                   ),
                   const SizedBox(height: 10),
-                  CompanionComposer(
-                    onUserInput: () {
-                      _acted();
-                      _hush();
-                    },
-                    input: _input,
-                    focus: _focus,
-                    hint: l10n.companionInputHint(name),
-                    running: _running,
-                    busy: _sending,
-                    listening: _voice.active,
-                    voiceAvailable: _voice.available,
-                    onSend: _send,
-                    onStop: _stop,
-                    onVoice: () {
-                      // Reaching for the microphone is already doing something.
-                      _acted();
-                      // Her voice off before the microphone opens.
-                      _hush();
-                      _voice.active ? _voice.stop() : _voice.start();
-                    },
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _input,
+                    builder: (context, value, _) => CompanionComposer(
+                      onUserInput: () {
+                        _acted();
+                        _hush();
+                      },
+                      input: _input,
+                      focus: _focus,
+                      hint: l10n.companionInputHint(name),
+                      running: _running,
+                      busy: _sending,
+                      listening: _voice.active,
+                      voiceAvailable: _voice.available,
+                      onSend: _send,
+                      onStop: _stop,
+                      onVoice: () {
+                        // Reaching for the microphone is already doing something.
+                        _acted();
+                        // Her voice off before the microphone opens.
+                        _hush();
+                        _voice.active ? _voice.stop() : _voice.start();
+                      },
+                    ),
                   ),
                 ],
               ),
@@ -3245,6 +3115,255 @@ class _CompanionPageState extends ConsumerState<CompanionPage> implements Compan
       ),
     );
   }
+}
+
+/// The original Page's real pickers, captured for one submitted turn. An
+/// unrelated route or lifecycle exit retires it even if the room returns.
+class _CompanionPageTaskUi implements CompanionAgentTaskUi {
+  _CompanionPageTaskUi(this.page, this.current)
+    : epoch = page._notesForegroundEpoch,
+      mapGeneration = page._mapHandoff.generation,
+      strings = page.context.l10n {
+    selectionRoute = (route, nextRoute) {
+      if (!current() || epoch != page._notesForegroundEpoch) return;
+      page._notesSelectionRoutes.add(route);
+      if (nextRoute != null && !page._notesSelectionRoutes.contains(nextRoute)) {
+        if (nextRoute is DialogRoute<Object?> && identical(nextRoute.settings.arguments, selectionRoute)) {
+          page._notesSelectionRoutes.add(nextRoute);
+        } else {
+          page._notesForegroundEpoch++;
+          return;
+        }
+      }
+      page._checkNotesSelectionRoute();
+    };
+  }
+
+  final _CompanionPageState page;
+  final bool Function() current;
+  final int epoch, mapGeneration;
+  final L10n strings;
+  late final CompanionAgentSelectionRoute selectionRoute;
+
+  @override
+  bool get isCurrent =>
+      current() &&
+      page.mounted &&
+      !page._leaving &&
+      epoch == page._notesForegroundEpoch &&
+      !page._logOpen &&
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+      // The route, not the ticker: right after an owned picker pops, this
+      // page's TickerMode still reads the covered value until the next build.
+      // Coverage by any other route has already retired the epoch above.
+      ((ModalRoute.of(page.context)?.isCurrent ?? false) ||
+          page._notesSelectionRoutes.any((route) => route.isActive && route.isCurrent));
+  @override
+  bool get mapIsCurrent => isCurrent && page._mapHere && mapGeneration == page._mapHandoff.generation;
+  @override
+  CompanionAgentSelectionRoute get onSelectionRoute => selectionRoute;
+
+  @override
+  Future<String?> chooseDeadline(
+    List<String> choices, {
+    required bool Function() isCurrent,
+    CompanionAgentSelectionRoute? onRouteChanged,
+  }) async {
+    if (!this.isCurrent || !isCurrent()) return null;
+    return showAppDialog<String>(
+      context: page.context,
+      onRouteChanged: onRouteChanged,
+      builder: (dialog) => SimpleDialog(
+        title: choices.length == 2 && choices.contains('07:00') && choices.contains('19:00')
+            ? Text(strings.companionFindSeven)
+            : null,
+        children: [
+          for (final time in choices)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, time),
+              child: Text(switch (time) {
+                '07:00' => strings.companionFindMorningSeven,
+                '19:00' => strings.companionFindEveningSeven,
+                _ => time,
+              }),
+            ),
+          SimpleDialogOption(onPressed: () => Navigator.pop(dialog), child: Text(strings.commonCancel)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Future<String?> chooseDirectory({
+    required String kind,
+    String? directoryHint,
+    required bool Function() isCurrent,
+    CompanionAgentSelectionRoute? onRouteChanged,
+  }) async {
+    if (!this.isCurrent || !isCurrent()) return null;
+    return showDirectoryPicker(
+      page.context,
+      onRouteChanged: onRouteChanged,
+      title: kind == 'host.find_draft'
+          ? strings.companionFindChooseDirectory(directoryHint ?? '')
+          : strings.companionNotesChooseDirectory,
+    );
+  }
+
+  @override
+  Future<MemoryRow?> chooseSavedDirectory(
+    List<MemoryRow> directories, {
+    required bool Function() isCurrent,
+    CompanionAgentSelectionRoute? onRouteChanged,
+  }) async {
+    if (!this.isCurrent || !isCurrent()) return null;
+    return showAppDialog<MemoryRow>(
+      context: page.context,
+      onRouteChanged: onRouteChanged,
+      builder: (dialog) => SimpleDialog(
+        title: Text(strings.companionFindSavedDirectory),
+        children: [
+          for (final value in directories)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialog, value),
+              child: Text(value['displayPath']! as String),
+            ),
+          SimpleDialogOption(onPressed: () => Navigator.pop(dialog), child: Text(strings.commonCancel)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Future<MemoryRow?> chooseDrafts({
+    required CompanionMemoryStore store,
+    required String hostKey,
+    required DshClient? client,
+    required CompanionTasksCapability? capability,
+    required bool Function() isCurrent,
+    CompanionAgentSelectionRoute? onRouteChanged,
+    String? originalStoreId,
+  }) async {
+    if (!this.isCurrent || !isCurrent()) return null;
+    return chooseCompanionDraftInputs(
+      page.context,
+      store: store,
+      hostKey: hostKey,
+      client: client,
+      capability: capability,
+      isCurrent: isCurrent,
+      onRouteChanged: onRouteChanged,
+      originalStoreId: originalStoreId,
+    );
+  }
+
+  @override
+  Future<({List<MemoryRow> inputs, MemoryRow outputDirectory})?> chooseReceipts({
+    required CompanionMemoryStore store,
+    required String hostKey,
+    required DshClient? client,
+    required CompanionTasksCapability? capability,
+    required bool Function() isCurrent,
+    CompanionAgentSelectionRoute? onRouteChanged,
+    String? originalStoreId,
+    List<MemoryRow>? keptInputs,
+    MemoryRow? keptOutput,
+  }) async {
+    if (!this.isCurrent || !isCurrent()) return null;
+    return chooseCompanionReceiptInputs(
+      page.context,
+      store: store,
+      hostKey: hostKey,
+      client: client,
+      capability: capability,
+      isCurrent: isCurrent,
+      onRouteChanged: onRouteChanged,
+      originalStoreId: originalStoreId,
+      keptInputs: keptInputs,
+      keptOutput: keptOutput,
+    );
+  }
+
+  @override
+  Future<CompanionMapSpec?> chooseMap(
+    CompanionMaps maps,
+    String address, {
+    required bool Function() isCurrent,
+    CompanionAgentSelectionRoute? onRouteChanged,
+  }) async {
+    if (!mapIsCurrent || !isCurrent()) return null;
+    return chooseCompanionMapTarget(
+      page.context,
+      maps,
+      address,
+      isCurrent: isCurrent,
+      choosing: (value) => page._mapChoosing = value,
+      onRouteChanged: onRouteChanged,
+    );
+  }
+
+  @override
+  void accepted(MemoryRow task) {
+    if (!isCurrent) return;
+    final id = task['task_id']! as String;
+    page._update(() {
+      switch (task['kind']) {
+        case 'public.lookup':
+          final original = page._memoryOwner!.store.lookupTask(id)!;
+          page._lookupResults = [
+            for (final result in page._lookupResults)
+              if (result.taskId != id) result,
+            (taskId: id, placeName: original['lookup_place_name']! as String),
+          ];
+        case 'phone.map_open':
+          page._mapResults = {...page._mapResults, id}.toList();
+        case 'host.notes_to_todo' || 'host.find_draft' || 'host.compare_drafts' || 'host.receipts_to_sheet':
+          page._notesResults = {...page._notesResults, id}.toList();
+      }
+    });
+  }
+
+  @override
+  void startForeground(List<CompanionNotesForegroundCapture> captures, {required bool Function() isCurrent}) {
+    // A popped selection route must actually leave the frame before this
+    // original Page hands the fresh tasks to their existing detail owner.
+    unawaited(() async {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!this.isCurrent || !isCurrent() || !page._notesForegroundHere) return;
+      final memory = page._memoryOwner;
+      if (memory == null) return;
+      final foregrounds = <CompanionNotesForegroundCapture>[
+        for (final capture in captures)
+          if (memory.store.hostTask(capture.task['task_id']! as String)?['task_rev'] == capture.task['task_rev'] &&
+              memory.store.hostTask(capture.task['task_id']! as String)?['cancel_requested'] == 0 &&
+              identical(capture.client, page.ref.read(activeConnectionProvider).value?.client) &&
+              capture.task['host_key'] == companionHostKey(page.ref.read(activeHostProvider)))
+            capture,
+      ];
+      if (foregrounds.isEmpty || !page.mounted) return;
+      unawaited(
+        Navigator.of(page.context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => CompanionTasksPage(
+              memory: memory,
+              taskId: foregrounds.first.task['task_id']! as String,
+              freshNotes: List<CompanionNotesForegroundCapture>.unmodifiable(foregrounds),
+            ),
+          ),
+        ),
+      );
+    }());
+  }
+}
+
+/// Her room's dark theme, one per palette and blur setting: a new one each build
+/// would tell every widget under it the theme changed whenever the page rebuilds
+/// (a streaming reply rebuilds it about thirty times a second).
+final _darkThemes = <(AppAccent, bool), ThemeData>{};
+
+ThemeData _darkTheme(AppAccent accent, bool blur) {
+  if (_darkThemes.length > 4) _darkThemes.clear();
+  return _darkThemes.putIfAbsent((accent, blur), () => buildDarkTheme(accent: accent, glassBlur: blur));
 }
 
 /// A new name for one of her moves: the dialog owns its field.
