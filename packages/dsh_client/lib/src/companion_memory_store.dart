@@ -342,13 +342,20 @@ class CompanionMemoryStore {
   final String Function() _createId;
 
   _PendingRawErase? _pendingRawErase;
+  PreparedStatement? _controlRevisionQuery;
 
   void close() {
     invalidateRawErase();
+    _controlRevisionQuery?.close();
     _db.close();
   }
 
   MemoryRow get archive => Map<String, Object?>.from(_db.select('SELECT * FROM memory_archive').single);
+
+  bool hasControlRevision(int revision) {
+    final query = _controlRevisionQuery ??= _db.prepare('SELECT control_revision FROM memory_archive');
+    return query.select().rows.single.single == revision;
+  }
 
   String get lightSessionId => archive['light_session_id'] as String;
 
@@ -1059,6 +1066,7 @@ class CompanionMemoryStore {
     final sequence = _sequence();
     _removeFactRelations(
       {id},
+      retainTopics: {for (final topic in topicControls()) topic['topic_id'] as String},
       domainSnapshot: _memoryDomainCards(rows.single['character_id'] as String?)
           .where((card) => card['character_id'] == rows.single['character_id'])
           .toList(),

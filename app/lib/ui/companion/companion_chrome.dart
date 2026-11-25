@@ -268,7 +268,11 @@ class CompanionSpeech extends StatelessWidget {
           grouped: true,
           borderRadius: BorderRadius.circular(20),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-          child: TypingIndicator(color: theme.colorScheme.onSurfaceVariant),
+          child: Builder(
+            builder: (context) => Visibility.of(context)
+                ? TypingIndicator(color: theme.colorScheme.onSurfaceVariant)
+                : const SizedBox.square(dimension: 20),
+          ),
         ),
       );
     } else if (words != null) {
@@ -700,7 +704,11 @@ class CompanionComposer extends StatelessWidget {
     required this.onStop,
     required this.onVoice,
     this.onUserInput,
+    this.onCall,
   });
+
+  /// 语音通话 with her; null hides the key.
+  final VoidCallback? onCall;
 
   /// The person tapped into the field or typed: not text set by the page.
   final VoidCallback? onUserInput;
@@ -799,6 +807,10 @@ class CompanionComposer extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
+            if (onCall != null && !hasText && !running) ...[
+              _ComposerKey(icon: AppIcons.call, label: l10n.speechCallTile, filled: false, onTap: onCall),
+              const SizedBox(width: 4),
+            ],
             AnimatedSwitcher(
               duration: AppMotion.of(context, AppMotion.quick),
               switchInCurve: AppMotion.enter,
@@ -915,6 +927,8 @@ class CompanionWelcome extends StatelessWidget {
     this.error,
     this.secondary,
     this.onSecondary,
+    this.tertiary,
+    this.onTertiary,
   });
 
   final String title;
@@ -926,6 +940,10 @@ class CompanionWelcome extends StatelessWidget {
   /// A quieter second way, under the button.
   final String? secondary;
   final VoidCallback? onSecondary;
+
+  /// One more way in under the others (创意工坊).
+  final String? tertiary;
+  final VoidCallback? onTertiary;
   final PetStateName state;
   final String? error;
 
@@ -994,6 +1012,15 @@ class CompanionWelcome extends StatelessWidget {
                         onPressed: onSecondary,
                         child: Text(label),
                       ),
+                    ),
+                  if (tertiary case final label? when !busy)
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: theme.colorScheme.onSurfaceVariant,
+                        shape: const StadiumBorder(),
+                      ),
+                      onPressed: onTertiary,
+                      child: Text(label),
                     ),
                   if (error != null) ...[
                     const SizedBox(height: 16),

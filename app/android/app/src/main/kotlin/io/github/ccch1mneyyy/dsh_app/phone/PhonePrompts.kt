@@ -69,11 +69,12 @@ class PhonePrompts(
 
     override fun confirm(request: ConfirmRequest): Decision = confirmFor(tasks, null, request)
 
-    private fun confirmFor(task: PhoneTasks, sessionId: String?, request: ConfirmRequest): Decision {
+    private fun confirmFor(task: PhoneTasks, sessionId: String?, request: ConfirmRequest,
+                           enabled: () -> Boolean = this.enabled): Decision {
         if (Looper.myLooper() == Looper.getMainLooper()) return Decision.UNAVAILABLE
         val taskOwner = request.owner ?: task.activeOwner() ?: return Decision.STOP
         if (!task.isCurrent(taskOwner)) return Decision.STOP
-        val shown = if (sessionId == null) request else request.copy(sentence = "[$sessionId]\n${request.sentence}")
+        val shown = request.copy(sentence = labelled(sessionId, request.sentence))
         val ticket = arbiter.begin(null, task,
             PromptContent(PromptKind.NATIVE_CONFIRM, shown.sentence.take(4096), shown, sessionId = sessionId), request.timeoutMs.coerceIn(1, 30_000),
             { enabled() && !locked() && task.isCurrent(taskOwner) }) ?: return Decision.UNAVAILABLE
@@ -100,11 +101,12 @@ class PhonePrompts(
     override fun handoff(reason: String, timeoutMs: Long, cause: HandoffCause?, owner: PhoneTasks.Owner): HandoffResult =
         handoffFor(tasks, null, reason, timeoutMs, cause, owner)
 
-    private fun handoffFor(task: PhoneTasks, sessionId: String?, reason: String, timeoutMs: Long, cause: HandoffCause?, owner: PhoneTasks.Owner?): HandoffResult {
+    private fun handoffFor(task: PhoneTasks, sessionId: String?, reason: String, timeoutMs: Long, cause: HandoffCause?, owner: PhoneTasks.Owner?,
+                           enabled: () -> Boolean = this.enabled): HandoffResult {
         if (Looper.myLooper() == Looper.getMainLooper()) return HandoffResult.STOP
         val taskOwner = owner ?: return HandoffResult.STOP
         if (!task.isCurrent(taskOwner)) return HandoffResult.STOP
-        val ticket = arbiter.begin(null, task, PromptContent(PromptKind.HANDOFF, (if (sessionId == null) reason else "[$sessionId]\n$reason").take(4096), cause = cause, sessionId = sessionId),
+        val ticket = arbiter.begin(null, task, PromptContent(PromptKind.HANDOFF, labelled(sessionId, reason).take(4096), cause = cause, sessionId = sessionId),
             timeoutMs.coerceIn(1, 600_000), { enabled() && !locked() && task.isCurrent(taskOwner) }) ?: return HandoffResult.STOP
         schedule(ticket)
         val result = ticket.await()
@@ -118,13 +120,17 @@ class PhonePrompts(
         }
     }
 
+    /** A chat's id says which conversation asks; her `companion:` run id is no chat and means nothing to the person. */
+    private fun labelled(sessionId: String?, text: String) =
+        if (sessionId == null || sessionId.startsWith("companion:")) text else "[$sessionId]\n$text"
+
     /** One UI arbiter, but every native ticket retains its own task and conversation. */
-    fun scoped(task: PhoneTasks, sessionId: String?): UserGate = object : UserGate {
-        override fun confirm(request: ConfirmRequest): Decision = confirmFor(task, sessionId, request)
+    fun scoped(task: PhoneTasks, sessionId: String?, enabled: () -> Boolean = this.enabled): UserGate = object : UserGate {
+        override fun confirm(request: ConfirmRequest): Decision = confirmFor(task, sessionId, request, enabled)
         override fun handoff(reason: String, timeoutMs: Long): HandoffResult =
-            handoffFor(task, sessionId, reason, timeoutMs, null, task.activeOwner())
+            handoffFor(task, sessionId, reason, timeoutMs, null, task.activeOwner(), enabled)
         override fun handoff(reason: String, timeoutMs: Long, cause: HandoffCause?, owner: PhoneTasks.Owner): HandoffResult =
-            handoffFor(task, sessionId, reason, timeoutMs, cause, owner)
+            handoffFor(task, sessionId, reason, timeoutMs, cause, owner, enabled)
         override fun status(text: String?) = status(text, displaySelection.currentGuard(task))
         override fun status(text: String?, ifCurrent: (() -> Unit) -> Boolean) =
             publishStatus(text, displaySelection.scoped(task, ifCurrent))

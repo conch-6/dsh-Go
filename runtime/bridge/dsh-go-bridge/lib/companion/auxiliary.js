@@ -28,7 +28,7 @@ function validate(value) {
 }
 
 const plainText = value => typeof value === 'string' &&
-  !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value) && value.isWellFormed();
+  !/[\u0000-\u0008\u000b\u000e-\u001f\u007f]/u.test(value) && value.isWellFormed();
 const agentSupported = capability => capability?.agent?.v === 1 &&
   capability.agent.tools === 'return-only' && capability.agent.streaming === true;
 
@@ -276,7 +276,7 @@ export function createCompanionAuxiliaryRoutes({ ctx, send, readJson, instanceId
       receipts.delete(finished[0]);
     }
     const controller = new AbortController();
-    const record = { requestId: body.requestId, provider: body.provider, model: body.model, controller,
+    const record = { requestId: body.requestId, sessionId: body.sessionId, provider: body.provider, model: body.model, controller,
       dispatched: false, dispatchAtMs: null, startUsage: null, finalUsage: null, stopReason: null,
       httpStatus: null, complete: false, terminal: 'incomplete', finished: false,
       rawUsageAvailable: false, normalizedUsage: [], handoffAtMs: null, runtimeFinishKind: null };
@@ -388,7 +388,8 @@ export function createCompanionAuxiliaryRoutes({ ctx, send, readJson, instanceId
         try { guard(); record.complete = true; }
         catch (stale) { error = stale; }
       }
-      failureCode = errorCode(error);
+      // An adapter may wrap cancellation in its own error. Preserve a model change observed by this Host.
+      failureCode = errorCode(controller.signal.reason instanceof CompanionError ? controller.signal.reason : error);
       record.terminal = controller.signal.aborted ? 'cancelled' : record.dispatched === false ? 'preflight_error'
         : record.httpStatus >= 400 ? 'http_error' : failureCode === 'STREAM_CLOSED' ? 'incomplete'
           : ['TRANSPORT', 'TIMEOUT'].includes(failureCode) ? 'network_error' : 'provider_error';
@@ -403,7 +404,7 @@ export function createCompanionAuxiliaryRoutes({ ctx, send, readJson, instanceId
         ...(failureCode ? { error: { code: failureCode } } : {}) };
       emit(record.finish);
       if (!res.destroyed && !res.writableEnded) res.end();
-      delete record.agent; delete record.controller;
+      record.agent = undefined; record.controller = undefined;
       if (active === record) active = undefined;
     }
   }
@@ -415,7 +416,10 @@ export function createCompanionAuxiliaryRoutes({ ctx, send, readJson, instanceId
   });
   const removeSelection = ctx?.on?.('session/event', (session, event) => {
     if (event.type === 'model/selection') for (const record of receipts.values()) {
-      if (!record.finished && record.agent?.session === session) record.controller.abort();
+      if (!record.finished && (record.agent ? record.agent.session === session :
+          record.sessionId !== undefined && record.sessionId === session.id)) {
+        record.controller.abort(failure(409, 'selection-changed', 'The companion session or selected model changed'));
+      }
     }
   });
 

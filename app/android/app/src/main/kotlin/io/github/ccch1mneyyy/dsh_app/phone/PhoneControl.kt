@@ -63,6 +63,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     private val taskIds = java.util.concurrent.atomic.AtomicLong()
     private val companionRunLock = Any()
     @Volatile private var companionRunEpoch = 0L
+    private val companionSessions = CompanionEngineSessions()
     private val cleanupIo = Executors.newSingleThreadExecutor { r -> Thread(r, "dsh-phone-cleanup").apply { isDaemon = true } }
 
     private val taskJournal = PhoneTaskJournal(
@@ -284,9 +285,17 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     }
 
     private fun createSessionCore(task: PhoneTasks, sessionId: String?): PhoneCore {
-        val gate = prompts.scoped(task, sessionId)
+        // The master switch is the person's choice for the engine's agent. Her runs start
+        // from the person asking her directly, which is its own go-ahead. Only her own
+        // bridge marks that admission; a session name the engine picks proves nothing.
+        val bridged = companionAdmission.get() == true
+        // Her full-mode session asks the same way. It is the exact engine session id the
+        // app registered, read live so forgetting her or leaving this host takes it back.
+        fun companion() = bridged || sessionId in companionSessions
+        val gate = prompts.scoped(task, sessionId) { companion() || isEnabled() }
         val observations = PhoneTaskObservations(task)
         val env = object : PhoneEnv by this@PhoneControl {
+            override fun enabled(): Boolean = companion() || isEnabled()
             override fun gate(): UserGate = gate
             override fun onTaskStarted(owner: PhoneTasks.Owner) {} // Registry owns managed trace start.
             override fun driver(screen: PhoneScreen, owner: PhoneTasks.Owner): PhoneDriver? =
@@ -294,7 +303,8 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
             override fun existingReplayDriver(owner: PhoneTasks.Owner, app: PhoneAppIdentity): PhoneDriver? =
                 background.existingReplayDriver(owner, app) { task.isCurrent(owner) }
                     ?.let { observations.bind(it, owner) }
-            override fun notifyFix(kind: String) = notifyFixFor(task, kind)
+            // She is talking with the person right now: put the system page in front of them.
+            override fun notifyFix(kind: String) = notifyFixFor(task, kind, open = companion() && kind == "a11y")
             override fun beforeHandoff(screen: PhoneScreen, owner: PhoneTasks.Owner): String? {
                 if (screen != PhoneScreen.BACKGROUND) return null
                 background.endTask(owner.taskId)
@@ -539,6 +549,13 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     internal fun companionPhoneEpoch(): Long = companionRunEpoch
 
+    /** Dart: her full-mode sessions on this engine, replaced whole; empty while she is on another host. */
+    fun setCompanionSessions(raw: Any?): Boolean =
+        companionSessions.replace(raw).also { if (it) refreshScreenOff() }
+
+    /** Set only on this thread while [companionPhoneCall] admits: the Task it creates is hers. */
+    private val companionAdmission = ThreadLocal<Boolean>()
+
     /** Local Agent transport; the original managed admission/Core/Gate stay authoritative. */
     internal fun companionPhoneCall(caller: PhoneCaller, name: String, args: Map<String, Any?>,
                                     expectedEpoch: Long, isCurrent: () -> Boolean,
@@ -548,7 +565,8 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
                 McpServer.result(caller.callId, McpServer.toolResult(ToolOutput(
                     "手机操控已重新启动，原授权已结束；请重新发起。", isError = true))) // l10n:keep agent error
             })
-            sessions.admit(caller)
+            companionAdmission.set(true)
+            try { sessions.admit(caller) } finally { companionAdmission.remove() }
         }
         val commit = PhoneReplyCommit()
         return PhoneCallWork(
@@ -656,7 +674,8 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     }
 
     /**
-     * Brings the app forward on [sessionId] (just the app when null) after a finished task. Started
+     * Brings the app forward on [sessionId] (just the app when null) after a finished task; Dart
+     * takes a companion task's `companion:` id to her room or leaves the app as it was, never a chat. Started
      * from the accessibility service when bound. This is a best-effort start under Android's
      * background-start restrictions, not a guarantee. False when start threw; the caller must
      * separately observe its ActivityAware host resumed (some vendors block silently).
@@ -734,7 +753,8 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     /** Receiver ownership stays on main; a pending selfcheck outlives an engine bridge. */
     private fun refreshScreenOff() {
         if (Looper.myLooper() != main.looper) { main.post { refreshScreenOff() }; return }
-        if ((bridge.listening && isEnabled()) || selfCheck.needsReceiver) registerScreenOffNow()
+        // Her runs stop with the screen too, switch or not.
+        if ((bridge.listening && (isEnabled() || !companionSessions.isEmpty())) || selfCheck.needsReceiver) registerScreenOffNow()
         else {
             screenReceiver?.let { runCatching { app.unregisterReceiver(it) } }
             screenReceiver = null
@@ -1125,8 +1145,9 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     override fun notifyFix(kind: String) = notifyFixFor(tasks, kind)
 
-    private fun notifyFixFor(task: PhoneTasks, kind: String) {
+    private fun notifyFixFor(task: PhoneTasks, kind: String, open: Boolean = false) {
         if (!task.firstNotice(kind)) return
+        if (open) runCatching { app.startActivity(accessibilitySettingsIntent()) }
         if (!nm.areNotificationsEnabled()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL_FIX, AppStrings.get(app, R.string.phone_fix_channel), NotificationManager.IMPORTANCE_HIGH))

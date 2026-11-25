@@ -6,8 +6,20 @@ const _agentRetryClosed = DshRemoteException(
   {'status': 409},
 );
 
+// Phone steps never become tasks, so 交代的事 has nothing to show for them:
+// the phone itself is where to look, and asking again simply starts over.
+const _phoneRunStopped = DshRemoteException(
+  'companion/phone-run-stopped',
+  'The phone work stopped partway; check the phone before asking again.',
+  {'status': 409},
+);
+
 /// Window facts and immediate presentation effects. No BuildContext or
 /// WidgetRef crosses this port; the Page still owns its actual routes.
+abstract interface class CompanionFallbackUi {
+  void continuedOnPhone(String sourceId);
+}
+
 abstract interface class CompanionAgentRoomUi {
   bool get mounted;
   bool get stageReady;
@@ -36,23 +48,25 @@ class CompanionAgentAttachment {
   final _CompanionAgentWindow _window;
 
   bool get isAttached => _window.current(_visit);
-  bool get preparing => _visit.preparing;
+  bool get preparing => _visit.preparing || _visit.clearing;
   bool get running => _visit.run?.running ?? false;
   // Retained API: local task speech has no model preparation.
   String? get preparingSignalId => null;
   String get text => _visit.run?.text ?? '';
+  bool get waitingForOwner => running && _visit.run!.waitingForOwner;
   String? get pendingText {
     final request = _visit.run?.request;
     return request != null && !request.saved && request.text.isNotEmpty ? request.text : null;
   }
 
   String? get replyId => _visit.run?.replyId;
+  int get phoneSteps => _visit.run?.phoneSteps ?? 0;
   Object? get error {
     final run = _visit.run;
     // Only a turn that already ran a tool is closed: retrying it could repeat
     // the tool's effect. A dropped stream with words only is an ordinary failure.
     if (run != null && run.error != null && run.toolDispatchStarted) {
-      return _agentRetryClosed;
+      return run.onlyPhoneSteps ? _phoneRunStopped : _agentRetryClosed;
     }
     return run?.error;
   }
@@ -88,11 +102,11 @@ class CompanionAgentAttachment {
 
   Future<CompanionMemoryOwner> openMemory() =>
       isAttached ? _visit.openMemory() : Future.error(const DshClosedException('Companion window closed'));
-  Future<void> submit(String raw, {String? assistantPage, bool returnToApp = false}) async {
+  Future<void> submit(String raw, {String? assistantPage, bool returnToApp = false, bool voiceCall = false}) async {
     if (isAttached) {
       await _visit.submit(
         raw,
-        inputWindow: 'room',
+        inputWindow: voiceCall ? 'voice' : 'room',
         origin: _window.ui,
         handoff: _window.mapHandoff,
         originCurrent: () => isAttached,
@@ -169,6 +183,7 @@ class CompanionAgentResident {
   CompanionAgentResident._(this._visit, this._ui);
   final _CompanionAgentVisit _visit;
   final CompanionAgentRoomUi _ui;
+  CompanionMoves get moves => _visit.moves;
   bool get active => _visit.active && identical(_visit.residentUi, _ui);
   CompanionMemoryOwner? get memory => active ? _visit.memory : null;
   String? get characterId => active ? _visit.characterId : null;
@@ -191,6 +206,9 @@ class CompanionAgentResident {
   }
 
   bool get ownsCurrentRun => active && identical(_visit.runOrigin, _ui) && identical(_visit.run, _visit.agent._run);
+
+  /// Her room is open (even behind another app): it reads her words aloud then.
+  bool get roomOpen => _visit.window != null;
 
   Future<bool> deliverReply(String replyId, String text, Future<bool> Function(int? noticeEpoch) deliver) {
     final run = _visit.run;
@@ -313,6 +331,11 @@ class _CompanionAgentVisit {
   late bool boundLight;
   bool closed = false;
   bool preparing = false;
+
+  /// 清空对话 in progress: nothing new is taken until it is done, or its run
+  /// would be dropped along with the old conversation's.
+  Future<void>? clearingNow;
+  bool get clearing => clearingNow != null;
   bool entered = false;
   CompanionInitiativeRoom? enteredRoom;
   int epoch = 0;
@@ -321,14 +344,19 @@ class _CompanionAgentVisit {
   CompanionMemoryOwner? memory;
   Future<CompanionMemoryOwner>? opening;
   MemoryRow? retrySource;
+  // An uncertain Host request may be repeated only on that same session under
+  // the same request id. A phone fallback stays on its original phone route.
+  ({String sourceId, HostRef host, String sessionId, String requestId,
+    (String?, String?, String?)? model})? hostAttempt;
+  ({String sourceId, String? page})? phoneAttempt;
   CompanionAgentMemoryTools? retryTools;
+  _CompanionFullSession? fullSession;
   CompanionAgentPhoneTools? activePhoneTools;
   CompanionResidentSignals? residentSignals;
   _VisitNotices? notices;
   _CompanionAgentRun? run;
   Timer? quietTimer;
   Timer? idleTimer;
-  Timer? usageTimer;
   bool _reducedPower = false;
   CompanionKeeper? phone;
   CompanionKeeper? keeper;
@@ -380,7 +408,6 @@ class _CompanionAgentVisit {
 
   void _schedulePeriodicWork() {
     idleTimer?.cancel();
-    usageTimer?.cancel();
     final factor = _reducedPower ? 2 : 1;
     idleTimer = Timer.periodic(Duration(minutes: factor), (_) {
       if (active) {
@@ -389,7 +416,6 @@ class _CompanionAgentVisit {
         unawaited(consolidate());
       }
     });
-    usageTimer = Timer.periodic(Duration(seconds: 15 * factor), (_) => refreshHostUsage());
   }
 
   CompanionAgentAttachment attachWindow(CompanionAgentRoomUi next, CompanionMapHandoff handoff) {
@@ -470,10 +496,14 @@ class _CompanionAgentVisit {
     stop(discard: true);
     memory?.cancelWork();
     epoch++;
+    fullSession?.close();
+    fullSession = null;
+    ref.read(companionSessionsProvider.notifier).retirePending();
     characterSourceKey = sourceKey;
     bindCharacter();
     notices?.invalidate();
     retrySource = null;
+    phoneAttempt = null;
     run = null;
     events = const [];
     lastSpokenAt = null;
@@ -651,7 +681,7 @@ class _CompanionAgentVisit {
     bool returnToApp = false,
     void Function(MemoryRow)? onCommitted,
   }) async {
-    if (!active || !originCurrent() || raw.trim().isEmpty || (preparing && !replacePreparing)) return;
+    if (!active || clearing || !originCurrent() || raw.trim().isEmpty || (preparing && !replacePreparing)) return;
     final noticeReply = notices?.replyContext(raw, retrySource: retrySource?['id'] as String?);
     notices?.invalidate(keepReply: true);
     lastUserInteractionAt = DateTime.now();
@@ -665,7 +695,8 @@ class _CompanionAgentVisit {
       inheritedRetry = retryTools;
       retryTools = null;
     }
-    stop();
+    final useSession = !light && noticeReply == null;
+    stop(cancelSession: !useSession);
     run = null;
     final number = ++submission;
     final visitCurrent = captureCurrent();
@@ -711,6 +742,8 @@ class _CompanionAgentVisit {
         return;
       }
       if (!reuse) {
+        hostAttempt = null;
+        phoneAttempt = null;
         inheritedRetry?.close();
         inheritedRetry = null;
       }
@@ -788,6 +821,7 @@ class _CompanionAgentVisit {
           callMe: persona.callMe,
           tools: true,
           moves: moves.rules(),
+          whale: companionIsWhale(characterSourceKey, character.name),
         ),
       );
       memoryTools = CompanionAgentMemoryTools(
@@ -798,6 +832,7 @@ class _CompanionAgentVisit {
         forgottenNotice: origin.forgottenNotice,
         semanticRecall: (query) => owner.recallIds(
           query,
+          explicitUserInput: source['text']! as String,
           characterId: source['character_id'] as String?,
           isCurrent: () => current() && memoryTools?.isCurrent == true,
         ),
@@ -818,12 +853,13 @@ class _CompanionAgentVisit {
           key: companionHostKey(hostRef),
           client: client,
           isCurrent: hostCurrent,
-          sessionId: client == null ? null : ref.read(companionSessionsProvider.notifier).of(hostRef)?.sessionId,
+          sessionId: client == null ? null : ref.read(companionSessionsProvider.notifier).ofCharacter(hostRef, characterSourceKey)?.sessionId,
           ensureSession: () async {
             if (client == null || !hostCurrent()) throw const DshClosedException('Companion Host changed');
             final binding = await ref
                 .read(companionSessionsProvider.notifier)
-                .ensure(
+                .ensureForCharacter(
+                  characterSourceKey,
                   memoryArchiveId: owner.store.archive['id']! as String,
                   memoryControlRevision: owner.store.archive['control_revision']! as int,
                 );
@@ -850,6 +886,7 @@ class _CompanionAgentVisit {
         source: source,
         turnId: memoryTools.turnId,
         returnToApp: returnToApp,
+        window: inputWindow == 'voice' ? 'room' : inputWindow,
         isCurrent: () => current() && memoryTools?.isCurrent == true,
         onStep: (text) {
           if (residentUi case final CompanionAgentAmbientUi target when current() && target.presentationAvailable) {
@@ -858,6 +895,10 @@ class _CompanionAgentVisit {
         },
       );
       activePhoneTools = phoneTools;
+      final photoTools = CompanionAgentPhotoTools(
+        describe: (image, question) =>
+            agent.describePhoto(owner: owner, image: image, question: question, isCurrent: current),
+      );
       if (noticeReply?.draftOnly != true) await phoneTools.prepare();
       if (!current()) return;
       if (noticeReply != null) {
@@ -867,14 +908,36 @@ class _CompanionAgentVisit {
         }
       }
       preparing = false;
+      // Notification replies carry a displayed draft and native confirmation.
+      final notificationWindow = residentUi;
       final work = agent.say(
+        useSession: useSession,
         memory: owner,
         source: source,
         system: system,
         context: turnContext,
-        assistantPage: assistantPage,
+        assistantPage: phoneAttempt?.sourceId == source['id'] ? phoneAttempt?.page : assistantPage,
         tools: noticeReply == null
-            ? [...memoryTools.bindings, ...taskTools.bindings, ...phoneTools.bindings]
+            ? [
+                ...memoryTools.bindings,
+                if (useSession && ref.read(androidSystemFeaturesProvider))
+                  companionRecentNoticesTool(
+                    notices: ref.read(companionNoticesProvider),
+                    readSummaries: owner.store.noticeMemories,
+                    isCurrent: current,
+                  ),
+                // The room UI type doesn't declare the notification surface; match it as a pattern.
+                if (useSession && notificationWindow != null && notificationWindow.mounted)
+                  if (notificationWindow case final CompanionAgentNotificationUi window)
+                    companionNotifyTool(
+                      deliver: (id, text) => identical(residentUi, notificationWindow) && notificationWindow.mounted
+                          ? window.deliverFollowup(id: id, text: text)
+                          : Future.value(false),
+                    ),
+                ...taskTools.bindings,
+                ...phoneTools.bindings,
+                if (ref.read(androidSystemFeaturesProvider)) ...photoTools.bindings,
+              ]
             : noticeReply.draftOnly
             ? const []
             : phoneTools.bindings,
@@ -887,7 +950,7 @@ class _CompanionAgentVisit {
       changed();
       await work;
       if (!current() || !identical(run, submittedRun)) return;
-      if (submittedRun!.text.trim().isNotEmpty) {
+      if ((!useSession || submittedRun!.phoneRoute) && submittedRun!.text.trim().isNotEmpty) {
         events = companionConsumeEvents(events, turnContext.eventIds);
         if (turnContext.hasClock) lastClockAt = turnContext.sampledAt;
       }
@@ -895,7 +958,13 @@ class _CompanionAgentVisit {
         // say has returned after its physical request's first cancel drain.
         // No tool callback has entered, so the original clock and budget can
         // survive until a later explicit click in this same live visit.
-        if (submittedRun.toolDispatchStarted) {
+        if (submittedRun.onlyPhoneSteps) {
+          // The person's new message is the go-ahead, the same words included.
+          // A turn that also saved a reminder or memory keeps the closed path
+          // below: a fresh source would commit that a second time.
+          retrySource = null;
+          failed(_phoneRunStopped);
+        } else if (submittedRun.toolDispatchStarted) {
           failed(_agentRetryClosed);
         } else if (memoryTools.isCurrent) {
           // No tool ran, with or without words: retrying reuses the same line.
@@ -906,8 +975,9 @@ class _CompanionAgentVisit {
           retrySource = null;
           failed(error, retry: raw);
         }
-      } else if (submittedRun.text.trim().isNotEmpty || !submittedRun.toolDispatchStarted) {
+      } else if (useSession || submittedRun.text.trim().isNotEmpty || !submittedRun.toolDispatchStarted) {
         retrySource = null;
+        phoneAttempt = null;
       }
       queueExtraction();
     } on Object catch (error) {
@@ -941,7 +1011,7 @@ class _CompanionAgentVisit {
     }
   }
 
-  void stop({bool discard = false}) {
+  void stop({bool discard = false, bool cancelSession = true}) {
     activePhoneTools?.stop();
     agent.cancelScreenObservation();
     final pendingRetry = retryTools;
@@ -951,18 +1021,61 @@ class _CompanionAgentVisit {
     preparing = false;
     runMapHandoff?.close();
     runMapHandoff = null;
-    if (run != null && identical(run, agent._run)) agent.stop(discard: discard);
+    if (run != null && identical(run, agent._run)) agent.stop(discard: discard, cancelSession: cancelSession);
     changed();
   }
 
+  /// A second 清空 while one is running waits for that one, so the guard is
+  /// let go only when the conversation is really clear.
   Future<void> restart() async {
     if (!active) return;
+    await (clearingNow ??= () async {
+      try {
+        await _clear();
+      } finally {
+        clearingNow = null;
+        changed();
+      }
+    }());
+  }
+
+  Future<void> _clear() async {
     stop(discard: true);
     final current = captureCurrent();
     final owner = await openMemory();
     if (!current()) return;
-    owner.store.startLightConversation();
+    fullSession?.close();
+    fullSession = null;
+    final key = characterSourceKey;
+    final sessions = ref.read(companionSessionsProvider.notifier);
+    final host = ref.read(activeHostProvider);
+    bool still() => current() && key == characterSourceKey && ref.read(activeHostProvider) == host;
+    final old = sessions.ofCharacter(host, key)?.sessionId;
+    // Full mode binds her clean session at once, so the room and its main
+    // session entry already point at it; the old one stays on the host, archived.
+    var fresh = false;
+    if (!light && old != null) {
+      try {
+        await sessions.startNewForCharacter(
+          key,
+          memoryArchiveId: owner.store.archive['id']! as String,
+          memoryControlRevision: owner.store.archive['control_revision']! as int,
+        );
+        fresh = true;
+      } on DshException {
+        // A new session may already be bound; only an untouched old binding is let go.
+        fresh = sessions.ofCharacter(host, key)?.sessionId != old;
+      }
+      if (!still()) return;
+    }
+    final clearsLight = light || old == null;
+    if (!fresh) await sessions.forgetCharacter(key);
+    if (!still()) return;
+    // The phone's conversation pointer is shared by every role: clearing her
+    // DSH session leaves the light history (hers and the others') as it was.
+    if (clearsLight) owner.store.startLightConversation();
     retrySource = null;
+    phoneAttempt = null;
     lastSpokenAt = null;
     lastClockAt = null;
     run = null;
@@ -979,6 +1092,17 @@ class _CompanionAgentVisit {
       ...events,
       CompanionContextEvent(id: 'e-${now.microsecondsSinceEpoch}-${++eventSerial}', kind: kind, at: now, detail: note),
     ], now: now);
+  }
+
+  /// What she just said about the screen, for the next real turn in either
+  /// mode. Only her newest three lines: they never crowd out the person's own.
+  void rememberScreenLine(String line, {String? app, String? scene}) {
+    final earlier = [for (final event in events) if (event.kind == 'screen') event];
+    if (earlier.length > 2) {
+      final dropped = earlier.sublist(0, earlier.length - 2).toSet();
+      events = [for (final event in events) if (!dropped.contains(event)) event];
+    }
+    remember('screen', companionScreenNote(companionWithoutMarks(line), app: app, scene: scene));
   }
 
   Future<CompanionSnapshot?> refreshKeeper() async {
@@ -1126,7 +1250,7 @@ class _CompanionAgentVisit {
             ref.read(companionSessionFilterProvider)(ref.read(activeHostProvider), session),
         offer: offerResidentSignal,
       );
-      residentSignals!.refresh();
+      residentSignals!.observeRecipient();
     }
   }
 
@@ -1315,6 +1439,7 @@ class _CompanionAgentVisit {
                 custom: persona.custom,
                 name: ref.read(companionNameProvider) ?? character.name,
                 callMe: persona.callMe,
+                whale: companionIsWhale(characterSourceKey, character.name),
               ) +
               owner.relationshipContext(role, forInitiative: true),
           offsetMinutes: clock().offsetMinutes,
@@ -1457,14 +1582,12 @@ class _CompanionAgentVisit {
     }
   }
 
-  void connectionChanged({bool generationChanged = false}) {
+  void connectionChanged() {
     if (!active) return;
     final host = ref.read(activeHostProvider);
     final client = ref.read(activeConnectionProvider).value?.client;
     final nextLight = light;
-    final differs =
-        nextLight != boundLight ||
-        (!nextLight && (generationChanged || host != boundHost || !identical(client, boundClient)));
+    final differs = nextLight != boundLight || (!nextLight && (host != boundHost || !identical(client, boundClient)));
     boundHost = host;
     boundClient = client;
     boundLight = nextLight;
@@ -1478,6 +1601,8 @@ class _CompanionAgentVisit {
     keeper = null;
     snapshot = null;
     vitalsQueue = Future.value();
+    fullSession?.close();
+    fullSession = null;
     ui.connectionChanged();
     unawaited(migrateHostMemory());
     // She arrives at the new keeper as on opening: its state, her greeting,
@@ -1514,6 +1639,8 @@ class _CompanionAgentVisit {
     }
   }
 
+  /// Nothing records new deliveries any more; this only drains rows an older
+  /// build left behind, once per opening or connection change (no timer).
   void refreshHostUsage() {
     final owner = memory;
     final client = ref.read(activeConnectionProvider).value?.client;
@@ -1621,8 +1748,9 @@ class _CompanionAgentVisit {
     notices = null;
     closed = true;
     stop(discard: true);
+    fullSession?.close();
+    fullSession = null;
     idleTimer?.cancel();
-    usageTimer?.cancel();
     quietTimer?.cancel();
     residentSignals?.close();
     residentSignals = null;

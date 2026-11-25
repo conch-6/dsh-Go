@@ -120,24 +120,26 @@ void main() {
     await directory.delete(recursive: true);
   });
 
-  test('phone tools require native approval for the actual user source before dispatch', () async {
+  test('phone tools open a native run for the actual user source before dispatch', () async {
     final calls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_channel, (call) async {
       calls.add(call);
       return switch (call.method) {
         'companionPhoneTools' => _catalog,
-        'companionPhoneBegin' => {'decision': 'rejected'},
+        'companionPhoneBegin' => {'decision': 'unavailable', 'reason': 'busy'},
         'companionPhoneEnd' => null,
-        _ => throw StateError('Native action must not execute after rejection'),
+        _ => throw StateError('Native action must not execute without a run'),
       };
     });
     await phone.prepare();
     expect(phone.bindings.single.definition.name, 'phone_open');
+    expect(phone.bindings.single.definition.description, contains('直接用'));
     final result = await phone.execute(
-      const CompanionAgentToolCall(id: 'rejected-open', name: 'phone_open', input: {'app': 'calendar'}),
+      const CompanionAgentToolCall(id: 'busy-open', name: 'phone_open', input: {'app': 'calendar'}),
     );
     expect(result.isError, isTrue);
-    expect((jsonDecode(result.content) as Map)['code'], 'phone_not_authorized');
+    // A run that could not start is never reported as a missing permission.
+    expect((jsonDecode(result.content) as Map)['code'], 'phone_busy');
     final begin = calls.singleWhere((call) => call.method == 'companionPhoneBegin').arguments as Map;
     expect(begin['sourceId'], source['id']);
     expect(begin['sourceRev'], source['source_rev']);
@@ -167,7 +169,7 @@ void main() {
           return {'decision': 'allowed-once'};
         case 'companionPhoneCall':
           final args = call.arguments as Map;
-          order.add(args['callId'] as String);
+          order.add((args['arguments'] as Map)['background'] == true ? 'background' : 'main');
           return '{"result":{"content":[]}}';
         case 'companionPhoneEnd':
           return null;
@@ -192,7 +194,7 @@ void main() {
       final result = await phone.execute(CompanionAgentToolCall(id: id, name: 'phone_screen', input: input));
       expect(result.isError, isFalse);
     }
-    expect(order, ['approved', 'background', 'yieldCompanionAssistant', 'first', 'second']);
+    expect(order, ['approved', 'background', 'yieldCompanionAssistant', 'main', 'main']);
   });
 
   test('stop during native approval fences the late approval and close awaits one original drain', () async {
@@ -243,6 +245,8 @@ void main() {
     await ending.future;
     expect(completed, isFalse);
     expect(endIdentity!['sessionId'], startIdentity!['sessionId']);
+    // The way back reads where it was asked for from the same id.
+    expect(companionPhoneWindow(startIdentity!['sessionId'] as String), 'room');
     expect(endIdentity!['runId'], startIdentity!['runId']);
     expect(endIdentity!['stopped'], isTrue);
     approval.complete({'decision': 'allowed-once'});
@@ -255,7 +259,7 @@ void main() {
     expect(steps, isEmpty);
   });
 
-  test('phone tools preserve native text without claiming image sight and never replay a call id', () async {
+  test('phone tools preserve native text without claiming image sight; a reused model id is a new step', () async {
     final dispatched = <Map>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_channel, (call) async {
       switch (call.method) {
@@ -295,13 +299,15 @@ void main() {
     expect(steps, ['已打开日历。']);
     expect(dispatched.single['name'], 'open');
     expect(dispatched.single['arguments'], call.input);
+    // Some models reuse ids across rounds; the loop never runs one call twice.
     final repeat = await phone.execute(
       const CompanionAgentToolCall(id: 'one-open', name: 'phone_open', input: {'app': 'another-app'}),
     );
-    expect(repeat.isError, isTrue);
-    expect((jsonDecode(repeat.content) as Map)['code'], 'duplicate_phone_call');
-    expect(dispatched, hasLength(1));
-    expect(steps, hasLength(1));
+    expect(repeat.isError, isFalse);
+    expect(dispatched, hasLength(2));
+    expect(dispatched.last['arguments'], {'app': 'another-app'});
+    expect(dispatched.last['callId'], isNot(dispatched.first['callId']));
+    expect(steps, hasLength(2));
 
     // An action reply can contain external screen text too. Exercise the real
     // Agent's same-batch execution gate and next-user reset, not a second loop.
@@ -390,7 +396,7 @@ void main() {
       expect(results.last['is_error'], isTrue);
       expect((jsonDecode(results.last['content']! as String) as Map)['code'], 'memory_change_after_web');
       expect((jsonDecode(results.first['content']! as String) as Map)['nativeResult'], '已打开日历。\n这是实际返回的第二行。');
-      expect(dispatched, hasLength(2));
+      expect(dispatched, hasLength(3));
     } finally {
       await phone.close();
       firstTools.close();

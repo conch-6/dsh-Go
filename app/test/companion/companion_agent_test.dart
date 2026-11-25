@@ -210,22 +210,24 @@ void main() {
         void emit(Map<String, Object?> frame) =>
             response.write('${jsonEncode({...frame, 'requestId': body['requestId']})}\n');
         emit({'type': 'accepted', 'instanceId': 'host-generation', 'provider': provider, 'model': model});
-        if (const {'not-sent', 'sent', 'stale'}.contains(p0Mode)) {
+        if (const {'not-sent', 'sent', 'stale', 'selection-changed'}.contains(p0Mode)) {
           if (p0Mode == 'stale') {
             await response.flush();
             staleAccepted.complete();
             await releaseStale.future;
           }
           final dispatched = p0Mode == 'sent';
+          final selectionChanged = p0Mode == 'selection-changed';
+          final failureTerminal = selectionChanged ? 'cancelled' : 'provider_error';
           emit({
             'type': 'finish',
             'dispatched': dispatched,
             'dispatchAtMs': dispatched ? 1795309200000 : null,
-            'terminal': 'provider_error',
+            'terminal': failureTerminal,
             'complete': false,
             'stopReason': null,
             'httpStatus': null,
-            'error': {'code': 'MISSING_CREDENTIAL'},
+            'error': {'code': selectionChanged ? 'companion/auxiliary-selection-changed' : 'MISSING_CREDENTIAL'},
             'usage': {
               'provider': provider,
               'model': model,
@@ -239,7 +241,7 @@ void main() {
               'input_cache_write': null,
               'output_tokens': null,
               'stop_reason': null,
-              'terminal': 'provider_error',
+              'terminal': failureTerminal,
               'complete': false,
               'http_status': null,
             },
@@ -389,7 +391,11 @@ void main() {
         ),
       ],
     ).whenComplete(() => settled = true);
-    await Future.wait([held.future, heard.future]);
+    await Future.wait([held.future, heard.future]).timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => throw TimeoutException('Host stream handshake timed out: '
+          'flushed=${held.isCompleted}, firstText=${heard.isCompleted}, error=${hostAgent.error}'),
+    );
     expect(hostAgent.text, '我先看看。');
     expect(hostAgent.running, isTrue);
     expect(settled, isFalse);
@@ -692,11 +698,12 @@ void main() {
     expect(selections.every((selection) => selection.ids.contains(memoryId)), isTrue);
     expect(postBytes.skip(6).every((size) => size <= companionAgentRequestMaxBytes), isTrue);
     for (final post in bounded) {
-      expect(companionAgentRequestBytes(
-        capability, requestId: post['requestId']! as String, system: post['system']! as String,
+      expect(CompanionAgentInput(
+        system: post['system']! as String,
         messages: (post['messages']! as List).cast<Map<String, Object?>>(),
-        tools: (post['tools']! as List).cast<Map<String, Object?>>(), maxTokens: post['maxTokens']! as int,
-      ), postBytes[posts.indexOf(post)]);
+        tools: (post['tools']! as List).cast<Map<String, Object?>>(),
+      ).requestBytes(capability, requestId: post['requestId']! as String, maxTokens: post['maxTokens']! as int),
+          postBytes[posts.indexOf(post)]);
       expect(post['system'], contains('protected-system-context'));
       final submitted = jsonEncode(post['messages']);
       expect(submitted, isNot(contains('oldest-only')));
@@ -846,6 +853,29 @@ void main() {
     expect(phoneRequests, hasLength(4));
     expect(p0Agent.error, isNull);
     expect(p0Memory.store.requests().singleWhere((row) => row['id'] == posts.last['requestId'])['terminal'], 'not_sent');
+
+    // The Host can learn of the change before this phone sees any local event.
+    p0Mode = 'selection-changed';
+    attemptStartIds = p0Memory.store.requests().map((row) => row['id']! as String).toSet();
+    final beforeChangePosts = posts.length;
+    await p0Agent.say(
+      memory: p0Memory,
+      source: p0Memory.store.submitMessage(
+        id: 'p0-model-switched', sessionId: 'full-session', text: '这轮属于刚切走的模型。',
+        saidAtUtc: 1795309200000, offsetMinutes: 480,
+      ),
+      system: 'protected-system-context', tools: const [], isCurrent: () => true,
+    );
+    expect(routeCurrent, isTrue);
+    expect(posts.length, beforeChangePosts + 1);
+    expect(phoneRequests, hasLength(4));
+    expect(p0Agent.error, isA<CompanionHostError>().having(
+      (error) => error.hostFailure, 'reason', CompanionHostFailure.selectionChanged,
+    ));
+    final retired = p0Memory.store.requests().singleWhere((row) => !attemptStartIds.contains(row['id']));
+    expect(retired['id'], posts.last['requestId']);
+    expect(retired['terminal'], 'not_sent');
+    expect((retired['raw_usage'] as Map)['terminal'], 'cancelled');
 
     // A late proof still settles its original receipt, but cannot resurrect
     // a retired Host selection by replacing its current fence with phone=true.
@@ -1038,16 +1068,18 @@ void main() {
         expect(agent.text, '她的临时通知回答。');
         expect(userTaskCalls, 1);
         expect(memory.store.messages().map((r) => r['role']), ['user']);
-        expect(memory.store.cards().map((r) => r['text']), [summary]);
+        // A new memory asked for beside a notice is kept; the notice card is not rewritten.
+        expect(memory.store.cards().map((r) => r['text']), unorderedEquals([summary, '越界推断']));
         final firstNames = (requests.first['tools'] as List).map((t) => t['name']);
-        expect(firstNames.contains('remember'), route != 'selection');
+        expect(firstNames, contains('remember'));
         final results = (requests[1]['messages'] as List).last['content'] as List;
-        for (final id in ['new-card', 'overwrite']) {
-          final result = results.singleWhere((r) => r['tool_use_id'] == id);
-          expect(jsonDecode(result['content'])['code'], 'memory_change_after_notice');
-        }
+        expect(jsonDecode(results.singleWhere((r) => r['tool_use_id'] == 'new-card')['content'])['applied'], isTrue);
+        final overwrite = results.singleWhere((r) => r['tool_use_id'] == 'overwrite');
+        expect(jsonDecode(overwrite['content'])['code'], 'memory_change_after_notice');
         final offered = (requests[1]['tools'] as List).map((t) => t['name']);
-        expect(offered, unorderedEquals(['recall', 'related', 'forget', 'task_status']));
+        expect(offered, unorderedEquals(['recall', 'related', 'forget', 'remember', 'task_status']));
+        final remember = (requests[1]['tools'] as List).singleWhere((t) => t['name'] == 'remember');
+        expect((remember['input_schema'] as Map)['properties'] as Map, isNot(contains('card')));
         final next = memory.store.submitMessage(
           id: 'ordinary-next',
           sessionId: memory.store.lightSessionId,

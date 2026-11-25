@@ -13,6 +13,7 @@ import 'tool_view.dart' show ToolCardPlacement;
 class ChatRowsCache {
   ChatState? _state;
   bool _foldTurns = false;
+  bool _compactTools = false;
   List<TurnArtifacts> _artifacts = const [];
   List<ChatRow> _rows = const [];
   Map<String, int> _index = const {};
@@ -21,15 +22,23 @@ class ChatRowsCache {
 
   /// The last [update] changed nothing but the streaming draft's row: every
   /// other row object is the one it was, and so is everything they show.
-  bool get onlyDraftChanged => _onlyDraftChanged;
-  bool _onlyDraftChanged = false;
+  bool get onlyDraftChanged => _unchangedPrefix != null;
 
-  List<ChatRow> update(ChatState state, {required bool foldTurns, List<TurnArtifacts> artifacts = const []}) {
+  /// On a draft-only update, the rows before this index keep their identities.
+  int? get unchangedPrefix => _unchangedPrefix;
+  int? _unchangedPrefix;
+
+  List<ChatRow> update(
+    ChatState state, {
+    required bool foldTurns,
+    List<TurnArtifacts> artifacts = const [],
+    bool compactTools = false,
+  }) {
     final previous = _state;
-    _onlyDraftChanged = false;
     List<ChatRow>? reused;
     if (previous != null &&
         foldTurns == _foldTurns &&
+        compactTools == _compactTools &&
         listEquals(artifacts, _artifacts) &&
         state.running == previous.running &&
         listEquals(state.approvals, previous.approvals) &&
@@ -42,10 +51,12 @@ class ChatRowsCache {
     }
     _state = state;
     _foldTurns = foldTurns;
+    _compactTools = compactTools;
     _artifacts = artifacts;
     if (reused != null) {
       _rows = reused;
     } else {
+      _unchangedPrefix = null;
       _rows = deriveRows(
         items: state.items,
         approvals: state.approvals,
@@ -57,6 +68,7 @@ class ChatRowsCache {
         turns: state.turns,
         foldTurns: foldTurns,
         artifacts: artifacts,
+        compactTools: compactTools,
       );
       _index = {for (var i = 0; i < _rows.length; i++) _rows[i].key: i};
     }
@@ -67,7 +79,7 @@ class ChatRowsCache {
     if (identical(previous, items)) {
       // A cached live projection is the same unchanged draft the value check
       // below used to find. Keep its historical widgets across status updates.
-      _onlyDraftChanged = running && items.isNotEmpty && _isDraft(items.last);
+      _unchangedPrefix = running && items.isNotEmpty && _isDraft(items.last) ? _rows.length : null;
       return _rows;
     }
     if (previous.length != items.length) return null;
@@ -78,9 +90,13 @@ class ChatRowsCache {
     while (start < items.length && identical(previous[start], items[start])) {
       start++;
     }
-    if (start == items.length) return _rows;
+    if (start == items.length) {
+      _unchangedPrefix = null;
+      return _rows;
+    }
     if (!running) return null;
     var rows = _rows;
+    _unchangedPrefix = rows.length;
     for (var i = start; i < items.length; i++) {
       final before = previous[i];
       final after = items[i];
@@ -91,7 +107,6 @@ class ChatRowsCache {
       if (next == null) return null;
       rows = next;
     }
-    _onlyDraftChanged = true;
     return rows;
   }
 
@@ -123,6 +138,7 @@ class ChatRowsCache {
   List<ChatRow>? _replaceDraft(List<ChatRow> rows, ChatItem before, ChatItem after) {
     final at = _index[before.key];
     if (at != null) {
+      if (at < _unchangedPrefix!) _unchangedPrefix = at;
       switch ((rows[at], after)) {
         case (final AssistantRow row, final AssistantChatItem after)
             when !row.showActions && row.footnote == null && _sameDraft(row.item, before):
@@ -142,6 +158,7 @@ class ChatRowsCache {
         // Another group (an earlier run of calls) may hold the draft.
         if (j < 0) continue;
         if (!_sameDraft(group.tools[j], before)) return null;
+        if (i < _unchangedPrefix!) _unchangedPrefix = i;
         final tools = [...group.tools]..[j] = after;
         return [...rows]..[i] = ToolGroupRow(tools, live: group.live);
       }

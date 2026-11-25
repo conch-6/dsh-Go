@@ -73,7 +73,7 @@ List<CompanionLine> companionLightContext(Iterable<CompanionLine> lines, {int wi
 
 enum CompanionLightFailure { noKey, badKey, busy, network, server }
 
-enum CompanionHostFailure { disconnected, modelUnavailable, unavailable, busy, requestFailed }
+enum CompanionHostFailure { disconnected, modelUnavailable, unavailable, busy, requestFailed, deviceConflict, retryClosed, selectionChanged }
 
 // Host failures keep their route identity through the Agent's existing error
 // channel. In particular they never ask for a phone-only DeepSeek key.
@@ -82,6 +82,7 @@ CompanionHostFailure companionHostFailure(String? code, {int? httpStatus}) => sw
   'RATE_LIMIT' || 'companion/auxiliary-busy' => CompanionHostFailure.busy,
   'companion/auxiliary-model-unavailable' || 'UNKNOWN_MODEL' || 'MISSING_MODEL' =>
     CompanionHostFailure.modelUnavailable,
+  'companion/auxiliary-selection-changed' => CompanionHostFailure.selectionChanged,
   'transport-error' || 'cancelled' => CompanionHostFailure.disconnected,
   'route-unavailable' ||
   'companion/auxiliary-unavailable' ||
@@ -575,7 +576,7 @@ class _CompanionAgentMessageBuilder {
         if (block is! Map || _blocks.containsKey(index)) throw const FormatException('Invalid content block start');
         switch (block['type']) {
           case 'text':
-            _blocks[index] = {'type': 'text', 'text': block['text'] as String? ?? ''};
+            _blocks[index] = {'type': 'text', 'text': StringBuffer(block['text'] as String? ?? '')};
           case 'tool_use':
             if (block['id'] is! String ||
                 (block['id'] as String).isEmpty ||
@@ -601,9 +602,9 @@ class _CompanionAgentMessageBuilder {
         if (delta['type'] == 'text_delta' && delta['text'] is String) {
           // Preserve the existing text-delta contract; tool blocks below still
           // require their actual start and stop before an argument is usable.
-          final block = _blocks.putIfAbsent(index, () => {'type': 'text', 'text': ''});
+          final block = _blocks.putIfAbsent(index, () => {'type': 'text', 'text': StringBuffer()});
           if (block['type'] != 'text') throw const FormatException('Text in a tool block');
-          block['text'] = '${block['text']}${delta['text']}';
+          (block['text']! as StringBuffer).write(delta['text']);
         } else if (delta['type'] == 'input_json_delta') {
           if (!_openTools.contains(index) || delta['partial_json'] is! String) {
             throw const FormatException('Arguments outside a tool block');
@@ -626,6 +627,7 @@ class _CompanionAgentMessageBuilder {
     final indices = _blocks.keys.toList()..sort();
     final ids = <String>{};
     for (final block in _blocks.values) {
+      if (block['type'] == 'text') block['text'] = block['text'].toString();
       if (block['type'] == 'tool_use' && !ids.add(block['id'] as String)) {
         throw const FormatException('Duplicate tool call ID');
       }

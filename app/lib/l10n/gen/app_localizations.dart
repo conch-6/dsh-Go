@@ -5816,6 +5816,12 @@ abstract class L10n {
   /// **'终端'**
   String get botsTerminal;
 
+  /// No description provided for @botsTerminalShowKeyboard.
+  ///
+  /// In zh, this message translates to:
+  /// **'唤起键盘'**
+  String get botsTerminalShowKeyboard;
+
   /// No description provided for @botsTerminalRename.
   ///
   /// In zh, this message translates to:
@@ -9290,6 +9296,66 @@ abstract class L10n {
   /// **'{month}月{day}日'**
   String commonMonthDay(String month, int day);
 
+  /// No description provided for @companionPhoneConnectionReplaced.
+  ///
+  /// In zh, this message translates to:
+  /// **'另一条手机连接已接手这个会话。请回到当前伙伴会话后再试。'**
+  String get companionPhoneConnectionReplaced;
+
+  /// No description provided for @companionPhoneSessionUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机找不到当前的伙伴会话，或这个会话已换了预设。请重新打开伙伴小屋。'**
+  String get companionPhoneSessionUnavailable;
+
+  /// No description provided for @companionPhoneToolsConflict.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机没有接入这次手机工具连接。请重新打开当前伙伴会话后再试。'**
+  String get companionPhoneToolsConflict;
+
+  /// No description provided for @companionHostSelectionChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机会话的模型选择已改变。请检查当前会话后再发送。'**
+  String get companionHostSelectionChanged;
+
+  /// No description provided for @companionLocalDisconnected.
+  ///
+  /// In zh, this message translates to:
+  /// **'未连上本机引擎。请检查引擎是否正在运行。'**
+  String get companionLocalDisconnected;
+
+  /// No description provided for @companionLocalUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机引擎暂时不能打开伙伴会话。请检查引擎及其伙伴预设。'**
+  String get companionLocalUnavailable;
+
+  /// No description provided for @companionLocalModelUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机引擎无法使用这个伙伴原先选择的模型。请检查模型设置。'**
+  String get companionLocalModelUnavailable;
+
+  /// No description provided for @companionContinuedOnPhone.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机尚未收到这句话，这一轮已转为轻量模式。'**
+  String get companionContinuedOnPhone;
+
+  /// No description provided for @companionLogOnDevice.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机上的记录'**
+  String get companionLogOnDevice;
+
+  /// No description provided for @companionSessionUsingTool.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在用 {tool}'**
+  String companionSessionUsingTool(String tool);
+
   /// No description provided for @companionTitle.
   ///
   /// In zh, this message translates to:
@@ -9428,6 +9494,12 @@ abstract class L10n {
   /// **'刚才那件事我可能已经动手了，怕做两遍。你先在「交代的事」里看一眼，再告诉我要不要接着来？'**
   String get companionAgentRetryClosed;
 
+  /// No description provided for @companionPhoneRunStopped.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机上的事做到一半断了，我怕重复操作就先停在这儿。你看一眼手机现在的样子，要接着来就再跟我说一声。'**
+  String get companionPhoneRunStopped;
+
   /// No description provided for @companionLogTitle.
   ///
   /// In zh, this message translates to:
@@ -9473,7 +9545,7 @@ abstract class L10n {
   /// No description provided for @companionMenuRestart.
   ///
   /// In zh, this message translates to:
-  /// **'重新认识'**
+  /// **'清空对话'**
   String get companionMenuRestart;
 
   /// No description provided for @companionMenuRestartHint.
@@ -9769,6 +9841,12 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'再摇我要吐泡泡了！'**
   String get companionShake3;
+
+  /// No description provided for @companionShakeDizzy.
+  ///
+  /// In zh, this message translates to:
+  /// **'头好晕……世界在转。'**
+  String get companionShakeDizzy;
 
   /// No description provided for @companionStatusIdle.
   ///
@@ -11600,28 +11678,22 @@ abstract class L10n {
   /// **'第二次'**
   String get companionReminderSecond;
 
-  /// No description provided for @companionReminderExactMissing.
-  ///
-  /// In zh, this message translates to:
-  /// **'手机还没让我准点提醒，这条没设上。去系统设置里打开「闹钟和提醒」就好。'**
-  String get companionReminderExactMissing;
-
   /// No description provided for @companionReminderNotificationsMissing.
   ///
   /// In zh, this message translates to:
-  /// **'通知没开，这条还没设上。去系统设置里打开通知就好。'**
+  /// **'设好了，可通知还关着，到点我叫不到你。去系统设置里打开通知就好。'**
   String get companionReminderNotificationsMissing;
 
   /// No description provided for @companionReminderChannelMissing.
   ///
   /// In zh, this message translates to:
-  /// **'「提醒」这类通知被关掉了，这条还没设上。去系统设置里打开就好。'**
+  /// **'设好了，可「提醒」这类通知被关掉了，到点我叫不到你。去系统设置里打开就好。'**
   String get companionReminderChannelMissing;
 
   /// No description provided for @companionReminderGroupMissing.
   ///
   /// In zh, this message translates to:
-  /// **'提醒所在的那组通知被关掉了，这条还没设上。去系统设置里打开就好。'**
+  /// **'设好了，可提醒所在的那组通知被关掉了，到点我叫不到你。去系统设置里打开就好。'**
   String get companionReminderGroupMissing;
 
   /// No description provided for @companionReminderTimePassed.
@@ -13359,7 +13431,7 @@ abstract class L10n {
   /// No description provided for @companionScreenHint.
   ///
   /// In zh, this message translates to:
-  /// **'隔一会儿看一眼屏幕，有值得说的才开口；看到的不会记下来'**
+  /// **'陪你一起看屏幕，看到有意思的就说出来；屏幕内容不会存下来，她只记得自己刚说过的几句'**
   String get companionScreenHint;
 
   /// No description provided for @companionScreenNeedsAccess.
@@ -13383,13 +13455,13 @@ abstract class L10n {
   /// No description provided for @companionScreenVisionHint.
   ///
   /// In zh, this message translates to:
-  /// **'把最长边不超过 512 像素的屏幕图片发给你选的模型；图片不会保存'**
+  /// **'发图前要先用本机文字识别（OCR）查一遍隐私，所以得开着它。图片最长边 512 像素，不会保存'**
   String get companionScreenVisionHint;
 
   /// No description provided for @companionScreenVisionTextOnly.
   ///
   /// In zh, this message translates to:
-  /// **'当前截图方式只能提供文字；图片需要能核实窗口来源的无障碍截图'**
+  /// **'现在的截图方式只能读到文字；要发图片，得用无障碍截图并开着本机文字识别'**
   String get companionScreenVisionTextOnly;
 
   /// No description provided for @companionScreenVisionModel.
@@ -13407,19 +13479,19 @@ abstract class L10n {
   /// No description provided for @companionScreenVisionAvailable.
   ///
   /// In zh, this message translates to:
-  /// **'所选模型可接收通过检查、最长边不超过 512 像素的屏幕图片；图片不会保存'**
+  /// **'所选模型能看图；开着本机文字识别时才会发图，图片不会保存'**
   String get companionScreenVisionAvailable;
 
   /// No description provided for @companionScreenVisionChecking.
   ///
   /// In zh, this message translates to:
-  /// **'正在检查所选模型，屏幕图片尚未启用'**
+  /// **'正在检查所选模型，先只用文字'**
   String get companionScreenVisionChecking;
 
   /// No description provided for @companionScreenVisionUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'当前连接或模型不能接收图片，看屏时继续使用文字'**
+  /// **'当前连接或模型不能看图，看屏时只用文字'**
   String get companionScreenVisionUnavailable;
 
   /// No description provided for @companionScreenFrequency.
@@ -13463,6 +13535,30 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'多陪你聊几句'**
   String get companionScreenChattyHint;
+
+  /// No description provided for @companionScreenLive.
+  ///
+  /// In zh, this message translates to:
+  /// **'实时'**
+  String get companionScreenLive;
+
+  /// No description provided for @companionScreenLiveHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'一直跟着看，一分钟里能说上好几句'**
+  String get companionScreenLiveHint;
+
+  /// No description provided for @companionScreenPerHour.
+  ///
+  /// In zh, this message translates to:
+  /// **'每小时最多搭话'**
+  String get companionScreenPerHour;
+
+  /// No description provided for @companionScreenPerHourNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'不限'**
+  String get companionScreenPerHourNone;
 
   /// No description provided for @companionScreenUsageAccess.
   ///
@@ -13727,6 +13823,48 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'这次来不及了，原话还留着。'**
   String get companionRawEraseGone;
+
+  /// No description provided for @companionSetupWorkshop.
+  ///
+  /// In zh, this message translates to:
+  /// **'去创意工坊找一位'**
+  String get companionSetupWorkshop;
+
+  /// No description provided for @companionRosterTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'伙伴'**
+  String get companionRosterTitle;
+
+  /// No description provided for @companionRosterHere.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在小屋里'**
+  String get companionRosterHere;
+
+  /// No description provided for @companionRosterAdd.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加伙伴'**
+  String get companionRosterAdd;
+
+  /// No description provided for @companionRosterBring.
+  ///
+  /// In zh, this message translates to:
+  /// **'请她进小屋'**
+  String get companionRosterBring;
+
+  /// No description provided for @companionRosterRemove.
+  ///
+  /// In zh, this message translates to:
+  /// **'从手机上移除'**
+  String get companionRosterRemove;
+
+  /// No description provided for @companionRosterRemoveConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'把「{name}」从这台手机上移除？她的文件会删掉，记忆和提醒还在。'**
+  String companionRosterRemoveConfirm(String name);
 
   /// No description provided for @automaticDiagnosticsRecover.
   ///

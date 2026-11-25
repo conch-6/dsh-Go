@@ -16,6 +16,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../companion/companion_call.dart';
+import '../../companion/companion_state.dart' show companionSessionsProvider;
 import '../../companion/companion_voice.dart';
 import '../../companion/companion_voice_source.dart';
 import '../../l10n/l10n.dart';
@@ -61,6 +63,18 @@ Future<void> openChatCall(
   required Future<String?> Function() session,
 }) async {
   final container = ProviderScope.containerOf(context, listen: false);
+  await openVoiceCall(context, title: title, conversation: ChatCallConversation(container, session));
+}
+
+/// Opens a call with [conversation]; [backdrop], when given, is the picture
+/// behind it whatever the call settings say (her room's call shows her).
+Future<void> openVoiceCall(
+  BuildContext context, {
+  required String title,
+  required CallConversation conversation,
+  CallBackdrop? backdrop,
+}) async {
+  final container = ProviderScope.containerOf(context, listen: false);
   container.read(readAloudProvider.notifier).stop();
   await Navigator.of(context).push(
     PageRouteBuilder<void>(
@@ -68,7 +82,7 @@ Future<void> openChatCall(
       fullscreenDialog: true,
       transitionDuration: AppMotion.of(context, const Duration(milliseconds: 520)),
       reverseTransitionDuration: AppMotion.of(context, AppMotion.collapse),
-      pageBuilder: (_, _, _) => VoiceCallPage(title: title, conversation: ChatCallConversation(container, session)),
+      pageBuilder: (_, _, _) => VoiceCallPage(title: title, conversation: conversation, backdrop: backdrop),
       transitionsBuilder: (_, animation, _, child) {
         final curve = CurvedAnimation(parent: animation, curve: AppMotion.enter, reverseCurve: AppMotion.exit);
         // Opening: the page rises out of the dark.
@@ -84,10 +98,13 @@ Future<void> openChatCall(
 }
 
 class VoiceCallPage extends ConsumerStatefulWidget {
-  const VoiceCallPage({super.key, required this.title, required this.conversation});
+  const VoiceCallPage({super.key, required this.title, required this.conversation, this.backdrop});
 
   final String title;
   final CallConversation conversation;
+
+  /// The picture behind the call instead of the one in the call settings.
+  final CallBackdrop? backdrop;
 
   @override
   ConsumerState<VoiceCallPage> createState() => _VoiceCallPageState();
@@ -136,6 +153,7 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     _call.ended == CallEnd.noRecognizer && ref.read(accountProvider).signedIn,
     switch (widget.conversation) {
       final ChatCallConversation chat => chat.sessionId,
+      final CompanionCallConversation room => room.sessionId,
       _ => null,
     },
   );
@@ -158,6 +176,10 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
     _call = VoiceCallController(
       audio: audio,
       conversation: widget.conversation,
+      verbatimInput: switch (widget.conversation) {
+        final CompanionCallConversation room => room.fullMode,
+        _ => null,
+      },
       recognizer: () async {
         // The phone's own voice warms up while the call starts, not when changed mid-reply.
         await _settleVoice(warm: _call.phase == CallPhase.starting);
@@ -522,12 +544,15 @@ class _VoiceCallPageState extends ConsumerState<VoiceCallPage> with WidgetsBindi
       _imageChecked = settings.image;
       _imageExists = settings.image.isNotEmpty && File(settings.image).existsSync();
     }
-    final image = settings.backdrop == CallBackdrop.image && _imageExists ? settings.image : null;
-    final her = settings.backdrop == CallBackdrop.companion && !_stageFailed;
+    final backdrop = widget.backdrop ?? settings.backdrop;
+    final image = backdrop == CallBackdrop.image && _imageExists ? settings.image : null;
+    final her = backdrop == CallBackdrop.companion && !_stageFailed;
     final (status, dots) = _status(l10n);
     final error = _call.error;
+    if (widget.conversation is CompanionCallConversation) ref.watch(companionSessionsProvider);
     final sessionId = switch (widget.conversation) {
       final ChatCallConversation chat => chat.sessionId,
+      final CompanionCallConversation room => room.sessionId,
       _ => null,
     };
     final width = MediaQuery.sizeOf(context).width;

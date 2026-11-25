@@ -9,7 +9,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'companion/companion_initiative_owner.dart' show companionInitiativeProvider;
 import 'companion/companion_always_on.dart' show companionAlwaysOnOwnerProvider;
 import 'companion/companion_residency.dart' show companionResidencyProvider;
+import 'companion/companion_state.dart' show companionPhoneSessionsBridgeProvider;
 import 'pets/pet_overlay_bridge.dart' show petOverlayBridgeProvider;
+import 'pets/pet_sheets.dart';
 import 'l10n/l10n.dart';
 import 'performance/performance_state.dart';
 import 'performance/refresh_rate.dart';
@@ -106,6 +108,10 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
     unawaited(ref.read(notifyChannelProvider).status());
   }
 
+  /// Decoded pet sheets nobody pins go, as Flutter's own image cache does.
+  @override
+  void didHaveMemoryPressure() => PetSheets.instance.trim();
+
   /// The system's remove-animations setting changed while the app was open: page
   /// transitions are chosen in [build], so they would keep the old answer.
   @override
@@ -194,6 +200,8 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     ref.watch(companionAlwaysOnOwnerProvider);
+    // Only Android's native phone control knows her sessions.
+    if (Platform.isAndroid) ref.watch(companionPhoneSessionsBridgeProvider);
     if (ref.watch(companionResidencyProvider).enabled) ref.watch(petOverlayBridgeProvider);
     // 刷新率设置改动时告诉原生;setMode 对同一个值不做任何事。
     unawaited(RefreshRateService.instance.setMode(ref.watch(performancePrefsProvider.select((p) => p.refreshRate))));

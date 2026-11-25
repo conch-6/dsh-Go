@@ -3137,6 +3137,9 @@ class L10nZh extends L10n {
   String get botsTerminal => '终端';
 
   @override
+  String get botsTerminalShowKeyboard => '唤起键盘';
+
+  @override
   String get botsTerminalRename => '重命名终端';
 
   @override
@@ -5034,6 +5037,38 @@ class L10nZh extends L10n {
   }
 
   @override
+  String get companionPhoneConnectionReplaced => '另一条手机连接已接手这个会话。请回到当前伙伴会话后再试。';
+
+  @override
+  String get companionPhoneSessionUnavailable => '主机找不到当前的伙伴会话，或这个会话已换了预设。请重新打开伙伴小屋。';
+
+  @override
+  String get companionPhoneToolsConflict => '主机没有接入这次手机工具连接。请重新打开当前伙伴会话后再试。';
+
+  @override
+  String get companionHostSelectionChanged => '主机会话的模型选择已改变。请检查当前会话后再发送。';
+
+  @override
+  String get companionLocalDisconnected => '未连上本机引擎。请检查引擎是否正在运行。';
+
+  @override
+  String get companionLocalUnavailable => '本机引擎暂时不能打开伙伴会话。请检查引擎及其伙伴预设。';
+
+  @override
+  String get companionLocalModelUnavailable => '本机引擎无法使用这个伙伴原先选择的模型。请检查模型设置。';
+
+  @override
+  String get companionContinuedOnPhone => '主机尚未收到这句话，这一轮已转为轻量模式。';
+
+  @override
+  String get companionLogOnDevice => '手机上的记录';
+
+  @override
+  String companionSessionUsingTool(String tool) {
+    return '正在用 $tool';
+  }
+
+  @override
   String get companionTitle => '伙伴小屋';
 
   @override
@@ -5105,6 +5140,9 @@ class L10nZh extends L10n {
   String get companionAgentRetryClosed => '刚才那件事我可能已经动手了，怕做两遍。你先在「交代的事」里看一眼，再告诉我要不要接着来？';
 
   @override
+  String get companionPhoneRunStopped => '手机上的事做到一半断了，我怕重复操作就先停在这儿。你看一眼手机现在的样子，要接着来就再跟我说一声。';
+
+  @override
   String get companionLogTitle => '聊天记录';
 
   @override
@@ -5126,7 +5164,7 @@ class L10nZh extends L10n {
   String get companionMenuHistory => '查看聊天记录';
 
   @override
-  String get companionMenuRestart => '重新认识';
+  String get companionMenuRestart => '清空对话';
 
   @override
   String get companionMenuRestartHint => '开始一段新对话';
@@ -5280,6 +5318,9 @@ class L10nZh extends L10n {
 
   @override
   String get companionShake3 => '再摇我要吐泡泡了！';
+
+  @override
+  String get companionShakeDizzy => '头好晕……世界在转。';
 
   @override
   String get companionStatusIdle => '在发呆';
@@ -6218,16 +6259,13 @@ class L10nZh extends L10n {
   String get companionReminderSecond => '第二次';
 
   @override
-  String get companionReminderExactMissing => '手机还没让我准点提醒，这条没设上。去系统设置里打开「闹钟和提醒」就好。';
+  String get companionReminderNotificationsMissing => '设好了，可通知还关着，到点我叫不到你。去系统设置里打开通知就好。';
 
   @override
-  String get companionReminderNotificationsMissing => '通知没开，这条还没设上。去系统设置里打开通知就好。';
+  String get companionReminderChannelMissing => '设好了，可「提醒」这类通知被关掉了，到点我叫不到你。去系统设置里打开就好。';
 
   @override
-  String get companionReminderChannelMissing => '「提醒」这类通知被关掉了，这条还没设上。去系统设置里打开就好。';
-
-  @override
-  String get companionReminderGroupMissing => '提醒所在的那组通知被关掉了，这条还没设上。去系统设置里打开就好。';
+  String get companionReminderGroupMissing => '设好了，可提醒所在的那组通知被关掉了，到点我叫不到你。去系统设置里打开就好。';
 
   @override
   String get companionReminderTimePassed => '约好的时间已经过了，我就没再补响。';
@@ -7189,7 +7227,7 @@ class L10nZh extends L10n {
   String get companionScreen => '陪你看屏幕';
 
   @override
-  String get companionScreenHint => '隔一会儿看一眼屏幕，有值得说的才开口；看到的不会记下来';
+  String get companionScreenHint => '陪你一起看屏幕，看到有意思的就说出来；屏幕内容不会存下来，她只记得自己刚说过的几句';
 
   @override
   String get companionScreenNeedsAccess => '要先打开手机操控的无障碍，或者允许她录屏';
@@ -7201,10 +7239,10 @@ class L10nZh extends L10n {
   String get companionScreenVision => '允许发送屏幕图片';
 
   @override
-  String get companionScreenVisionHint => '把最长边不超过 512 像素的屏幕图片发给你选的模型；图片不会保存';
+  String get companionScreenVisionHint => '发图前要先用本机文字识别（OCR）查一遍隐私，所以得开着它。图片最长边 512 像素，不会保存';
 
   @override
-  String get companionScreenVisionTextOnly => '当前截图方式只能提供文字；图片需要能核实窗口来源的无障碍截图';
+  String get companionScreenVisionTextOnly => '现在的截图方式只能读到文字；要发图片，得用无障碍截图并开着本机文字识别';
 
   @override
   String get companionScreenVisionModel => '看图使用的模型';
@@ -7213,13 +7251,13 @@ class L10nZh extends L10n {
   String get companionScreenVisionChoose => '选择支持图片的模型';
 
   @override
-  String get companionScreenVisionAvailable => '所选模型可接收通过检查、最长边不超过 512 像素的屏幕图片；图片不会保存';
+  String get companionScreenVisionAvailable => '所选模型能看图；开着本机文字识别时才会发图，图片不会保存';
 
   @override
-  String get companionScreenVisionChecking => '正在检查所选模型，屏幕图片尚未启用';
+  String get companionScreenVisionChecking => '正在检查所选模型，先只用文字';
 
   @override
-  String get companionScreenVisionUnavailable => '当前连接或模型不能接收图片，看屏时继续使用文字';
+  String get companionScreenVisionUnavailable => '当前连接或模型不能看图，看屏时只用文字';
 
   @override
   String get companionScreenFrequency => '多久开口';
@@ -7241,6 +7279,18 @@ class L10nZh extends L10n {
 
   @override
   String get companionScreenChattyHint => '多陪你聊几句';
+
+  @override
+  String get companionScreenLive => '实时';
+
+  @override
+  String get companionScreenLiveHint => '一直跟着看，一分钟里能说上好几句';
+
+  @override
+  String get companionScreenPerHour => '每小时最多搭话';
+
+  @override
+  String get companionScreenPerHourNone => '不限';
 
   @override
   String get companionScreenUsageAccess => '让她知道你在用哪个 App';
@@ -7390,6 +7440,29 @@ class L10nZh extends L10n {
 
   @override
   String get companionRawEraseGone => '这次来不及了，原话还留着。';
+
+  @override
+  String get companionSetupWorkshop => '去创意工坊找一位';
+
+  @override
+  String get companionRosterTitle => '伙伴';
+
+  @override
+  String get companionRosterHere => '正在小屋里';
+
+  @override
+  String get companionRosterAdd => '添加伙伴';
+
+  @override
+  String get companionRosterBring => '请她进小屋';
+
+  @override
+  String get companionRosterRemove => '从手机上移除';
+
+  @override
+  String companionRosterRemoveConfirm(String name) {
+    return '把「$name」从这台手机上移除？她的文件会删掉，记忆和提醒还在。';
+  }
 
   @override
   String get automaticDiagnosticsRecover => '恢复本地记录';

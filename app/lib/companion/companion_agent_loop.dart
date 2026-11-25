@@ -100,6 +100,26 @@ bool _controlRetiresText(CompanionAgentToolCall call, CompanionAgentToolResult r
   return !const ['ask_later', 'cancel', 'postpone'].contains(call.name);
 }
 
+// A later own control invalidates an earlier raw-erase proposal. Its durable
+// card outcome stays, but the old result must not claim it is still pending.
+Map<String, Object?> _withoutRawEraseFields(Map<String, Object?> result) {
+  if (result['type'] != 'tool_result') return result;
+  final content = result['content'];
+  if (content is! String) return result;
+  Object? decoded;
+  try {
+    decoded = jsonDecode(content);
+  } on FormatException {
+    return result;
+  }
+  if (decoded is! Map || !const {'pending', 'awaiting'}.contains(decoded['rawEraseState'])) return result;
+  final remaining = Map<String, Object?>.from(decoded);
+  for (final field in const ['pendingRawEraseId', 'rawEraseState', 'rawEraseMessage']) {
+    remaining.remove(field);
+  }
+  return {...result, 'content': jsonEncode(remaining)};
+}
+
 Map<String, Object?> _retiredToolResult(Map<String, Object?> result) => {
   ...result,
   'content': jsonEncode(_safeToolOutcome(result['content']! as String)),
@@ -135,6 +155,9 @@ class CompanionAgentModelRequest {
   CompanionAgentModelRequest(this.id);
 
   final String id;
+
+  /// The Host input already encoded and measured for this request, if any.
+  CompanionAgentInput? hostInput;
   final settled = Completer<void>();
   http.Client? client;
   StreamIterator<String>? stream;
@@ -199,29 +222,32 @@ class CompanionAgentModelRequest {
   }) async {
     if (!isCurrent()) return null;
     final abort = _hostAbort = DshHttpAbort();
-    final future = client.callCompanionAgent(
-      capability,
-      requestId: id,
-      system: system,
-      messages: messages,
-      tools: [for (final tool in tools) tool.toJson()],
-      maxTokens: maxTokens,
-      abort: abort,
-      onDispatchUncertain: onDispatchUncertain,
-      onSent: onSent,
-      onText: (delta) {
-        if (!isCurrent()) {
-          abort.abort();
-          return;
-        }
-        onText(delta);
-      },
-      onUsage: (usage) {
-        // Late receipts still belong to this captured physical request.
-        onUsage(usage);
-        final view = CompanionUsage.fromReceipt(usage);
-        onUsageSettled?.call(view.telemetry, partial: !view.complete);
-      },
+    // An input that fails to encode settles as notSent, as the call's own failures do.
+    final future = Future.sync(
+      () => client.callCompanionAgent(
+        capability,
+        requestId: id,
+        input:
+            hostInput ??
+            CompanionAgentInput(system: system, messages: messages, tools: [for (final tool in tools) tool.toJson()]),
+        maxTokens: maxTokens,
+        abort: abort,
+        onDispatchUncertain: onDispatchUncertain,
+        onSent: onSent,
+        onText: (delta) {
+          if (!isCurrent()) {
+            abort.abort();
+            return;
+          }
+          onText(delta);
+        },
+        onUsage: (usage) {
+          // Late receipts still belong to this captured physical request.
+          onUsage(usage);
+          final view = CompanionUsage.fromReceipt(usage);
+          onUsageSettled?.call(view.telemetry, partial: !view.complete);
+        },
+      ),
     );
     _hostDrain = future.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     try {
@@ -315,6 +341,20 @@ Future<CompanionAgentMessage?> runCompanionAgentLoop({
       }
       if (!isCurrent()) return null;
       final controlChanged = controlRevision() != before;
+      if (retainToolOutcomes && controlChanged) {
+        // Clear only prior outcomes, including when a new remember keeps text.
+        // The current returned result is added below, with any fresh pending.
+        for (var i = 0; i < exchanges.length; i++) {
+          final exchange = exchanges[i];
+          exchanges[i] = (
+            assistant: exchange.assistant,
+            results: [for (final previous in exchange.results) _withoutRawEraseFields(previous)],
+          );
+        }
+        for (var i = 0; i < results.length; i++) {
+          results[i] = _withoutRawEraseFields(results[i]);
+        }
+      }
       final retireText = controlChanged && (!retainToolOutcomes || _controlRetiresText(call, result));
       if (retireText) {
         if (retainToolOutcomes) {

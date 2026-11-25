@@ -19,13 +19,17 @@ import 'package:dsh_app/ui/chat/media/media_paths.dart';
 import 'package:dsh_app/ui/chat/turn_summary.dart' show debugToolSummaryCaches;
 import 'package:dsh_app/ui/chat/widgets/assistant_message.dart';
 import 'package:dsh_app/ui/chat/widgets/notice_row.dart';
+import 'package:dsh_app/ui/chat/widgets/stream_row.dart';
+import 'package:dsh_app/ui/chat/widgets/thinking_pill.dart';
 import 'package:dsh_app/ui/chat/widgets/tool_row.dart';
 import 'package:dsh_app/ui/chat/widgets/turn_process.dart';
 import 'package:dsh_app/ui/chat/widgets/user_bubble.dart';
+import 'package:dsh_app/ui/pets/pet_perch.dart';
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/harness.dart';
 import 'support/pending_notice_harness.dart';
@@ -348,6 +352,69 @@ void main() {
     await streamText(tester, queued: ['排队一', '排队二']);
   });
 
+  testWidgets('text deltas leave the jump button alone', (tester) async {
+    final g = _Guard();
+    addTearDown(g.dispose);
+    await g.mount(tester);
+    g.snapshot();
+    await g.settle(tester);
+    g.startStream();
+    g.chunk(const TextDeltaChunk(0, '开始'));
+    await g.settle(tester);
+
+    // The Positioned that owns the floating button stays in both trees.
+    final overlay = tester.element(find.ancestor(of: find.byType(PetAvoid), matching: find.byType(Positioned)).first);
+    var builds = 0;
+    final previous = debugOnRebuildDirtyWidget;
+    debugOnRebuildDirtyWidget = (element, builtOnce) {
+      previous?.call(element, builtOnce);
+      element.visitAncestorElements((ancestor) {
+        if (ancestor != overlay) return true;
+        builds++;
+        return false;
+      });
+    };
+    try {
+      for (var i = 0; i < _deltas; i++) {
+        g.chunk(const TextDeltaChunk(0, '字'));
+        await tester.pump(const Duration(milliseconds: 32));
+      }
+    } finally {
+      debugOnRebuildDirtyWidget = previous;
+    }
+    expect(g.state.items.whereType<AssistantChatItem>().last.text, '开始${'字' * _deltas}');
+    debugPrint('[GUARD] jump button builds=$builds for $_deltas text deltas');
+    expect(builds, 0);
+    await g.unmount(tester);
+  });
+
+  testWidgets('text deltas reuse the unchanged reasoning control', (tester) async {
+    final g = _Guard();
+    addTearDown(g.dispose);
+    await g.mount(tester);
+    g.snapshot();
+    await g.settle(tester);
+    g.startStream();
+    g.chunk(const ReasoningDeltaChunk(0, '思考'));
+    await g.settle(tester);
+    final row = find.byWidgetPredicate((w) => w is AssistantMessage && w.item.streaming);
+    final pill = find.descendant(of: row, matching: find.byType(ThinkingPill));
+    expect(tester.widget<ThinkingPill>(pill).active, isTrue);
+
+    g.chunk(const BlockStartChunk(1, 'text'));
+    g.chunk(const TextDeltaChunk(1, '答'));
+    await g.settle(tester);
+    final stable = tester.widget<ThinkingPill>(pill);
+    expect(stable.active, isFalse);
+    for (var i = 0; i < 3; i++) {
+      g.chunk(const TextDeltaChunk(1, '字'));
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(tester.widget<ThinkingPill>(pill), same(stable));
+    }
+    expect(g.state.items.whereType<AssistantChatItem>().last.text, '答字字字');
+    await g.unmount(tester);
+  });
+
   testWidgets('plain streaming replies do not build the media path projection', (tester) async {
     final media = _MediaPathsObserver();
     final g = _Guard(observers: [media]);
@@ -381,6 +448,91 @@ void main() {
     await g.unmount(tester);
   });
 
+  testWidgets('text deltas leave the historical sliver in place until its rows change', (tester) async {
+    final g = _Guard();
+    addTearDown(g.dispose);
+    await g.mount(tester);
+    g.snapshot();
+    await g.settle(tester);
+    g.startStream();
+    g.chunk(const TextDeltaChunk(0, '开始'));
+    await g.settle(tester);
+
+    final history = find.byType(SliverList).first;
+    final element = tester.element(history);
+    expect(find.descendant(of: history, matching: find.byType(TurnProcess)), findsWidgets);
+    var builds = 0;
+    final previous = debugOnRebuildDirtyWidget;
+    debugOnRebuildDirtyWidget = (child, builtOnce) {
+      previous?.call(child, builtOnce);
+      child.visitAncestorElements((ancestor) {
+        if (ancestor != element) return true;
+        builds++;
+        return false;
+      });
+    };
+    try {
+      for (var i = 0; i < _deltas; i++) {
+        g.chunk(const TextDeltaChunk(0, '字'));
+        await tester.pump(const Duration(milliseconds: 32));
+      }
+    } finally {
+      debugOnRebuildDirtyWidget = previous;
+    }
+    expect(g.state.items.whereType<AssistantChatItem>().last.text, '开始${'字' * _deltas}');
+    expect(builds, 0);
+
+    SharedPreferences.setMockInitialValues({});
+    await g.container.read(settingsProvider.notifier).setFoldCompletedTurns(false);
+    await g.settle(tester);
+    expect(find.descendant(of: history, matching: find.byType(TurnProcess)), findsNothing);
+    expect(find.descendant(of: history, matching: find.byType(ToolRow)), findsWidgets);
+    await g.unmount(tester);
+  });
+
+  testWidgets('publishing text keeps the completed tool’s forward sliver child', (tester) async {
+    final g = _Guard();
+    addTearDown(g.dispose);
+    await g.mount(tester);
+    g.snapshot();
+    await g.settle(tester);
+    g.startStream();
+    g.chunk(const TextDeltaChunk(0, '开始'));
+    await g.settle(tester);
+
+    final forward = tester.element(find.byType(SliverList).last);
+    Element forwardChild(Finder finder) {
+      var child = tester.element(finder);
+      var found = false;
+      child.visitAncestorElements((parent) {
+        if (parent == forward) {
+          found = true;
+          return false;
+        }
+        child = parent;
+        return true;
+      });
+      expect(found, isTrue);
+      return child;
+    }
+
+    final tool = find.byWidgetPredicate((w) => w is ToolRow && w.item.callId == 'c4');
+    final completed = forwardChild(tool);
+    final active = forwardChild(find.byWidgetPredicate((w) => w is AssistantMessage && w.item.streaming));
+    final fixed = completed.widget;
+    var previous = active.widget;
+    for (var i = 0; i < _deltas; i++) {
+      g.chunk(const TextDeltaChunk(0, '字'));
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(forwardChild(tool), same(completed));
+      expect(completed.widget, same(fixed));
+      expect(active.widget, isNot(same(previous)));
+      previous = active.widget;
+    }
+    expect(g.state.items.whereType<AssistantChatItem>().last.text, '开始${'字' * _deltas}');
+    await g.unmount(tester);
+  });
+
   testWidgets('streaming tool arguments rebuild only the tool being written', (tester) async {
     final g = _Guard();
     addTearDown(g.dispose);
@@ -409,6 +561,45 @@ void main() {
     expect(counts.live, greaterThan(0), reason: 'the tool call being written rebuilds');
     expect(counts.done, 0, reason: 'finished rows must not rebuild while tool arguments stream');
     expect(counts.derivations, 0, reason: 'an argument delta must not derive the rows again');
+    await g.unmount(tester);
+  });
+
+  testWidgets('writing file content keeps the tool header until its displayed path changes', (tester) async {
+    final g = _Guard();
+    addTearDown(g.dispose);
+    await g.mount(tester);
+    g.snapshot();
+    await g.settle(tester);
+    g.startStream();
+    g.chunk(const ReasoningDeltaChunk(0, '准备写文件'));
+    g.chunk(const BlockStartChunk(1, 'tool-call'));
+    g.chunk(const ToolCallDeltaChunk(1, id: 'c5', name: 'write', argumentsDelta: '{"path":"a.dart","content":"'));
+    await g.settle(tester);
+
+    final row = find.byWidgetPredicate((w) => w is ToolRow && w.item.callId == 'c5');
+    final frame = find.descendant(of: row, matching: find.byType(StreamRowFrame));
+    final element = tester.element(frame);
+    expect(find.descendant(of: frame, matching: find.text('a.dart')), findsOneWidget);
+    var builds = 0;
+    final previous = debugOnRebuildDirtyWidget;
+    debugOnRebuildDirtyWidget = (e, builtOnce) {
+      previous?.call(e, builtOnce);
+      if (e == element) builds++;
+    };
+    try {
+      for (var i = 0; i < _deltas; i++) {
+        g.chunk(ToolCallDeltaChunk(1, id: 'c5', argumentsDelta: 'final x$i = $i;'));
+        await tester.pump(const Duration(milliseconds: 32));
+      }
+    } finally {
+      debugOnRebuildDirtyWidget = previous;
+    }
+    expect((g.state.items.last as ToolChatItem).arguments, endsWith('final x19 = 19;'));
+    expect(tester.element(frame), same(element));
+    expect(builds, 0);
+    g.chunk(const ToolCallDeltaChunk(1, id: 'c5', argumentsDelta: '","file_path":"b.dart"}'));
+    await tester.pump(const Duration(milliseconds: 32));
+    expect(find.descendant(of: frame, matching: find.text('b.dart')), findsOneWidget);
     await g.unmount(tester);
   });
 

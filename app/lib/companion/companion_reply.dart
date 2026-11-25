@@ -124,6 +124,20 @@ class CompanionReply {
 
 final _mark = RegExp(r'[\[【]\s*(表情|动作|emotion|action)\s*[:：]\s*([^\]】\n]{1,40}?)\s*[\]】]', caseSensitive: false);
 
+/// Whether [text] carries any of her marks (or, while [streaming], the
+/// start of one at its end).
+bool companionHasMarks(String text, {bool streaming = false}) =>
+    _mark.hasMatch(text) || (streaming && _partialMark.hasMatch(text));
+
+/// [text] without her marks (and the spaces right after them). While
+/// [streaming], a mark still arriving at the end is held back too.
+String companionWithoutMarks(String text, {bool streaming = false}) {
+  final done = text.replaceAll(_markAndSpace, '');
+  return (streaming ? done.replaceFirst(_partialMark, '') : done).trim();
+}
+
+final _markAndSpace = RegExp('${_mark.pattern}[ \\t]*', caseSensitive: false);
+
 /// Whether a label can be written in a mark at all.
 bool companionMarkLabelFits(String label) {
   final trimmed = label.trim();
@@ -190,7 +204,13 @@ class CompanionReplyStream {
       findCut: true,
     );
     final tail = part.reply;
-    final words = tail.words.isEmpty ? _committed.words : _committed.words + tail.words;
+    // Removing marks, trimming and collapsing spaces can only shorten the
+    // input. At the same length every displayed code unit is still raw.
+    final words = tail.words.isEmpty
+        ? _committed.words
+        : _committed.words.length + tail.words.length == text.length
+        ? text
+        : _committed.words + tail.words;
     final marks = tail.marks.isEmpty
         ? _committed.marks
         : List<CompanionMark>.unmodifiable([..._committed.marks, ...tail.marks]);

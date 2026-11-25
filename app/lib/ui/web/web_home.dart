@@ -25,6 +25,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../companion/companion_state.dart' show companionSessionFilterProvider, companionSessionsProvider;
 import '../../l10n/l10n.dart';
 import '../../links/app_links.dart';
 import '../../links/launcher_entries.dart';
@@ -82,6 +83,11 @@ class _WebHomeState extends ConsumerState<WebHome> {
       _webSession = target.sessionId;
       unawaited(_link.open(target));
     }
+    // Another host's page has not opened anything yet: a conversation chosen
+    // there opens even when its id is the one this page last showed.
+    ref.listenManual(activeHostProvider, (previous, next) {
+      if (previous != next) _webSession = null;
+    });
     // Something chose a conversation (a notification, a recent shortcut, the
     // banner): the page goes there, once it has been rebuilt for the host.
     ref.listenManual(currentSessionProvider, (_, next) {
@@ -322,6 +328,12 @@ class _WebEntryHostState extends ConsumerState<WebEntryHost> {
   }
 
   Future<void> _onEntry(LauncherEntry entry) async {
+    if (entry is OpenChatEntry) {
+      // A cold start may still be reading her saved sessions.
+      await ref.read(companionSessionsProvider.notifier).ready;
+      if (!mounted) return;
+      entry = entry.forCompanion(ref.read(companionSessionFilterProvider), active: ref.read(activeHostProvider));
+    }
     switch (entry) {
       case NewChatEntry(:final text):
         // Dictation is the native composer's; Siri's supplied text still
@@ -359,6 +371,9 @@ class _WebEntryHostState extends ConsumerState<WebEntryHost> {
         }
       case CompanionAssistantEntry():
         if (mounted) await openCompanionAssistant(context, ref, entry);
+      case OpenCompanionEntry(:final room):
+        // As on the native home: her room, never the page's conversation.
+        if (room && mounted) await showCompanionRoom(context, ref);
     }
   }
 

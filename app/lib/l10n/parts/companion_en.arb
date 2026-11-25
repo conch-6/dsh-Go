@@ -1,4 +1,29 @@
 {
+  "companionPhoneConnectionReplaced": "A newer phone connection took over this session. Return to the current companion session and try again.",
+  "@companionPhoneConnectionReplaced": {"description": "A newer callback owner replaced this pending phone connection."},
+  "companionPhoneSessionUnavailable": "The host cannot find this companion session, or its preset has changed. Reopen the companion room.",
+  "@companionPhoneSessionUnavailable": {"description": "The current session no longer resolves to the selected companion."},
+  "companionPhoneToolsConflict": "The host could not connect the phone tools for this turn. Reopen the current companion session and try again.",
+  "@companionPhoneToolsConflict": {"description": "An older host rejected the companion phone connection without a specific reason code."},
+  "companionHostSelectionChanged": "The host session selection changed. Check the current session before sending again.",
+  "@companionHostSelectionChanged": {"description": "Companion session status displayed in the room."},
+  "companionLocalDisconnected": "The on-device engine is disconnected. Check that it is running.",
+  "@companionLocalDisconnected": {"description": "Companion session status displayed in the room."},
+  "companionLocalUnavailable": "The on-device engine cannot open the companion session. Check the engine and its companion preset.",
+  "@companionLocalUnavailable": {"description": "Companion session status displayed in the room."},
+  "companionLocalModelUnavailable": "The on-device engine cannot use this companion’s previously selected model. Check its model settings.",
+  "@companionLocalModelUnavailable": {"description": "Companion session status displayed in the room."},
+  "companionContinuedOnPhone": "The host has not received this message. This turn will use light mode.",
+  "@companionContinuedOnPhone": {"description": "One-turn phone fallback after confirming the host prompt was never dispatched."},
+  "companionLogOnDevice": "On-device history",
+  "@companionLogOnDevice": {
+    "description": "Open this companion's local SQLite and earlier phone conversations."
+  },
+  "companionSessionUsingTool": "Using {tool}",
+  "@companionSessionUsingTool": {
+    "description": "Current tool activity in a companion session, shown on a floating or notification surface.",
+    "placeholders": {"tool": {"type": "String"}}
+  },
   "companionTitle": "Companion room",
   "companionEntrySubtitle": "Spend some time with her",
   "companionDefaultName": "her",
@@ -22,6 +47,7 @@
   "companionNotConnected": "I can't reach the engine right now. Tell me again in a bit?",
   "companionSendFailed": "That didn't get through. Say it again?",
   "companionAgentRetryClosed": "I may have already started on that, and I don't want to do it twice. Take a look in Tasks, then tell me whether to carry on?",
+  "companionPhoneRunStopped": "The phone work stopped partway, so I paused rather than repeat a step. Check the phone as it is now, and tell me if I should carry on.",
   "companionLogTitle": "Log",
   "companionContextUnsupported": "This host can't take her context yet: her name, persona, recent events and memories on your phone won't reach her, only what you say. Update the host or switch to light mode.",
   "companionLogEmpty": "Nothing said yet.",
@@ -79,6 +105,7 @@
   "companionShake1": "Whoa, stop shaking!",
   "companionShake2": "I'm so dizzy… the water's sloshing everywhere.",
   "companionShake3": "Keep that up and I'll start blowing bubbles!",
+  "companionShakeDizzy": "My head is spinning…",
   "companionStatusIdle": "Daydreaming",
   "companionStatusListening": "Listening",
   "companionStatusThinking": "Thinking",
@@ -384,10 +411,9 @@
   "companionReminderOverlap": "That time happens twice that day. Which one?",
   "companionReminderFirst": "The first one",
   "companionReminderSecond": "The second one",
-  "companionReminderExactMissing": "Your phone won't let me remind you on the dot yet, so this isn't set. Turn on “Alarms & reminders” in system settings.",
-  "companionReminderNotificationsMissing": "Notifications are off, so this isn't set yet. Turn them on in system settings.",
-  "companionReminderChannelMissing": "Reminder notifications are turned off, so this isn't set yet. Turn them on in system settings.",
-  "companionReminderGroupMissing": "The notification group for reminders is turned off, so this isn't set yet. Turn it on in system settings.",
+  "companionReminderNotificationsMissing": "It's set, but notifications are off, so I can't reach you when it's time. Turn them on in system settings.",
+  "companionReminderChannelMissing": "It's set, but reminder notifications are turned off, so I can't reach you when it's time. Turn them on in system settings.",
+  "companionReminderGroupMissing": "It's set, but the notification group for reminders is turned off, so I can't reach you when it's time. Turn it on in system settings.",
   "companionReminderTimePassed": "That time has already passed, so I didn't ring late.",
   "companionReminderInvalidTime": "I didn't quite get that time. Tell me the date, time and time zone again?",
   "companionReminderCancelUnknown": "Your request to cancel is saved. I haven't confirmed that this reminder has been removed.",
@@ -1041,17 +1067,17 @@
   "companionReceiptPriorResult": "The workbook from the earlier agreement was found; the new agreement has not been completed.",
   "companionLegacyConversation": "Earlier conversation (character not recorded)",
   "companionScreen": "Watch the screen with me",
-  "companionScreenHint": "She glances at the screen now and then and only speaks up when something is worth saying; nothing she sees is kept",
+  "companionScreenHint": "She watches the screen with you and speaks up when something catches her eye; the screen itself is not kept, only her last few remarks",
   "companionScreenNeedsAccess": "Turn on phone control's accessibility service first, or let her record the screen",
   "companionScreenAllowProjection": "Allow screen recording",
   "companionScreenVision": "Allow screen images",
-  "companionScreenVisionHint": "Send a screen image up to 512 pixels on its longest side to the model you choose; the image is not saved",
-  "companionScreenVisionTextOnly": "The current screen capture can provide text only. Images need accessibility capture with verified window sources",
+  "companionScreenVisionHint": "Images are checked for privacy with on-device text recognition (OCR) first, so it needs to be on. Up to 512 px on the longest side, never saved",
+  "companionScreenVisionTextOnly": "This capture method only reads text; images need accessibility capture with on-device text recognition on",
   "companionScreenVisionModel": "Model for screen images",
   "companionScreenVisionChoose": "Choose a model that accepts images",
-  "companionScreenVisionAvailable": "The selected model can receive qualified screen images up to 512 pixels; images are not saved",
-  "companionScreenVisionChecking": "Checking the selected model; screen images are not active yet",
-  "companionScreenVisionUnavailable": "Images are unavailable for this connection or model; screen observation uses text",
+  "companionScreenVisionAvailable": "The selected model can see images; they're sent only while on-device text recognition is on, and never saved",
+  "companionScreenVisionChecking": "Checking the selected model; text only for now",
+  "companionScreenVisionUnavailable": "This connection or model can't take images, so screen watching uses text",
   "companionScreenFrequency": "How often she speaks",
   "companionScreenQuiet": "Quiet",
   "companionScreenQuietHint": "Rarely, only when it matters",
@@ -1059,6 +1085,14 @@
   "companionScreenNormalHint": "A word when something catches her eye",
   "companionScreenChatty": "Chatty",
   "companionScreenChattyHint": "Talks with you more often",
+  "companionScreenLive": "Live",
+  "@companionScreenLive": {"description": "Highest screen-watching frequency: she keeps watching and may speak several times a minute."},
+  "companionScreenLiveHint": "Keeps watching and can speak up several times a minute",
+  "@companionScreenLiveHint": {"description": "Subtitle of the Live frequency option."},
+  "companionScreenPerHour": "Most lines an hour",
+  "@companionScreenPerHour": {"description": "Caption above the choices for how many times an hour she may speak while watching the screen; quips count too."},
+  "companionScreenPerHourNone": "No limit",
+  "@companionScreenPerHourNone": {"description": "Default choice: no hourly limit on what she says while watching the screen."},
   "companionScreenUsageAccess": "Let her know which app you're using",
   "companionScreenCost": "About ¥{amount} today",
   "@companionScreenCost": {
@@ -1164,5 +1198,41 @@
   "companionRawEraseNo": "Keep",
   "companionRawErased": "Done, the original words are gone too.",
   "companionRawKept": "Okay, the original words stay.",
-  "companionRawEraseGone": "Too late this time; the original words are still here."
+  "companionRawEraseGone": "Too late this time; the original words are still here.",
+  "@companionShakeDizzy": {
+    "description": "What she says when the phone is shaken, for any character."
+  },
+  "companionSetupWorkshop": "Find one in the Workshop",
+  "@companionSetupWorkshop": {
+    "description": "On the companion setup screen: open the Workshop on its companions to download one."
+  },
+  "companionRosterTitle": "Companions",
+  "companionRosterHere": "In the room",
+  "companionRosterAdd": "Add a companion",
+  "companionRosterBring": "Bring her into the room",
+  "companionRosterRemove": "Remove from this phone",
+  "companionRosterRemoveConfirm": "Remove “{name}” from this phone? Her files are deleted; memories and reminders stay.",
+  "@companionRosterTitle": {
+    "description": "Her page's group listing every companion installed on the phone."
+  },
+  "@companionRosterHere": {
+    "description": "Under the companion who is in the room now."
+  },
+  "@companionRosterAdd": {
+    "description": "Row that adds another companion (from a file or the Workshop)."
+  },
+  "@companionRosterBring": {
+    "description": "Switch to this companion: she moves into the room, the current one is kept."
+  },
+  "@companionRosterRemove": {
+    "description": "Delete a kept (not active) companion from the phone."
+  },
+  "@companionRosterRemoveConfirm": {
+    "description": "Confirmation before deleting a kept companion.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
 }
